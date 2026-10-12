@@ -326,5 +326,5 @@ You now understand the full lifecycle of a realtime audio conversation:
 ## Next steps
 
 - See the [reference](/docs/reference/client/realtime) for the complete `RealtimeSession` API: every event type, reconnect configuration, and resumption behavior.
-- Explore the playground's [Live page implementation](https://github.com/10xGraph/agentflow-playground/tree/main/src/pages/live) for a production example.
+- Explore the playground's [Live page implementation](https://github.com/10xHub/agentflow-playground/tree/main/src/pages/live) for a production example.
 - For Python server-side realtime audio, see [use-realtime-audio](/docs/guides/use-realtime-audio) (the guide for building a `LiveAgent`).

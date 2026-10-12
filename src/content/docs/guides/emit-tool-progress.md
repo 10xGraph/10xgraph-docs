@@ -157,7 +157,7 @@ def call_external_service(
 ```
 
 **Frontend sees:**
-1. "Calling https://api.example.com..."
+1. "Calling `https://api.10xgraph.com`..."
 2. After timeout: "Retry attempt 1 of 2"
 3. After another timeout: "Retry attempt 2 of 2"
 4. If still failing: "Service unreachable after 3 attempts: ..."

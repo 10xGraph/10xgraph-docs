@@ -15,7 +15,7 @@ You can contribute to 10xGraph by fixing bugs, improving the code, writing docum
 | The core Python framework | [10xGraph/10xGraph](https://github.com/10xGraph/10xGraph) |
 | The API server or CLI | [10xGraph/10xgraph-api](https://github.com/10xGraph/10xgraph-api) |
 | The TypeScript client | [10xGraph/10xgraph-client](https://github.com/10xGraph/10xgraph-client) |
-| This documentation site | [10xGraph/agentflow-docs](https://github.com/10xGraph/agentflow-docs) |
+| This documentation site | [10xGraph/10xgraph-docs](https://github.com/10xGraph/10xgraph-docs) |
 
 Every page here has an **Edit this page** link at the bottom that opens the
 right file in the docs repository.
@@ -72,8 +72,8 @@ files under `src/content/docs/`, and the folder path is the URL path. Node 22.12
 or newer is required.
 
 ```bash
-git clone https://github.com/10xGraph/agentflow-docs
-cd agentflow-docs
+git clone https://github.com/10xGraph/10xgraph-docs
+cd 10xgraph-docs
 npm install
 npm run dev        # builds the search index, then serves http://localhost:4321
 ```

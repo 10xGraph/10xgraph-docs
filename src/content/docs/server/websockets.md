@@ -34,7 +34,7 @@ At the WebSocket handshake, the server verifies the token. Before every graph ru
 
 ```javascript
 const socket = new WebSocket(
-  "wss://api.example.com/v1/graph/ws",
+  "wss://api.10xgraph.com/v1/graph/ws",
   ["10xgraph-bearer", TOKEN]
 );
 ```
@@ -261,7 +261,7 @@ If you prefer to manage the WebSocket directly:
 
 ```javascript
 const token = "your-jwt-token";
-const socket = new WebSocket("wss://api.example.com/v1/graph/ws", ["10xgraph-bearer", token]);
+const socket = new WebSocket("wss://api.10xgraph.com/v1/graph/ws", ["10xgraph-bearer", token]);
 
 socket.onopen = () => {
   console.log("Connected");

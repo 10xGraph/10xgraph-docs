@@ -274,12 +274,12 @@ import {
 } from '10xgraph-client';
 
 const context = {
-  baseUrl: 'https://api.example.com',
+  baseUrl: 'https://api.10xgraph.com',
   authToken: process.env.API_TOKEN,
 };
 
 resolveBearerToken(context);                     // the token, or null
-buildWsUrl(context, '/v1/graph/ws');             // 'wss://api.example.com/v1/graph/ws'
+buildWsUrl(context, '/v1/graph/ws');             // 'wss://api.10xgraph.com/v1/graph/ws'
 
 const socket = openWebSocket(buildWsUrl(context, '/v1/graph/ws'), context);
 // equivalent to: new WebSocket(url, [WS_BEARER_SUBPROTOCOL, token])
@@ -346,7 +346,7 @@ For browser apps that rely on session cookies (e.g. an API gateway that sets a c
 
 ```ts
 const client = new TenxGraphClient({
-  baseUrl: 'https://api.example.com',
+  baseUrl: 'https://api.10xgraph.com',
   credentials: 'include',
   // No auth field: the cookie is sent automatically by the browser
 });

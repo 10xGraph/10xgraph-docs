@@ -105,7 +105,7 @@ CORS_ALLOW_CREDENTIALS=false
 Security headers are enabled by default (`SECURITY_HEADERS_ENABLED`). `Strict-Transport-Security` is only sent on HTTPS requests, so check through your TLS endpoint:
 
 ```bash
-curl -si https://api.example.com/ping | grep -iE "strict-transport-security|x-frame-options"
+curl -si https://api.10xgraph.com/ping | grep -iE "strict-transport-security|x-frame-options"
 ```
 
 In production mode the documentation pages are off unless you set `DOCS_PATH` or `REDOCS_PATH` explicitly. Leave them unset.
@@ -419,7 +419,7 @@ Run 150 requests in quick succession and verify 429 responses after 100.
 ### 4. Security headers are present
 
 ```bash
-curl -si https://api.example.com/ping | grep -iE "strict-transport-security|x-frame-options|x-content-type"
+curl -si https://api.10xgraph.com/ping | grep -iE "strict-transport-security|x-frame-options|x-content-type"
 ```
 
 ### 5. Docs paths are disabled
