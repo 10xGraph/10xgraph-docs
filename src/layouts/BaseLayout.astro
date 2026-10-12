@@ -99,6 +99,9 @@ const ogImage = new URL('/og-default.png', Astro.site).toString();
     {markdownHref && <link rel="alternate" type="text/markdown" title="This page as Markdown" href={markdownHref} />}
     <link rel="alternate" type="text/plain" title="LLM-readable site index" href="/llms.txt" />
     <link rel="sitemap" href="/sitemap-index.xml" />
+    <!-- Agent resource catalog (lib/ard.ts); "ai-catalog" is the older name some tools still read -->
+    <link rel="ard" type="application/json" href="/.well-known/ard.json" />
+    <link rel="ai-catalog" type="application/json" href="/.well-known/ai-catalog.json" />
 
     <link rel="preload" href={displayFont} as="font" type="font/woff2" crossorigin />
     <link rel="preload" href={bodyFont} as="font" type="font/woff2" crossorigin />
@@ -112,6 +115,10 @@ const ogImage = new URL('/og-default.png', Astro.site).toString();
       <slot />
     </main>
     <Footer />
+    <script>
+      // WebMCP tools for in-browser AI agents. A no-op where the browser lacks WebMCP.
+      import '../scripts/webmcp';
+    </script>
     <script>
       // Copy buttons on code frames (lib/code-frame.mjs). Removed diff lines are left out of the copy.
       document.addEventListener('click', async (e) => {

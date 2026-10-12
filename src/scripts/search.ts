@@ -24,7 +24,7 @@ export function loadPagefind() {
 }
 
 // Pagefind reports file paths (/docs/concepts/memory.html); the site serves clean URLs.
-const clean = (url: string) => url.replace(/\.html(?=#|$)/, '').replace(/\/index(?=#|$)/, '') || '/';
+export const clean = (url: string) => url.replace(/\.html(?=#|$)/, '').replace(/\/index(?=#|$)/, '') || '/';
 const kind = (url: string) => (url.startsWith('/blog') ? 'Blog' : url.startsWith('/docs') ? 'Docs' : 'Page');
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 

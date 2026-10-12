@@ -31,6 +31,6 @@ export const GET: APIRoute = async () => {
     for (const p of posts) out.push(`- [${p.data.title}](${absolute(postMarkdownHref(p.id))}): ${p.data.description}`);
     out.push('');
   }
-  out.push('## Optional', '', `- [Full content](${absolute('/llms-full.txt')}): every doc and post in one file`, `- [Changelog](${absolute('/changelog')}): release notes for every published version`, '');
+  out.push('## Optional', '', `- [Full content](${absolute('/llms-full.txt')}): every doc and post in one file`, `- [Changelog](${absolute('/changelog')}): release notes for every published version`, `- [Agent resource catalog](${absolute('/.well-known/ard.json')}): ARD manifest listing the 10xGraph agent skill`, '');
   return new Response(out.join('\n'), { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 };
