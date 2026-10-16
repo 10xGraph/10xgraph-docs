@@ -11,6 +11,9 @@ export const SITE = {
   github: 'https://github.com/10xGraph/10xGraph',
   docsRepo: 'https://github.com/10xGraph/10xgraph-docs',
   docsBranch: 'main',
+  // Hosted playground (agentflow-playground/, Cloudflare). `10xgraph play` still opens the old
+  // Firebase URL until the CLI's DEFAULT_PLAYGROUND_URL changes.
+  playground: 'https://play.10xgraph.com',
   version: '0.10.0',
   locale: 'en_US',
   org: { name: '10xScale', url: 'https://10xscale.ai' },

@@ -33,10 +33,12 @@ From the directory containing your `10xgraph.json`, run:
 The command validates `10xgraph.json`, starts the API server with auto-reload on, and opens the hosted playground in your browser once the API responds. The terminal shows a progress timeline and then a line like:
 
 ```
-Playground opened: https://playground-463bd.web.app?backendUrl=http%3A%2F%2F127.0.0.1%3A8000
+Playground opened: https://play.10xgraph.com?backendUrl=http%3A%2F%2F127.0.0.1%3A8000
 ```
 
-If the browser tab does not open automatically, copy the playground URL from the terminal output and paste it into your browser's address bar.
+If the browser tab does not open automatically, copy the playground URL from the terminal output and paste it into your browser's address bar. You can also open [play.10xgraph.com](https://play.10xgraph.com) directly and enter your server URL on the Connect page.
+
+`10xgraph-api` 0.7.0 opens the same playground at its previous address, `playground-463bd.web.app`. Both addresses serve the same app.
 
 ## Verify the playground works
 
@@ -204,7 +206,7 @@ If you want others to test your agent in the playground:
 1. Deploy your API to a public HTTPS endpoint (e.g., on a cloud provider)
 2. Share the playground URL with the `backendUrl` query parameter:
    ```
-   https://playground-463bd.web.app?backendUrl=https://your-api.example.com
+   https://play.10xgraph.com?backendUrl=https://your-api.example.com
    ```
 3. Others can open this URL and test your agent in their browsers
 
