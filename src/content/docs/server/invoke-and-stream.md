@@ -80,7 +80,7 @@ The server refuses some input with `422`, on invoke, stream and the WebSocket:
 - An unknown `current_node`.
 - A state value that does not match its field type. The error names the field.
 
-Requests are also limited in size: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. A request over a limit gets `422`. In development the error details name the limit; production returns a generic validation message. The limits are fixed.
+Requests are also limited in size: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. A request over a limit gets `422` with a message that names the limit, in development and production alike. The limits are fixed.
 
 Custom state fields are allowed, so a frontend can pass a selected ID straight into state. To limit which keys clients may set, list them in `runs.state_keys` in `10xgraph.json`. The server ignores any `message_id` you send and generates its own.
 

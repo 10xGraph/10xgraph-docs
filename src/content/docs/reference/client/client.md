@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 460
 label: "TenxGraphClient"
-updated: "2026-10-26"
+updated: "2026-10-27"
 ---
 
 `TenxGraphClient` is the main class of the `10xgraph-client` package. It wraps the 10xGraph REST and WebSocket endpoints in one typed object, so a TypeScript or JavaScript app can invoke, stream, manage threads, use memory and files, and run client-side tools without writing fetch code.
@@ -52,7 +52,7 @@ new TenxGraphClient(config: TenxGraphConfig)
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Auth on WebSocket routes</p>
 
-`wsStream()` and `realtime()` send only a bearer token, as the `agentflow-bearer` WebSocket subprotocol (never in the URL). `auth` takes precedence over `authToken`, as for HTTP. If `auth` is `basic` or `header`, no bearer token is sent on the socket, so use a bearer token for these methods.
+`wsStream()` and `realtime()` send only a bearer token, as the `10xgraph-bearer` WebSocket subprotocol (never in the URL). `auth` takes precedence over `authToken`, as for HTTP. If `auth` is `basic` or `header`, no bearer token is sent on the socket, so use a bearer token for these methods.
 
 </aside>
 

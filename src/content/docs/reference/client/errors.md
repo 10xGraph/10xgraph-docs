@@ -96,7 +96,7 @@ These six classes map to one status each. They carry no recovery suggestion, so 
 | `PermissionError` | 403 | `PERMISSION_ERROR` | The caller is authenticated but not allowed to perform the action. |
 | `NotFoundError` | 404 | `RESOURCE_NOT_FOUND` | The thread, message, memory or file does not exist. |
 | `ConflictError` | 409 | `CONFLICT` | The thread is still busy with another run after the server's 30 second wait, or a resume's `interrupt_id` does not match the open interrupt. The client never retries it. |
-| `ValidationError` | 422 | `VALIDATION_ERROR` | The request body fails schema validation, is over a size limit (500 messages, 100 blocks per message, 1,000,000 characters of text), or a resume answer fails the interrupt's `response_schema`. `details` lists the failing fields. |
+| `ValidationError` | 422 | `VALIDATION_ERROR` | The request body fails schema validation, is over a size limit (500 messages, 100 blocks per message, 1,000,000 characters of text), or a resume answer fails the interrupt's `response_schema`. The message names the size limit that was hit; `details` lists the failing fields (development only). |
 
 ```ts title="http-status-errors.ts"
 import {
