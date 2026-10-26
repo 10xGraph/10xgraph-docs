@@ -4,7 +4,7 @@ description: "Exception hierarchy for graph execution, storage, timeouts, and me
 order: 120
 group: "Python library"
 section: Reference
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 10xGraph raises typed exceptions that distinguish retryable storage failures from permanent errors, execution faults from control flow, and capability mismatches from input corruption. Most carry an error code and a context dict, and serialize to a dictionary through `to_dict()`. This page lists every class in `tenxgraph.core.exceptions`, with signatures, defaults and examples.
@@ -14,10 +14,12 @@ from tenxgraph.core.exceptions import (
     GraphError,
     GraphRecursionError,
     GraphStopRequested,
+    InterruptMismatchError,
     MetricsError,
     NodeError,
     NodeTimeoutError,
     ResourceNotFoundError,
+    ResumeValidationError,
     SchemaVersionError,
     SerializationError,
     StaleStateError,
@@ -39,6 +41,8 @@ Exception
     NodeError
       NodeTimeoutError
     GraphRecursionError
+    InterruptMismatchError (also ValueError)
+    ResumeValidationError (also ValueError)
   GraphStopRequested
   StorageError
     TransientStorageError
@@ -57,6 +61,8 @@ Exception
 | TransientStorageError | 503 |
 | SchemaVersionError | 422 |
 | StaleStateError | 409 |
+| InterruptMismatchError | 409 (raised by a resume that names the wrong interrupt) |
+| ResumeValidationError | 422 |
 | MetricsError | 500 |
 
 `str(error)` returns `"[error_code] message"`. Each constructor also logs the error on the `tenxgraph.exceptions` logger.
@@ -232,6 +238,64 @@ raise GraphRecursionError(
     context={"recursion_depth": 26, "max_depth": 25},
 )
 ```
+
+## InterruptMismatchError
+
+Raised when a resume names an interrupt that is not the one the thread is paused at. Inherits from `GraphError` and `ValueError`, so handlers for a bad resume keep working.
+
+A resume can carry `resume_interrupt_id` (the `id` of the pending interrupt). If it differs from the pending id, for example in a stale tab or a retried request, the answer is rejected and nothing is recorded.
+
+**Signature**
+
+```python
+class InterruptMismatchError(GraphError, ValueError):
+    def __init__(
+        self,
+        message: str,
+        error_code: str = "INTERRUPT_001",
+        context: dict[str, Any] | None = None,
+    ) -> None: ...
+```
+
+**Base classes**: GraphError, ValueError
+
+**Example**
+
+```python
+from tenxgraph.core.exceptions import InterruptMismatchError
+
+try:
+    await app.ainvoke(
+        {"resume": {"approved": True}, "resume_interrupt_id": "int_a"},
+        config,
+    )
+except InterruptMismatchError as e:
+    print(e.context)  # {"expected": "<pending id>", "received": "int_a"}
+```
+
+See [Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt).
+
+## ResumeValidationError
+
+Raised when a resume value does not satisfy the pending interrupt's `response_schema`. Nothing is recorded. Inherits from `GraphError` and `ValueError`. A `None` resume (a cancel) is never checked.
+
+The check supports the JSON Schema keywords `type`, `enum`, `properties`, `required` and `items` (a single schema), and ignores any other keyword.
+
+**Signature**
+
+```python
+class ResumeValidationError(GraphError, ValueError):
+    def __init__(
+        self,
+        message: str,
+        error_code: str = "INTERRUPT_002",
+        context: dict[str, Any] | None = None,
+    ) -> None: ...
+```
+
+**Base classes**: GraphError, ValueError
+
+The `context` holds `interrupt_id` and `errors`, a list of problems such as `$.approved: expected boolean`.
 
 ## GraphStopRequested
 

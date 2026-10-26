@@ -4,7 +4,7 @@ description: "Pause graph execution from inside a node or tool to request human 
 order: 70
 group: "Foundations"
 section: Concepts
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 Human-in-the-loop patterns pause a graph mid-execution to collect human input: an approval, a correction, a choice, or confirmation. 10xGraph provides two complementary interrupt mechanisms: the `interrupt()` function for pauses inside your code, and `interrupt_before`/`interrupt_after` for pauses at fixed node boundaries.
@@ -70,7 +70,7 @@ result = await graph.ainvoke(
 | `value` | Any | Data for the person answering: what to approve, what to choose from, context they need. |
 | `message` | str | Human-readable prompt shown by UI frameworks (CopilotKit and similar). |
 | `reason` | str | Machine-readable pause reason, e.g. `"tool_approval"`, `"user_choice"`, `"input_required"` (default). |
-| `response_schema` | dict | JSON Schema the resume value should match. Helps UIs build forms and validate input. |
+| `response_schema` | dict | JSON Schema the resume value must match. Helps UIs build forms. The resume is checked against it (see below). |
 
 The function returns the resume value on the next run (or `None` if the client cancelled).
 
@@ -145,6 +145,43 @@ On resume, the graph:
 5. The node continues normally.
 
 A client that cancels instead of answering sends `{"resume": null}`. The `interrupt()` call returns `None`, allowing code to detect the cancellation.
+
+## Bind a resume to its interrupt
+
+A plain `{"resume": value}` answers whatever prompt the thread is paused at. That is risky when a request is retried or a second tab sends a stale answer: it could answer the next prompt of a node that calls `interrupt()` twice, before anyone has seen it.
+
+To prevent this, name the interrupt you are answering. Add the key `resume_interrupt_id` (the constant `RESUME_INTERRUPT_ID_KEY` in `tenxgraph.utils.interrupt`) with the `id` of the pending interrupt:
+
+```python
+request = pending_interrupt(result["state"])
+
+result = await graph.ainvoke(
+    {"resume": {"approved": True}, "resume_interrupt_id": request.id},
+    config=config,
+)
+```
+
+The key is optional. Without it, the resume answers the pending interrupt as before.
+
+Two errors can reject a resume. Nothing is recorded when either is raised, and both are also `ValueError`s, so existing handlers for a bad resume keep working.
+
+| Exception | Code | Raised when |
+|---|---|---|
+| `InterruptMismatchError` | `INTERRUPT_001` | `resume_interrupt_id` is not the id of the pending interrupt. |
+| `ResumeValidationError` | `INTERRUPT_002` | The resume value fails the interrupt's `response_schema`. |
+
+A resume of `None` (a cancel) is never checked against the schema.
+
+### The schema subset
+
+The check uses a small built-in validator, so no JSON Schema library is needed. It supports these keywords:
+
+- `type`: a type name or a list of names (`string`, `boolean`, `integer`, `number`, `null`, `array`, `object`).
+- `enum`
+- `properties` and `required`
+- `items`, as a single schema
+
+Any other keyword (`oneOf`, `pattern`, `minimum` and so on) is ignored. A schema that uses only those keywords is checked only for the ones above.
 
 ## Sending new messages to a paused thread
 
@@ -268,6 +305,29 @@ Streaming sends an `updates` event when the graph pauses. The same `resume` fiel
 ```json
 {"event": "updates", "data": {"status": "interrupted", "node": "refund_tool", "interrupt": {...}}}
 ```
+
+### Get the interrupt id and bind the resume
+
+The pending interrupt lives in the thread state at `execution_meta.interrupt_data.interrupt`, and its `id` is the value to send back. Read it from the response state (with `"response_granularity": "full"`) or from the `interrupt` payload of the `interrupted` update. On AG-UI, the interrupt event carries the same id.
+
+Send it as `interrupt_id` next to `resume`:
+
+```bash
+curl -X POST http://localhost:8000/v1/graph/invoke \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resume": {"approved": true},
+    "interrupt_id": "int_abc123...",
+    "config": {"thread_id": "order-42"}
+  }'
+```
+
+`interrupt_id` is accepted on `/v1/graph/invoke`, `/v1/graph/stream` and the WebSocket. The server returns:
+
+- **409** if the thread is not paused, or is paused at a different interrupt. This is checked before anything runs.
+- **422** if the answer fails the interrupt's `response_schema`.
+
+On stream and WebSocket, both arrive as an error chunk instead of an HTTP status. The server passes the id to core as `resume_interrupt_id`. See [Invoke and stream over REST](/docs/server/invoke-and-stream) for the error format.
 
 For UI integration, see [Add human approval](/docs/guides/add-human-approval).
 

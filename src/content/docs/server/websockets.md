@@ -4,7 +4,7 @@ description: "Bidirectional WebSocket endpoints for turn-based agent streaming a
 order: 100
 group: "Interfaces"
 section: "API server"
-updated: "2026-10-26"
+updated: "2026-10-27"
 ---
 
 10xGraph exposes two WebSocket endpoints: `/v1/graph/ws` for turn-based agent interactions and `/v1/graph/live` for realtime audio conversations. WebSockets keep a persistent connection open so the server can stream responses token-by-token, the client can resume from checkpoints, and (for realtime agents) both sides can exchange audio in near-real-time. Both endpoints support the same authentication, rate limiting, and concurrency controls as REST APIs.
@@ -90,6 +90,22 @@ Server → Client:
 (same format: StreamChunk lines, ending with updates/status:done)
 ```
 
+**Resume a human-in-the-loop pause:**
+
+A `fresh` frame can also answer an `interrupt()` pause. Send `resume` (any JSON value, including `null` to cancel) with the thread's `config.thread_id`. No `messages` are needed. Add `interrupt_id` to bind the answer to the interrupt it belongs to:
+
+```json
+Client → Server:
+{
+  "invoke_type": "fresh",
+  "resume": {"approved": true},
+  "interrupt_id": "int_abc123...",
+  "config": {"thread_id": "same-thread-from-checkpoint"}
+}
+```
+
+Get the id from the `interrupt` object of the `interrupted` update chunk, or from the thread state at `execution_meta.interrupt_data.interrupt.id`. If the thread is not paused, or is paused at a different interrupt, the server sends an `error` chunk and runs nothing. A `resume` that fails the interrupt's `response_schema` also gets an `error` chunk. The socket stays open. See [Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt).
+
 ### Thread IDs
 
 - Omit `thread_id` or send `"new"` to create a fresh thread each time.
@@ -97,6 +113,20 @@ Server → Client:
 - A blank or missing `thread_id` also means "create a new one", so the server generates an ID.
 - `resume` runs require `config.thread_id`.
 - When auth is enabled, the thread is owner-checked before each run. An unauthorized thread gets an `error` chunk with `Not authorized to stream thread ...` and the socket stays open.
+
+### One run per thread
+
+The server runs one graph run at a time on a thread, and each run on the socket takes the thread's lock first. A run that finds the thread busy waits up to 30 seconds. After that the server sends an `error` chunk and the socket stays open:
+
+```json
+{"event": "error", "data": {"reason": "thread is busy"}}
+```
+
+To stop the running run and take its place, add `"on_busy": "cancel"` to the frame (the default is `"wait"`). New threads are locked as soon as their id exists. When Redis is configured, the lock is shared across processes. `/v1/graph/live` is not covered.
+
+### Request limits and error text
+
+A frame is limited to 500 messages (in `messages` or `tool_result`), 100 content blocks per message and 1,000,000 characters of text in total. An oversized frame gets 422 from the schema check. In production (`MODE=production`), `error` chunks from a failing node or tool carry a generic message instead of the raw exception text. Development shows the details.
 
 ### Rate limiting and concurrency
 

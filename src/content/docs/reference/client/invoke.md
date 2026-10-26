@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 490
 label: "invoke()"
-updated: "2026-10-26"
+updated: "2026-10-27"
 faq:
   - q: "When should I use invoke() instead of stream()?"
     a: "Use invoke() when you need the complete answer before updating your UI or returning from a function. Use stream() when you want tokens or messages as they are produced."
@@ -34,6 +34,9 @@ invoke(
     initial_state?: Record<string, any>;
     config?: Record<string, any>;
     recursion_limit?: number;
+    on_busy?: 'wait' | 'cancel';
+    resume?: unknown;
+    interrupt_id?: string;
     response_granularity?: 'full' | 'partial' | 'low';
     onPartialResult?: InvokeCallback;
   }
@@ -65,6 +68,9 @@ All options are optional. The defaults below are the values the client applies w
 | `initial_state` | `Record<string, any>` | none | State values to seed the graph. Sent only on the first request of a call, not on the follow-up requests that return tool results. |
 | `config` | `Record<string, any>` | none | Run configuration. Put `thread_id` at the top level of this object to keep and checkpoint a conversation. |
 | `recursion_limit` | `number` | `25` | Maximum number of requests the client makes in one `invoke()` call. The server accepts values from 1 to 100. |
+| `on_busy` | `'wait' \| 'cancel'` | server default (`'wait'`) | What the server does when another run is active on the same thread. `'wait'` queues behind it for up to 30 seconds, then fails with `ConflictError`. `'cancel'` stops the running run and starts this one. Needs a `10xgraph-api` version that supports it. |
+| `resume` | `unknown` | none | The answer to an `interrupt()` pause on the thread (any JSON value, `null` to cancel). Pass an empty `messages` array with it. |
+| `interrupt_id` | `string` | none | The id of the interrupt `resume` answers. The client does not track ids: pass the one you got from the server (`execution_meta.interrupt_data.interrupt.id` in the thread state, or the `interrupt` object of the `interrupted` update). A mismatch fails with `ConflictError`. |
 | `response_granularity` | `'full' \| 'partial' \| 'low'` | `'full'` | How much data the server returns per request. See [Response granularity](#response-granularity). |
 | `onPartialResult` | `InvokeCallback` | none | Called after every request with that iteration's results. |
 
@@ -153,7 +159,19 @@ The client resolves remote tool calls for you. When a response contains a `remot
 3. The tool result messages are added to `all_messages` and posted to the same endpoint as the next request.
 4. Steps 2 and 3 repeat until a response has no remote tool calls or `recursion_limit` is reached.
 
-Only the first request carries `initial_state`. See [Register remote tools](/docs/client/remote-tools) for how to register handlers.
+Only the first request carries `initial_state`. `resume` and `interrupt_id` are sent on the first request of a call only, not on the follow-up requests that return tool results. `on_busy` is sent on every request.
+
+Resume a paused thread like this:
+
+```ts
+const result = await client.invoke([], {
+  config: { thread_id: 'order-42' },
+  resume: { approved: true },
+  interrupt_id: 'int_abc123',
+});
+```
+
+ See [Register remote tools](/docs/client/remote-tools) for how to register handlers.
 
 ## InvokeRequest
 
@@ -165,6 +183,9 @@ interface InvokeRequest {
   initial_state?: Record<string, any>;
   config?: Record<string, any>;
   recursion_limit?: number;
+  on_busy?: 'wait' | 'cancel';
+  resume?: unknown;
+  interrupt_id?: string;
   response_granularity?: 'full' | 'partial' | 'low';
 }
 ```
@@ -236,6 +257,7 @@ A non-2xx response throws a subclass of `TenxGraphError`, chosen by status code.
 |---|---|---|
 | `AuthenticationError` (401) | Missing or invalid credentials. | Set `authToken` or `auth` in the client config. |
 | `ValidationError` (422) | The server rejected the payload, for example an empty `messages` array. | Send at least one message and check `config`. |
+| `ConflictError` (409) | The thread is busy with another run (after the server waited 30 seconds), or `interrupt_id` does not match the open interrupt. | Wait and send again, set `on_busy: 'cancel'`, or fetch the current interrupt id. The client never retries it. |
 | `ServerError` (500, 502, 503, 504) | The graph failed or the server is unavailable. | Check the server logs, then retry. |
 | `Error: Request timeout after <n>ms` | One request exceeded the client `timeout` (default 300000 ms). | Raise `timeout` in the client config or shorten the graph. |
 | `recursion_limit_reached: true` | The loop used all allowed iterations. | Raise `recursion_limit` (maximum 100), or check that tools return and do not loop. |

@@ -5,7 +5,7 @@ section: TypeScript client
 group: Features
 order: 90
 label: Graph utilities
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The `10xgraph-client` TypeScript client exposes utility methods for inspecting graph metadata, controlling execution, repairing state, and handling human-in-the-loop workflows. Use these methods to build observability dashboards, debugging tools, and approval interfaces.
@@ -372,6 +372,8 @@ if (slowest) {
 
 Sends a stop signal to a running graph execution via `POST /v1/graph/stop`. The server sets a stop flag on the thread; the graph checks this flag after each node and halts before starting the next node.
 
+The stop request belongs to the run that was active when you sent it, so starting a new run on the thread does not cancel a stop meant for the earlier run.
+
 ```ts
 const result = await client.stopGraph('thread-abc123');
 
@@ -566,7 +568,27 @@ if (meta.status.startsWith('interrupted')) {
 
 - Interrupts are only possible if the graph was compiled with `interrupt_before` or `interrupt_after`. Check `graph().data.info.interrupt_before` and `.interrupt_after` to see which nodes pause.
 - Interrupted state is saved by the checkpointer. With a durable checkpointer (such as Postgres or SQLite), it survives server restarts.
-- A pause raised by the Python `interrupt()` function is different: resuming it needs a `resume` value in the invoke input, which this client's `invoke()` does not take as a parameter.
+- A pause raised by the Python `interrupt()` function is different: resuming it needs a `resume` value, which `invoke()`, `stream()` and `wsStream()` take as an option. See the next section.
+
+### Resuming an interrupt() pause
+
+Pass `resume` with the answer, and `interrupt_id` with the id of the interrupt you are answering. Read the id from the thread state, at `execution_meta.interrupt_data.interrupt.id`. The client does not track ids for you. Send an empty `messages` array:
+
+```ts
+const { data } = await client.threadState('approval-thread');
+const meta = data.state.execution_meta as unknown as {
+  interrupt_data?: { interrupt?: { id: string } };
+};
+const interruptId = meta.interrupt_data?.interrupt?.id;
+
+const result = await client.invoke([], {
+  config: { thread_id: 'approval-thread' },
+  resume: { approved: true },
+  interrupt_id: interruptId,
+});
+```
+
+`interrupt_id` is optional. If the thread is not paused, or is paused at a different interrupt, the server answers 409 and the client throws `ConflictError`. If the answer fails the interrupt's `response_schema`, it throws `ValidationError` (422). Send `resume: null` to cancel.
 
 ---
 

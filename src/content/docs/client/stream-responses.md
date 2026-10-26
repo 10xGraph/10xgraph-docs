@@ -5,7 +5,7 @@ section: "TypeScript client"
 group: "Basics"
 order: 40
 label: Stream responses
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 `client.stream()` and `client.wsStream()` let you process the agent's response as it arrives, chunk by chunk, instead of waiting for the complete response. This guide shows you how to consume streams, handle different event types, and manage long-running operations.
@@ -303,8 +303,23 @@ for await (const chunk of stream) {
 Common errors:
 
 - **`AuthenticationError` (401)**: Missing or invalid token. Thrown before any chunk arrives.
-- **`ValidationError`**: Invalid message format or state schema. Thrown before any chunk arrives.
+- **`ValidationError`**: Invalid message format or state schema, or a request over the size limits. Thrown before any chunk arrives.
+- **`ConflictError` (409)**: The thread is busy with another run, or `interrupt_id` does not match the open interrupt. Thrown before any chunk arrives.
 - **`'error'` chunk**: A node or tool failed mid-run. Read `chunk.data` for the status and reason.
+
+In production, the text in an `'error'` chunk is a generic message; development shows the details.
+
+To control what happens when the thread is busy, pass `on_busy` (`'wait'`, the server default, or `'cancel'`). To answer an `interrupt()` pause, pass `resume` and `interrupt_id`:
+
+```ts
+const stream = client.stream([], {
+  config: { thread_id: 'order-42' },
+  resume: { approved: true },
+  interrupt_id: 'int_abc123', // from the thread state or the interrupted update
+});
+```
+
+`wsStream()` takes the same options. See [stream()](/docs/reference/client/stream).
 
 Always handle the `'error'` event to prevent silent failures. The HTTP errors above are thrown by the generator as `TenxGraphError` subclasses, so wrap the `for await` loop in `try/catch`.
 

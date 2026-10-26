@@ -6,7 +6,7 @@ section: "API server"
 group: "Operate"
 order: 170
 label: Production Checklist
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "What is the minimum checklist for production?"
     answer: "Set MODE=production, IS_DEBUG=false, use explicit ORIGINS, configure Postgres+Redis for persistence, enable rate limiting, and run at least two API instances."
@@ -175,6 +175,10 @@ redis-cli -u redis://redis.internal:6379/0 ping
 # Should respond PONG
 ```
 
+### One run per thread
+
+The server runs one graph run at a time on a thread. With Redis configured, the lock is shared across all instances, so two replicas cannot run the same thread at once. Without Redis, the lock is per process and does not stop two replicas from running one thread together. A second run waits up to 30 seconds, then gets `409` (`thread is busy`). The lock expires on its own if a worker dies. If Redis is unreachable, runs proceed without the lock and the error is logged. See [Invoke and stream](/docs/server/invoke-and-stream#one-run-per-thread).
+
 ### Topology diagram
 
 ```
@@ -243,6 +247,10 @@ In a second instance:
 SNOWFLAKE_NODE_ID=1
 SNOWFLAKE_WORKER_ID=2
 ```
+
+### Error text and request limits
+
+With `MODE=production`, error chunks on stream, WebSocket and AG-UI carry a generic message instead of the raw exception text, the same as invoke. Requests are also limited to 500 messages, 100 content blocks per message and 1,000,000 characters of text; over a limit gets `422`. Neither needs configuration.
 
 ## 7. Rate limiting
 
@@ -445,6 +453,7 @@ curl http://127.0.0.1:8000/ping
 | Thread state disappears after restart | Using `InMemoryCheckpointer` | Switch to `PgCheckpointer` with Postgres DSN |
 | One worker sees state, another does not | Workers are not sharing the same backend | Point all instances at the same Postgres and Redis |
 | CORS requests are blocked | `ORIGINS` does not include the client domain | Add the domain to `ORIGINS` or set `ORIGINS=*` with `CORS_ALLOW_CREDENTIALS=false` |
+| `409 thread is busy` on a thread | Another run is still active, and the 30 s wait ran out | Wait for the run to end, use `on_busy: "cancel"`, or use one thread per conversation |
 | Rate limiting not working | No `rate_limit` block, or Redis is down (with `fail_open` true, requests pass) | Verify `rate_limit.redis.url` and Redis connectivity |
 
 ## Related pages

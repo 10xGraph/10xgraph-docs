@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 210
 label: Checkpointers
-updated: "2026-10-26"
+updated: "2026-10-27"
 ---
 
 A checkpointer persists graph state, messages and thread metadata between requests, so conversations survive restarts and multi-turn runs stay coherent. 10xGraph ships four: the `BaseCheckpointer` abstract class, plus `InMemoryCheckpointer`, `SqliteCheckpointer` and `PgCheckpointer`. Pass one to `graph.compile(checkpointer=...)`.
@@ -80,6 +80,20 @@ message = await checkpointer.aupdate_message_metadata(
 ```
 
 Optional, non-abstract async methods also exist on the base class, for example `aput_checkpoint`, `aput_cache_value`, `aget_cache_value`, `arequest_stop` and `aget_thread_owner`. Backends override them as needed.
+
+### Stop requests and active runs
+
+A stop request belongs to the run it targets. The base class tracks which run is active on each thread, so a new run cannot erase a stop meant for a run that is still going. It uses the generic cache (`aput_cache_value`, `aget_cache_value`, `aclear_cache_value`), so it works on every backend with no schema change.
+
+| Method | Description |
+|---|---|
+| `abegin_run(config)` | Registers `config["run_id"]` as the active run on the thread and drops a stale stop request: one that targets no run, or a run that is no longer active. A request that targets the run still marked active is kept. |
+| `aend_run(config)` | Marks the run as finished. Clears the active-run marker if it is still this run's, and drops a stop request that targeted this run. |
+| `aget_active_run(config)` | Returns the id of the run marked active on the thread, or `None`. |
+| `arequest_stop(config)` | Records a stop request that names the run active on the thread (`None` when none is known). |
+| `ais_stop_requested(config)` | `True` only for a request that targets `config["run_id"]`. A config with no `run_id`, or an old untargeted request, still matches. |
+
+`ainvoke` and `astream` call `abegin_run` when a run starts and `aend_run` when it ends, so a stop request for a finished run does not linger until its TTL. A custom checkpointer that implements the cache methods gets all of this without changes. One that leaves them as the base class no-ops degrades to doing nothing, as stop requests did before. The existing method signatures are unchanged.
 
 ### Wiring into a graph
 
