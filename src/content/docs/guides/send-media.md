@@ -6,7 +6,7 @@ section: "Build agents"
 group: "Streaming, media and realtime"
 order: 330
 label: Send media
-updated: "2026-10-08"
+updated: "2026-10-26"
 faq:
   - q: "When should I use each MediaRef kind?"
     a: "Use `url` for public or CDN-hosted media, and for `graph://media/{key}` references built with `media_store.to_media_ref()`. Use `data` for small payloads embedded directly in the message. Use `file_id` only for provider-managed file IDs."
@@ -94,6 +94,63 @@ print(result["messages"][-1].text())
 ```
 
 This is the simplest approach: you give the model a URL and 10xGraph resolves it for the provider. `Agent` is a graph node, so run it through a compiled graph (`app`), which later examples reuse.
+
+---
+
+## Control which URLs the server downloads
+
+A `kind="url"` block is untrusted input when it comes from a client. What happens to it depends on the provider path:
+
+- **OpenAI and Anthropic** fetch the URL themselves. Your server only passes it on, and the policy below does not apply.
+- **Google GenAI**, the Google File API and the inline-bytes transport make your server download the URL first. These downloads go through a `MediaFetchPolicy`.
+
+`MediaFetchPolicy` is a frozen dataclass in `tenxgraph.storage.media`. The defaults are safe, so you only set the fields you want to change:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `enabled` | `True` | `False` means the server never downloads an external URL. URLs a provider fetches itself are not affected. |
+| `allowed_schemes` | `("https", "http")` | A subset of these two. No other scheme can be allowed. |
+| `allowed_hosts` | `()` | Empty allows any public host. Entries are exact names or `"*.example.com"` (subdomains only). |
+| `allow_private_for_allowed_hosts` | `False` | On-prem opt-in: hosts listed in `allowed_hosts` may resolve to private addresses. |
+| `allowed_content_types` | `("image/*", "application/pdf")` | Response `Content-Type` values accepted. `"image/*"` style wildcards work. |
+| `max_bytes` | 20 MiB | Largest download. |
+| `timeout` | `10.0` | Seconds for the whole download, redirects included. |
+| `allowed_gcs_buckets` | `()` | `gs://` buckets a client may reference. Empty rejects every `gs://` URL. |
+
+These rules always apply and cannot be turned off:
+
+- Only `http` and `https` are downloaded.
+- Cloud metadata addresses are never reached, even with the private-host opt-in.
+- A host name must resolve to public addresses, and the connection goes to the address that was checked.
+- Every redirect is checked again, and at most 5 are followed.
+- The size cap and the timeout always apply.
+
+Pass the policy to `compile()`. The prebuilt agents take the same argument on their own `compile()`:
+
+```python
+from tenxgraph.storage.media import MediaFetchPolicy
+
+policy = MediaFetchPolicy(
+    allowed_hosts=("cdn.example.com", "*.example.org"),
+    allowed_content_types=("image/*", "application/pdf", "audio/*"),
+    max_bytes=10 * 1024 * 1024,
+    timeout=5.0,
+    allowed_gcs_buckets=("my-uploads",),
+)
+app = graph.compile(media_policy=policy)
+
+app.media_policy.check_url("https://cdn.example.com/a.png")  # no network; raises MediaURLError if refused
+```
+
+`check_url` needs no network, so it is cheap to call on input. The API server calls it on every client media URL before the run (see [Files and multimodal on the server](/docs/server/files-and-multimodal#external-media-urls)). Host names are resolved, and their addresses checked, only at download time.
+
+A URL the policy refuses, or that fails to download, becomes a `[Failed to load image]` or `[Failed to load media]` text part in the prompt. The warning in the log shows the URL without its query string.
+
+The default content types cover images and PDFs only, so audio and video links on Google graphs are not downloaded until you add those types.
+
+### `gs://` URLs
+
+On Vertex AI, a `gs://` URL is read with the server's own credentials, not the client's. A client could point it at any bucket the server can read. For that reason the API rejects a client `gs://` URL unless its bucket is in `allowed_gcs_buckets`. The converters pass `gs://` through unchanged, and your own code may still use any `gs://` URL, because `check_url` is the only place the list is enforced.
 
 ---
 

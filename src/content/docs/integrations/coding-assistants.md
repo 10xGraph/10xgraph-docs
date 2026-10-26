@@ -5,7 +5,7 @@ description: Install the bundled 10xGraph skill for Codex, Claude, or GitHub Cop
 section: Integrations
 group: "Coding assistants"
 order: 90
-updated: "2026-10-08"
+updated: "2026-10-26"
 faq:
   - question: "Do I need to install the skill?"
     answer: "No. The skill is optional. If your coding assistant already knows 10xGraph, you do not need it. Install the skill when you want better suggestions and fewer mistakes in generated 10xGraph code."
@@ -134,7 +134,7 @@ By default, skills are installed in the current working directory. Use `--path` 
 10xgraph skills --agent claude --path ./my-other-project
 ```
 
-The CLI refuses to install at the filesystem root or directly in your home directory. Restart your coding assistant after installing so it loads the new skills directory.
+The CLI refuses to install at the filesystem root or directly in your home directory. It also refuses when any existing part of the destination (`.claude`, `.agents`, `.github` and the paths under them) is a symlink, or when the resolved destination is outside `--path`, so a repository cannot make the install write files elsewhere. Restart your coding assistant after installing so it loads the new skills directory.
 
 ## Update the skill after upgrading the CLI
 

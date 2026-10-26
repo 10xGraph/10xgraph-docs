@@ -4,7 +4,7 @@ description: "Reference for 10xGraph prebuilt tools: web fetch, file operations,
 order: 250
 group: "Python library"
 section: Reference
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 10xGraph ships ten ready-made tools in `tenxgraph.prebuilt.tools`: URL fetching, workspace file read, write and search, Google web and Vertex AI search, a safe calculator, and long-term memory. Each is a plain function you pass to a `ToolNode`, and each returns a JSON string.
@@ -78,7 +78,9 @@ result = asyncio.run(fetch_url("https://example.com"))
 
 Read a UTF-8 text file from the configured workspace root. Returns a slice of the file (by line number) and truncates long output.
 
-All three file tools resolve paths under one root: the `file_tool_root` key of the injected `config` dict, then `workspace_root`, then the current directory. A path that resolves outside the root returns an error.
+All three file tools resolve paths under one root: the `file_tool_root` key of the injected `config` dict, then `workspace_root`, then the current directory. A path that resolves outside the root returns an error. Secret files (`.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*key*.json`, `service_account*.json`, `id_rsa*`, `id_ed25519*`, `.netrc`, `.npmrc`, `.pypirc`, and anything under `.ssh`, `.aws`, `.gnupg` or `.git`) are hidden and return `path is not allowed`.
+
+Reading the root from the run config is deprecated and will be removed in 0.11. `create_file_tools(root, *, read=True, write=True, search=True, deny=(), use_default_deny=True)` returns the same three tools locked to a root set in code. `deny` adds glob patterns to hide, and `use_default_deny=False` drops the default list.
 
 ```python
 def file_read(

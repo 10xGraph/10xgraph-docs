@@ -73,8 +73,10 @@ The scope string is always `"resource:action"`. The full list of scopes is:
 - Thread state (checkpointer): `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`
 - Thread import (admin only): `checkpointer:import`
 - Long-term memory (store): `store:read`, `store:write`, `store:delete`
-- Media and files: `files:read`, `files:upload`
+- Media and files: `files:read`, `files:upload`, `files:delete`
 - Configuration: `config:read`
+
+`files:delete` guards `DELETE /v1/files/{file_id}`. Only the uploader can delete a file even with the scope: a missing file or someone else's file returns 404. A role of `"*"` includes it.
 
 `checkpointer:import` guards `POST /v1/threads/{thread_id}/messages`, which imports history of any role. It is the one scope that is never implied. Other routes treat an identity with no declared scopes as unrestricted. This route returns 403 unless the scope is granted explicitly. A role of `"*"` includes it. Grant it only to trusted admin identities.
 

@@ -6,14 +6,25 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 190
 label: File Tools
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 File tools give your agent filesystem access in a secure, controlled way. Three complementary tools handle reading text files, writing output, and searching by filename or content. All three are workspace-scoped: paths are resolved under a configured root directory, and paths that escape the root are rejected. This prevents agents from accessing sensitive files outside the intended workspace.
 
 **Import path:** `tenxgraph.prebuilt.tools`
 
-The workspace root is read from `config["file_tool_root"]`, then `config["workspace_root"]`, and defaults to the current directory (`.`) if neither is set. You can pass it at runtime via `invoke(config={"file_tool_root": "/path/to/root"})` or set it once in your agent's configuration.
+For any graph that serves requests, create the tools with `create_file_tools(root)`. The root is fixed in your code, so nothing in the run config can move it:
+
+```python
+from tenxgraph.core.graph import ToolNode
+from tenxgraph.prebuilt.tools import create_file_tools
+
+tool_node = ToolNode(create_file_tools("/srv/workspace", write=False))
+```
+
+`create_file_tools` takes `read`, `write` and `search` flags (all `True` by default) to pick which tools you get. It raises `ValueError` if `root` is not an existing directory.
+
+The module-level `file_read`, `file_write` and `file_search` still work. They read their root from `config["file_tool_root"]`, then `config["workspace_root"]`, and default to the current directory. That path is deprecated and will be removed in 0.11, because anyone who can set the run config can point the tools at any directory. The examples below use it for brevity. In production, use `create_file_tools`.
 
 ## When to use file tools
 
@@ -395,6 +406,28 @@ The agent will:
 ---
 
 ## Workspace security and limits
+
+### Hidden files
+
+Secret files are hidden by default, for any root, including the working-directory default. The tools refuse to read or write them, and `file_search` skips them and never shows their names or contents. Hidden paths are:
+
+- `.env` and `.env.*`
+- `*.pem`, `*.key`, `*.p12`, `*.pfx`
+- `*key*.json` and `service_account*.json`
+- `id_rsa*` and `id_ed25519*`
+- `.netrc`, `.npmrc` and `.pypirc`
+- anything under a directory named `.ssh`, `.aws`, `.gnupg` or `.git`
+
+Matching ignores case and uses the resolved path, so symlinks, `..` and case changes do not get around it. A read or write of a hidden path returns the same `path is not allowed` error whether or not the file exists, so the model cannot use the error to find out what is there.
+
+Add your own patterns with `deny=`. Each glob is matched, ignoring case, against every part of the path under the root and against the whole relative path:
+
+```python
+tools = create_file_tools("/srv/workspace", deny=["secrets/*", "*.sqlite"])
+```
+
+Set `use_default_deny=False` to drop the default patterns. Only do this when the root holds nothing sensitive. Patterns you pass in `deny=` still apply.
+
 
 ### Path security
 

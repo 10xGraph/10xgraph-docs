@@ -3,7 +3,7 @@ title: 10xgraph.json configuration reference
 description: Every key the 10xgraph.json config file accepts, with defaults, types, purposes, and complete examples for rate limiting, auth, and servers.
 section: Reference
 order: 420
-updated: "2026-10-08"
+updated: "2026-10-26"
 group: "CLI and configuration"
 faq:
   - q: Which key is required in 10xgraph.json?
@@ -34,6 +34,7 @@ Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: th
 | `remote_tools` | array | `[]` | Schemas of tools that run in the client |
 | `rate_limit` | object | absent (off) | Request rate limiting |
 | `websocket` | object | built-in caps | WebSocket connection limits |
+| `media` | object | `{"delete_with_thread": true}` | Uploaded-file lifecycle |
 | `ag_ui` | object | disabled | AG-UI protocol endpoint |
 | `observability` | object | absent | Logfire and LangSmith tracing |
 | `test` | object | absent | Defaults for `10xgraph test` |
@@ -70,7 +71,7 @@ RBAC object keys:
 | `default_scopes` | array | `[]` | Scopes granted to everyone |
 | `isolation` | string | `owner` | `owner` or `none`: whether storage is scoped per user |
 
-Scopes are `checkpointer:read|write|delete`, `config:read`, `files:read|upload`, `graph:fix|invoke|read|setup|stop|stream` and `store:read|write|delete`.
+Scopes are `checkpointer:read|write|delete`, `config:read`, `files:read|upload|delete`, `graph:fix|invoke|read|setup|stop|stream` and `store:read|write|delete`.
 
 ## rate_limit
 
@@ -107,6 +108,14 @@ The `memory` backend counts per process, so with N workers the real limit is `re
 | `observability.langsmith` | object | none | Keys include `enabled`, `project`, `endpoint` |
 
 Tokens stay in the environment: `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY` are never read from the file.
+
+## media
+
+| Key | Type | Default | Purpose |
+|---|---|---|---|
+| `media.delete_with_thread` | boolean | `true` | Delete an uploaded file when the last message or thread that references it is deleted. `false` keeps recording links but never deletes a file automatically |
+
+Files uploaded before link tracking existed are never deleted automatically, whatever this is set to. See [Delete a file and file lifecycle](/docs/server/files-and-multimodal#delete-a-file-and-file-lifecycle). The setting is also in `10xgraph config`.
 
 ## remote_tools
 

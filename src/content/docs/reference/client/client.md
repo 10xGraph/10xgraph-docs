@@ -144,6 +144,7 @@ See [Memory](/docs/reference/client/memory) for full details.
 | `uploadFile(file)` | `Promise<FileUploadResponse>` | Upload an image, audio, or document file. Returns `file_id` and access URL. |
 | `getFile(fileId)` | `Promise<Blob>` | Download a file by ID as a raw `Blob`. |
 | `getFileInfo(fileId)` | `Promise<FileInfoResponse>` | Fetch metadata (MIME type, size, extracted text) for a stored file. |
+| `deleteFile(fileId)` | `Promise<DeleteFileResponse>` | Delete a file you uploaded. Needs the `files:delete` scope; 404 for a missing file or someone else's. |
 | `getFileAccessUrl(fileId)` | `Promise<FileAccessUrlResponse>` | Get the best access URL for a file (signed URL for cloud storage, or a direct API URL). |
 | `getMultimodalConfig()` | `Promise<MultimodalConfigResponse>` | Fetch the server's multimodal configuration (storage backend, max size, etc.). |
 

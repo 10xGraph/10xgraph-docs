@@ -5,7 +5,7 @@ section: Reference
 group: "REST API"
 order: 360
 label: Files
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 The file endpoints upload images, audio and documents to the 10xGraph server and return a `file_id` you reference from graph messages. Each file belongs to the user who uploaded it, and every read checks that ownership. This page lists each route with its permission, request, response and errors.
@@ -18,6 +18,7 @@ Base path: `/v1/files`. Every route needs authentication when `auth` is configur
 | `GET /v1/files/{file_id}` | `files:read` | Download the raw bytes. |
 | `GET /v1/files/{file_id}/info` | `files:read` | Read metadata only. |
 | `GET /v1/files/{file_id}/url` | `files:read` | Get a direct access URL. |
+| `DELETE /v1/files/{file_id}` | `files:delete` | Delete a file you uploaded. |
 | `GET /v1/config/multimodal` | `config:read` | Read the server's media settings. |
 
 ---
@@ -41,6 +42,8 @@ MEDIA_ALLOWED_CONTENT_TYPES=image/*,application/pdf
 ```
 
 Entries may be exact (`image/png`) or wildcard subtype (`image/*`). A rejected type returns `415`.
+
+The server also compares the first bytes of the file with its declared type for PNG, JPEG, GIF, WebP, BMP, TIFF, ICO, PDF, Office (ZIP and OLE), MP3, WAV, OGG, FLAC, MP4 and WebM. A mismatch returns `415` with `file content does not match <type>`. Types with no known signature (plain text, JSON, CSV) are accepted.
 
 Types commonly sent to an agent: `image/jpeg`, `image/png`, `image/webp`, `image/gif`, `audio/mpeg`, `audio/wav`, `audio/ogg`, `application/pdf`, `text/plain`.
 
@@ -78,7 +81,7 @@ curl -X POST http://127.0.0.1:8000/v1/files/upload \
 | `mime_type` | The content type the server recorded. |
 | `size_bytes` | Stored size in bytes. |
 | `filename` | Original filename from the upload. |
-| `extracted_text` | Extracted document text, when `DOCUMENT_HANDLING=extract_text` and the type is extractable. `null` otherwise. |
+| `extracted_text` | Extracted document text, when `DOCUMENT_HANDLING=extract_text` and the type is extractable. `null` otherwise, and also `null` for HTML, XML, CSV, Markdown, JSON and plain-text files over 5 MiB, which are stored without extraction. |
 | `url` | API-relative retrieval path. |
 | `direct_url` | Signed direct URL, when the storage backend can produce one. |
 | `direct_url_expires_at` | Expiry of the signed URL as a Unix timestamp. |
@@ -200,6 +203,32 @@ Uploads fail with `400`, `413` or `415`; reads fail with `404`. A missing permis
 | `413` | File exceeds `MEDIA_MAX_SIZE_MB` (or the media service rejects its size). The limit is checked as data arrives in 1 MiB chunks, so uploads are rejected before the whole file is buffered. |
 | `415` | Content type not allowed by `MEDIA_ALLOWED_CONTENT_TYPES`. |
 | `404` | `file_id` not found or owned by another user. |
+
+---
+
+## DELETE /v1/files/{file_id}
+
+Deletes a stored file and its metadata. Only the uploader can delete a file.
+
+**Example:**
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/v1/files/f_abc123 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "data": {"file_id": "f_abc123", "deleted": true},
+  "metadata": {"request_id": "...", "timestamp": "...", "message": "OK"}
+}
+```
+
+**Errors:** `404` if the file does not exist or is owned by another user. The permission is `files:delete`, which roles granted `"*"` have.
+
+Files are also deleted for you when the last message or thread that references them is deleted. See [Delete a file and file lifecycle](/docs/server/files-and-multimodal#delete-a-file-and-file-lifecycle).
 
 ---
 
