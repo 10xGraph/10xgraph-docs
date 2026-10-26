@@ -4,7 +4,7 @@ description: "Read caller identity and enforce scopes inside graph nodes and too
 order: 380
 group: "Safety"
 section: "Build agents"
-updated: "2026-10-08"
+updated: "2026-10-26"
 label: "Authorization scopes"
 faq:
   - question: "What is the difference between identity and scopes?"
@@ -71,9 +71,12 @@ The scope string is always `"resource:action"`. The full list of scopes is:
 
 - Graph execution: `graph:invoke`, `graph:stream`, `graph:stop`, `graph:fix`, `graph:setup`, `graph:read`
 - Thread state (checkpointer): `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`
+- Thread import (admin only): `checkpointer:import`
 - Long-term memory (store): `store:read`, `store:write`, `store:delete`
 - Media and files: `files:read`, `files:upload`
 - Configuration: `config:read`
+
+`checkpointer:import` guards `POST /v1/threads/{thread_id}/messages`, which imports history of any role. It is the one scope that is never implied. Other routes treat an identity with no declared scopes as unrestricted. This route returns 403 unless the scope is granted explicitly. A role of `"*"` includes it. Grant it only to trusted admin identities.
 
 `has_scope()` is permissive by default: if no authorization context is present (auth not configured, or a direct SDK call without an authz block), it returns `True`. This ensures backward compatibility, existing graphs work unchanged.
 

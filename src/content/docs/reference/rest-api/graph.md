@@ -6,7 +6,7 @@ section: Reference
 group: "REST API"
 order: 310
 label: Graph
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 The graph endpoints run your compiled graph over HTTP and WebSocket: invoke it for a complete result, stream it chunk by chunk, stop or repair a thread, and inspect the graph's nodes, tools, and state schema. This page lists each route with its permission, request body, and response.
@@ -56,12 +56,22 @@ Run the graph and return the complete result when all nodes finish.
 | --- | --- | --- | --- |
 | `messages` | array | yes, unless `resume` is set | One or more messages to append to state before invoking. |
 | `resume` | any | no | Answer for a thread paused by [`interrupt()`](/docs/guides/add-human-approval). The paused node runs again and `interrupt()` returns this value; `null` means cancelled. Send it only to resume a paused thread. |
-| `initial_state` | object | no | Initial state for the run |
+| `initial_state` | object | no | Initial state for the run. Custom fields and `current_node` are allowed; built-in fields are not (see input rules below). |
 | `config` | object | no | Run configuration |
 | `config.thread_id` | string | no | Conversation identifier. When absent or blank, the server generates one and persists the thread; the id comes back in `data.meta.thread_id`. |
 | `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `authz` and `_`-prefixed keys. |
 | `recursion_limit` | integer | no | Maximum graph iterations. Default `25`, range `1`-`100`. |
 | `response_granularity` | string | no | `full`, `partial`, or `low`. Default `low`. |
+
+**Input rules.** The server refuses these with `422`:
+
+- A message with role `assistant` or `system`. Clients send user messages only.
+- A `tool` message that is not made of `tool_result` blocks, or that does not answer a remote tool call waiting for a result.
+- `context_summary` or `execution_meta` in `initial_state`. Clients can never write these built-in fields.
+- A `current_node` in `initial_state` that is not a node in the graph.
+- A state value whose type does not match the state field. The error names the field.
+
+Custom state fields are allowed. If the operator set `runs.state_keys` in `10xgraph.json`, only the listed keys are accepted. The server replaces any `message_id` you send with its own. The same rules apply to `POST /v1/graph/stream` and the WebSocket.
 
 Messages may carry image and document content blocks referencing an uploaded `file_id`. Those references are resolved before the graph runs; see [Multimodal and vision](/docs/server/files-and-multimodal).
 
@@ -305,14 +315,14 @@ Turn-based streaming over a WebSocket. Same payloads as `POST /v1/graph/stream`,
 ```json
 {
   "invoke_type": "resume",
-  "tool_result": [{"role": "tool", "content": "24 degrees and sunny"}],
+  "tool_result": [{"role": "tool", "content": [{"type": "tool_result", "call_id": "call-abc123", "output": "24 degrees and sunny"}]}],
   "config": {"thread_id": "my-thread-1"}
 }
 ```
 
-`tool_result` must be non-empty and `config.thread_id` is required, so the server can resume the right checkpoint.
+`tool_result` must be non-empty and `config.thread_id` is required, so the server can resume the right checkpoint. Each message must be a `tool` message of `tool_result` blocks that answers a pending remote tool call, and `call_id` must match that call.
 
-Both frames also accept `initial_state`, `recursion_limit`, and `response_granularity` with the same meaning as `POST /v1/graph/invoke`.
+Both frames also accept `initial_state`, `recursion_limit`, and `response_granularity` with the same meaning as `POST /v1/graph/invoke`, and the same input rules.
 
 **Server frames.** The server sends `StreamChunk` JSON messages, identical to the HTTP stream, followed by a terminator:
 

@@ -4,7 +4,7 @@ description: "Call your graph over HTTP: synchronous invoke, streaming with NDJS
 order: 90
 group: "Interfaces"
 section: "API server"
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 The 10xGraph API server exposes your graph over HTTP, allowing you to invoke it synchronously, stream results in real time, manage thread-scoped state, and control running executions. This page covers the REST interface for graph execution.
@@ -61,12 +61,24 @@ The request body is a JSON object with these fields:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `messages` | array | `[]` | List of message objects to send to the graph. At least one message is required unless `resume` is provided. |
+| `messages` | array | `[]` | List of user messages to send to the graph. At least one message is required unless `resume` is provided. Roles `assistant` and `system` return 422. |
 | `config` | object | `{}` | Optional configuration for the run, such as `thread_id` for continuing a conversation. |
-| `initial_state` | object | `null` | Optional initial state for the graph execution. |
+| `initial_state` | object | `null` | Optional initial state for the graph execution. Custom fields and `current_node` are allowed. `context_summary` and `execution_meta` return 422. |
 | `response_granularity` | string | `low` | How much to return: `low`, `partial` or `full`. `state` in the response is filled only at `full`. |
 | `recursion_limit` | integer | 25 | Maximum depth of graph execution (1-100). Raise this if your graph has deep loops. |
 | `resume` | any | `null` | Set this to resume a paused thread (see human-in-the-loop section below). |
+
+### What the server accepts from clients
+
+The server refuses some input with `422`, on invoke, stream and the WebSocket:
+
+- Messages with role `assistant` or `system`. Clients send user messages only.
+- A `tool` message that is not `tool_result` blocks answering a pending remote tool call.
+- `context_summary` or `execution_meta` in `initial_state`. These built-in fields are never client-writable.
+- An unknown `current_node`.
+- A state value that does not match its field type. The error names the field.
+
+Custom state fields are allowed, so a frontend can pass a selected ID straight into state. To limit which keys clients may set, list them in `runs.state_keys` in `10xgraph.json`. The server ignores any `message_id` you send and generates its own.
 
 ### Response fields
 

@@ -6,7 +6,7 @@ section: Reference
 group: "REST API"
 order: 340
 label: Threads
-updated: "2026-10-08"
+updated: "2026-10-26"
 faq:
   - q: "How do I create a thread over the REST API?"
     a: "There is no create-thread endpoint. A thread comes into existence the first time you call the invoke or stream endpoint with its thread_id, or when the server generates an id because the request omitted one."
@@ -20,7 +20,7 @@ The thread endpoints read and manage what the checkpointer stores for a conversa
 
 ## Route summary
 
-The server exposes ten thread routes. Reads need `checkpointer:read`, writes need `checkpointer:write`, and deletes need `checkpointer:delete`.
+The server exposes eleven thread routes. Reads need `checkpointer:read`, writes need `checkpointer:write`, and deletes need `checkpointer:delete`. Importing messages is admin-only and needs `checkpointer:import`.
 
 | Method | Path | Permission |
 | --- | --- | --- |
@@ -31,8 +31,9 @@ The server exposes ten thread routes. Reads need `checkpointer:read`, writes nee
 | `PUT` | `/v1/threads/{thread_id}/state` | `checkpointer:write` |
 | `DELETE` | `/v1/threads/{thread_id}/state` | `checkpointer:delete` |
 | `GET` | `/v1/threads/{thread_id}/messages` | `checkpointer:read` |
-| `POST` | `/v1/threads/{thread_id}/messages` | `checkpointer:write` |
+| `POST` | `/v1/threads/{thread_id}/messages` | `checkpointer:import` (explicit grant) |
 | `GET` | `/v1/threads/{thread_id}/messages/{message_id}` | `checkpointer:read` |
+| `PUT` | `/v1/threads/{thread_id}/messages/{message_id}` | `checkpointer:write` |
 | `DELETE` | `/v1/threads/{thread_id}/messages/{message_id}` | `checkpointer:delete` |
 
 There is no create-thread endpoint. A thread is created implicitly by the first `POST /v1/graph/invoke` or `POST /v1/graph/stream` that uses its `thread_id`, or by the server generating one when the request omits it. See [Graph endpoints](/docs/reference/rest-api/graph).
@@ -142,7 +143,15 @@ The exact fields depend on your `AgentState` subclass. `state` is `null` when no
 | `state` | object | yes | State fields to merge into the current state |
 | `config` | object | no | Extra keys merged into the checkpointer config |
 
-The merge rules are fixed. `context` is appended to the existing list, not replaced. Nested dictionaries are deep-merged, other values overwrite, `null` values are ignored, and `execution_meta` is always kept from the existing state. Messages in `context` that carry a tool call return `422`, because only the model may request tools.
+The merge rules are fixed. `context` is appended to the existing list, not replaced. Nested dictionaries are deep-merged, other values overwrite, and `null` values are ignored. The server refuses some input with `422`:
+
+- The built-in fields `context_summary` and `execution_meta` can never be set by a client.
+- Messages in `context` must be user messages. A message with role `assistant` or `system` returns `422`. A `tool` message is accepted only as `tool_result` blocks that answer a pending client tool call.
+- Messages that carry a tool call return `422`, because only the model may request tools.
+- Any `message_id` you send in `context` is ignored. The server generates the ids.
+- A value that does not match the type of its state field returns `422` and names the field.
+
+Custom state fields are allowed. If the operator set `runs.state_keys` in `10xgraph.json`, only the listed keys are accepted.
 
 ```bash
 # Add a custom field to the state before the first invoke
@@ -198,7 +207,7 @@ Each item is a `Message` object. Fields such as `timestamp`, `metadata` and `usa
 
 ## Store messages
 
-`POST /v1/threads/{thread_id}/messages` writes messages to a thread, for example to import a conversation.
+`POST /v1/threads/{thread_id}/messages` writes messages to a thread, for example to import a conversation. It accepts messages of any role, so it is admin-only. The caller needs the `checkpointer:import` scope granted explicitly. A token that declares no scopes gets `403`, and a role of `"*"` has the scope. Normal clients send messages through invoke or stream, and use [Set message feedback](#set-message-feedback) to attach feedback.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -231,6 +240,24 @@ curl -X POST http://localhost:8000/v1/threads/t1/messages \
 # Fetch message m1 from thread t1
 curl http://localhost:8000/v1/threads/t1/messages/m1 -H "Authorization: Bearer $TOKEN"
 ```
+
+## Set message feedback
+
+`PUT /v1/threads/{thread_id}/messages/{message_id}` stores feedback on a message, for example a thumbs up or down with a comment. It writes to `message.metadata["feedback"]` and replaces any earlier feedback. Nothing else on the message can change.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `feedback` | object | yes | Any JSON object. At most 8 KB serialized and 10 levels deep, otherwise `422`. |
+
+```bash
+# Record a thumbs-down with a comment on message m2
+curl -X PUT http://localhost:8000/v1/threads/t1/messages/m2 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"feedback": {"rating": "down", "comment": "Wrong city"}}'
+```
+
+The response `data` is the updated `Message`, the same shape as [Get a message](#get-a-message). The route returns `404` when the thread has no such message, and `501` when the server runs a core older than `10xgraph` 0.10.4.
 
 ## Delete a message
 

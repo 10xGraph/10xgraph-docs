@@ -5,7 +5,7 @@ description: How 10xgraph.json wires a compiled graph to the API server, plus au
 section: Concepts
 group: "Serving"
 order: 160
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 The 10xGraph API server transforms a compiled graph into a production-ready HTTP service. This page explains how the server loads and runs your agent, how authentication and authorization protect it, how publishers stream execution events to external systems, and what configuration controls each piece.
@@ -109,7 +109,7 @@ The API exposes these routers (all under `/v1` except `/ping`):
 | Router | Endpoints | Purpose |
 |---|---|---|
 | Graph | `POST /v1/graph/invoke`, `POST /v1/graph/stream`, `WebSocket /v1/graph/ws`, `WebSocket /v1/graph/live`, `POST /v1/graph/stop`, `POST /v1/graph/fix`, `GET /v1/graph`, `GET /v1/graph/tools` | Invoke or stream the agent, stop a run, fix interrupted state, get graph info. |
-| Threads | `GET /v1/threads`, `GET /v1/threads/{id}`, `GET`/`PUT`/`DELETE /v1/threads/{id}/state`, `GET`/`POST /v1/threads/{id}/messages` | Manage thread state and message history. |
+| Threads | `GET /v1/threads`, `GET /v1/threads/{id}`, `GET`/`PUT`/`DELETE /v1/threads/{id}/state`, `GET`/`POST /v1/threads/{id}/messages`, `GET`/`PUT`/`DELETE /v1/threads/{id}/messages/{message_id}` | Manage thread state and message history. `POST` messages is admin-only; `PUT` message sets feedback. |
 | Store | `POST /v1/store/memories`, `POST /v1/store/memories/list`, `POST /v1/store/memories/{id}`, `POST /v1/store/search` | Long-term memory operations. |
 | Files | `POST /v1/files/upload`, `GET /v1/files/{id}`, `GET /v1/files/{id}/info`, `GET /v1/files/{id}/url` | Upload, retrieve, and get signed URLs for media. |
 | Config | `GET /v1/config/multimodal` | Get multimodal settings. |

@@ -4,7 +4,7 @@ description: "Bidirectional WebSocket endpoints for turn-based agent streaming a
 order: 100
 group: "Interfaces"
 section: "API server"
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 10xGraph exposes two WebSocket endpoints: `/v1/graph/ws` for turn-based agent interactions and `/v1/graph/live` for realtime audio conversations. WebSockets keep a persistent connection open so the server can stream responses token-by-token, the client can resume from checkpoints, and (for realtime agents) both sides can exchange audio in near-real-time. Both endpoints support the same authentication, rate limiting, and concurrency controls as REST APIs.
@@ -72,14 +72,14 @@ The final `{"event": "updates", "data": {"status": "done"}}` chunk is sent by th
 
 **Resume after remote tool call:**
 
-When a run ends on a remote (client-executed) tool call, the client executes the tool (for example in the browser) and sends the result back. The server does not inspect chunks for tool calls; detecting them is the client library's job. The `resume` frame needs `tool_result` and `config.thread_id`:
+When a run ends on a remote (client-executed) tool call, the client executes the tool (for example in the browser) and sends the result back. The server does not inspect chunks for tool calls; detecting them is the client library's job. The `resume` frame needs `tool_result` and `config.thread_id`. Each `tool_result` message must be a `tool` message of `tool_result` blocks that answers a pending remote tool call, or the server returns 422:
 
 ```json
 Client → Server:
 {
   "invoke_type": "resume",
   "tool_result": [
-    {"role": "tool", "content": [{"type": "text", "text": "result here"}]}
+    {"role": "tool", "content": [{"type": "tool_result", "call_id": "call-abc123", "output": "result here"}]}
   ],
   "config": {
     "thread_id": "same-thread-from-checkpoint"

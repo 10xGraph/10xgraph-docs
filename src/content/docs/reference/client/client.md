@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 460
 label: "TenxGraphClient"
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 `TenxGraphClient` is the main class of the `10xgraph-client` package. It wraps the 10xGraph REST and WebSocket endpoints in one typed object, so a TypeScript or JavaScript app can invoke, stream, manage threads, use memory and files, and run client-side tools without writing fetch code.
@@ -115,7 +115,8 @@ See [Graph](/docs/reference/client/graph) for full details on the graph-control 
 | `updateThreadState(threadId, config, state)` | `Promise<UpdateThreadStateResponse>` | Write a new state snapshot for a thread. |
 | `clearThreadState(threadId)` | `Promise<ClearThreadStateResponse>` | Delete all checkpointed state for a thread. |
 | `threadMessages(threadId, request?)` | `Promise<ThreadMessagesResponse>` | List messages in a thread with optional search and pagination. |
-| `addThreadMessages(threadId, messages, config?, metadata?)` | `Promise<AddThreadMessagesResponse>` | Append messages to a thread's history. |
+| `addThreadMessages(threadId, messages, config?, metadata?)` | `Promise<AddThreadMessagesResponse>` | Deprecated. Append messages to a thread's history. Needs the admin scope `checkpointer:import`. |
+| `updateThreadMessageFeedback(threadId, messageId, feedback)` | `Promise<UpdateThreadMessageFeedbackResponse>` | Set `metadata.feedback` on a message. |
 | `singleMessage(threadId, messageId)` | `Promise<ThreadMessageResponse>` | Fetch a single message by ID. |
 | `deleteMessage(threadId, messageId, config?)` | `Promise<DeleteThreadMessageResponse>` | Delete a message by ID. |
 | `deleteThread(threadId, config?)` | `Promise<DeleteThreadResponse>` | Delete a thread and all its state and messages. |

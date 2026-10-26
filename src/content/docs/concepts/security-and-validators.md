@@ -4,7 +4,7 @@ description: "How input validators and PromptInjectionValidator work, the author
 section: Concepts
 order: 170
 group: Serving
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 Validators are checks that run on incoming messages before a graph executes them. A validator subclasses `BaseValidator`, is registered on a `CallbackManager`, and raises `ValidationError` to reject unsafe input. Authorization defines who can call which endpoints and which scopes a caller has inside the graph. Together, they form a two-layer security model. Both reduce risk but do not eliminate it.
@@ -28,7 +28,7 @@ Authorization inside 10xGraph is built on two concepts: **isolation scope** and 
 The canonical scope set (verified in `tenxgraph.core.authz`):
 
 - **Graph execution:** `graph:invoke`, `graph:stream`, `graph:stop`, `graph:fix`, `graph:setup`, `graph:read`
-- **Thread state and checkpointing:** `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`
+- **Thread state and checkpointing:** `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`, and the admin-only `checkpointer:import`
 - **Long-term memory (store):** `store:read`, `store:write`, `store:delete`
 - **Files and media:** `files:read`, `files:upload`
 - **Configuration:** `config:read`

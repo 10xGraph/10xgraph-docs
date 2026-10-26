@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 490
 label: "invoke()"
-updated: "2026-10-08"
+updated: "2026-10-26"
 faq:
   - q: "When should I use invoke() instead of stream()?"
     a: "Use invoke() when you need the complete answer before updating your UI or returning from a function. Use stream() when you want tokens or messages as they are produced."
@@ -219,7 +219,7 @@ console.log(await chat('What did I just say?')); // sees the previous turn
 
 ### Seed the graph with initial state
 
-`initial_state` sets state keys before the run. Use keys that exist in your graph's state schema.
+`initial_state` sets state keys before the run. Use keys that exist in your graph's state schema. The server answers 422 for `context_summary`, `execution_meta`, an unknown `current_node`, or a value of the wrong type. Do not put identity such as a user ID in state and trust it on the server, because any client can set it.
 
 ```ts
 const result = await client.invoke([Message.text_message('Continue where we left off')], {

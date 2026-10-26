@@ -5,7 +5,7 @@ section: Reference
 group: "REST API"
 order: 300
 label: Conventions and permissions
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 Every route in the 10xGraph REST API lives under `/v1/` (except `/ping`), returns the same JSON envelope, authenticates with a Bearer token, and is guarded by a resource and action permission pair. This page lists those shared rules, the full permission table, the WebSocket close codes and the HTTP status codes.
@@ -90,7 +90,8 @@ The table lists every `(resource, action)` pair the server enforces. `POST /v1/a
 | `DELETE /v1/threads/{id}/state` | `checkpointer` | `delete` |
 | `GET /v1/threads/{id}/messages` | `checkpointer` | `read` |
 | `GET /v1/threads/{id}/messages/{msg}` | `checkpointer` | `read` |
-| `POST /v1/threads/{id}/messages` | `checkpointer` | `write` |
+| `POST /v1/threads/{id}/messages` | `checkpointer` | `import` (explicit grant, admin only) |
+| `PUT /v1/threads/{id}/messages/{msg}` | `checkpointer` | `write` |
 | `DELETE /v1/threads/{id}/messages/{msg}` | `checkpointer` | `delete` |
 | `GET /v1/threads` | `checkpointer` | `read` |
 | `GET /v1/threads/{id}` | `checkpointer` | `read` |
