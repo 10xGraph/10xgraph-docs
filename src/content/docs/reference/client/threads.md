@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 520
 label: Threads
-updated: "2026-10-26"
+updated: "2026-10-27"
 ---
 
 A thread is one conversation stored by the server's checkpointer: an ordered list of messages plus a state snapshot. The `TenxGraphClient` thread methods list threads, read and edit their state and messages, and delete them. They all call the `/v1/threads` routes and need a checkpointer on the server.
@@ -19,7 +19,7 @@ const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
 
 <aside class="callout callout-note" role="note"><p class="callout-title">A checkpointer is required</p>
 
-If the server was started without a checkpointer, every thread route returns HTTP 503 ("Checkpointer is not configured"). To create threads from the client, pass `thread_id` in the `config` of an invoke or stream call. See [Invoke](/docs/reference/client/invoke) and [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
+If the server was started without a checkpointer, every thread route returns HTTP 503 ("Checkpointer is not configured"). To create a thread from the client, call invoke or stream without a `thread_id`. The server picks the id and returns it as `meta.thread_id` (invoke) or `chunk.thread_id` (stream). See [Invoke](/docs/reference/client/invoke) and [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
 
 </aside>
 

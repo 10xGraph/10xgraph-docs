@@ -3,7 +3,7 @@ title: Deploy with Docker and Kubernetes
 description: Generate a Dockerfile, docker-compose.yml and Kubernetes manifest with 10xgraph build, then ship them with a production environment checklist.
 section: "API server"
 order: 150
-updated: 2026-10-08T00:00:00.000Z
+updated: "2026-10-27"
 faq:
   - q: Why does the generated config wait so long to shut down?
     a: An agent run can take minutes, and Gunicorn's default 30 second graceful timeout would kill runs mid-flight on every rolling deploy. The generated files use a 600 second graceful timeout, a 660 second worker timeout, and a 660 second Kubernetes grace period.
@@ -177,8 +177,8 @@ The generated files set `MODE=production` and `IS_DEBUG=false`. Add the followin
 
 | Variable | Set to | Why |
 |---|---|---|
-| `ORIGINS` | Comma-separated list of your frontend origins | Wildcard `*` is refused when `CORS_ALLOW_CREDENTIALS` is true |
-| `ALLOWED_HOST` | Your hostnames | Comma-separated. The default `*` triggers a startup warning in production |
+| `ORIGINS` | Comma-separated list of your frontend origins | The generated files set a placeholder. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false`, and is always refused when `CORS_ALLOW_CREDENTIALS` is true |
+| `ALLOWED_HOST` | Your hostnames | Comma-separated. The generated files set a placeholder. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false` |
 | `JWT_SECRET_KEY` | 32+ bytes, from a secret manager | Required if `auth` is `jwt`. See [Add JWT authentication](/docs/server/auth) |
 | `JWT_ALGORITHM` | `HS256` or your choice | Required with `jwt` |
 | `REDIS_URL` | Your Redis connection URL | Optional. The server falls back to it for the shared tier of the authorization ownership cache when the `redis` key in `10xgraph.json` is unset. For shared rate limiting, point `rate_limit.redis.url` at it as `${REDIS_URL}` |
@@ -194,7 +194,7 @@ Full reference is in the [configuration](/docs/reference/api-cli/configuration) 
 
 <Callout type="warning" title="CORS and credentials">
 
-Replace the placeholder `ORIGINS` and never ship `*` with credentials. In production the server refuses to start with wildcard origins while `CORS_ALLOW_CREDENTIALS` is true. This is a safety check: wildcard CORS with credentials would allow any website to read your data.
+Replace the placeholder `ORIGINS` and `ALLOWED_HOST` before you deploy. In production the server refuses to start with wildcard origins, a wildcard host or enabled docs paths, because `STRICT_PRODUCTION_CHECKS` is on by default. It always refuses wildcard origins while `CORS_ALLOW_CREDENTIALS` is true. These are safety checks: wildcard CORS with credentials would allow any website to read your data.
 
 </Callout>
 
@@ -225,7 +225,7 @@ Before deploying to production, run these checks to catch configuration issues e
    - Check that neither variable is set in your deployment
 
 6. **Persistence survives restart**
-   - Invoke an agent and save the thread_id
+   - Invoke an agent without a `thread_id` and save the one the server returns in `data.meta.thread_id`
    - Restart the server or container
    - Fetch the same thread: messages and state should be intact
 

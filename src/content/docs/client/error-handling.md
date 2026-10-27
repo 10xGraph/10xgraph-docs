@@ -34,7 +34,7 @@ import {
 |---|---|---|---|
 | `BadRequestError` | 400 | Malformed request or invalid data | Fix the request and retry immediately |
 | `AuthenticationError` | 401 | Missing or invalid auth credentials | Check token, refresh if expired, retry |
-| `PermissionError` | 403 | User lacks access to the resource | Check authorization scope, request new permissions |
+| `PermissionError` | 403 | User lacks access to the resource, or the `thread_id` does not exist or belongs to another user | Check authorization scope. For a new conversation, omit `thread_id` and use the id the server returns |
 | `NotFoundError` | 404 | Resource (thread, file) does not exist | Verify the ID, create the resource, or move on |
 | `ConflictError` | 409 | The thread is busy with another run, or a resume's `interrupt_id` does not match | Wait and retry, or send `on_busy: 'cancel'`. For a mismatch, fetch the current interrupt id |
 | `ValidationError` | 422 | Request failed schema validation, is over a size limit, or a resume answer fails `response_schema` | Fix field types, ranges and sizes, retry |
@@ -59,10 +59,7 @@ const client = new TenxGraphClient({
 });
 
 try {
-  const result = await client.invoke(
-    [Message.text_message('Hello', 'user')],
-    { config: { thread_id: 'user-123' } }
-  );
+  const result = await client.invoke([Message.text_message('Hello', 'user')]);
   console.log('Response:', result.messages);
 } catch (err) {
   if (err instanceof TransientStorageError) {
@@ -160,9 +157,7 @@ async function retryWithBackoff<T>(
 
 // Usage
 const result = await retryWithBackoff(() =>
-  client.invoke([Message.text_message('Query', 'user')], {
-    config: { thread_id: 'user-123' },
-  })
+  client.invoke([Message.text_message('Query', 'user')])
 );
 ```
 
@@ -182,9 +177,7 @@ export enum StreamEventType {
 Iterate through the stream and check the `event` field. When an error occurs, the server sends a chunk with `event: 'error'`:
 
 ```ts
-const stream = client.stream([Message.text_message('Hello', 'user')], {
-  config: { thread_id: 'user-123' },
-});
+const stream = client.stream([Message.text_message('Hello', 'user')]);
 
 try {
   for await (const chunk of stream) {
@@ -216,9 +209,7 @@ When a graph node raises an exception or a tool fails, the error is captured by 
 
 ```ts
 try {
-  const result = await client.invoke([Message.text_message('Search for X', 'user')], {
-    config: { thread_id: 'user-123' },
-  });
+  const result = await client.invoke([Message.text_message('Search for X', 'user')]);
 } catch (err) {
   if (err instanceof NodeError) {
     console.error('Node failed:', err.message);

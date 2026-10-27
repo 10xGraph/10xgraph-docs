@@ -60,7 +60,7 @@ Run the graph and return the complete result when all nodes finish.
 | `on_busy` | string | no | `wait` (default) or `cancel`. What to do when another run is active on the thread (see [One run per thread](#one-run-per-thread)). |
 | `initial_state` | object | no | Initial state for the run. Custom fields and `current_node` are allowed; built-in fields are not (see input rules below). |
 | `config` | object | no | Run configuration |
-| `config.thread_id` | string | no | Conversation identifier. When absent or blank, the server generates one and persists the thread; the id comes back in `data.meta.thread_id`. |
+| `config.thread_id` | string | no | Id of an existing thread to continue. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.meta.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `403`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
 | `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `authz` and `_`-prefixed keys. |
 | `recursion_limit` | integer | no | Maximum graph iterations. Default `25`, range `1`-`100`. |
 | `response_granularity` | string | no | `full`, `partial`, or `low`. Default `low`. |
@@ -340,7 +340,7 @@ Turn-based streaming over a WebSocket. Same payloads as `POST /v1/graph/stream`,
 }
 ```
 
-`messages` must be non-empty, unless the frame carries `resume`. `config.thread_id` is optional; omit it to start a new thread.
+`messages` must be non-empty, unless the frame carries `resume`. `config.thread_id` is optional; omit it, or send `"new"`, to start a new thread. The server picks the id and sends it on each chunk. A `thread_id` that does not exist gets an `error` chunk, the same as an unauthorized one, unless `runs.thread_ids` is `client`.
 
 **Answer an `interrupt()` pause.** A `fresh` frame accepts `resume` (any JSON value, `null` to cancel) and an optional `interrupt_id`, with the same meaning as on invoke. No `messages` are needed:
 

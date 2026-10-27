@@ -11,7 +11,7 @@ faq:
   - q: "When should I use invoke() instead of stream()?"
     a: "Use invoke() when you need the complete answer before updating your UI or returning from a function. Use stream() when you want tokens or messages as they are produced."
   - q: "How do I continue a conversation across invoke() calls?"
-    a: "Pass the same thread_id at the top level of the config option on every call. You can read the id used by the server from result.meta.thread_id."
+    a: "Omit thread_id on the first call. The server starts a thread and returns its id in result.meta.thread_id. Pass that id at the top level of the config option on later calls."
   - q: "Why does invoke() make more than one HTTP request?"
     a: "When the agent asks for a remote tool, the client runs your registered handler locally and sends the result back in a new request. This repeats until no remote tool calls remain or recursion_limit is reached."
 ---
@@ -66,7 +66,7 @@ All options are optional. The defaults below are the values the client applies w
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `initial_state` | `Record<string, any>` | none | State values to seed the graph. Sent only on the first request of a call, not on the follow-up requests that return tool results. |
-| `config` | `Record<string, any>` | none | Run configuration. Put `thread_id` at the top level of this object to keep and checkpoint a conversation. |
+| `config` | `Record<string, any>` | none | Run configuration. Put `thread_id` at the top level of this object to continue an existing thread. Omit it to start a new one. |
 | `recursion_limit` | `number` | `25` | Maximum number of requests the client makes in one `invoke()` call. The server accepts values from 1 to 100. |
 | `on_busy` | `'wait' \| 'cancel'` | server default (`'wait'`) | What the server does when another run is active on the same thread. `'wait'` queues behind it for up to 30 seconds, then fails with `ConflictError`. `'cancel'` stops the running run and starts this one. Needs a `10xgraph-api` version that supports it. |
 | `resume` | `unknown` | none | The answer to an `interrupt()` pause on the thread (any JSON value, `null` to cancel). Pass an empty `messages` array with it. |
@@ -94,10 +94,8 @@ All options are optional. The defaults below are the values the client applies w
 Use `meta.thread_id` to continue a conversation in a later call:
 
 ```ts
-// First turn: the thread is created with the id you choose
-const first = await client.invoke([Message.text_message('Hi')], {
-  config: { thread_id: 'conv-001' },
-});
+// First turn: no thread_id, so the server starts a thread and picks its id
+const first = await client.invoke([Message.text_message('Hi')]);
 
 // Second turn: reuse the id reported by the server
 const followUp = await client.invoke([Message.text_message('Tell me more')], {
@@ -214,19 +212,20 @@ console.log(result.messages[0].content[0]);
 
 ### Chat on a persistent thread
 
-Reusing one `thread_id` makes the server load the saved state, so the agent remembers earlier turns. This needs a checkpointer on the server.
+Reusing one `thread_id` makes the server load the saved state, so the agent remembers earlier turns. This needs a checkpointer on the server. Do not invent the id: the first call omits it and the server returns it. By default the server answers `403` for an id that does not exist.
 
 ```ts
 import { TenxGraphClient, Message } from '10xgraph-client';
 
 const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
-const THREAD_ID = 'user-123-session-456';
+let threadId: string | undefined; // set from the first response
 
 async function chat(userInput: string): Promise<string> {
   const result = await client.invoke([Message.text_message(userInput)], {
-    config: { thread_id: THREAD_ID },
+    config: threadId ? { thread_id: threadId } : undefined,
     response_granularity: 'low', // messages only
   });
+  threadId = result.meta.thread_id;
 
   // Pick the assistant's text block out of the returned messages
   const assistantMsg = result.messages.find((m) => m.role === 'assistant');
@@ -245,7 +244,6 @@ console.log(await chat('What did I just say?')); // sees the previous turn
 ```ts
 const result = await client.invoke([Message.text_message('Continue where we left off')], {
   initial_state: { user_preferences: { language: 'en', theme: 'dark' } },
-  config: { thread_id: 'thread-789' },
 });
 ```
 

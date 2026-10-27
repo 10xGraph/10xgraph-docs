@@ -6,10 +6,10 @@ section: Reference
 group: "REST API"
 order: 340
 label: Threads
-updated: "2026-10-26"
+updated: "2026-10-27"
 faq:
   - q: "How do I create a thread over the REST API?"
-    a: "There is no create-thread endpoint. A thread comes into existence the first time you call the invoke or stream endpoint with its thread_id, or when the server generates an id because the request omitted one."
+    a: "There is no create-thread endpoint. A thread comes into existence when you call the invoke or stream endpoint without a thread_id and the server generates one. With `runs.thread_ids` set to `client`, it also comes into existence the first time a request uses an id you picked."
   - q: "Why do I get 403 on a thread I know exists?"
     a: "With the ownership authorization backend active, a thread can only be used by the user who owns it, for every action. A missing scope also returns 403, with the message Missing required scope."
   - q: "Is the limit parameter capped?"
@@ -36,7 +36,7 @@ The server exposes eleven thread routes. Reads need `checkpointer:read`, writes 
 | `PUT` | `/v1/threads/{thread_id}/messages/{message_id}` | `checkpointer:write` |
 | `DELETE` | `/v1/threads/{thread_id}/messages/{message_id}` | `checkpointer:delete` |
 
-There is no create-thread endpoint. A thread is created implicitly by the first `POST /v1/graph/invoke` or `POST /v1/graph/stream` that uses its `thread_id`, or by the server generating one when the request omits it. See [Graph endpoints](/docs/reference/rest-api/graph).
+There is no create-thread endpoint. A thread is created implicitly when `POST /v1/graph/invoke` or `POST /v1/graph/stream` omits `thread_id` and the server generates one. With `runs.thread_ids` set to `client`, the first request that names an unused id creates it instead. See [Graph endpoints](/docs/reference/rest-api/graph).
 
 ## Response envelope and shared rules
 
@@ -279,6 +279,6 @@ curl -X DELETE http://localhost:8000/v1/threads/t1/messages/m1 \
 
 When auth is configured, every thread route requires a bearer token and the scope shown in the [route summary](#route-summary). A failed login returns `401`. A missing scope or a thread owned by someone else returns `403`. When auth is not configured, these checks are skipped entirely.
 
-Thread ownership is enforced by the ownership authorization backend. It is the default when `MODE=production` and no `authorization` is configured, and it can be selected explicitly with `"authorization": "ownership"`. In development, the default backend allows every authenticated user. With ownership active, a request for a thread owned by another user is rejected with `403` before it reaches the checkpointer, for every action. A `thread_id` that does not exist yet is allowed through, since it represents a new session. Ownership checks need a checkpointer that can report a thread's owner, such as the Postgres checkpointer; otherwise the check is inactive and the server logs a warning.
+Thread ownership is enforced by the ownership authorization backend. It is the default when `MODE=production` and no `authorization` is configured, and it can be selected explicitly with `"authorization": "ownership"`. In development, the default backend allows every authenticated user. With ownership active, a request for a thread owned by another user is rejected with `403` before it reaches the checkpointer, for every action. A `thread_id` that does not exist yet is refused with `403`, the same answer as for another user's thread, unless `runs.thread_ids` is `client`. A new thread is started by omitting the id. The checkpointer write routes follow the same rule. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). Ownership checks need a checkpointer that can report a thread's owner, such as the Postgres checkpointer; otherwise the check is inactive and the server logs a warning.
 
 See [Authentication](/docs/reference/api-cli/auth) for the backends and how to write your own.

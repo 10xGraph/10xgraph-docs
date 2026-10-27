@@ -312,14 +312,13 @@ The API server exposes the pause/resume mechanism over REST. When a thread is pa
 
 ### Invoking and pausing
 
-The `thread_id` goes inside `config`. Set `response_granularity` to `full` so the response includes the state:
+Leave `thread_id` out of the first request. The server starts a thread and returns its id in `data.meta.thread_id`. Later requests send it inside `config` (shown as `THREAD_ID` below). Set `response_granularity` to `full` so the response includes the state:
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{"role": "user", "content": [{"type": "text", "text": "Refund my order, $25"}]}],
-    "config": {"thread_id": "order-42"},
     "response_granularity": "full"
   }'
 ```
@@ -352,7 +351,7 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
   -d '{
     "resume": {"approved": true},
-    "config": {"thread_id": "order-42"}
+    "config": {"thread_id": "THREAD_ID"}
   }'
 ```
 
@@ -364,7 +363,7 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
   -d '{
     "resume": {"approved": true},
     "interrupt_id": "int_abc123...",
-    "config": {"thread_id": "order-42"}
+    "config": {"thread_id": "THREAD_ID"}
   }'
 ```
 

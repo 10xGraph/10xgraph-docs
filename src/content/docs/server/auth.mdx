@@ -4,7 +4,7 @@ description: "Enable JWT or custom auth, enforce thread ownership, and protect y
 section: "API server"
 group: "Security"
 order: 60
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Which claims must my JWT contain?"
     a: "Every token needs `exp` (expiration) and `user_id` claims. If you set JWT_ISSUER or JWT_AUDIENCE, the token must also carry matching `iss` or `aud` claims. A token without `user_id` is rejected with status 401, code `INVALID_TOKEN`."
@@ -87,6 +87,8 @@ The server reads a standard bearer credential from the `Authorization` header:
 | Expired token | 401 | `EXPIRED_TOKEN` |
 | Bad signature, or mismatched `iss`/`aud` | 401 | `INVALID_TOKEN` |
 | Valid signature but no `user_id` claim | 401 | `INVALID_TOKEN` |
+| `user_id` that is not a non-empty string or whole number (empty, boolean, float, list, object) | 401 | `INVALID_TOKEN` |
+| `scope` or `scopes` claim of the wrong type | 401 | `INVALID_TOKEN` |
 | All auth/authorization checks pass | 200 | (success) |
 
 To pin tokens to your service and prevent replay across services, set `JWT_ISSUER` and `JWT_AUDIENCE` in your environment. When either is set, tokens must carry the matching claim, so a token minted for another service is rejected even if it shares your key.
@@ -102,7 +104,7 @@ const ws = new WebSocket(
 );
 ```
 
-The subprotocol list works as: the server looks for `10xgraph-bearer` (or the legacy `agentflow-bearer`), treats the next item as the token, and responds with the matching subprotocol. The server also accepts the `Authorization` header and, as a last resort, a `?token=` query parameter, which lands in URLs and logs. If no credential is found, the connection is rejected with close code `1008` (policy violation).
+The subprotocol list works as: the server looks for `10xgraph-bearer` (or the legacy `agentflow-bearer`), treats the next item as the token, and responds with the matching subprotocol. The server also accepts the `Authorization` header and, as a last resort, a `?token=` query parameter, which lands in URLs and logs. The subprotocol and `?token=` work on WebSocket routes only; HTTP routes take the `Authorization` header alone. If no credential is found, the connection is rejected with close code `1008` (policy violation).
 
 ## How does the user reach your code?
 
@@ -132,6 +134,8 @@ The simplest and most important authorization rule is "a user sees only their ow
 A thread is read, continued, stopped, fixed, or deleted **only by the user who created it**. Another user's request on that thread is rejected up front with status 403 before the model runs, for every action including `invoke` and `stream`. Listing threads shows only the caller's.
 
 If you leave `authorization` unset, the default depends on `MODE`: ownership in production (secure by default), allow-all in development (frictionless). Your explicit choice always wins.
+
+A custom `AuthorizationBackend` also isolates users by default: its `isolation_scope()` returns `"owner"`, so each user sees only their own threads and memories. A backend that wants shared data returns `"none"`. The built-in `allow_all` shares data, and `ownership` and `rbac` isolate it.
 
 Ownership is looked up through the checkpointer's `aget_thread_owner` method. Use a durable checkpointer such as `PgCheckpointer` so owners survive restarts. For high-concurrency workloads, set `redis` in `10xgraph.json` (or `REDIS_URL` in your environment) to cache ownership lookups across workers:
 
@@ -191,6 +195,8 @@ For finer-grained control without writing code, use the RBAC config block. It la
 ```
 
 Each endpoint requires a scope like `"graph:invoke"` or `"store:write"`. A role granting `"*"` gets every scope. `default_scopes` applies to everyone, including users with no role. If a user's resolved scopes is empty, they are locked out of everything (commonly a mistake with RBAC). Give `default_scopes` a sensible floor and test on staging first.
+
+Scopes also come from the token. The server reads the `scope` claim (space-separated) and the `scopes` claim (a list or a space-separated string) and matches by exact name. No scope claim means the token is not restricted. `scope=""` restricts it to nothing.
 
 Available scopes: `graph:{invoke,stream,stop,fix,setup,read}`, `checkpointer:{read,write,delete}`, `store:{read,write,delete}`, `files:{upload,read}`, `config:read`.
 

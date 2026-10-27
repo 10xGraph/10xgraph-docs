@@ -119,20 +119,18 @@ The distinction matters because partial chunks may be truncated mid-word or mid-
 
 ## Use a persistent thread
 
-Pass `config.thread_id` to keep the conversation on the same thread:
+Omit `config.thread_id` on the first call. The server starts a new thread, picks its id and sends it on every chunk. Pass that id as `config.thread_id` on later calls to keep the conversation on the same thread:
 
 ```ts
-const threadId = 'user-123-session-001';
+let threadId: string | undefined;
 
 const stream = client.stream(
   [Message.text_message('What can you do?')],
-  {
-    config: { thread_id: threadId },
-    response_granularity: 'low',
-  }
+  { response_granularity: 'low' }
 );
 
 for await (const chunk of stream) {
+  if (chunk.thread_id) threadId = chunk.thread_id;
   if (chunk.event === 'message' && chunk.message?.delta) {
     const text = chunk.message.content
       .filter(b => b.type === 'text')
@@ -143,7 +141,7 @@ for await (const chunk of stream) {
 }
 ```
 
-The thread ID appears on every chunk as `chunk.thread_id` and `chunk.metadata?.thread_id`, so you can track it without passing it explicitly on every call.
+The thread ID appears on every chunk as `chunk.thread_id` and `chunk.metadata?.thread_id`. Store it and send it back on the next call. Do not invent an id: by default the server answers `403` for a thread that does not exist.
 
 ---
 
@@ -215,10 +213,7 @@ This approach gives you streaming for better UX while still having a complete Me
 ```ts
 const stream = client.wsStream(
   [Message.text_message('Explain quantum computing.')],
-  {
-    config: { thread_id: 'ws-session-001' },
-    response_granularity: 'low',
-  }
+  { response_granularity: 'low' } // no thread_id: the server starts a thread
 );
 
 for await (const chunk of stream) {
@@ -363,7 +358,7 @@ The `for await` loop respects backpressure automatically. If you slowly consume 
 **Thread ID is undefined**
 
 - Catch the thread ID from the first chunk: `if (chunk.thread_id) threadId = chunk.thread_id;`
-- Pass an explicit `thread_id` in `config` to avoid this.
+- Pass the id of an existing thread in `config` to continue it. Do not make up a new one.
 
 ---
 
@@ -402,7 +397,7 @@ You should see a haiku print token by token, followed by a newline and "Done."
 - `stream()` returns an `AsyncGenerator` that yields `StreamChunk` objects.
 - Filter for `event === 'message'` to get text tokens.
 - Use `chunk.message.delta` to differentiate partial tokens from complete messages.
-- Pass `config.thread_id` to keep conversations on the same thread.
+- Omit `config.thread_id` to start a thread, then pass the id from `chunk.thread_id` to continue it.
 - `wsStream()` is identical to `stream()` but uses WebSocket for lower overhead with remote tools.
 - Set `response_granularity: 'full'` to receive graph state alongside messages.
 

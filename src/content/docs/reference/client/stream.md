@@ -6,7 +6,7 @@ section: Reference
 group: TypeScript client
 order: 500
 label: stream()
-updated: '2026-10-27'
+updated: "2026-10-27"
 ---
 
 `client.stream()` sends a list of messages to the agent graph and returns an `AsyncGenerator` that yields `StreamChunk` objects as the server produces them. Use it to show incremental output (token by token, update by update) instead of waiting for the full response. For a single final result, use `invoke()`.
@@ -44,7 +44,7 @@ Same as [`invoke()`](/docs/reference/client/invoke#parameters). An array of `Mes
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `initial_state` | `Record<string, any>` | `undefined` | Initial state values to seed the graph. |
-| `config` | `Record<string, any>` | `undefined` | Run config. Set `thread_id` at the top level of this object for persistent state. |
+| `config` | `Record<string, any>` | `undefined` | Run config. Set `thread_id` at the top level of this object to continue an existing thread. Omit it to start a new one; the server picks the id and sends it on each chunk as `thread_id`. |
 | `recursion_limit` | `number` | `25` | Maximum recursion depth for the graph. |
 | `on_busy` | `'wait' \| 'cancel'` | server default (`'wait'`) | What the server does when another run is active on the same thread. `'wait'` queues behind it for up to 30 seconds, then fails with `ConflictError`. `'cancel'` stops the running run and starts this one. |
 | `resume` | `unknown` | none | The answer to an `interrupt()` pause on the thread (any JSON value, `null` to cancel). Pass an empty `messages` array with it. |
@@ -123,7 +123,6 @@ console.log('\n--- Stream complete ---');
 const stream = client.stream(
   [Message.text_message('Analyse this dataset.')],
   {
-    config: { thread_id: 'analysis-001' },
     response_granularity: 'full',
   }
 );
@@ -218,14 +217,12 @@ async function streamToString(messages: Message[]): Promise<string> {
 Breaking out of the loop stops reading locally, but the server keeps running the graph until you call `stopGraph()` with the thread ID:
 
 ```ts
-const threadId = 'story-001';
-const stream = client.stream(
-  [Message.text_message('Tell me a very long story')],
-  { config: { thread_id: threadId } }
-);
+const stream = client.stream([Message.text_message('Tell me a very long story')]);
+let threadId: string | undefined; // the server picks it and sends it on each chunk
 let wordCount = 0;
 
 for await (const chunk of stream) {
+  if (chunk.thread_id) threadId = chunk.thread_id;
   if (chunk.event === StreamEventType.MESSAGE && chunk.message) {
     const textBlock = chunk.message.content.find(b => b.type === 'text');
     if (textBlock && 'text' in textBlock) {
@@ -235,7 +232,7 @@ for await (const chunk of stream) {
 
   if (wordCount > 500) {
     // Request a server-side stop, then stop iterating locally
-    await client.stopGraph(threadId);
+    if (threadId) await client.stopGraph(threadId);
     break;
   }
 }

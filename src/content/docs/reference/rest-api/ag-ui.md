@@ -177,7 +177,7 @@ With `ag_ui.allow_client_tools` set to `false`, tools sent by the client are ign
 
 ## Authentication
 
-The route uses `RequirePermission("graph", "stream")`, the same permission as [`POST /v1/graph/stream`](/docs/reference/rest-api/graph). When auth is configured, the server also checks that the caller may access `threadId` through the [authorization backend](/docs/reference/api-cli/auth), so with `ownership` one user cannot run or read another user's thread.
+The route uses `RequirePermission("graph", "stream")`, the same permission as [`POST /v1/graph/stream`](/docs/reference/rest-api/graph). When auth is configured, the server also checks that the caller may access `threadId` through the [authorization backend](/docs/reference/api-cli/auth), so with `ownership` one user cannot run or read another user's thread. AG-UI accepts a `threadId` the frontend made even when `runs.thread_ids` is `server`, because CopilotKit creates its own. The caller then owns that thread.
 
 Browsers should not hold the API token. With CopilotKit, set the `Authorization` header in the Next.js route handler through `HttpAgent`'s `headers` option, so the token stays on the server.
 

@@ -6,7 +6,7 @@ section: "API server"
 group: "Basics"
 order: 20
 label: Run the API Server
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "Can I use 10xgraph api in production?"
     answer: "No. The 10xgraph api command runs a single-worker development server. For production, use Docker with Gunicorn and multiple Uvicorn workers. Generate production files with 10xgraph build --docker-compose."
@@ -92,10 +92,11 @@ Both show the full endpoint list, parameters, request/response shapes, and authe
 
 ```json
 {
-  "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}],
-  "config": {"thread_id": "test-thread-1"}
+  "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}]
 }
 ```
+
+Leave `config` out. The server starts a new thread and returns its id in `data.meta.thread_id`. By default it refuses a `thread_id` that does not exist yet.
 
 5. Click "Execute"
 

@@ -6,7 +6,7 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 200
 label: Memory Tools
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 10xGraph memory tools give agents the ability to build long-term memory, facts and preferences that persist across conversations and threads. Your agent can search what it has learned about users, store new observations, and reason about patterns over time. All three tools use semantic search, so the agent finds relevant information by meaning, not by keyword.
@@ -23,7 +23,7 @@ updated: "2026-10-08"
 | `user_memory_tool` | Agent-managed memory scoped to individual users | `Agent(memory=MemoryConfig(user_memory=...))` | search, remember |
 | `agent_memory_tool` | Read-only, application-wide memory (e.g. knowledge base, policies) | `Agent(memory=MemoryConfig(agent_memory=...))` | search only |
 
-All three tools require a configured store (for example Qdrant or Mem0) that supports semantic search. Pass it to `compile(store=...)` or to `MemoryConfig(store=...)`. The `user_memory_tool` and `agent_memory_tool` are registered automatically when `MemoryConfig.retrieval_mode` is `postload` (the default for `MemoryConfig`); `agent_memory` is disabled unless you set `enabled=True`.
+All three tools require a configured store (for example Qdrant or Mem0) that supports semantic search. Pass it to `compile(store=...)` or to `MemoryConfig(store=...)`. The `user_memory_tool` and `agent_memory_tool` are registered automatically when `MemoryConfig.retrieval_mode` is `postload` (the default for `MemoryConfig`); `agent_memory` is disabled unless you set `enabled=True`. With `preload`, memories are not tool results: they are added to the latest user message as a fenced block (see [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text)).
 
 ## How memory works
 

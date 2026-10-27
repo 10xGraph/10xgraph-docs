@@ -5,7 +5,7 @@ description: "Agent memory is how an AI agent stores and retrieves information a
 section: Glossary
 order: 60
 label: What is agent memory?
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: What is the difference between agent memory and a database?
     a: "A database stores structured data retrieved by exact queries. Agent memory covers three types: in-context memory (the LLM's working context), episodic memory (conversation threads retrieved by thread ID), and semantic memory (facts retrieved by similarity, not exact match). All three can be backed by databases but serve different retrieval patterns."
@@ -136,12 +136,12 @@ app = agent.compile(checkpointer=checkpointer)
 }
 ```
 
-The thread ID is passed in each API request:
+Leave the thread ID out of the first API request. The server starts a thread and returns its id in `data.meta.thread_id`. Pass that id in later requests to continue the conversation:
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}], "config": {"thread_id": "user-123"}}'
+  -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}], "config": {"thread_id": "THREAD_ID"}}'
 ```
 
 ## Context window management

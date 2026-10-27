@@ -62,7 +62,7 @@ The request body is a JSON object with these fields:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `messages` | array | `[]` | List of user messages to send to the graph. At least one message is required unless `resume` is provided. Roles `assistant` and `system` return 422. |
-| `config` | object | `{}` | Optional configuration for the run, such as `thread_id` for continuing a conversation. |
+| `config` | object | `{}` | Optional configuration for the run, such as `thread_id` for continuing an existing conversation. Omit it to start a new thread. |
 | `initial_state` | object | `null` | Optional initial state for the graph execution. Custom fields and `current_node` are allowed. `context_summary` and `execution_meta` return 422. |
 | `response_granularity` | string | `low` | How much to return: `low`, `partial` or `full`. `state` in the response is filled only at `full`. |
 | `recursion_limit` | integer | 25 | Maximum depth of graph execution (1-100). Raise this if your graph has deep loops. |
@@ -170,11 +170,11 @@ An app that sent parallel runs on the same thread will see them queue, or get `4
 
 ## Use threads for conversation memory
 
-A thread is a persistent conversation context. Use `thread_id` in the config to keep messages and state across multiple calls, so your graph can remember previous exchanges.
+A thread is a persistent conversation context. Use `thread_id` in the config to keep messages and state across multiple calls, so your graph can remember previous exchanges. The server makes the id of a new thread. You do not pick it.
 
 ### Start a new thread
 
-If you do not provide a `thread_id`, the server generates one:
+Leave `thread_id` out and the server starts a new thread and generates its id:
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/invoke \
@@ -201,7 +201,7 @@ The response includes `data.meta.thread_id`:
 
 ### Continue on the same thread
 
-Pass the thread_id in the next request to continue the conversation:
+Pass the returned `thread_id` in the next request to continue the conversation:
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/invoke \
@@ -215,6 +215,8 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
 ```
 
 The graph now sees all previous messages in the thread, so it can answer contextually. The checkpointer (configured in `10xgraph.json`) stores the thread state durably.
+
+By default (`runs.thread_ids` is `"server"`), a `thread_id` that does not exist answers `403`, the same as an id another user owns. Do not invent an id for a new conversation. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 
 ### Read thread history
 

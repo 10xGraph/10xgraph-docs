@@ -93,7 +93,7 @@ These six classes map to one status each. They carry no recovery suggestion, so 
 |---|---|---|---|
 | `BadRequestError` | 400 | `BAD_REQUEST` | The server rejects the request as malformed. |
 | `AuthenticationError` | 401 | `AUTHENTICATION_FAILED` | Credentials are missing, invalid or expired. |
-| `PermissionError` | 403 | `PERMISSION_ERROR` | The caller is authenticated but not allowed to perform the action. |
+| `PermissionError` | 403 | `PERMISSION_ERROR` | The caller is authenticated but not allowed to perform the action. With the default `runs.thread_ids`, a `thread_id` that does not exist or belongs to another user also gives this error. |
 | `NotFoundError` | 404 | `RESOURCE_NOT_FOUND` | The thread, message, memory or file does not exist. |
 | `ConflictError` | 409 | `CONFLICT` | The thread is still busy with another run after the server's 30 second wait, or a resume's `interrupt_id` does not match the open interrupt. The client never retries it. |
 | `ValidationError` | 422 | `VALIDATION_ERROR` | The request body fails schema validation, is over a size limit (500 messages, 100 blocks per message, 1,000,000 characters of text), or a resume answer fails the interrupt's `response_schema`. The message names the size limit that was hit; `details` lists the failing fields (development only). |

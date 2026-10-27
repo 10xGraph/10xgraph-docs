@@ -5,7 +5,7 @@ section: "API server"
 group: "Operate"
 order: 160
 label: Deploy on Kubernetes
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "Why does the termination grace period need to be so long?"
     answer: "Agent runs are not typical web requests. An LLM call alone can take minutes, and tools add more time. Kubernetes default 30-second termination grace period kills pods mid-run. The server uses 600 seconds for shutdown, so the termination window must exceed that."
@@ -88,7 +88,7 @@ The manifest sets `ORIGINS` to the placeholder `https://your-frontend.example.co
   value: "https://app.example.com,https://app-staging.example.com"
 ```
 
-With `MODE=production`, the server refuses to start if `ORIGINS` is the wildcard `*` while credentials are enabled, which is the default (`CORS_ALLOW_CREDENTIALS=true`). If you truly need wildcard origins, set `CORS_ALLOW_CREDENTIALS=false`, which is rare.
+With `MODE=production`, the server refuses to start if `ORIGINS` or `ALLOWED_HOST` is the wildcard `*`. The check is `STRICT_PRODUCTION_CHECKS`, which is on by default in production. The generated manifest sets placeholders for both, so replace them. If you truly need wildcard origins, set `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false`, which is rare.
 
 ### Mount secrets, do not bake them
 
@@ -219,7 +219,7 @@ CPU is the provided metric, but it is a poor signal for agent workloads. Agents 
 | Pods restart during long runs | Liveness probe is too strict (failing too quickly) | Loosen the liveness probe (`periodSeconds: 30`, `failureThreshold: 5`). The readiness probe should be strict; the liveness probe should not. |
 | Thread history disappears or threads resolve differently | Replicas do not share a checkpointer | Ensure the Postgres DSN and `REDIS_URL` your graph module uses point to shared instances. Do not use `InMemoryCheckpointer` in production. |
 | Random 409 errors under high load | Two requests wrote to the same thread concurrently | This is expected with optimistic concurrency. Retry with exponential backoff, or serialize writes to the same thread. |
-| Server exits at startup with a CORS error | `ORIGINS` is `*` while credentials are enabled | Set `ORIGINS` to your real domain. If you need wildcard, set `CORS_ALLOW_CREDENTIALS=false` (unusual). |
+| Server exits at startup with a CORS or host error | `ORIGINS` or `ALLOWED_HOST` is `*` | Set both to your real values. If you need wildcard origins, set `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false` (unusual). |
 | Browser requests fail CORS checks | `ORIGINS` still holds the placeholder | Set `ORIGINS` to your real domain. |
 
 ## Related

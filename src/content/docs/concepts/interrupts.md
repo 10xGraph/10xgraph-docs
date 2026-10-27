@@ -253,7 +253,7 @@ It derives from `BaseException` (not `Exception`) so tool and node error handler
 
 ## How the API server exposes interrupts
 
-The REST API exposes interrupts through the same checkpoint/resume flow. Send `resume` instead of `messages` to `/v1/graph/invoke` or `/v1/graph/stream`; `thread_id` goes in `config`.
+The REST API exposes interrupts through the same checkpoint/resume flow. Send `resume` instead of `messages` to `/v1/graph/invoke` or `/v1/graph/stream`; `thread_id` goes in `config`. The first request leaves `thread_id` out, so the server starts a thread and returns its id in `data.meta.thread_id`. The resume sends that id back (shown as `THREAD_ID` below).
 
 **At `/v1/graph/invoke` (REST):**
 
@@ -263,7 +263,6 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{"role": "user", "content": [{"type": "text", "text": "Refund my order"}]}],
-    "config": {"thread_id": "order-42"},
     "response_granularity": "full"
   }'
 
@@ -294,7 +293,7 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
   -d '{
     "resume": {"approved": true},
-    "config": {"thread_id": "order-42"}
+    "config": {"thread_id": "THREAD_ID"}
   }'
 ```
 
@@ -318,7 +317,7 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
   -d '{
     "resume": {"approved": true},
     "interrupt_id": "int_abc123...",
-    "config": {"thread_id": "order-42"}
+    "config": {"thread_id": "THREAD_ID"}
   }'
 ```
 

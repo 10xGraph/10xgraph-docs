@@ -101,7 +101,7 @@ The AG-UI endpoint is mounted whenever enabled, regardless of `MODE`. Treat it w
 
 ### Persistent checkpointing
 
-AG-UI clients identify the conversation by `threadId`, which the server maps to a 10xGraph thread. The server reads the checkpoint to determine which messages are new and only sends those to the graph. With an in-memory checkpointer:
+AG-UI clients identify the conversation by `threadId`, which the server maps to a 10xGraph thread. AG-UI accepts a `threadId` the frontend made, even when `runs.thread_ids` is `"server"`, because CopilotKit creates its own. The caller owns a new thread, and an existing thread is owner-checked as usual. The server reads the checkpoint to determine which messages are new and only sends those to the graph. With an in-memory checkpointer:
 
 - Threads are lost when the server restarts
 - State is not shared across replicas

@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 470
 label: Graph control
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 Seven methods on `TenxGraphClient` inspect the graph and control its execution. They check server health, retrieve the graph's topology, list available tools, fetch observability data for a run, return the state schema, and stop or repair a thread. All are imported from `10xgraph-client` and called on a client instance.
@@ -370,8 +370,8 @@ async function askUser(reason: string, data?: Record<string, any>): Promise<bool
 
 const userMessage = Message.text_message('Delete the old reports', 'user');
 
+// No thread_id: the server starts a thread and returns its id in result.meta.thread_id.
 const result = await client.invoke([userMessage], {
-  config: { thread_id: 'approval-1' },
   response_granularity: 'full',
 });
 
@@ -384,7 +384,7 @@ if (meta?.status?.startsWith('interrupted')) {
 
   // Resume by invoking the same thread again.
   await client.invoke([Message.text_message(approved ? 'approved' : 'rejected', 'user')], {
-    config: { thread_id: 'approval-1' },
+    config: { thread_id: result.meta.thread_id },
   });
 }
 ```

@@ -399,21 +399,21 @@ The exported `StopGraphResponse` TypeScript type declares `success`, `message`, 
 The most common pattern: a user clicks a stop button while a stream is running.
 
 ```ts
-const threadId = 'long-thread';
+// No thread_id: the server starts a thread and sends its id on every chunk.
+const stream = client.stream([
+  Message.text_message('Write a very long essay about the universe.'),
+]);
 
-const stream = client.stream(
-  [Message.text_message('Write a very long essay about the universe.')],
-  { config: { thread_id: threadId } }
-);
-
+let threadId: string | undefined;
 let stopped = false;
 
 document.getElementById('stop-btn')!.addEventListener('click', async () => {
   stopped = true;
-  await client.stopGraph(threadId);
+  if (threadId) await client.stopGraph(threadId);
 });
 
 for await (const chunk of stream) {
+  if (chunk.thread_id) threadId = chunk.thread_id;
   if (stopped) break;
 
   if (chunk.event === 'message' && chunk.message?.delta) {
@@ -516,10 +516,12 @@ The default `response_granularity` of `stream()` is `'low'`, which yields only `
 ```ts
 const stream = client.stream(
   [Message.text_message('Proceed with the high-cost operation.')],
-  { config: { thread_id: 'approval-thread' }, response_granularity: 'full' }
+  { response_granularity: 'full' } // no thread_id: the server starts a thread
 );
 
+let threadId: string | undefined;
 for await (const chunk of stream) {
+  if (chunk.thread_id) threadId = chunk.thread_id; // keep it to resume later
   if (chunk.event === 'updates' && chunk.data?.is_interrupted) {
     console.log('Execution paused; the graph is waiting for approval.');
     break;
@@ -533,13 +535,13 @@ for await (const chunk of stream) {
 
 ### Resuming after human approval
 
-To resume after an interrupt, invoke the same thread again. The graph clears the pause, continues from the paused node, and keeps all prior state:
+To resume after an interrupt, invoke the same thread again, with the `threadId` you read from the stream. The graph clears the pause, continues from the paused node, and keeps all prior state:
 
 ```ts
 // User reviews the decision and approves
 const approval = await client.invoke(
   [Message.text_message('Approved. Proceed.')],
-  { config: { thread_id: 'approval-thread' } }
+  { config: { thread_id: threadId } }
 );
 
 console.log('Final result:', approval.messages[approval.messages.length - 1]);
@@ -550,7 +552,7 @@ console.log('Final result:', approval.messages[approval.messages.length - 1]);
 Use `threadState()` to check whether a thread is currently paused. The state is at `data.state`:
 
 ```ts
-const { data } = await client.threadState('approval-thread');
+const { data } = await client.threadState(threadId);
 const meta = data.state.execution_meta as unknown as {
   status: string;
   interrupted_node: string | null;
@@ -575,14 +577,14 @@ if (meta.status.startsWith('interrupted')) {
 Pass `resume` with the answer, and `interrupt_id` with the id of the interrupt you are answering. Read the id from the thread state, at `execution_meta.interrupt_data.interrupt.id`. The client does not track ids for you. Send an empty `messages` array:
 
 ```ts
-const { data } = await client.threadState('approval-thread');
+const { data } = await client.threadState(threadId);
 const meta = data.state.execution_meta as unknown as {
   interrupt_data?: { interrupt?: { id: string } };
 };
 const interruptId = meta.interrupt_data?.interrupt?.id;
 
 const result = await client.invoke([], {
-  config: { thread_id: 'approval-thread' },
+  config: { thread_id: threadId },
   resume: { approved: true },
   interrupt_id: interruptId,
 });
@@ -601,7 +603,7 @@ import { TenxGraphClient, Message } from '10xgraph-client';
 
 const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
 
-async function runWithApprovalGate(threadId: string, userMessage: string) {
+async function runWithApprovalGate(userMessage: string) {
   // 1. Inspect the graph capabilities
   const graphInfo = await client.graph();
   console.log(`Graph: ${graphInfo.data.nodes.length} nodes, ` +
@@ -611,16 +613,18 @@ async function runWithApprovalGate(threadId: string, userMessage: string) {
   console.log(`Approval gates available: ${supportsApproval}`);
 
   // 2. Stream the execution
-  console.log(`\nExecuting on thread: ${threadId}`);
+  // No thread_id: the server starts a thread and sends its id on each chunk
   const stream = client.stream(
     [Message.text_message(userMessage)],
-    { config: { thread_id: threadId }, response_granularity: 'full' }
+    { response_granularity: 'full' }
   );
 
   const finalMessages: Message[] = [];
   let paused = false;
+  let threadId = '';
 
   for await (const chunk of stream) {
+    if (chunk.thread_id) threadId = chunk.thread_id;
     // Check for interrupt (approval gate paused execution)
     if (chunk.event === 'updates' && chunk.data?.is_interrupted) {
       paused = true;
@@ -633,6 +637,7 @@ async function runWithApprovalGate(threadId: string, userMessage: string) {
   }
 
   // 3. If paused, show where, then observability, then resume
+  console.log(`\nExecuted on thread: ${threadId}`);
   if (paused) {
     const { data } = await client.threadState(threadId);
     const meta = data.state.execution_meta as unknown as {
@@ -664,7 +669,7 @@ async function runWithApprovalGate(threadId: string, userMessage: string) {
 }
 
 // Run the example
-runWithApprovalGate('approval-demo-123', 'Process this high-cost operation.')
+runWithApprovalGate('Process this high-cost operation.')
   .then(msgs => console.log(`\nFinal: ${msgs.length} messages in thread`))
   .catch(console.error);
 ```

@@ -30,6 +30,8 @@ Both endpoints use the same credential methods as REST APIs. The bearer token ca
 
 At the WebSocket handshake, the server verifies the token. Before every graph run on `/v1/graph/ws` (the client can send several messages on one socket), the token is verified again: if it expires or is revoked between runs, the server sends an error chunk and closes the socket with code 1008.
 
+On `/v1/graph/live` there is no run boundary, so the token is checked again after the init frame and then every 30 seconds for as long as the session lasts. The checks cover expiry and revocation, and they fail closed: if the revocation backend cannot answer, the token counts as revoked. When a check fails, the server sends a fatal `session_expired` error event and closes the socket with code 1008. Reconnect with a fresh token.
+
 **Setting the subprotocol** (if using `10xgraph-bearer`): offer two subprotocols, the sentinel first and the raw token second.
 
 ```javascript
@@ -57,7 +59,7 @@ Client → Server:
     {"role": "user", "content": [{"type": "text", "text": "What is 2 + 2?"}]}
   ],
   "config": {
-    "thread_id": "optional-id-or-omit-for-new-thread"
+    "thread_id": "existing-thread-id-or-omit-for-new-thread"
   }
 }
 
@@ -108,11 +110,12 @@ Get the id from the `interrupt` object of the `interrupted` update chunk, or fro
 
 ### Thread IDs
 
-- Omit `thread_id` or send `"new"` to create a fresh thread each time.
+- Omit `thread_id` or send `"new"` to start a new thread. The server picks the id and puts it on each chunk as `thread_id`.
 - Send an existing `thread_id` to resume that thread's conversation.
-- A blank or missing `thread_id` also means "create a new one", so the server generates an ID.
+- A blank or missing `thread_id` also means "start a new thread".
+- With the default `runs.thread_ids` of `"server"`, a `thread_id` that does not exist is refused like a thread you do not own. Do not invent ids. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 - `resume` runs require `config.thread_id`.
-- When auth is enabled, the thread is owner-checked before each run. An unauthorized thread gets an `error` chunk with `Not authorized to stream thread ...` and the socket stays open.
+- When auth is enabled, the thread is owner-checked before each run. An unauthorized or unknown thread gets an `error` chunk with `Not authorized to stream thread ...` and the socket stays open.
 
 ### One run per thread
 
@@ -135,7 +138,7 @@ Every WebSocket handshake and every graph run on the socket counts against the g
 - A handshake over the limit is refused before `accept()` with close code 1013.
 - A run over the limit gets an `error` chunk whose `data` has `reason` and `retry_after_seconds`. The run is skipped and the socket stays open; the check runs again on the next frame.
 
-Connection caps apply at the handshake only: `websocket.max_connections` (per process) and `websocket.max_connections_per_user`. Over either cap, the handshake is refused with close code 1013.
+Connection caps apply at the handshake only: `websocket.max_connections` (per process) and `websocket.max_connections_per_user`. Over either cap, the handshake is refused with close code 1013. Live sessions on `/v1/graph/live` count against `websocket.max_connections_per_user` like any other socket.
 
 ## Realtime audio: `/v1/graph/live`
 
@@ -161,6 +164,8 @@ Client → Server:
   "thread_id": "optional-thread-id"
 }
 ```
+
+The realtime client makes its own thread id when you do not pass one, and `/v1/graph/live` accepts it even with `runs.thread_ids` set to `"server"`. The caller owns that new thread.
 
 The `model` override is honored only if it is listed in `websocket.realtime_models`; otherwise it is ignored and the agent's own model is used. A bad value (for example an invalid `modalities` entry) returns a fatal `error` event with code `invalid_config`.
 
@@ -207,7 +212,7 @@ WebSocket close codes follow RFC 6455. The server sends these in specific situat
 |---|---|---|
 | 1000 | Normal closure (client initiated or clean shutdown) | No |
 | 1003 | Unsupported data: the `/v1/graph/live` init frame is not a JSON object or could not be parsed | No |
-| 1008 | Policy violation: wrong endpoint for the agent type, token expired/revoked between runs, or auth/authorization failure at the handshake | No |
+| 1008 | Policy violation: wrong endpoint for the agent type, token expired/revoked between runs (or during a live session), or auth/authorization failure at the handshake | No |
 | 1011 | Unexpected server error during run | May retry after brief delay |
 | 1013 | Try again later: rate limit or connection cap exceeded at the handshake | Yes, after a delay |
 
@@ -271,12 +276,13 @@ const client = new TenxGraphClient({
   authToken: "your-jwt-token",
 });
 
-// wsStream() has the same signature as stream(), but runs over /v1/graph/ws
-const stream = client.wsStream([Message.text_message("What is 2 + 2?")], {
-  config: { thread_id: "my-thread" },
-});
+// wsStream() has the same signature as stream(), but runs over /v1/graph/ws.
+// Omit thread_id to start a new thread. The server picks it and sends it on each chunk.
+const stream = client.wsStream([Message.text_message("What is 2 + 2?")]);
 
+let threadId: string | undefined;
 for await (const chunk of stream) {
+  if (chunk.thread_id) threadId = chunk.thread_id;
   if (chunk.event === "message") {
     console.log("Message:", chunk.message);
   }
@@ -330,7 +336,7 @@ socket.onclose = (event) => {
 
 **Socket closes with code 1008**
 - If the message is "This graph is a live agent...", you're using `/v1/graph/ws` on a realtime agent. Switch to `/v1/graph/live`.
-- If the message is "Session expired...", your token has expired. Reconnect with a fresh token.
+- If the message is "Session expired...", your token has expired or was revoked. On `/v1/graph/live` this can happen mid-session, and the server sends a `session_expired` error event first. Reconnect with a fresh token.
 
 **Socket closes with code 1013**
 - Rate limit or connection cap exceeded at the handshake. Wait and reconnect.

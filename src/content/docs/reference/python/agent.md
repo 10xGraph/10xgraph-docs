@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 30
 label: Agent
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The `Agent` class is a graph node that calls an LLM through the native OpenAI, Google, or Anthropic SDK. It handles message conversion, tool calls, memory retrieval, skills, streaming, and retries for you. Add it to a `StateGraph` as a node, and the graph supplies state and routing.
@@ -267,7 +267,7 @@ agent = Agent(
 app = graph.compile(store=my_qdrant_store)
 ```
 
-`retrieval_mode` is a `ReadMode`: `NO_RETRIEVAL`, `PRELOAD`, or `POSTLOAD` (the `MemoryConfig` default). With `POSTLOAD`, the agent also exposes user and agent memory tools to the model. `MemoryConfig` fields are `store`, `retrieval_mode`, `limit`, `score_threshold`, `max_tokens`, `inject_system_prompt`, `config`, `user_memory`, and `agent_memory`. Defaults: `limit=5`, `score_threshold=0.0`, `inject_system_prompt=True`. See [`memory-stores`](/docs/reference/python/memory-stores) for details.
+`retrieval_mode` is a `ReadMode`: `NO_RETRIEVAL`, `PRELOAD`, or `POSTLOAD` (the `MemoryConfig` default). With `POSTLOAD`, the agent also exposes user and agent memory tools to the model. `MemoryConfig` fields are `store`, `retrieval_mode`, `limit`, `score_threshold`, `max_tokens`, `inject_system_prompt`, `config`, `user_memory`, and `agent_memory`. Defaults: `limit=5`, `score_threshold=0.0`, `inject_system_prompt=True`. With `PRELOAD`, memories are added to the latest user message for that request only, not to the system prompt ([why](/docs/concepts/memory-and-store#why-memories-are-not-system-text)). See [`memory-stores`](/docs/reference/python/memory-stores) for details.
 
 ---
 

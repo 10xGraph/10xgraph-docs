@@ -3,7 +3,7 @@ title: 10xgraph.json configuration reference
 description: Every key the 10xgraph.json config file accepts, with defaults, types, purposes, and complete examples for rate limiting, auth, and servers.
 section: Reference
 order: 420
-updated: "2026-10-26"
+updated: "2026-10-27"
 group: "CLI and configuration"
 faq:
   - q: Which key is required in 10xgraph.json?
@@ -32,6 +32,7 @@ Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: th
 | `thread_name_generator` | string or null | none | Import path of a thread name generator |
 | `redis` | string or null | none | Redis URL for the shared ownership cache. Falls back to `REDIS_URL` |
 | `remote_tools` | array | `[]` | Schemas of tools that run in the client |
+| `runs` | object | built-in defaults | Who names threads, which client input reaches the graph, and run limits |
 | `rate_limit` | object | absent (off) | Request rate limiting |
 | `websocket` | object | built-in caps | WebSocket connection limits |
 | `media` | object | `{"delete_with_thread": true}` | Uploaded-file lifecycle |
@@ -72,6 +73,62 @@ RBAC object keys:
 | `isolation` | string | `owner` | `owner` or `none`: whether storage is scoped per user |
 
 Scopes are `checkpointer:read|write|delete`, `config:read`, `files:read|upload|delete`, `graph:fix|invoke|read|setup|stop|stream` and `store:read|write|delete`.
+
+## runs
+
+| Key | Type | Default | Purpose |
+|---|---|---|---|
+| `runs.thread_ids` | `"server"` or `"client"` | `"server"` | Who may name a new thread. See below |
+| `runs.config_keys` | array of strings or null | `null` (any key) | Allow-list for the keys of a request's `config` |
+| `runs.state_keys` | array of strings or null | `null` (any key) | Allow-list for the keys of a request's `initial_state` |
+| `runs.max_concurrent_per_user` | integer or null | `10` | HTTP graph runs one verified user may have in flight at once |
+| `runs.timeout` | number or null | `300` in production, no limit in development | Longest a single graph run may take, in seconds |
+| `runs.max_parallel_tool_calls` | integer or null | `null` (core decides) | Tool calls one model turn may run at once |
+
+```json
+{
+  "agent": "graph.react:app",
+  "runs": {
+    "thread_ids": "server",
+    "config_keys": ["locale", "tenant_hint"],
+    "state_keys": ["preferences"],
+    "max_concurrent_per_user": 10,
+    "timeout": 600,
+    "max_parallel_tool_calls": 10
+  }
+}
+```
+
+### thread_ids
+
+With `"server"` (the default), a request may only name a thread that already exists. To start a new thread, omit `thread_id` from `config`, or send `"new"` over `/v1/graph/ws`. The server picks the id and returns it. Read it from `meta.thread_id` on invoke, or from `thread_id` on each stream chunk.
+
+Naming an id that does not exist answers `403` on invoke, stream, `/v1/graph/ws` and the checkpointer write routes. It is the same `403` as for an id another user owns, so a caller cannot tell whether an id is taken.
+
+AG-UI (`POST /v1/ag-ui`) and realtime (`/v1/graph/live`) are the exception. They still accept an id the frontend made, because CopilotKit and the realtime client create their own. The caller then owns that thread, and an existing thread is owner-checked as usual.
+
+With `"client"`, any request may start a thread under an id it picks. Under owner-only authorization the first user to write an id owns it. A user who claims a guessable id such as `default` first locks out its intended owner, and an unknown id answers differently from a taken one. Use `"client"` only if you accept that.
+
+<aside class="callout callout-warning" role="note"><p class="callout-title">What enforces this</p>
+<p>The built-in <code>ownership</code> and <code>rbac</code> authorization backends enforce <code>thread_ids</code>. A custom backend must check thread ownership itself. With auth off in development (no authorization configured), no authorization check runs, so nothing is enforced.</p></aside>
+
+### config_keys and state_keys
+
+When set, a request whose `config` (or `initial_state`) carries any key not on the list is rejected with `422`. `thread_id` and `run_id` are always allowed in `config`. When the key is `null` or absent, any key passes except the ones the server owns, which it drops.
+
+Set these when a tool or node trusts a value such as `role` or `plan` from state or config. Without an allow-list, a client can send that value.
+
+### max_concurrent_per_user
+
+Caps the HTTP graph runs (invoke, stream and AG-UI) one verified user may have in flight at once, per server process. Over the cap the request gets `429`. `0` or `null` means no cap. Requests without a verified user (auth off) are not capped. The value must be a non-negative integer.
+
+### timeout
+
+A run that passes the limit is cancelled. Invoke answers `504`, and a stream, `/v1/graph/ws` run or AG-UI run ends with an error. The message reads `Graph run passed the runs.timeout limit of 300s and was cancelled. Raise "runs.timeout" in 10xgraph.json to allow longer runs.` An explicit number wins in either mode, and an explicit `null` means no limit. The key must be a positive number or `null`. Realtime sessions have no limit.
+
+### max_parallel_tool_calls
+
+Caps how many tool calls one model turn may run at once. The server puts it into every run's config, and clients cannot set it. When unset, core uses the `TENXGRAPH_MAX_PARALLEL_TOOL_CALLS` environment variable, or 10 if that is not set. The key must be a positive integer or `null`.
 
 ## rate_limit
 

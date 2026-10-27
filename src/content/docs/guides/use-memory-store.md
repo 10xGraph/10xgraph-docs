@@ -5,7 +5,7 @@ section: "Build agents"
 group: "State, memory and context"
 order: 250
 label: Memory store
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 ## What the memory store solves
@@ -311,7 +311,7 @@ memory = MemoryConfig(
     limit=5,                                  # max memories to retrieve per search
     score_threshold=0.0,                      # minimum similarity score (must be >= 0)
     max_tokens=None,                          # cap total tokens across all memories
-    inject_system_prompt=True,                # prepend memories to system prompt
+    inject_system_prompt=True,                # add memory instructions to the system prompt
 
     user_memory=UserMemoryConfig(
         enabled=True,
@@ -339,7 +339,7 @@ agent = Agent(model="gpt-4o", tool_node=ToolNode([]), memory=memory)
 | Mode | Behaviour |
 |---|---|
 | `ReadMode.POSTLOAD` (default) | Memories are fetched on-demand via injected tools that the LLM can call. The model decides **when** and **what** to retrieve. Gives the model more agency but requires the model to recognize when memories are relevant. |
-| `ReadMode.PRELOAD` | Memories are retrieved automatically before every LLM call, using the latest user message as the query, and added as a system message. The model always has relevant context but uses more tokens. No memory tools are exposed, so the model cannot save new memories in this mode. |
+| `ReadMode.PRELOAD` | Memories are retrieved automatically before every LLM call, using the latest user message as the query, and added to the latest user message as a fenced `<user_memories_...>` block for that request only (it is not saved in the thread). See [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text). The model always has relevant context but uses more tokens. No memory tools are exposed, so the model cannot save new memories in this mode. |
 | `ReadMode.NO_RETRIEVAL` | No automatic retrieval. |
 
 ### UserMemoryConfig vs. AgentMemoryConfig

@@ -5,7 +5,7 @@ section: API server
 group: Interfaces
 order: 120
 label: Files and multimodal
-updated: "2026-10-26"
+updated: "2026-10-27"
 faq:
   - q: How do I restrict which file types my agent accepts?
     a: Set MEDIA_ALLOWED_CONTENT_TYPES to a comma-separated list of MIME types or wildcards (e.g., image/*,application/pdf). Empty (the default) accepts all types.
@@ -118,10 +118,7 @@ Once uploaded, use the `file_id` in a content block. Send the message to the gra
         }
       ]
     }
-  ],
-  "config": {
-    "thread_id": "thread-123"
-  }
+  ]
 }
 ```
 

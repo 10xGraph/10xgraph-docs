@@ -4,7 +4,7 @@ description: "Read caller identity and enforce scopes inside graph nodes and too
 order: 380
 group: "Safety"
 section: "Build agents"
-updated: "2026-10-26"
+updated: "2026-10-27"
 label: "Authorization scopes"
 faq:
   - question: "What is the difference between identity and scopes?"
@@ -108,7 +108,7 @@ Combining `user_id` with a checkpointer that supports owner-only access (like `P
 
 ## Understand isolation scope
 
-The `isolation_scope` returned by `isolation_scope()` tells you (and the storage layer) which data-isolation policy is in effect:
+The `isolation_scope` returned by `isolation_scope()` tells you (and the storage layer) which data-isolation policy is in effect. A custom `AuthorizationBackend` that does not override its own `isolation_scope()` method gets `"owner"`. Return `"none"` from the backend only when users should share data:
 
 ```python
 from tenxgraph.core.authz import isolation_scope, SCOPE_OWNER, SCOPE_NONE
@@ -236,7 +236,7 @@ Without an authz block, `get_authz()` returns `None`, and all functions default 
 When a request reaches the API server, the `RequirePermission` dependency (in the route's `Depends()`) performs this flow:
 
 1. **Authenticate**: Extract and verify the bearer token (JWT or custom `BaseAuth`). Decode claims to get `user_id`, `roles`, `scopes`, etc.
-2. **Check scopes**: Call the authorization backend's `scopes_for(user)` (for example `RoleBasedAuthorizationBackend` maps roles to scopes), falling back to `user["scopes"]`. If scopes are declared, verify that the required scope (e.g., `"graph:invoke"` for a POST to `/v1/graph/invoke`) is granted.
+2. **Check scopes**: Call the authorization backend's `scopes_for(user)` (for example `RoleBasedAuthorizationBackend` maps roles to scopes), falling back to the identity's `scope` and `scopes` claims (read as exact names). If scopes are declared, verify that the required scope (e.g., `"graph:invoke"` for a POST to `/v1/graph/invoke`) is granted.
 3. **Check object access**: Call `authorize(user, resource, action, resource_id)` to enforce object-level rules (e.g., ownership checks).
 4. **Build and stamp authz**: Call `build_authz(user_id, scope=isolation_policy, scopes=granted_scopes)` and place it in `user["authz"]`. This overwrites anything the client sent, it is non-hijackable.
 5. **Place in config**: Every service (graph execution, checkpointer, store) copies `user` into `config["user"]`, so the authz block reaches your code.

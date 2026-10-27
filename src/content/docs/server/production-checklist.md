@@ -38,7 +38,9 @@ IS_DEBUG=false
 LOG_LEVEL=INFO
 ```
 
-`MODE=production` enforces stricter validation at startup: wildcard CORS origins combined with credentials fail the server boot, and HMAC JWT secrets shorter than 32 bytes are rejected. It also turns off the `/docs` and `/redocs` pages unless you set their paths explicitly, and it does not mount the eval report routes. Leave `IS_DEBUG=false`; debug mode in production logs a security warning.
+`MODE` accepts `production` (or `prod`) and `development` (or `dev`, `local`), trimmed and case-insensitive. Unset means `development`. Any other value, such as a typo, stops the server at startup, so a misspelling cannot run with the development defaults.
+
+`MODE=production` enforces stricter validation at startup: wildcard CORS origins combined with credentials fail the server boot, and HMAC JWT secrets shorter than 32 bytes are rejected. `STRICT_PRODUCTION_CHECKS` is on by default in production and also stops startup on a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST`, or enabled `DOCS_PATH` and `REDOCS_PATH`. Set `STRICT_PRODUCTION_CHECKS=false` to start with warnings only. It also turns off the `/docs` and `/redocs` pages unless you set their paths explicitly, and it does not mount the eval report routes. Leave `IS_DEBUG=false`; debug mode in production logs a security warning.
 
 ## 2. Secrets and authentication
 
@@ -95,11 +97,12 @@ ORIGINS=https://app.example.com,https://admin.example.com
 ALLOWED_HOST=app.example.com
 ```
 
-The server refuses to start with `ORIGINS="*"` and `CORS_ALLOW_CREDENTIALS=true` (the default) in production mode. If you need cross-origin requests without credentials, set:
+The server refuses to start with a wildcard `ORIGINS` or a wildcard `ALLOWED_HOST` in production mode, because `STRICT_PRODUCTION_CHECKS` is on by default. If you need cross-origin requests from any origin without credentials, opt out of the strict checks and turn credentials off:
 
 ```bash
 ORIGINS=*
 CORS_ALLOW_CREDENTIALS=false
+STRICT_PRODUCTION_CHECKS=false
 ```
 
 Security headers are enabled by default (`SECURITY_HEADERS_ENABLED`). `Strict-Transport-Security` is only sent on HTTPS requests, so check through your TLS endpoint:
@@ -405,18 +408,19 @@ curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
 ### 2. Thread persistence survives restart
 
 ```bash
-# First invoke
+# First invoke. Omit thread_id: the server starts a new thread and returns its id
+# in data.meta.thread_id. Use that id below.
 curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "Remember: my name is Alice"}]}], "config": {"thread_id": "test-123"}}'
+  -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "Remember: my name is Alice"}]}]}'
 
-# Verify it's stored
-curl http://127.0.0.1:8000/v1/threads/test-123/messages
+# Verify it's stored (replace THREAD_ID with the returned id)
+curl http://127.0.0.1:8000/v1/threads/THREAD_ID/messages
 
 # Stop the API server and restart it
 
 # Verify state persists
-curl http://127.0.0.1:8000/v1/threads/test-123/messages
+curl http://127.0.0.1:8000/v1/threads/THREAD_ID/messages
 # Should still contain the previous message
 ```
 
@@ -452,7 +456,7 @@ curl http://127.0.0.1:8000/ping
 | Requests are denied on a thread | User does not own the thread | Check authorization backend and thread ownership |
 | Thread state disappears after restart | Using `InMemoryCheckpointer` | Switch to `PgCheckpointer` with Postgres DSN |
 | One worker sees state, another does not | Workers are not sharing the same backend | Point all instances at the same Postgres and Redis |
-| CORS requests are blocked | `ORIGINS` does not include the client domain | Add the domain to `ORIGINS` or set `ORIGINS=*` with `CORS_ALLOW_CREDENTIALS=false` |
+| CORS requests are blocked | `ORIGINS` does not include the client domain | Add the domain to `ORIGINS`. A public API can set `ORIGINS=*` with `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false` |
 | `409 thread is busy` on a thread | Another run is still active, and the 30 s wait ran out | Wait for the run to end, use `on_busy: "cancel"`, or use one thread per conversation |
 | Rate limiting not working | No `rate_limit` block, or Redis is down (with `fail_open` true, requests pass) | Verify `rate_limit.redis.url` and Redis connectivity |
 

@@ -4,7 +4,7 @@ description: "Configure client-executed tools on the server: define them in 10xg
 order: 130
 group: "Interfaces"
 section: "API server"
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "Can a client call a tool that isn't registered as a remote tool?"
     answer: "No. The server only presents remote tools from 10xgraph.json to the model. If ag_ui.allow_client_tools is true, AG-UI clients can bring their own tools for that run, but plain REST/WebSocket callers cannot. See the AG-UI documentation for per-run client tools."
@@ -149,10 +149,8 @@ client.registerToolHandler('read_clipboard', async () => {
 });
 
 // Now stream or invoke. The client will run registered tools when the model calls them.
-const stream = client.stream(
-  [Message.text_message('Where am I?')],
-  { config: { thread_id: 'thread-123' } }
-);
+// Omit thread_id to start a new thread. Each chunk carries the id the server picked.
+const stream = client.stream([Message.text_message('Where am I?')]);
 
 for await (const chunk of stream) {
   // Process streaming response

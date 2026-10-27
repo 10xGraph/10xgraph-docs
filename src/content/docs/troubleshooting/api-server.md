@@ -3,7 +3,7 @@ title: API Server Troubleshooting
 description: Symptoms, causes, and fixes for 10xGraph API server problems at startup, at request time, and in production deployments.
 section: Troubleshooting
 order: 40
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Why does the server refuse to start with "routes are not protected"?
     a: Every route except /ping and the two eval report routes must carry a RequirePermission guard. The check runs at startup so a forgotten guard cannot ship as an open endpoint. Add the dependency to the handler.
@@ -109,9 +109,56 @@ ORIGINS=https://yourapp.com,https://api.yourapp.com
 ```
 
 ```bash
-# Or serve a public, non-credentialed API
+# Or serve a public, non-credentialed API (production also needs the strict checks off)
 CORS_ALLOW_CREDENTIALS=false
+STRICT_PRODUCTION_CHECKS=false
 ```
+
+### Issue: `Refusing to start: MODE=production with insecure settings`
+
+**Symptoms**
+
+- the server exits at startup in production and lists one or more lines that start with a warning sign
+
+**Cause**
+
+`STRICT_PRODUCTION_CHECKS` is on by default in production. It stops startup on a wildcard `ALLOWED_HOST` (including `*` with spaces around it), a wildcard `ORIGINS`, or an enabled `DOCS_PATH` or `REDOCS_PATH`. Generated `.env.example`, compose and Kubernetes files use placeholder values, so a file you did not edit also trips it.
+
+**Fix**
+
+- set `ALLOWED_HOST` and `ORIGINS` to your real hosts and origins, and leave `DOCS_PATH` and `REDOCS_PATH` empty
+- or set `STRICT_PRODUCTION_CHECKS=false` to start with warnings only
+
+### Issue: `Invalid MODE` on startup
+
+**Symptoms**
+
+- the server, or `10xgraph dev`, exits with a message that starts with `Invalid MODE` and lists the accepted values
+- `10xgraph dev` exits with code 2
+
+**Cause**
+
+`MODE` is trimmed and lowercased, then must be one of `production`, `prod`, `development`, `dev` or `local`. Anything else, such as `prodution`, is refused so a typo cannot run with the development defaults. Unset means `development`.
+
+**Fix**
+
+- correct the spelling, or remove the variable for development
+
+### Issue: runs fail with 504 or a `runs.timeout` error
+
+**Symptoms**
+
+- invoke returns `504` with `Graph run passed the runs.timeout limit of 300s and was cancelled`
+- a stream, WebSocket or AG-UI run ends with an error chunk that carries the same text
+
+**Cause**
+
+In production, `runs.timeout` is 300 seconds when you do not set it. Development has no limit.
+
+**Fix**
+
+- set a larger number in `10xgraph.json`, for example `"runs": {"timeout": 900}`
+- or set `"timeout": null` to remove the limit
 
 ### Issue: port already in use
 
@@ -234,12 +281,13 @@ A `1008` accompanied by an `error` event with `code: "not_live"` or `"not_author
 - no checkpointer configured
 - checkpointer backend unavailable (Postgres, Redis, or SQLite)
 - inconsistent `thread_id` usage
+- a `thread_id` that does not exist, which answers `403` by default (`runs.thread_ids` is `server`)
 
 **Fix**
 
 - configure a checkpointer in `10xgraph.json`
 - verify backend connectivity and health
-- use a stable `thread_id` (do not generate a new one per request)
+- use the `thread_id` the server returned on the first call (do not generate a new one per request, and do not make one up: the server refuses ids it did not create)
 
 For more details, see [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
 
@@ -377,7 +425,7 @@ Enable the option in `10xgraph.json` only when the app sits behind a proxy you c
 
 - `DOCS_PATH` or `REDOCS_PATH` set explicitly (in production they default to empty, which disables the pages and the OpenAPI schema; the server logs a warning when either is set)
 - `MODE` is not `production`, so the development defaults apply
-- `ORIGINS=*` still set
+- `ORIGINS=*` still set (production refuses it unless `STRICT_PRODUCTION_CHECKS=false`)
 
 **Fix**
 

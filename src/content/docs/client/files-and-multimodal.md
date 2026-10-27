@@ -5,7 +5,7 @@ section: "TypeScript client"
 group: "Features"
 order: 70
 label: "Files and multimodal"
-updated: "2026-10-26"
+updated: "2026-10-27"
 ---
 
 The 10xGraph client supports multimodal messages: you upload files once, then reference them by `file_id` in as many messages as you need. The server handles access control and media resolution, so you never expose public URLs or inline base64.
@@ -196,9 +196,9 @@ The message works unchanged across all three call methods:
 ### With `invoke()`
 
 ```ts
-const result = await client.invoke([msg], {
-  config: { thread_id: 'vision-demo-1' },
-});
+// No thread_id: the server starts a thread. Keep result.meta.thread_id to continue it.
+const result = await client.invoke([msg]);
+const threadId = result.meta.thread_id;
 
 const last = result.messages.at(-1);
 const text = (last?.content ?? [])
@@ -214,7 +214,6 @@ console.log(text);
 import { StreamEventType } from '10xgraph-client';
 
 const stream = client.stream([msg], {
-  config: { thread_id: 'vision-demo-1' },
   response_granularity: 'low',
 });
 
@@ -246,7 +245,7 @@ const followUp = Message.withFile(
   upload.data.mime_type,
 );
 
-await client.invoke([followUp], { config: { thread_id: 'vision-demo-1' } });
+await client.invoke([followUp], { config: { thread_id: threadId } });
 ```
 
 Because the thread is checkpointed, the earlier turn is already in context. Re-attaching the file ensures the model can look at the pixels again rather than relying on its own earlier description.
