@@ -3,6 +3,7 @@ title: "AI agents in fall 2026: what changed, and how to build for it with 10xGr
 seoTitle: "AI agent trends, fall 2026, with 10xGraph code"
 description: "Cheaper models, a stateless MCP spec, MCP CVEs, approvals everywhere and EU transparency rules: what changed in AI in 2026 and the 10xGraph code to handle each one."
 date: 2026-10-18
+updated: 2026-10-27
 author: Shudipto Trafder
 kind: engineering
 tags: [industry, models, mcp, security, reliability]
@@ -457,6 +458,8 @@ The model sees only `order_id` and `amount`. The scope list comes from your auth
 
 </Callout>
 
+Since this section was written, core has tightened the defaults that sit under these checks. A handoff only happens through a tool made with `create_handoff_tool` and registered on that tool node; a model that writes a `transfer_to_*` call for any other name gets an ordinary tool call, and a jump to an unknown node raises `GRAPH_007`, so a model cannot talk its way past edges and approval steps. Tools hidden with `tools_tags` are now refused at run time, not only left out of the model's tool list. An MCP tool with the same name as a local or remote tool is an error instead of a silent override. The prebuilt `fetch_url` tool checks every redirect hop and pins the resolved address, so a public page cannot bounce the agent to an internal host. These cut the damage a hijacked model can do; they do not stop prompt injection, and the checklist below still applies.
+
 ### Operational checklist for MCP
 
 - **Patch and inventory.** Upgrade LiteLLM past 1.84.0 if you run its proxy, and list every MCP server your agents can reach.
@@ -683,14 +686,14 @@ Neither deal changes anything on day one. Both are a reminder that a gateway, a 
 
 ```bash title="Terminal"
 10xgraph init --template production --auth jwt --rate-limit redis --name support-agent --yes
-10xgraph api --no-reload            # local server on http://127.0.0.1:8000
+10xgraph dev --no-open             # local server on http://127.0.0.1:8000
 10xgraph build --docker-compose --k8s
 ```
 
 What each command does:
 
 - **`init`** writes the graph package, the prompt-injection validator, an `evals/` folder, tests, `.env.example` and `10xgraph.json`.
-- **`api`** serves REST, streaming and WebSocket endpoints for the graph. `--reload` is on by default for development, so pass `--no-reload` anywhere else.
+- **`dev`** serves REST, streaming and WebSocket endpoints for the graph on a local Uvicorn server. `--reload` is on by default and `--no-open` skips opening the hosted playground. It is a development server: production runs the Gunicorn image that `build` writes.
 - **`build`** writes a `Dockerfile`, `docker-compose.yml` and `k8s.yaml` with a Deployment and a Service.
 
 Wire `PgCheckpointer` in your graph module and pass it to `compile()`. The server uses the checkpointer your compiled graph carries; the `checkpointer` key in `10xgraph.json` is not read. See [Serving agents](/docs/concepts/serving-agents).
@@ -809,7 +812,7 @@ checkpointer = PgCheckpointer(
 app = graph.compile(checkpointer=checkpointer, callback_manager=callbacks)
 ```
 
-Point `"agent"` in `10xgraph.json` at `graph.agent:app`, run `10xgraph api`, and the API server serves this graph with JWT auth, thread ownership and rate limits. The TypeScript client (`npm install 10xgraph-client`) connects a web frontend to it.
+Point `"agent"` in `10xgraph.json` at `graph.agent:app`, run `10xgraph dev`, and the API server serves this graph with JWT auth, thread ownership and rate limits. The TypeScript client (`npm install 10xgraph-client`) connects a web frontend to it.
 
 ## What 10xGraph does not do yet
 

@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Streaming, media and realtime"
 order: 320
 label: Stream responses
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "When should I use astream() instead of ainvoke()?"
     a: "Use astream() to display tokens as they arrive (lower latency in chat UIs), observe intermediate progress during long runs, or cancel execution early. Use ainvoke() when you need the final result and can wait for the entire graph to complete."
@@ -481,6 +481,10 @@ asyncio.run(chat_session())
 Output varies by model. Each turn prints the assistant text as it streams, and the second turn also runs the `get_current_time` tool before the final answer.
 
 ---
+
+## Run it in production
+
+Over HTTP the same events arrive as NDJSON from the stream endpoint, or over WebSocket. Apply the rate limit to streams, since each one holds a connection open, and note that a stop request is bound to the run it was sent for. See [Invoke and stream](/docs/server/invoke-and-stream), [WebSockets](/docs/server/websockets) and [Rate limiting](/docs/server/rate-limiting).
 
 ## Related guides
 

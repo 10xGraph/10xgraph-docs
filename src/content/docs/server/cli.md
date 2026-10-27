@@ -6,7 +6,7 @@ section: "API server"
 group: "Basics"
 order: 50
 label: CLI
-updated: "2026-10-26"
+updated: "2026-10-27"
 ---
 
 The `10xgraph` command-line interface (`10xgraph-api` package) is your complete toolkit for building and operating 10xGraph agents in production. From initial scaffolding through deployment and evaluation, each command handles a specific phase of agent development.
@@ -30,9 +30,7 @@ The CLI requires Python 3.12+. It depends on the core framework (`10xgraph`), wh
 | Command | Purpose |
 | --- | --- |
 | [`10xgraph init`](/docs/server/project-setup) | Scaffold a new agent project interactively |
-| `10xgraph dev` | Start the development server and open the playground (`--no-open` to skip) |
-| [`10xgraph api`](/docs/server/run-the-server) | Start the API server (single-worker development server) |
-| [`10xgraph play`](/docs/server/playground) | Start the server and open the playground |
+| [`10xgraph dev`](/docs/server/run-the-server) | Start the development server with reload and open the [playground](/docs/server/playground) (`--no-open` to skip) |
 | [`10xgraph build`](/docs/server/deploy) | Generate Docker files for containerization |
 | [`10xgraph skills`](/docs/integrations/coding-assistants) | Install coding-agent skills (Claude, Codex, GitHub) |
 | [`10xgraph test`](/docs/testing/run-tests) | Run the project test suite (pytest wrapper) |
@@ -76,7 +74,7 @@ Change any of these with flags:
 10xgraph dev --no-open --port 9000 --no-reload
 ```
 
-Alternatively, use `10xgraph api` (no playground) or `10xgraph play` (always opens the playground). All three reload on file changes by default.
+`10xgraph dev` is the only server command. It reloads on file changes by default and opens the playground unless you pass `--no-open`. Production runs Gunicorn in the image that `10xgraph build` generates.
 
 ### Test and evaluate
 

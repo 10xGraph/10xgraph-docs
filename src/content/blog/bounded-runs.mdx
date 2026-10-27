@@ -1,0 +1,78 @@
+---
+title: "Bounded by design: timeouts, tool caps, request limits and one run per thread"
+seoTitle: "Bounded agent runs: timeouts, caps, limits"
+description: "The limits a 10xGraph run has by default: parallel tool cap, run, node and tool timeouts, per-user run cap, one run per thread, request size limits and paging caps."
+date: 2026-10-27
+updated: 2026-10-27
+author: Shudipto Trafder
+kind: engineering
+tags: [reliability, scaling, limits, production]
+draft: true
+faq:
+  - q: What is the default run timeout?
+    a: With MODE=production and no runs.timeout in 10xgraph.json, a run is cancelled after 300 seconds. In development there is no limit. An explicit number overrides the default, and an explicit null removes the limit in either mode.
+  - q: What happens when two requests use the same thread at once?
+    a: The second waits up to 30 seconds for the first to finish, then gets 409. With on_busy set to cancel, it asks the active run to stop first.
+  - q: Do these limits apply to streaming runs?
+    a: runs.timeout, the per-user run cap, the thread lock and the request size limits do. Node and tool timeouts and the tool ledger are part of the invoke path and do not apply to streaming runs.
+---
+
+Agents are loops that call a model and a set of tools, and nobody wrote down in advance how long the loop will take or how many tools one turn will start. A hung tool, a model that emits hundreds of calls in one message, two tabs sending to the same thread and a client that posts a huge body are all ordinary events once real users arrive. If nothing bounds them, the first one that happens takes the worker down.
+
+This post lists the bounds that 10xGraph and `10xgraph-api` apply by default, with the numbers from the code. They are a backstop against runaway work, not a latency budget. The operating guidance is on the [scaling page](/docs/production/scaling).
+
+## Parallel tool calls: at most 10 at a time
+
+One model turn can ask for many tool calls, and the ToolNode runs them in parallel. Each parallel branch holds a deep copy of the state, so memory grows with the call count. In a test of one turn with 300 tool calls, the unbounded version used 2.4 GB.
+
+At most `max_parallel_tool_calls` run at once, and the default is 10. Set it in the run config, process-wide with the `TENXGRAPH_MAX_PARALLEL_TOOL_CALLS` environment variable, or, when you serve with the API, as `runs.max_parallel_tool_calls` in `10xgraph.json`. The API writes it into every run's config, so clients cannot raise it.
+
+## Timeouts at three levels
+
+| Bound | Default | Where it is set |
+|---|---|---|
+| Whole run | 300 s with `MODE=production`, no limit in development | `runs.timeout` in `10xgraph.json` |
+| One node | 900 s | `node_timeout` in the run config |
+| One tool call | 300 s | `tool_timeout` in the run config |
+
+A run that passes `runs.timeout` is cancelled: invoke answers 504, and a stream, WebSocket run or AG-UI run ends with an error. Realtime sessions are not limited. An explicit number overrides the default and an explicit `null` removes the limit, in either mode.
+
+The node and tool defaults are generous on purpose. The node limit sits above the 600 s default timeout of the model SDKs, so a slow model call fails with its own error instead of being masked by the node deadline. Both can be disabled with `None` or `0`.
+
+## One run per thread
+
+Two runs writing the same thread would race on its state. The API takes a per-thread lock for invoke, stream and WebSocket runs. A request that finds the thread busy waits up to 30 seconds and then gets 409.
+
+Send `on_busy` with the request to choose what a waiting request does:
+
+- `"wait"` (the default) waits for the active run to finish.
+- `"cancel"` first asks the active run to stop, and repeats the request every second while it waits, in case the run had not saved its state yet.
+
+With Redis configured the lock is a lease that a background task renews while the run is alive. If the worker dies, the lease expires on its own, so a crashed worker cannot hold a thread forever. Without Redis the lock is per process.
+
+## Per-user run cap
+
+`runs.max_concurrent_per_user` caps the HTTP graph runs (invoke, stream, AG-UI) that one verified user can have in flight at once. The default is 10, and `0` or `null` means unlimited. Over the cap the request gets 429 before the response starts. Requests without a verified user, which means auth is off, are not capped. Like the thread lock, the count is shared across workers only when Redis is configured.
+
+## Request size limits
+
+Limits on what a client can post are fixed. They have no setting, on purpose.
+
+- Body size: `MAX_REQUEST_SIZE`, 10 MB by default. A declared `Content-Length` over the limit is rejected before any body is read, and a streamed body is cut off as soon as it passes the limit. The upload route has its own limit sized to `MEDIA_MAX_SIZE_MB` (25 by default). WebSocket frames use the same cap.
+- Per request: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text across all text blocks.
+- AG-UI clients resend the whole conversation on every run. The trailing turn gets the limits above, and the full history gets a looser cap of 10,000 messages.
+
+## Paging and the rate limiter
+
+Checkpointer list endpoints default to 100 rows, cap `limit` at 1000 whatever the client sends, and the core checkpointers lower an explicit `limit` above `MAX_LIST_LIMIT` (also 1000) and raise `ValueError` for a negative `limit` or `offset`. Passing no limit to the Python API still returns everything, which is for code you control, not for a client.
+
+The in-memory rate limiter keeps at most 50,000 keys. It used to sweep every key when a new one arrived at the cap, which blocked the event loop for about 2.5 ms per new key. Keys are now held in least-recently-used order, so the oldest entry is dropped from the front in constant time, and idle-key cleanup runs in the background. The "bucket cap reached" warning is logged at most once a minute. For more than one worker, use the Redis backend.
+
+## What is not bounded
+
+Be clear about the gaps.
+
+- Streaming runs do not have a tool ledger. The ledger lookup is on the invoke path, so a streamed run that is resumed after a crash can repeat a tool that already finished. Use idempotency keys for tools with side effects on streamed runs.
+- Node and tool timeouts apply to invoke. For a streaming run, `runs.timeout` is the deadline that holds.
+- Counts such as the per-user cap and the thread lock are per process until you add Redis.
+- These bounds protect the server. They do not cap what a model costs you. Set provider-side spend limits too.

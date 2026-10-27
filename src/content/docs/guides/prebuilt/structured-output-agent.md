@@ -412,7 +412,6 @@ app = agent.compile()
   "agent": "graph:app",
   "env": ".env",
   "auth": null,
-  "checkpointer": null,
   "injectq": null,
   "store": null,
   "redis": null,
@@ -429,12 +428,16 @@ OPENAI_API_KEY=sk-...
 Then run:
 
 ```bash
-10xgraph play
+10xgraph dev
 ```
 
 The command starts the API server and opens the hosted playground. Type a message and watch the agent invoke, validate, and return structured output. If validation fails, the playground shows the error and the retry attempt.
 
 ---
+
+## Run it in production
+
+`max_attempts` counts one turn, so a bad schema cannot burn unlimited retries on a long-lived thread. See [Errors and limits](/docs/concepts/errors-and-limits) and [Production readiness](/docs/production).
 
 ## Next steps
 

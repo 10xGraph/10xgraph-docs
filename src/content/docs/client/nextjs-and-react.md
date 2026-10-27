@@ -465,7 +465,7 @@ TENXGRAPH_URL=http://localhost:8000
 TENXGRAPH_API_TOKEN=your_api_key_here
 ```
 
-Run the 10xGraph API server locally (`10xgraph api`) and your Next.js dev server (`npm run dev`) in separate terminals.
+Run the 10xGraph API server locally (`10xgraph dev --no-open`) and your Next.js dev server (`npm run dev`) in separate terminals.
 
 ### Streaming and function timeouts
 
@@ -479,7 +479,7 @@ export const maxDuration = 60; // 60 seconds
 
 2. **Deploy 10xGraph separately** (e.g., on AWS, Fly.io, or Railway) and Next.js to Vercel. This isolates the compute and lets you tune each independently.
 
-3. **Self-host both** on the same infrastructure (Docker, Kubernetes, VPS). Run `next start` and `10xgraph api` on the same machine.
+3. **Self-host both** on the same infrastructure (Docker, Kubernetes, VPS). Run `next start` and the production image from `10xgraph build` on the same machine.
 
 For non-streaming requests, Vercel's default timeout is usually fine.
 

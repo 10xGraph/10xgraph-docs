@@ -8,11 +8,29 @@ label: Overview
 updated: "2026-10-27"
 ---
 
-The `10xgraph api` command starts a FastAPI server that exposes your compiled graph as a production-ready REST and WebSocket API, handling graph invocation, streaming, thread state, media files, authentication, rate limiting, and observability. This section is the single source of truth for operating the 10xGraph API server.
+The 10xGraph API server is a FastAPI server that exposes your compiled graph as a production-ready REST and WebSocket API, handling graph invocation, streaming, thread state, media files, authentication, rate limiting, and observability. This section is the single source of truth for operating the 10xGraph API server.
+
+## What the server does for you
+
+Serving your graph with `10xgraph-api` gives you these guarantees without code in your agent. Each row links to the page that explains it.
+
+| Guarantee | What it means | Details |
+| --- | --- | --- |
+| Authentication | JWT or your own `BaseAuth` on every route except `/ping` and `/health/ready`. You must configure it: `auth: null` is allowed, even in production. | [Authentication](/docs/server/auth) |
+| Ownership isolation | In production (and whenever auth is on) a thread is readable and writable only by its creator; a foreign `invoke` is rejected with 403 before the model runs. | [Thread ownership](/docs/server/auth) |
+| Scoped authorization | Per-route scopes, and a boot-time route guard that refuses to start if any non-public route has no permission check. | [Authorization scopes](/docs/guides/authorization-scopes) |
+| Input rules | Request size limit, client messages limited to the `user` role, built-in state fields not writable, `current_node` and state values validated. | [Invoke and stream](/docs/server/invoke-and-stream), [CORS and security headers](/docs/server/cors-and-security-headers) |
+| Rate limits and run caps | Sliding-window limits (memory or Redis) and a per-run timeout (300 s by default in production). | [Rate limiting](/docs/server/rate-limiting) |
+| Production mode | `MODE=production` validates itself at startup, turns off `/docs`, leaves out the eval routes and hides 5xx error text. | [Production checklist](/docs/server/production-checklist) |
+| Durable state | Threads, state and messages go through your checkpointer; with `PgCheckpointer` they survive restarts and are shared across replicas. | [Backup and restore](/docs/server/backup-and-restore), [Kubernetes](/docs/server/kubernetes) |
+| Deploy files | `10xgraph build` writes a hardened Dockerfile and optional Compose and Kubernetes files. | [Deploy](/docs/server/deploy) |
+| Observability | Structured logs, metrics, Sentry and OpenTelemetry hooks, and per-thread run traces in development. | [Observability](/docs/server/observability) |
+
+For the reasoning behind these and the limits of what the server protects, read [Production readiness](/docs/production), the [security model](/docs/production/security-model) and [what 10xGraph does not protect](/docs/production/limits).
 
 ## What the server does
 
-Running `10xgraph api` (or `10xgraph play` for local development) starts a Uvicorn ASGI server on port 8000 that exposes your compiled graph alongside infrastructure for real applications: stateful thread management, semantic memory, multimodal file handling, JWT or custom authentication, rate limiting, and structured logging and tracing. The server reads two inputs: your `10xgraph.json` configuration file (which graph to load, which auth backend, storage layer) and environment variables for secrets and runtime tunables. Your graph logic stays in Python; the server handles the transport layer, persistence, and cross-cutting concerns.
+Running `10xgraph dev` (add `--no-open` to skip the playground) starts a Uvicorn ASGI development server on port 8000 that exposes your compiled graph alongside infrastructure for real applications: stateful thread management, semantic memory, multimodal file handling, JWT or custom authentication, rate limiting, and structured logging and tracing. The server reads two inputs: your `10xgraph.json` configuration file (which graph to load, which auth backend, storage layer) and environment variables for secrets and runtime tunables. Your graph logic stays in Python; the server handles the transport layer, persistence, and cross-cutting concerns.
 
 The server is mode-aware: development mode (`MODE=development`, the default) mounts the unauthenticated eval endpoints and leaves CORS open; production mode (`MODE=production`) does not mount them, refuses wildcard CORS with credentials, turns off the `/docs` and `/redocs` pages unless you set their paths, and defaults to ownership-based thread isolation. A single codebase switches between modes via environment variables, so your Docker image works in both dev and production.
 
@@ -56,7 +74,7 @@ WebSocket and HTTP endpoints both enforce authentication via the `Authorization:
 The `MODE` environment variable switches the server's security and logging posture:
 
 - **`MODE=development`** (default): Unauthenticated `/ping` and `/v1/evals` accessible, `ORIGINS="*"` (CORS allows any domain), `IS_DEBUG` defaults to true. Use for local development and testing.
-- **`MODE=production`**: Only `/ping` is unauthenticated, the `/v1/evals` endpoints are not mounted, a graph run is cancelled after 300 seconds unless you change `runs.timeout`, wildcard CORS with credentials is refused (set `ORIGINS` explicitly), and `/docs` and `/redocs` are disabled unless you set `DOCS_PATH` and `REDOCS_PATH`. Security headers (HSTS, X-Frame-Options and others) are on in every mode unless `SECURITY_HEADERS_ENABLED=false`. Use for deployments exposed to the internet.
+- **`MODE=production`**: Only `/ping` is unauthenticated, the `/v1/evals` endpoints are not mounted, a graph run is cancelled after 300 seconds unless you change `runs.timeout`, wildcard CORS with credentials is refused (set `ORIGINS` explicitly), and `/docs` and `/redocs` are disabled unless you set `DOCS_PATH` and `REDOCS_PATH`. `IS_DEBUG` is forced off, and `graph_introspection` defaults to `"scoped"` (see [Configure the server](/docs/server/configure#control-who-can-read-the-graph-structure)). Security headers (HSTS, X-Frame-Options and others) are on in every mode unless `SECURITY_HEADERS_ENABLED=false`. Use for deployments exposed to the internet.
 
 Together with `JWT_SECRET_KEY` (a strong, randomly generated secret in production) and an explicit `ORIGINS` list, production mode refuses to start with wildcard CORS and credentials enabled. `STRICT_PRODUCTION_CHECKS` is on by default in production and also refuses a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST` and enabled docs paths, so set `ORIGINS` and `ALLOWED_HOST` to your real values. Set `STRICT_PRODUCTION_CHECKS=false` to opt out.
 
@@ -68,7 +86,7 @@ This section is organized by task and layer:
 
 **Basics** (how to run and configure):
 1. [Run the server](/docs/server/run-the-server): start the server in dev and production, set the port, enable hot-reload
-2. [Configure](/docs/server/configure): write your `10xgraph.json` file with your graph path, auth, checkpointer, and rate limiting
+2. [Configure](/docs/server/configure): write your `10xgraph.json` file with your graph path, auth, store, and rate limiting (the checkpointer goes to `compile()` in your graph code)
 3. [Project setup](/docs/server/project-setup): use `10xgraph init` to scaffold a project with templates
 4. [CLI reference](/docs/server/cli): overview of all `10xgraph` commands
 

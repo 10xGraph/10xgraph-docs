@@ -5,7 +5,7 @@ description: Plain definitions of AI agent terms, from ReAct agents and state gr
 section: Glossary
 order: 10
 label: Glossary
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The glossary defines the terms that come up most often when building Python AI agents, from the ReAct loop to the production concerns that decide whether an agent survives real traffic. Each entry opens with a short definition, then shows how the concept works in [10xGraph](/docs/get-started) with Python examples.
@@ -32,6 +32,8 @@ For connecting an agent to the outside world, read [What is the Model Context Pr
 | [What is durable execution?](/docs/glossary/what-is-durable-execution) | Running a workflow so progress is saved and a crashed run resumes where it stopped instead of starting over |
 | [What is an idempotent tool call?](/docs/glossary/what-is-an-idempotent-tool-call) | A tool call that can run more than once without repeating its side effect, such as a second charge or email |
 | [What is agent streaming?](/docs/glossary/what-is-agent-streaming) | Sending AI agent responses token-by-token to a frontend instead of waiting for the full response to complete |
+| [What is thread isolation?](/docs/glossary/what-is-thread-isolation) | Each user can read and run only the conversation threads they own, enforced by the server on every request |
+| [What is prompt injection?](/docs/glossary/what-is-prompt-injection) | Text that makes a model follow an attacker's instructions instead of yours, directly or through content the agent reads |
 
 ## Related
 

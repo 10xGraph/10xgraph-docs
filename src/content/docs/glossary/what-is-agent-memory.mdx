@@ -10,7 +10,7 @@ faq:
   - q: What is the difference between agent memory and a database?
     a: "A database stores structured data retrieved by exact queries. Agent memory covers three types: in-context memory (the LLM's working context), episodic memory (conversation threads retrieved by thread ID), and semantic memory (facts retrieved by similarity, not exact match). All three can be backed by databases but serve different retrieval patterns."
   - q: Does 10xGraph support persistent memory out of the box?
-    a: Yes. 10xGraph ships with InMemoryCheckpointer for development (state is lost when the process stops) and PgCheckpointer for production (dual-layer Redis + Postgres persistence). When running via 10xgraph api, the checkpointer the graph is compiled with is applied automatically to all requests.
+    a: Yes. 10xGraph ships with InMemoryCheckpointer for development (state is lost when the process stops) and PgCheckpointer for production (dual-layer Redis + Postgres persistence). When running via the API server (`10xgraph dev` or the production image), the checkpointer the graph is compiled with is applied automatically to all requests.
   - q: How does 10xGraph handle multiple users in the same agent?
     a: Each conversation is scoped to a thread_id. Different users get different thread IDs and their memory is completely isolated. The checkpointer stores state keyed by thread_id, so threads do not share memory. The API server uses thread IDs from each request.
   - q: What is checkpointing in the context of AI agents?
@@ -124,7 +124,7 @@ With `MemoryConfig`, the agent either searches once per invocation and adds the 
 
 ## Memory and the API server
 
-When running via `10xgraph api`, memory is automatic once the graph is compiled with a checkpointer. The server uses the checkpointer the compiled graph carries:
+When running via the API server (`10xgraph dev` or the production image), memory is automatic once the graph is compiled with a checkpointer. The server uses the checkpointer the compiled graph carries:
 
 ```python title="graph/agent.py"
 app = agent.compile(checkpointer=checkpointer)

@@ -6,7 +6,7 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 180
 label: Web Tools
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The web tools package provides three complementary prebuilt tools for agents that research, fact-check, or ground their answers in real-time data. `fetch_url` retrieves and parses a single web page with built-in SSRF protection; `google_web_search` searches the public web with source attribution; and `vertex_ai_search` searches private datastore collections. Together they enable research workflows where agents discover relevant sources, fetch full content, and synthesize findings.
@@ -39,11 +39,11 @@ Use `fetch_url` when you need the full content of a specific URL. It is async (t
 `fetch_url` performs several steps to make raw web content usable:
 
 1. **Validates the URL**: accepts only HTTP and HTTPS schemes.
-2. **Blocks private addresses**: prevents Server-Side Request Forgery (SSRF) attacks by resolving the hostname and rejecting private, loopback, link-local, multicast, reserved, or unspecified IP ranges (RFC 1918, 127.0.0.0/8, fe80::/10, etc.).
+2. **Blocks private addresses**: prevents Server-Side Request Forgery (SSRF) attacks by resolving the hostname and allowing only globally routable addresses. Private, loopback, link-local, multicast, reserved and unspecified ranges (RFC 1918, 127.0.0.0/8, fe80::/10, 100.64.0.0/10, NAT64 and similar) are rejected. The connection is then pinned to the address that was checked, so a changed DNS answer cannot redirect it, and proxy environment variables are ignored.
 3. **Fetches with timeout**: requests data with a 10-second timeout by default, clamped between 1 and 30 seconds.
 4. **Extracts text**: if the content is HTML, parses it and strips tags and the contents of `script`, `style` and `noscript` blocks. Whitespace is collapsed, so the result is a single line of text.
 5. **Truncates**: limits output to 20,000 characters by default to avoid overwhelming the LLM context.
-6. **Returns metadata**: includes the final URL (after redirects), HTTP status code, content type, and a `truncated` flag indicating overflow.
+6. **Returns metadata**: includes the final URL (after redirects; at most 5 are followed, and every redirect target goes through the same address check), HTTP status code, content type, and a `truncated` flag indicating overflow.
 
 ### Parameters
 
@@ -365,6 +365,10 @@ async def safe_web_search(query: str) -> dict:
 ```
 
 In production agents, implement retry logic at the graph level (using `RetryConfig`) or at the tool level (wrap the tool to add exponential backoff). For network timeouts, increase the `timeout` parameter on `fetch_url` or add retry steps to your agent's system prompt.
+
+## Run it in production
+
+`fetch_url` is built to resist server-side request forgery, which matters most when the server runs inside your network. Search tools call Google with your credentials, so keep them in the environment file and not in the image. See the [Security model](/docs/production/security-model).
 
 ## See also
 

@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Agents and graphs"
 order: 30
 label: Configure Agent
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 `Agent` is the LLM node in a `StateGraph`. This guide covers every constructor parameter with working examples to help you configure agents with different models, providers, tools, and behaviors.
@@ -617,6 +617,10 @@ Agent(
 - **Tools are flexible:** pass a `ToolNode` inline or reference one as a separate graph node. Use `tools_tags` to control which tools the LLM can see.
 - **Structured output:** use `output_schema` with a Pydantic model to force JSON output.
 - **System prompts support interpolation:** use `{field_name}` placeholders to inject state values at runtime.
+
+## Run it in production
+
+On the server, the model API keys come from the environment file named in `10xgraph.json`, never from the client, and the server drops client-sent run config keys that control limits (such as `tool_timeout`, `node_timeout` and `max_parallel_tool_calls`). Set those limits in your graph code or environment. See [Configure the server](/docs/server/configure) and [Errors and limits](/docs/concepts/errors-and-limits).
 
 ## Next steps
 

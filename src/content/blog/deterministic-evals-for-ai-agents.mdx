@@ -1,8 +1,9 @@
 ---
 title: "Moving past vibe checks: deterministic agent evals in CI"
 seoTitle: "Deterministic agent evals in CI/CD"
-description: "How to gate pull requests on what an AI agent actually did, which tools it called and with what arguments, using 10xGraph eval sets, trajectory scoring with no judge model, and pytest."
+description: "Gate pull requests on what an AI agent did: which tools it called and with what arguments. Uses 10xGraph eval sets, trajectory scoring with no judge model, and pytest."
 date: 2026-10-26
+updated: 2026-10-27
 author: "Shudipto Trafder"
 kind: "engineering"
 tags: [testing, evaluation, ci-cd, reliability, pytest]
@@ -345,6 +346,8 @@ The command always writes HTML and JSON reports to the output directory unless y
 - Trajectory criteria check that expected tool calls happened, not that nothing else did. Write prohibitions as assertions on `result.actual_tool_calls`, as in the refund test.
 - When the model requests several tools in one turn, 10xGraph runs them in parallel, and the recorded order can differ from the order the model listed them in. An `EXACT` order check on such a turn can fail even when the agent did the right thing. Use `strict=False` (`IN_ORDER`), or a `trajectory` criterion with `MatchType.ANY_ORDER`, for cases where the calls can come back in either order.
 - Arguments are compared as a whole dict. Leave optional arguments out of the expected `ToolCall`, or give only the tool name, when exact arguments are not the point of the case.
+
+For the wider set of checks to run before you ship, including auth and isolation tests against a running server, see [Test before production](/docs/testing/before-production).
 
 ## Further reading
 

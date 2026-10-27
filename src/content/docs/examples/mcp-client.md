@@ -11,7 +11,7 @@ faq:
     a: "No. The FastMCP Client connects to a server, lists tools and calls them on its own. A graph is only needed when an LLM should choose the tools."
   - q: "Does the example server check the Authorization header?"
     a: "No. The example server accepts any request. The header in the client config shows where credentials go for servers that require them."
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 ## What the example shows
@@ -22,17 +22,17 @@ The example pairs a small weather server with a client that lists the tools and 
 
 ## How to run it
 
-The files are in `agentflow/examples/react-mcp/`. Install the packages (the client also imports `python-dotenv`), then start the server in one terminal.
+The files are in `examples/react-mcp/`. Install the packages (the client also imports `python-dotenv`), then start the server in one terminal.
 
 ```bash
 pip install fastmcp python-dotenv
-python agentflow/examples/react-mcp/server.py
+python examples/react-mcp/server.py
 ```
 
 The server uses the streamable HTTP transport and serves the MCP endpoint at `http://127.0.0.1:8000/mcp`. In a second terminal, run the client.
 
 ```bash
-python agentflow/examples/react-mcp/client.py
+python examples/react-mcp/client.py
 ```
 
 You see the tool name and tags, the full tool definition, then the result of calling `get_weather` for New York.
@@ -41,7 +41,7 @@ You see the tool name and tags, the full tool definition, then the result of cal
 
 The server registers `get_weather` with a description and tags, then runs over streamable HTTP. The tags are what the client later reads from the tool metadata.
 
-```python title="agentflow/examples/react-mcp/server.py"
+```python title="examples/react-mcp/server.py"
 from fastmcp import FastMCP
 
 
@@ -70,7 +70,7 @@ if __name__ == "__main__":
 
 The client declares its servers in a config dict, opens the connection with an async context manager, lists the tools, and calls one by name. The same file is shown whole so you can run it as is.
 
-```python title="agentflow/examples/react-mcp/client.py"
+```python title="examples/react-mcp/client.py"
 import asyncio
 
 from dotenv import load_dotenv

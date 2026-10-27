@@ -227,6 +227,10 @@ Choose the embedding model based on your provider and token budget. `OpenAIEmbed
 
 ---
 
+## Run it in production
+
+Memory is scoped to the authenticated `user_id` that the server supplies. Configure the store through the `store` key in `10xgraph.json`. See [Configure the server](/docs/server/configure) and the [Security model](/docs/production/security-model).
+
 ## Related pages
 
 - **Concept:** Long-term memory and how it complements thread checkpoints, see `/docs/concepts/memory-and-store`

@@ -1,7 +1,7 @@
 ---
 title: Coming from agentflow
 description: Migrate from the old Agentflow package, import, command, config and environment variable names to 10xGraph, step by step.
-updated: "2026-10-08"
+updated: "2026-10-27"
 order: 130
 group: "Next steps"
 section: "Get started"
@@ -77,7 +77,7 @@ The server reads `10xgraph.json` first and falls back to `agentflow.json` when i
 mv agentflow.json 10xgraph.json
 ```
 
-If you pass a path explicitly, use `--config`, for example `10xgraph api --config ./config/prod.json`. The default value is `10xgraph.json`. See [Configure the server](/docs/server/configure) for every key.
+If you pass a path explicitly, use `--config`, for example `10xgraph dev --config ./config/prod.json`. The default value is `10xgraph.json`. See [Configure the server](/docs/server/configure) for every key.
 
 ## Rename CLI environment variables
 
@@ -134,7 +134,7 @@ print("Graph compiled with tenxgraph")
 ```bash
 # Run the compile check, then start the API server with your renamed config
 python check_migration.py
-10xgraph api
+10xgraph dev --no-open
 ```
 
 Seeing no deprecation warnings means all imports are migrated. If the server starts from your renamed `10xgraph.json`, the config rename worked.
@@ -166,7 +166,7 @@ You uninstalled the old package but some code still imports from it. Change thos
 
 ### The server cannot find its config file
 
-`10xgraph api` looks for `10xgraph.json` in the working directory. Run it from the project root, or pass `--config` with the path.
+`10xgraph dev` looks for `10xgraph.json` in the working directory. Run it from the project root, or pass `--config` with the path.
 
 ### Deprecation warnings keep appearing
 

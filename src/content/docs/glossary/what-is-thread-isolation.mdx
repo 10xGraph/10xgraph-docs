@@ -1,0 +1,55 @@
+---
+title: What Is Thread Isolation?
+seoTitle: "What is thread isolation in an agent server?"
+description: Thread isolation means each user can reach only their own conversation threads. See how ownership checks work, what a 403 means and how 10xGraph enforces it.
+section: Glossary
+order: 120
+label: What is thread isolation?
+updated: "2026-10-27"
+faq:
+  - q: Is thread isolation the same as authentication?
+    a: No. Authentication proves who the caller is. Thread isolation uses that identity to decide which threads the caller may touch. A server can authenticate every user and still let one user read another's conversation if it never checks ownership.
+  - q: What does a 403 on a thread mean?
+    a: The caller is signed in, but the thread belongs to someone else or does not exist. By default the server answers 403 for both, so a caller cannot probe which ids exist.
+  - q: Is thread isolation on by default in 10xGraph?
+    a: When auth is configured or MODE is production, the server uses the ownership backend, which allows only the owner to read or run a thread. With auth off in development there is no identity, so nothing is isolated.
+  - q: Does isolation stop a user from changing their own thread?
+    a: No. A user may write to their own thread. Restrict that with scopes such as checkpointer:write, and with runs.state_keys for the state fields a caller may set.
+---
+
+**Thread isolation means each user can read and run only the conversation threads they own.** An agent server stores history per thread. If any signed-in user can name any thread id, then anyone who learns or guesses an id can read another person's messages or continue their conversation. Isolation closes that gap.
+
+## Why does it matter for agents?
+
+A chat thread often holds private data: order details, account questions, documents a user uploaded. A thread also carries state that steers later turns, so writing to someone else's thread can change what the agent does for them. Both are access-control problems, and the check has to happen on the server. A browser cannot be trusted to enforce it.
+
+## How does ownership work?
+
+1. A user makes a first request without a thread id. The server creates the thread and records the caller's `user_id` as its owner.
+2. Every later request that names that thread is checked against the owner. The check covers running the graph (invoke and stream), stopping a run, and reading, changing or deleting state and messages.
+3. If the caller is not the owner, the server refuses the request with `403` before the graph runs.
+
+The owner is immutable once set, so the server can cache the lookup and avoid a database call on every request.
+
+## Why can a client not name a new thread id?
+
+If clients could invent ids, two users might collide on one id, and an attacker could claim an id before its owner used it. With the `server` setting of `runs.thread_ids`, the default, only the server creates thread ids. A request that names an id the server did not create gets `403`.
+
+## How does 10xGraph enforce it?
+
+In `10xgraph-api`, authorization defaults to the `ownership` backend whenever auth is configured or `MODE=production`. It is object-level and fails closed: if the checkpointer cannot report thread owners, the server refuses to boot with auth on. The checkpointer also stores the owner with the thread, and `PgCheckpointer` scopes reads by user (`enforce_user_isolation`). A custom `AuthorizationBackend` that implements only `authorize()` still gets owner scoping unless it opts out on purpose. See [Auth and authorization](/docs/server/auth).
+
+Isolation is not a substitute for scopes. It answers "whose thread is this", and scopes answer "what may this role do". Use both.
+
+You can check it yourself with two tokens and `curl` in [Security in five minutes](/docs/get-started/security-in-five-minutes).
+
+## Next steps
+
+<CardGrid>
+
+<LinkCard title="Security model" href="/docs/production/security-model" description="What the server enforces by default." eyebrow="Production" />
+<LinkCard title="Auth and authorization" href="/docs/server/auth" description="JWT, ownership isolation and role scopes." eyebrow="Guide" />
+<LinkCard title="Checkpointing and threads" href="/docs/concepts/checkpointing-and-threads" description="How thread state is stored." eyebrow="Concept" />
+<LinkCard title="Test before production" href="/docs/testing/before-production" description="Smoke-test 401, 403 and 429." eyebrow="Testing" />
+
+</CardGrid>

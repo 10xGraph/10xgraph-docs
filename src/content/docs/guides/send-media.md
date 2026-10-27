@@ -6,7 +6,7 @@ section: "Build agents"
 group: "Streaming, media and realtime"
 order: 330
 label: Send media
-updated: "2026-10-26"
+updated: "2026-10-27"
 faq:
   - q: "When should I use each MediaRef kind?"
     a: "Use `url` for public or CDN-hosted media, and for `graph://media/{key}` references built with `media_store.to_media_ref()`. Use `data` for small payloads embedded directly in the message. Use `file_id` only for provider-managed file IDs."
@@ -468,6 +468,10 @@ All stores expose the same async interface: `store()`, `retrieve()`, `delete()`,
 - Always provide MIME types and respect size limits.
 
 ---
+
+## Run it in production
+
+The server accepts uploads through its file API and hands your graph references. Choose the storage backend, size limits and signed URL settings there, not in the graph. See [Files and multimodal](/docs/server/files-and-multimodal) and the [Security model](/docs/production/security-model).
 
 ## Related pages
 

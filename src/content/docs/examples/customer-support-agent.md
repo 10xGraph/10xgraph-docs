@@ -5,7 +5,7 @@ section: Examples
 group: Use cases
 order: 230
 label: Customer Support
-updated: '2026-07-27'
+updated: "2026-10-27"
 ---
 
 This page shows a customer support agent that routes each message to a refund, shipping or general specialist, lets each specialist call only its own tools, and pauses for a human with `interrupt()`. The code runs as shown once you set provider API keys. The order, payment and shipping clients are mocks you replace.
@@ -291,6 +291,8 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+`human_reply` resumes with the answer alone. When a human reviews escalations through a UI or a retried request is possible, also name the interrupt you are answering with `resume_interrupt_id`, set to the `id` of the pending interrupt. A different id raises `InterruptMismatchError` and records nothing, so a stale or retried request cannot answer the next prompt. If the escalation set a `response_schema`, the reply is validated against it first. Over the API the client sends `interrupt_id` next to `resume`. See [interrupts](/docs/concepts/interrupts).
+
 The replies depend on the models, so your output will differ. To test escalation, ask for a refund while telling the agent you are furious, then call `human_reply("Approved, refund issued.", "customer-123")` on that thread. For streaming, see [stream a graph](/docs/guides/stream-graph), and for the approval flow in detail, see [add human approval](/docs/guides/add-human-approval).
 
 ## Production considerations
@@ -301,7 +303,7 @@ Four changes matter most before real customers use it.
 |---|---|
 | Persistence | Replace `InMemoryCheckpointer` with a durable one and keep one `thread_id` per customer conversation. See [set up checkpointing](/docs/guides/set-up-checkpointing). |
 | Cost abuse | Set per-user limits on the API server. See [rate limiting](/docs/server/rate-limiting). |
-| Money movement | Keep idempotency keys on every refund, and require the customer to confirm in the prompt before `issue_refund`. |
+| Money movement | Keep idempotency keys on every refund. The prompt asks the customer to confirm before `issue_refund`, but a prompt is not a guard. For a hard approval gate, call `interrupt()` inside `issue_refund` before the payment call and keep the payment after it, as in [add human approval](/docs/guides/add-human-approval). |
 | Escalation visibility | Record every `interrupt()` payload in a queue or table so your team can review and learn from handoffs. |
 
 ## When not to use this

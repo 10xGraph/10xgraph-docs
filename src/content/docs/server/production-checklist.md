@@ -18,6 +18,31 @@ faq:
 
 Deploying 10xGraph to production requires hardening your API server for security, reliability, and scale. This checklist walks through every critical setting, from runtime mode to persistence topology to horizontal scaling, with verification steps to confirm each piece is working before traffic arrives.
 
+## Already done by the server in production
+
+With `MODE=production`, the server does these for you. You do not configure them; the sections below cover what you still own.
+
+- Validates `MODE` at startup: a typo stops the server instead of running with development defaults.
+- Runs strict production checks (`STRICT_PRODUCTION_CHECKS`, on by default): wildcard `ORIGINS` or `ALLOWED_HOST`, wildcard CORS with credentials and enabled docs paths are refused at boot, and short HMAC JWT secrets are rejected.
+- Turns off the `/docs` and `/redocs` pages unless you set their paths.
+- Does not mount the unauthenticated `/v1/evals` routes.
+- Replaces 5xx error text, including streamed error chunks, with a generic message. Raise `ClientInputError` for 422 messages that must reach the client.
+- Cancels a graph run after 300 seconds unless you set `runs.timeout`.
+- Scopes graph introspection (`GET /v1/graph`, `/v1/graph/tools`, `/v1/graph:StateSchema`) to callers with the `graph:read` scope, unless you set `graph_introspection` to `"open"`.
+- Defaults authorization to ownership, so each user reaches only their own threads.
+- Forces `IS_DEBUG` off, even if the environment sets it to true.
+- Ships a hardened image when you use `10xgraph build`: non-root user, Gunicorn with long graceful timeouts, health check on `/ping`.
+
+For why these matter, see the [security model](/docs/production/security-model) and [scaling and reliability](/docs/production/scaling).
+
+## What you still own
+
+- **Configure auth.** Nothing refuses `"auth": null` in production; the server starts open and every route except `/ping` accepts any caller. Set `"auth": "jwt"` or a custom backend (section 2).
+- Strong secrets, explicit `ORIGINS`, and secret storage (sections 2 and 3).
+- A shared, durable checkpointer passed to `compile()`, plus Postgres and Redis operations and backups (section 5).
+- Rate limits, worker count and replica count for your traffic (sections 6 and 7).
+- Proxy, media storage, monitoring and the verification steps at the end.
+
 ## Prerequisites
 
 You have a 10xGraph project with a working `10xgraph.json` and a compiled graph. You are ready to containerize and deploy. This guide covers Linux/Kubernetes production environments; Docker and `docker-compose` will be used in examples.
@@ -40,7 +65,7 @@ LOG_LEVEL=INFO
 
 `MODE` accepts `production` (or `prod`) and `development` (or `dev`, `local`), trimmed and case-insensitive. Unset means `development`. Any other value, such as a typo, stops the server at startup, so a misspelling cannot run with the development defaults.
 
-`MODE=production` enforces stricter validation at startup: wildcard CORS origins combined with credentials fail the server boot, and HMAC JWT secrets shorter than 32 bytes are rejected. `STRICT_PRODUCTION_CHECKS` is on by default in production and also stops startup on a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST`, or enabled `DOCS_PATH` and `REDOCS_PATH`. Set `STRICT_PRODUCTION_CHECKS=false` to start with warnings only. It also turns off the `/docs` and `/redocs` pages unless you set their paths explicitly, and it does not mount the eval report routes. Leave `IS_DEBUG=false`; debug mode in production logs a security warning.
+`MODE=production` enforces stricter validation at startup: wildcard CORS origins combined with credentials fail the server boot, and HMAC JWT secrets shorter than 32 bytes are rejected. `STRICT_PRODUCTION_CHECKS` is on by default in production and also stops startup on a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST`, or enabled `DOCS_PATH` and `REDOCS_PATH`. Set `STRICT_PRODUCTION_CHECKS=false` to start with warnings only. It also turns off the `/docs` and `/redocs` pages unless you set their paths explicitly, and it does not mount the eval report routes. Leave `IS_DEBUG=false`. In production the server forces `IS_DEBUG` off and logs a warning if it was set to true.
 
 ## 2. Secrets and authentication
 
@@ -381,6 +406,8 @@ SENTRY_TRACES_SAMPLE_RATE=0.1
 
 Sampling 10% of traces is typical for production.
 
+The API reports only server faults: 4xx responses are logged at WARNING and never become events, and request bodies are never sent to Sentry. If an alert matches ERROR logs for client errors, match WARNING instead.
+
 ### OpenTelemetry tracing
 
 For distributed tracing across your infrastructure:
@@ -481,3 +508,8 @@ curl http://127.0.0.1:8000/ping
 - [Set up checkpointing](/docs/guides/set-up-checkpointing)
 - [Observability](/docs/server/observability)
 - [Deploy](/docs/server/deploy)
+- [Production readiness](/docs/production)
+- [Security model](/docs/production/security-model)
+- [Scaling and reliability](/docs/production/scaling)
+- [Authorization scopes](/docs/guides/authorization-scopes)
+- [Graceful shutdown](/docs/guides/graceful-shutdown)

@@ -21,6 +21,8 @@ A typical agent invocation chains several operations: the client calls the serve
 
 Kubernetes' default pod lifecycle is hostile to this. When you trigger a rolling deploy, the kubelet gives a pod 30 seconds to shut down gracefully before sending SIGKILL. If the app is still in an LLM call, the pod dies mid-request, and the client's stream breaks.
 
+For the scaling model behind these settings, see [scaling and reliability](/docs/production/scaling). Draining runs on shutdown is covered in [Graceful shutdown](/docs/guides/graceful-shutdown).
+
 `10xgraph build --k8s` generates a manifest that fixes this: it sets the termination grace period, pre-termination delay, and probe timeouts so that in-flight runs finish normally, even during deploys.
 
 ## Generate the manifest

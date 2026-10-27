@@ -11,14 +11,14 @@ faq:
   - q: Can I use OpenAI or Anthropic instead of Google?
     a: Yes. Change the model string and the provider argument, and install the matching extra. The graph, the tools and the API server stay the same.
   - q: Which Node.js version does the TypeScript client need?
-    a: Node.js 18 or newer. Install the client with npm and point TenxGraphClient at the baseUrl of your running 10xgraph api server.
+    a: Node.js 18 or newer. Install the client with npm and point TenxGraphClient at the baseUrl of your running 10xgraph dev server.
   - q: How do I authenticate the TypeScript client?
     a: Pass an auth option to the TenxGraphClient constructor, for example bearerAuth("your-token"). The client also exports basicAuth(username, password) and headerAuth(name, value).
   - q: Why does the second curl call remember the first one?
     a: Both calls send the same thread_id, and the compiled graph has a checkpointer. The checkpointer stores the conversation per thread, so the next call on that thread continues it.
 ---
 
-To build your first 10xGraph agent, install the packages, define a ReactAgent with two tools, run it from Python, serve it with `10xgraph api`, and call it with curl and the TypeScript client. This page takes you through all of it with one support agent.
+To build your first 10xGraph agent, install the packages, define a ReactAgent with two tools, run it from Python, serve it with `10xgraph dev`, and call it with curl and the TypeScript client. This page takes you through all of it with one support agent.
 
 You need Python 3.12 or newer and an API key for your chosen model provider (Google, OpenAI, or Anthropic).
 
@@ -228,7 +228,7 @@ You will create two Python files: one that defines the agent, and one that runs 
 4. **Start the API server**
 
    ```bash
-   10xgraph api
+   10xgraph dev --no-open
    ```
 
    Expected output:
@@ -237,7 +237,7 @@ You will create two Python files: one that defines the agent, and one that runs 
    INFO: Uvicorn running on http://127.0.0.1:8000
    ```
 
-   The server listens on `127.0.0.1:8000` by default. Use `--host 0.0.0.0` to accept connections from other machines and `--port` to use a different port. The server needs the same provider API key in its environment, so run it from the shell where you exported the key.
+   The server listens on `127.0.0.1:8000` by default. Without `--no-open`, `10xgraph dev` also opens the hosted playground, and it reloads when your files change. Use `--host 0.0.0.0` to accept connections from other machines and `--port` to use a different port. The server needs the same provider API key in its environment, so run it from the shell where you exported the key.
 
 5. **Call the agent over HTTP**
 
@@ -398,7 +398,7 @@ Omit `thread_id` from `config` to start a new thread. The server picks the id an
 
 <Callout type="note" title="InMemoryCheckpointer restarts with the server">
 
-`InMemoryCheckpointer` stores threads in the Python process and loses everything when the server stops. It is perfect for development and testing. For production or long-lived services, use a durable checkpointer like `SqliteCheckpointer` or `PgCheckpointer`. See [Memory: hot and cold](/docs/concepts/memory).
+`InMemoryCheckpointer` stores threads in the Python process and loses everything when the server stops. It is perfect for development and testing. For production or long-lived services, use a durable checkpointer like `SqliteCheckpointer` or `PgCheckpointer`. See [Set up checkpointing](/docs/guides/set-up-checkpointing).
 
 </Callout>
 
@@ -408,7 +408,18 @@ The `refund_order` tool moves money. If a run is interrupted and later resumed, 
 
 </Callout>
 
-## Next steps
+## Make it production ready
+
+The server you just ran is open: no auth, in-memory state. Close the gap before anyone else can reach it.
+
+<CardGrid>
+
+<LinkCard title="Security in five minutes" href="/docs/get-started/security-in-five-minutes" description="Turn on JWT, then watch the server refuse a missing token and a second user reading the first user's thread." eyebrow="Next" />
+<LinkCard title="Production readiness" href="/docs/production" description="What you get when you serve with 10xgraph-api, and what is still yours to configure." eyebrow="Production" />
+
+</CardGrid>
+
+## More to read
 
 You now have a working agent, API server, and TypeScript client. Here is what to read next:
 
@@ -418,7 +429,7 @@ You now have a working agent, API server, and TypeScript client. Here is what to
 <LinkCard title="Build a graph by hand" href="/docs/get-started/tutorial/build-a-graph" description="Create nodes and edges yourself to understand how ReactAgent works." eyebrow="Tutorial" />
 <LinkCard title="Create a client" href="/docs/client/create-client" description="Client configuration, authentication, and options." eyebrow="How-to" />
 <LinkCard title="Project structure" href="/docs/get-started/project-structure" description="What 10xgraph init generates for a production project." eyebrow="Get started" />
-<LinkCard title="Memory: hot and cold" href="/docs/concepts/memory" description="How to persist threads and choose a checkpointer." eyebrow="Concept" />
-<LinkCard title="Add JWT authentication" href="/docs/server/auth" description="Secure your API server before deploying." eyebrow="How-to" />
+<LinkCard title="Long-term memory" href="/docs/concepts/memory-and-store" description="Remember facts across conversations with the memory store." eyebrow="Concept" />
+<LinkCard title="Authentication reference" href="/docs/server/auth" description="JWT options, custom auth and scopes." eyebrow="How-to" />
 
 </CardGrid>

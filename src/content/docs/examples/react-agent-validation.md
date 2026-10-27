@@ -4,7 +4,7 @@ description: Reject unsafe or off-policy user messages before they reach the mod
 section: Examples
 group: "Foundations"
 order: 60
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: When do input validators run?
     a: They run once per invoke, on the new messages you pass in, before those messages are added to the thread state and before any node executes.
@@ -16,7 +16,7 @@ faq:
 
 This example adds input validation to a ReAct agent. You register validators on a `CallbackManager`, pass it to `graph.compile`, and every new user message is checked before the model sees it. A rejected message raises `ValidationError`. You combine two built-in validators with one custom business-policy validator.
 
-The source lives in [`examples/react/react_sync_validation.py`](https://github.com/10xGraph/10xGraph/blob/main/examples/react/react_sync_validation.py) (in a monorepo checkout: `agentflow/examples/react/`). The page below reworks it into a self-contained script with a working tool and a test section.
+The source lives in [`examples/react/react_sync_validation.py`](https://github.com/10xGraph/10xGraph/blob/main/examples/react/react_sync_validation.py) (in a clone of the repository: `examples/react/`). The page below reworks it into a self-contained script with a working tool and a test section.
 
 ## Install and run the example
 

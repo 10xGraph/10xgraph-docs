@@ -1,10 +1,11 @@
 ---
-title: How PgCheckpointer works
+title: "Hot and cold state: how PgCheckpointer stores threads"
+label: Checkpointer internals
 description: The internal mechanisms of PgCheckpointer's two-layer storage model, the write path, read path, and optimistic concurrency control for thread state.
 section: Concepts
 order: 110
 group: "Memory and reliability"
-updated: 2026-10-08T00:00:00.000Z
+updated: "2026-10-27"
 faq:
   - q: What happens when the Redis cache expires or Redis restarts?
     a: Nothing is lost. PostgreSQL holds the authoritative state, so the next read misses the cache, loads the latest version from PostgreSQL and writes it back to Redis. The cache TTL defaults to 86400 seconds (24 hours).
@@ -15,6 +16,8 @@ faq:
 ---
 
 `PgCheckpointer` implements a two-layer storage model: a **durable layer** in PostgreSQL with full versioned history, and a **hot cache layer** in Redis with TTL-controlled entries. Understanding how state flows through these layers is essential for production deployment and debugging concurrency issues.
+
+> This page is about thread state (the checkpointer). For facts that last across threads, see [Long-term memory](/docs/concepts/memory-and-store). For how threads and checkpointers work from the outside, see [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
 
 ## The two-layer model
 

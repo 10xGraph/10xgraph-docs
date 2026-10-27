@@ -5,7 +5,7 @@ section: Examples
 group: "Use cases"
 order: 260
 label: Research
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Does this example need an API key besides Anthropic?"
     a: "Yes. The web_search tool calls the Tavily API, so you need a TAVILY_API_KEY in the environment. The Anthropic key is read from ANTHROPIC_API_KEY."
@@ -22,14 +22,14 @@ The agent receives a question, searches the web with the Tavily API, reads promi
 | Part | Role |
 |---|---|
 | `web_search` tool | Calls Tavily and returns numbered sources with title, URL and snippet |
-| `fetch_url` tool | Downloads a page, strips HTML and returns up to 20,000 characters |
+| `fetch_url` tool | The prebuilt tool: downloads a public page, strips HTML and returns up to 20,000 characters as JSON |
 | `MAIN` node | An `Agent` that plans subqueries, calls tools and writes the answer |
 | `TOOL` node | A `ToolNode` that runs the tool calls |
 | `validate_citations` | A post-run check, outside the graph, that counts uncited sentences |
 
 ## Run the example
 
-This page is a self-contained walkthrough: copy the code below into one file named `graph.py`. There is no matching folder in `agentflow/examples`. The code needs the Anthropic extra, `httpx` and a Tavily key.
+This page is a self-contained walkthrough: copy the code below into one file named `graph.py`. There is no matching folder in `examples/`. The code needs the Anthropic extra, `httpx` and a Tavily key.
 
 ```bash
 pip install "10xgraph[anthropic]" httpx
@@ -65,16 +65,16 @@ The code lives in one file in three parts: the tools, the graph, and the citatio
 
 ### Tools: search and fetch
 
-The two tools give the model web access and number every search hit so it can cite it. Put them at the top of `graph.py`.
+The model gets two tools: `web_search`, which you write and which numbers every search hit so the model can cite it, and the prebuilt `fetch_url`, which reads a page. Put this at the top of `graph.py`.
 
 ```python title="graph.py (part 1: tools)"
 import os
 import re
 import httpx
-from html.parser import HTMLParser
 from tenxgraph.core.graph import Agent, StateGraph, ToolNode
 from tenxgraph.core.state.agent_state import AgentState
 from tenxgraph.core.state.message import Message
+from tenxgraph.prebuilt.tools import fetch_url
 from tenxgraph.utils.constants import END
 
 # Load the Tavily key from the environment (the Anthropic key is read by 10xGraph)
@@ -117,48 +117,13 @@ def web_search(query: str, max_results: int = 5) -> str:
         output.append(f"[source-{i}] {title}\n{url}\n{content}")
     
     return "\n\n".join(output)
-
-def strip_html_tags(text: str) -> str:
-    """Simple HTML tag stripper for fetched pages."""
-    class MLStripper(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.reset()
-            self.fed = []
-        def handle_data(self, data):
-            self.fed.append(data)
-        def get_data(self):
-            return ''.join(self.fed)
-    
-    stripper = MLStripper()
-    try:
-        stripper.feed(text)
-        return stripper.get_data()
-    except Exception:
-        return text
-
-def fetch_url(url: str) -> str:
-    """Fetch the full text of a URL. Call after web_search to read promising sources."""
-    if not url.strip():
-        return "No URL provided."
-    
-    try:
-        response = httpx.get(url, timeout=15.0, follow_redirects=True)
-        response.raise_for_status()
-        text = response.text
-        text = strip_html_tags(text)
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text[:20_000]  # Cap at 20k chars to keep context manageable
-    except Exception as e:
-        return f"Error fetching {url}: {e}"
 ```
 
 **Notes on the tools:**
 
 - **Source IDs in output:** `[source-1]`, `[source-2]` are tags that the agent cites in the final answer. A module-level counter keeps them unique when the agent searches more than once.
 - **web_search:** Calls Tavily API. Errors come back as text so the agent can see them. Check the current Tavily API reference for the request format (this code sends the key as `api_key` in the JSON body) and adjust if it has changed.
-- **fetch_url:** Strips HTML, limits to 20k characters (a 1 MB page eats context), and includes error messages.
-- **HTML stripping:** A simple parser removes tags; for production, use `trafilatura` or `readability-lxml`.
+- **fetch_url:** Imported from `tenxgraph.prebuilt.tools`, not hand-written. It accepts only http and https, rejects private, loopback and link-local addresses, checks every redirect hop (at most 5), connects to the address it checked, strips HTML and limits output to 20,000 characters. Errors come back as a JSON object with an `error` key. Do not replace it with a plain `httpx.get(url, follow_redirects=True)` tool: a model-chosen URL (or a redirect) could then reach internal services such as a cloud metadata endpoint.
 
 ### The agent
 

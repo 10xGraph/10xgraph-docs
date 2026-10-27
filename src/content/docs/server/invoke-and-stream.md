@@ -214,7 +214,7 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
   }'
 ```
 
-The graph now sees all previous messages in the thread, so it can answer contextually. The checkpointer (configured in `10xgraph.json`) stores the thread state durably.
+The graph now sees all previous messages in the thread, so it can answer contextually. The checkpointer (passed to `graph.compile(checkpointer=...)` in your graph code) stores the thread state durably.
 
 By default (`runs.thread_ids` is `"server"`), a `thread_id` that does not exist answers `403`, the same as an id another user owns. Do not invent an id for a new conversation. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 

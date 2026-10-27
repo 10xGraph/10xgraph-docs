@@ -52,7 +52,7 @@ WebSocket handshakes bypass the HTTP rate-limit and request-size middleware (Sta
 | Protection | Config key | Default | Behavior |
 |---|---|---|---|
 | Global rate limit | `rate_limit` | per your config | A handshake counts against the same bucket as REST requests. |
-| Concurrent connections per process | `websocket.max_connections` | `1000` | Shared across `/v1/graph/live` and `/v1/graph/ws`. |
+| Concurrent connections | `websocket.max_connections` | `1000` | Shared across `/v1/graph/live` and `/v1/graph/ws`. |
 | Concurrent connections per user | `websocket.max_connections_per_user` | `10` | Limits how many slots one verified user can hold. |
 
 ```json
@@ -66,7 +66,7 @@ WebSocket handshakes bypass the HTTP rate-limit and request-size middleware (Sta
 }
 ```
 
-A missing key gets the default above. Set a key to `0` or `null` for unlimited. The counters are per process, like the in-memory rate-limit backend, so size them per worker. `realtime_models` is covered under the init frame.
+A missing key gets the default above. Set a key to `0` or `null` for unlimited. The counters are shared by all workers when Redis is configured (`redis` key or `REDIS_URL`) and per process otherwise, so without Redis size them per worker. `realtime_models` is covered under the init frame.
 
 ---
 

@@ -6,7 +6,7 @@ section: Examples
 group: "Tools and MCP"
 order: 140
 label: Dependency Injection
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Do I need to install InjectQ separately?
     a: No. 10xgraph depends on injectq, so installing 10xgraph brings it in. You import Inject and InjectQ from injectq in your own code.
@@ -20,7 +20,7 @@ This example builds a small ReAct-style graph where a main node and a tool funct
 
 ## How to run the example
 
-The example lives in `agentflow/examples/react-injection/react_di.py` in the 10xGraph repository. The main node returns scripted messages instead of calling a model, so it runs offline. It imports `python-dotenv` and `injectq`, both of which are dependencies of `10xgraph`.
+The example lives in `examples/react-injection/react_di.py` in the 10xGraph repository. The main node returns scripted messages instead of calling a model, so it runs offline. It imports `python-dotenv` and `injectq`, both of which are dependencies of `10xgraph`.
 
 ```bash
 # Install 10xGraph (add a provider extra such as google-genai if you extend the example with a real model)
@@ -54,7 +54,7 @@ For the reasoning behind DI and the full list of injectable parameters, see [Dep
 
 The example gets the singleton `InjectQ` container and binds an instance of a small custom class. Any value you bind this way can later be requested with `Inject[...]`.
 
-```python title="agentflow/examples/react-injection/react_di.py"
+```python title="examples/react-injection/react_di.py"
 from injectq import Inject, InjectQ
 
 
@@ -78,7 +78,7 @@ The container is connected to the graph with `StateGraph(container=container)`, 
 
 A tool function mixes runtime parameters with injected services. The graph supplies `location`, `tool_call_id`, `state` and `config`; the container supplies `checkpointer` and `a`. Parameters with an `Inject[...]` default are not part of the schema sent to the model.
 
-```python title="agentflow/examples/react-injection/react_di.py"
+```python title="examples/react-injection/react_di.py"
 def get_weather(
     location: str,
     tool_call_id: str,
@@ -109,7 +109,7 @@ tool_node = ToolNode([get_weather])
 
 A node declares injected services the same way. The main node asks for the callback manager, the checkpointer and the store, and also reads values straight from the container. The store is typed `BaseStore | None` because no store is configured in this example.
 
-```python title="agentflow/examples/react-injection/react_di.py"
+```python title="examples/react-injection/react_di.py"
 async def main_agent(
     state: AgentState,
     config: dict,
@@ -163,7 +163,7 @@ Typical uses for injected node services are audit logging, callback orchestratio
 
 A routing function decides whether the loop calls the tool or ends. It sends the run to `TOOL` when the last message is an assistant message with tool calls, and to `END` otherwise.
 
-```python title="agentflow/examples/react-injection/react_di.py"
+```python title="examples/react-injection/react_di.py"
 def should_use_tools(state: AgentState) -> str:
     """Determine if we should use tools or end the conversation."""
     if not state.context:
@@ -183,7 +183,7 @@ def should_use_tools(state: AgentState) -> str:
 
 The graph is a standard ReAct loop. Passing `container=container` to `StateGraph` is what makes your bindings available during execution, and compiling with a checkpointer lets nodes and tools request it with `Inject[InMemoryCheckpointer]`.
 
-```python title="agentflow/examples/react-injection/react_di.py"
+```python title="examples/react-injection/react_di.py"
 graph = StateGraph(container=container)
 graph.add_node("MAIN", main_agent)
 graph.add_node("TOOL", tool_node)
@@ -205,7 +205,7 @@ for m in res["messages"]:
 
 The imports the file needs at the top are:
 
-```python title="agentflow/examples/react-injection/react_di.py"
+```python title="examples/react-injection/react_di.py"
 from injectq import Inject, InjectQ
 
 from tenxgraph.core.graph import StateGraph, ToolNode

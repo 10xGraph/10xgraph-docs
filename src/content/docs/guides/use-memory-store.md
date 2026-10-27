@@ -570,6 +570,10 @@ Map your use case to a memory type:
 
 ---
 
+## Run it in production
+
+Pass the store the server should use through the `store` key in `10xgraph.json`. Scope every memory to the authenticated `user_id`: an empty `user_id` raises `ValueError`, and the reserved `system_user_id` namespaces are for your own shared data. See [Configure the server](/docs/server/configure) and the [Security model](/docs/production/security-model).
+
 ## Next steps
 
 - [Set up checkpointing](/docs/guides/set-up-checkpointing) to persist conversation history across threads.

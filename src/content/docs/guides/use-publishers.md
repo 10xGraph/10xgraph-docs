@@ -398,3 +398,7 @@ For OpenTelemetry-based tracing to Logfire, LangSmith, or other backends, see [S
 - `RedisPublisher` supports Pub/Sub (live subscribers) and Streams (durable log).
 - `CompositePublisher` sends events to multiple transports simultaneously.
 - Every event has a source, phase, node name, and structured data for downstream processing.
+
+## Run it in production
+
+Publishers carry run events to Kafka, Redis, RabbitMQ or OTEL outside the request path. Use TLS to the broker, and set `observability.user_id_mode` if user IDs should be hashed or masked. See [Observability](/docs/server/observability) and [Scaling and reliability](/docs/production/scaling).

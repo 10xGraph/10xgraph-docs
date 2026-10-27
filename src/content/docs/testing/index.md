@@ -5,7 +5,7 @@ description: "Build confidence in agent behavior: unit test graph logic with Tes
 section: "Testing and evaluation"
 order: 10
 label: Overview
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "When should I unit test vs evaluate?"
     a: "Unit test when you want fast feedback on routing and graph logic with no LLM costs. Evaluate when you need to measure response quality and catch regressions in real behavior. Use both in CI."
@@ -26,6 +26,8 @@ Begin with [unit tests](/docs/testing/unit-tests): they show you `TestAgent`, `Q
 Then move to [evaluation](/docs/testing/evaluation) for scored runs against real or staged models. [Eval sets](/docs/testing/eval-sets) define the test cases and expected tool sequences. [Criteria](/docs/testing/criteria) describes what can be scored (tool accuracy, response quality, hallucination, safety, and more). [Presets](/docs/testing/presets) give ready-made criterion configurations to speed up setup. [Reports](/docs/testing/reports) explains the HTML, JSON, and JUnit output formats.
 
 For conversational agents, [user simulation](/docs/testing/user-simulation) lets a model play the user and drives realistic multi-turn interactions. Integration with pytest is in [evals in pytest](/docs/testing/evals-in-pytest), which runs evals as part of your test suite via helpers like `eval_test` and `run_eval`.
+
+Before you launch, follow [Test before production](/docs/testing/before-production): it adds `10xgraph audit`, a startup check in production mode, and curl smoke tests for auth (`401`), thread isolation (`403`) and rate limits (`429`).
 
 Wiring both layers into CI pipelines is covered in [run tests](/docs/testing/run-tests) and [run evaluations](/docs/testing/run-evals).
 
@@ -88,6 +90,7 @@ If you are new to testing agents, start here:
 4. [Eval sets](/docs/testing/eval-sets): define test cases
 5. [Criteria](/docs/testing/criteria): understand scoring
 6. [Run evaluations](/docs/testing/run-evals): automate evaluations in CI
+7. [Test before production](/docs/testing/before-production): gates and smoke tests before launch
 
 Then explore deeper topics like [presets](/docs/testing/presets), [user simulation](/docs/testing/user-simulation), and [evals in pytest](/docs/testing/evals-in-pytest) as your needs grow.
 

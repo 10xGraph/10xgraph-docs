@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 160
 label: "@tool decorator"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The `@tool` decorator marks a Python function as an agent tool and attaches metadata that 10xGraph uses to build the schema the LLM sees, control tool visibility across agents, and inject context at runtime. Every tool is a regular Python function; the decorator adds no runtime behavior, only metadata that the `ToolNode` reads at schema-generation time.
@@ -431,6 +431,10 @@ This tool:
 - Errors in tools are caught and reported to the LLM, which can retry or adjust its approach.
 - Tools can be sync or async; async is preferred for I/O operations.
 - Tags allow fine-grained control over which tools each agent can call.
+
+## Run it in production
+
+The model sees only a generic failure message when a tool raises, with a reference ID that matches the full error in the server log; return a string if the model should read the message. Tools run in parallel up to a cap of 10 by default. See [Errors and limits](/docs/concepts/errors-and-limits) and [Production readiness](/docs/production).
 
 ## Next steps
 

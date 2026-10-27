@@ -368,7 +368,6 @@ app = agent.compile()
   "agent": "graph:app",
   "env": ".env",
   "auth": null,
-  "checkpointer": null,
   "injectq": null,
   "store": null,
   "redis": null,
@@ -386,13 +385,13 @@ GOOGLE_API_KEY=AIza...
 **Launch the playground** to test interactively:
 
 ```bash
-10xgraph play
+10xgraph dev
 ```
 
 **Launch the API server** to serve the agent over HTTP:
 
 ```bash
-10xgraph api
+10xgraph dev --no-open
 ```
 
 The server opens Swagger docs at `http://localhost:8000/docs` with full route reference.
@@ -461,6 +460,10 @@ result = await app.ainvoke(
 ```
 
 ---
+
+## Run it in production
+
+`max_iterations` counts one turn and resets when the next turn starts, so cost per request stays bounded on a long-lived thread. Serve it with a durable checkpointer passed to `compile()`. See [Errors and limits](/docs/concepts/errors-and-limits) and [Scaling and reliability](/docs/production/scaling).
 
 ## See also
 

@@ -241,7 +241,7 @@ If you see these errors, here are the fixes:
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `TypeError: Failed to fetch` | Server not running | Start it with `10xgraph api` |
+| `TypeError: Failed to fetch` | Server not running | Start it with `10xgraph dev` |
 | `TenxGraphError 401` | Token invalid or missing | Check `API_TOKEN` env var |
 | Empty messages array | Agent has no output | Check the agent code for issues |
 

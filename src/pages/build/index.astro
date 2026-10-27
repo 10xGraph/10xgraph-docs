@@ -5,7 +5,7 @@ import { absolute, buildHref, getBuilds } from '../../lib/content';
 import '../../styles/build.css';
 
 const builds = await getBuilds();
-const description = 'Step-by-step 10xGraph guides that end with something running: a production ReAct agent with auth, memory, tests and Docker, and more.';
+const description = 'Four step-by-step 10xGraph guides that end with something running: a production agent, multi-user isolation, human approval for refunds, and a Kubernetes deploy.';
 const jsonLd = [
   {
     '@context': 'https://schema.org',
@@ -22,7 +22,7 @@ const jsonLd = [
     <header class="build-index-head">
       <p class="build-kicker">Build</p>
       <h1>Pick a result. Build it end to end.</h1>
-      <p>Each guide starts in an empty folder and ends with something running. Every card tells you how long it takes and exactly what you will have. For how things work underneath, the <a href="/docs">docs</a> go deeper.</p>
+      <p>You write the agent. These four guides show what serving it looks like: auth, isolation between users, human approval, and a deploy. Each starts in an empty folder, shows real requests and responses, and says what was run and what was not. For how things work underneath, the <a href="/docs">docs</a> go deeper.</p>
     </header>
 
     <section aria-label="About build guides" class="build-index-head">

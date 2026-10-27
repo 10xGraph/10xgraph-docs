@@ -6,7 +6,7 @@ description: Migration guide from 10xGraph 0.8 and 0.9 to 1.0, covering the four
 section: Project
 order: 20
 label: Upgrade to 1.0
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 1.0 is the first release covered by our deprecation policy. It contains four breaking changes and
@@ -156,7 +156,7 @@ concurrent workers cannot race the DDL.
 pg_dump "$DATABASE_URL" > 10xgraph-pre-1.0.sql
 
 # Migrations apply on first startup of the upgraded server.
-10xgraph api --no-reload
+10xgraph dev --no-reload
 ```
 
 Roll out one instance first and confirm the schema version before scaling up.

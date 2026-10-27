@@ -5,7 +5,7 @@ section: Examples
 group: "Foundations"
 order: 70
 label: Google GenAI Adapter
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "When should I use GoogleGenAIConverter instead of Agent?"
     a: "Use it when you call the google-genai SDK yourself, outside a StateGraph or in a custom node, and still want 10xGraph Message objects. Inside a graph, the Agent class handles the conversion for you."
@@ -13,7 +13,7 @@ faq:
     a: "Yes. convert_streaming_response yields Message objects with delta set to True for each chunk, followed by a final assembled message with delta set to False."
 ---
 
-`GoogleGenAIConverter` turns raw google-genai SDK responses into 10xGraph `Message` objects, so you can call Gemini directly and still work with one message format. This walkthrough covers a standard response, a streamed response, and function calling, using the example at `agentflow/examples/google_genai_example.py` in the [10xGraph repository](https://github.com/10xGraph/10xGraph).
+`GoogleGenAIConverter` turns raw google-genai SDK responses into 10xGraph `Message` objects, so you can call Gemini directly and still work with one message format. This walkthrough covers a standard response, a streamed response, and function calling, using the example at `examples/google_genai_example.py` in the [10xGraph repository](https://github.com/10xGraph/10xGraph).
 
 ## Prerequisites
 

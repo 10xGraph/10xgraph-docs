@@ -1,13 +1,13 @@
 ---
 title: Introduction
 seoTitle: 10xGraph documentation and introduction
-description: "10xGraph is an open-source Python framework for production multi-agent AI: a core library, an API server and CLI, and a TypeScript client."
+description: "10xGraph (formerly Agentflow) is an open-source Python framework for production multi-agent AI: a core library, an API server and CLI, and a TypeScript client."
 section: "Get started"
 order: 0
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Is 10xGraph production-ready?"
-    a: "10xGraph is pre-1.0, so pin versions and read the changelog before each upgrade. The production layer (API server, JWT or custom auth, rate limits, replay-safe tools, Docker and Kubernetes files) ships as the `10xgraph-api` package alongside the core library."
+    a: "The production layer ships today in the `10xgraph-api` package: an API server with JWT or custom auth, owner-only thread access, rate limits, durable checkpointing with Postgres or SQLite, replay-safe tools, and Docker and Kubernetes files from `10xgraph build`. Some of it you must configure: with `auth` unset the server runs open, even with `MODE=production`. 10xGraph is pre-1.0, so pin exact versions and read the changelog before each upgrade. See Production readiness for what is covered and what is not."
   - q: "Do I need LangChain to use 10xGraph?"
     a: "No. 10xGraph has no LangChain dependency. You build graphs with its own StateGraph and Agent classes and call model providers through its own interface."
   - q: "Which models does 10xGraph support?"
@@ -16,19 +16,23 @@ faq:
     a: "Yes. 10xGraph is MIT licensed and self-hosted, with no hosted platform required. The `10xgraph build` command writes a Dockerfile and, with flags, a docker-compose.yml and a Kubernetes manifest so you can run it on your own infrastructure."
 ---
 
-10xGraph is an open-source Python framework for production multi-agent AI. You build agents and graphs in Python; 10xGraph generates a production server that handles authentication, scoped access control, durable state, replay-safe tools, and deployment to Docker or Kubernetes. It has three packages: a core library, an API server and CLI, and a TypeScript client.
+You build the agent. Served with `10xgraph-api`, it gets authentication, per-user thread isolation, rate limits, durable state, replay-safe tools and Docker and Kubernetes deploy files, without you writing that layer. 10xGraph (formerly Agentflow) is an open-source Python framework for production multi-agent AI.
+
+## Your path
+
+1. [Quickstart](/docs/get-started/first-agent): build an agent and serve it in ten minutes.
+2. [Production readiness](/docs/production): what you get when you serve with `10xgraph-api`.
+3. [Security model](/docs/production/security-model): who can do what, and where each check runs.
+4. [Production checklist](/docs/server/production-checklist): the settings to confirm before you deploy.
+5. [Build a production agent end to end](/build/production-react-agent): a support agent served with JWT auth, rate limits, Postgres memory, tests and Docker files.
 
 ## The three packages
 
-10xGraph ships as three packages that work together or standalone.
+They work together or standalone.
 
-**Core library** (`10xgraph`, import `tenxgraph`) is the foundation. You use `StateGraph` to define a graph of agents and nodes, `ReactAgent` for the standard tool-calling loop, and custom nodes for control flow, human approval, or data transformation. Tools are ordinary Python functions. Models come from OpenAI, Google Gemini, or Anthropic. The library handles state management, checkpointing to memory, SQLite or Postgres, tool replay on failure, streaming, MCP servers, and dependency injection. Its required dependencies are small (InjectQ, Pydantic, Pillow, PyYAML and python-dotenv), and you add the provider SDK you choose as an extra, such as `10xgraph[openai]`. You can run your agent entirely within Python with no server.
-
-**API server and CLI** (`10xgraph-api`, import `tenxgraph_api`, command `10xgraph`) wraps your graph in a FastAPI server. You point `10xgraph.json` at your compiled graph, and the server auto-generates REST and WebSocket endpoints, Swagger UI, authentication, rate limits, thread and memory management, file uploads, and observability hooks. The `10xgraph` CLI scaffolds a new project, runs the server in development or production, serves the built-in playground, tests your agent, evaluates against test sets, and generates Docker and Kubernetes files. Running `10xgraph api` starts the server on port 8000.
-
-**TypeScript client** (`10xgraph-client`) is a typed SDK for Node.js and browsers. It handles authentication, invokes the graph over REST or WebSocket, streams responses, manages threads and memory, uploads files, and abstracts the transport. It works with Next.js, React, plain TypeScript and Node backends. You can also call the server with plain HTTP or curl.
-
-All three are optional. You can use the library standalone (no server), the server without the client (curl is fine), or the client with any compatible API.
+- **Core library** (`10xgraph`, import `tenxgraph`): `StateGraph`, `ReactAgent` and other prebuilt agents, tools as plain Python functions, state, checkpointing to memory, SQLite or Postgres, tool replay on failure, streaming, MCP and dependency injection. Add one provider extra such as `10xgraph[openai]`. You can run an agent from Python with no server.
+- **API server and CLI** (`10xgraph-api`, import `tenxgraph_api`, command `10xgraph`): you point `10xgraph.json` at your compiled graph, and it serves REST and WebSocket endpoints with auth, authorization, rate limits, threads, memory, files and observability. `10xgraph dev` runs it locally; production runs Gunicorn in the image from `10xgraph build`.
+- **TypeScript client** (`10xgraph-client`): a typed SDK for Node.js and browsers covering invoke, stream, threads, memory and files. Plain HTTP or curl works too.
 
 ## Get started
 
@@ -53,6 +57,8 @@ Navigate by the question you want to answer.
 **[Get Started](/docs/get-started).** Installation, your first agent, the production template, and how to migrate from Agentflow. Read this first.
 
 **[Concepts](/docs/concepts).** The mental model: graphs, state, messages, agents, tools, threads, checkpointers, memory, context, interrupts, streaming, serving and events. Understand how 10xGraph works.
+
+**[Production](/docs/production).** What the server gives you and how it works: the security model, architecture, scaling and reliability, and what 10xGraph does not protect. Read this to decide whether to trust it.
 
 **[Build Agents](/docs/guides).** How-to guides for building: custom graphs, prebuilt agents, tools, MCP, state, dependency injection, memory, context, multi-agent orchestration, streaming, media, authentication, interrupts, testing and observability. Each guide is a complete recipe with code.
 

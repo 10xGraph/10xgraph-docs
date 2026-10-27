@@ -35,7 +35,7 @@ MODE=production
 ### At the process level
 
 ```bash
-MODE=production 10xgraph api --no-reload
+MODE=production 10xgraph dev --no-reload
 ```
 
 ---
@@ -52,7 +52,7 @@ MODE=production 10xgraph api --no-reload
 | `IS_DEBUG` | `true` | Enable debug mode. Set `false` in production; leaving it on logs a startup warning. |
 | `SUMMARY` | `10xGraph Backend` | One-line service summary shown in the OpenAPI schema |
 | `LOGGER_NAME` | `10xgraph-api` | Name of the root logger the server writes under. Read at import time, so it must be a process environment variable; setting it in `.env` is too late. |
-| `GRAPH_PATH` | `10xgraph.json` | Path to the config file the ASGI app loads. `10xgraph api --config` sets this for you; set it directly when running the app under an external server such as Gunicorn or Uvicorn. |
+| `GRAPH_PATH` | `10xgraph.json` | Path to the config file the ASGI app loads. `10xgraph dev --config` sets this for you; set it directly when running the app under an external server such as Gunicorn or Uvicorn. |
 
 The settings model allows extra variables, so unknown names in the environment are tolerated rather than rejected.
 
@@ -255,7 +255,7 @@ REDOCS_PATH=
 | --- | --- | --- |
 | `WEB_CONCURRENCY` | Unset (`2` in the generated Dockerfile) | Number of Gunicorn workers. Gunicorn reads this variable natively; without it Gunicorn runs one worker. The Dockerfile from `10xgraph build` sets `ENV WEB_CONCURRENCY=2`; override it at deploy time, for example `docker run -e WEB_CONCURRENCY=8 ...`. |
 
-Only Gunicorn reads this variable, for example when started as `gunicorn -k uvicorn.workers.UvicornWorker tenxgraph_api.src.app.main:app`. The development server (`10xgraph api`) does not use it.
+Only Gunicorn reads this variable, for example when started as `gunicorn -k uvicorn_worker.UvicornWorker tenxgraph_api.src.app.main:app`. The development server (`10xgraph dev`) does not use it.
 
 ---
 

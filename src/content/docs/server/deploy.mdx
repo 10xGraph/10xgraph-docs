@@ -18,6 +18,8 @@ group: "Operate"
 
 `10xgraph build` generates a production-ready `Dockerfile` and `.dockerignore` for your agent, and with flags also a `docker-compose.yml` and a `k8s.yaml` manifest. The images run Gunicorn with Uvicorn workers in `MODE=production`. This guide covers building, configuring, and shipping your deployment with a release checklist.
 
+The image and manifests implement the behavior described in [scaling and reliability](/docs/production/scaling). Draining runs on shutdown is covered in [Graceful shutdown](/docs/guides/graceful-shutdown).
+
 <Steps>
 
 1. **Generate the deployment files**
@@ -178,7 +180,7 @@ Before building, decide whether you need persistence, multiple instances, and pu
 
 ```mermaid
 flowchart TD
-    A[Do you need public or team access?] -->|No| B[Stay local with 10xgraph api/play]
+    A[Do you need public or team access?] -->|No| B[Stay local with 10xgraph dev]
     A -->|Yes| C[Do you need persistence?]
     C -->|No| D[Single-instance simple deployment]
     C -->|Yes| E[Shared durable checkpointer]
@@ -187,9 +189,9 @@ flowchart TD
     F -->|Yes| H[Load balanced multi-instance deployment]
 ```
 
-For local development, `10xgraph api` and `10xgraph play` are sufficient. For shared or production use:
+For local development, `10xgraph dev` is sufficient. For shared or production use:
 
-- **Persistence required:** Set a durable checkpointer (for example `PgCheckpointer`), either in your graph code or with the `checkpointer` key in `10xgraph.json`. In-memory checkpointing loses all threads on restart.
+- **Persistence required:** Set a durable checkpointer (for example `PgCheckpointer`), by passing it to `graph.compile(checkpointer=...)` in your graph code (the `checkpointer` key in `10xgraph.json` is not read). In-memory checkpointing loses all threads on restart.
 - **Multiple instances:** Use a shared durable checkpointer and a shared store (if using long-term memory). Each instance must access the same database backend.
 - **Rate limiting across instances:** Use the `redis` rate-limit backend (the memory backend counts per process and is not shared).
 

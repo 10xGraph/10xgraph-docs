@@ -252,6 +252,10 @@ Prebuilt agents are opinionated. If you need:
 
 then read the agent's page for its graph layout, and move to a custom `StateGraph`. You get the same execution runtime, checkpointing, and streaming tools; you just define the nodes and edges yourself. See [Build a graph](/docs/guides/build-a-graph) for the pattern.
 
+## Run it in production
+
+Every prebuilt agent compiles to an ordinary graph, so `10xgraph dev` serves it with no extra code. Pass a durable checkpointer to `compile()` and turn on auth before exposing it. See [Production readiness](/docs/production) and the [production checklist](/docs/server/production-checklist).
+
 ## Next steps
 
 - Pick an agent from the table above and read its detailed guide.

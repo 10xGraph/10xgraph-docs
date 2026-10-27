@@ -17,7 +17,7 @@ faq:
 
 A RAG (retrieval-augmented generation) agent answers questions from your own documents: it searches a knowledge base, optionally reranks the hits, and passes the best ones to an LLM as context. `RAGAgent` is a prebuilt graph that does this, so you supply a store and an `Agent`.
 
-The runnable demo is based on `agentflow/examples/rag/rag_example.py` in the repository. This page adapts it, then shows how to move to Qdrant and add reranking.
+The runnable demo is based on `examples/rag/rag_example.py` in the repository. This page adapts it, then shows how to move to Qdrant and add reranking.
 
 ## When to use RAGAgent
 

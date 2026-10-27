@@ -21,7 +21,7 @@ In this step you call the agent server from step 4 with the TypeScript client. Y
 
 You need the server from [Serve and inspect](/docs/get-started/tutorial/serve-and-inspect) running, and Node.js 18 or later (the client uses the built-in `fetch`).
 
-- The API server is started with `10xgraph api --host 127.0.0.1 --port 8000`, from the folder that holds `10xgraph.json`.
+- The API server is started with `10xgraph dev --no-open --host 127.0.0.1 --port 8000`, from the folder that holds `10xgraph.json`.
 - The graph has a weather tool and a checkpointer, as built in the previous steps.
 - The server is reachable at `http://127.0.0.1:8000`.
 
@@ -306,7 +306,7 @@ npx tsx verify.ts
 
 ### Common errors
 
-- **`fetch failed` or connection refused:** the server is not running or `baseUrl` is wrong. Check `10xgraph api` is up on the same host and port.
+- **`fetch failed` or connection refused:** the server is not running or `baseUrl` is wrong. Check `10xgraph dev` is up on the same host and port.
 - **HTTP 401 or 403:** the server requires auth. Pass `authToken` as shown above.
 - **CORS error in a browser:** the server must allow your page's origin through the `ORIGINS` environment variable. See the [production checklist](/docs/server/production-checklist).
 - **`Request timeout after 300000ms`:** the run took longer than `timeout`. Raise `timeout` or use `stream()`.

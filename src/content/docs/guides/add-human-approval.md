@@ -468,6 +468,10 @@ Verify that `interrupt()` is called. If the node completes without calling it, t
 
 Ensure you pass the `resume` key in the next invocation. The value must match the `response_schema` if one is defined. Check the error response: a 422 means the answer failed the schema, and a 409 means `interrupt_id` did not match the open interrupt or the thread is not paused. In Python, these are `ResumeValidationError` and `InterruptMismatchError`.
 
+## Run it in production
+
+Under `10xgraph dev` the pause surfaces as an interrupt in the HTTP response, and the client resumes by posting to the same thread, optionally with the `interrupt_id` it is answering so a stale or retried request cannot answer the next prompt. Use a durable checkpointer such as `PgCheckpointer`, passed to `compile()`, so a pending approval survives a restart. See [Pause and resume over the API](/docs/server/invoke-and-stream#human-in-the-loop-pause-and-resume) and [Scaling and reliability](/docs/production/scaling).
+
 ## See also
 
 - [Concepts: Interrupts](/docs/concepts/interrupts): detailed explanation of interrupt mechanisms

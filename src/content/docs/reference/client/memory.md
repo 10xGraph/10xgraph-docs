@@ -1,7 +1,7 @@
 ---
 title: Memory
 seoTitle: Memory store methods in the TypeScript client
-description: 'Reference for memory store methods in the 10xGraph TypeScript client: store, search, retrieve, update and delete memories with type-based filtering and vector similarity.'
+description: "Reference for memory store methods in the 10xGraph TypeScript client: store, search, retrieve, update and delete memories, with type filtering and vector similarity."
 section: Reference
 group: TypeScript client
 order: 530
@@ -133,7 +133,7 @@ for (const result of response.data.results) {
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `query` | `string` | - | The search query. Converted to a vector embedding by the store backend. |
+| `query` | `string` | - | The search query, at most 8,000 characters. Converted to a vector embedding by the store backend. |
 | `memory_type` | `MemoryType` | `EPISODIC` | Filter by memory type. |
 | `category` | `string` | `''` | Filter by category. Empty string returns all categories. |
 | `limit` | `number` | `10` | Maximum number of results to return. |
@@ -397,7 +397,7 @@ Failed requests from every method except `forgetMemories()` throw `TenxGraphErro
 | Error | Cause | Fix |
 |---|---|---|
 | status `404` | Memory not found (wrong ID or already deleted). | Check the ID returned by `storeMemory()`. |
-| status `422` | `searchMemory()` was called with an empty `query`. | Pass a non-empty query string. |
+| status `422` | `searchMemory()` was called with an empty `query`, a `query` over 8,000 characters, `limit` outside 1 to 100, or `storeMemory()` or `updateMemory()` was given string `content` over 100,000 characters. | Pass a non-empty query within the limits, and shorten or split long content. |
 | status `503` | Store not configured or unavailable. | Check the `store` field in `10xgraph.json` and the store backend status. |
 
 ---

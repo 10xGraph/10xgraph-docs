@@ -13,7 +13,7 @@ faq:
     a: The in-memory checkpointer is still in use. Switch to a durable checkpointer such as PgCheckpointer.
 ---
 
-Use this page when `10xgraph api` fails to start, rejects requests, or behaves differently in production than locally. Find your symptom under startup, request-time or production issues, then apply the fix. Each entry lists symptoms, the cause and a concrete fix verified against the server code.
+Use this page when `10xgraph dev` fails to start, rejects requests, or behaves differently in production than locally. Find your symptom under startup, request-time or production issues, then apply the fix. Each entry lists symptoms, the cause and a concrete fix verified against the server code.
 
 ## Server troubleshooting map
 
@@ -190,7 +190,7 @@ In production, `runs.timeout` is 300 seconds when you do not set it. Development
 **Fix**
 
 ```bash
-10xgraph api --no-reload
+10xgraph dev --no-reload
 ```
 
 Use reload only for active local development.
@@ -270,6 +270,44 @@ A `404` on `/v1/evals/*` means the server runs with `MODE=production`: the eval 
 
 A `1008` accompanied by an `error` event with `code: "not_live"` or `"not_authorized"` tells you which of the two `1008` causes applies.
 
+### Issue: `429 Too Many Requests`
+
+**Symptoms**
+
+- requests fail with status `429` after a burst of calls
+- the body has `error.code` `RATE_LIMIT_EXCEEDED` and the message ends with `Retry after <n>s.`, or the message says there are too many runs in progress for this user
+
+**Cause**
+
+Two different limits answer 429:
+
+- the `rate_limit` window: the response carries `Retry-After` (seconds) and `X-RateLimit-*` headers. Behind a reverse proxy, every client may share one bucket if `trusted_proxies` is not set (see the `X-Forwarded-For` entry below)
+- the per-user run cap `runs.max_concurrent_per_user` (default 10): one verified user already has that many invoke, stream or AG-UI runs in flight. The body is the standard error envelope with code `HTTPException` and there is no `Retry-After` header
+
+**Fix**
+
+- wait for the `Retry-After` interval, or for a running request to finish, then retry
+- raise `rate_limit.requests` or `runs.max_concurrent_per_user` in `10xgraph.json` if the traffic is legitimate
+- set `trusted_proxies` when the server sits behind a proxy
+- on the TypeScript client this is a plain `TenxGraphError` with `statusCode` 429; see [Error handling](/docs/client/error-handling#rate-limits-429)
+
+### Issue: the error message is generic in production
+
+**Symptoms**
+
+- a 5xx response says "An error occurred processing your request." or "An error occurred executing the graph." instead of the real cause
+- the same request shows the real exception text locally
+
+**Cause**
+
+With `MODE=production` the server replaces the message of every 5xx error with a generic one, because exception text can contain internals. The full error is written to the server log with the request id. Messages of 4xx `HTTPException` errors (401, 403, 404, 413, 429) are written for the client and are kept. Request validation errors (422) use the generic text "The request data is invalid. Please check your input." in production, except size-limit messages, which are kept. `execution_meta.internal_data.error` in `GET /v1/threads/{id}/state` also carries the generic text in production (this and the `WARNING` logging below are in the API changelog under Unreleased, after 0.9.0).
+
+**Fix**
+
+- take the `request_id` from the response metadata and search the server log for it
+- reproduce in development (`MODE=development`) to see the raw message
+- handled 4xx errors are logged at `WARNING` (one line, no traceback), not `ERROR`. If an alert rule matched `ERROR` for 401 or 404 responses, change it to match `WARNING`
+
 ### Issue: thread endpoints fail
 
 **Symptoms**
@@ -278,14 +316,16 @@ A `1008` accompanied by an `error` event with `code: "not_live"` or `"not_author
 
 **Likely causes**
 
-- no checkpointer configured
+- no checkpointer configured (the thread routes answer `503` with `Checkpointer is not configured`)
 - checkpointer backend unavailable (Postgres, Redis, or SQLite)
 - inconsistent `thread_id` usage
 - a `thread_id` that does not exist, which answers `403` by default (`runs.thread_ids` is `server`)
+- a state update whose `context` is not a list of messages, or that sets built-in fields or keys outside `runs.state_keys`, which answers `422`
+- a message id that is not in the thread, which answers `404` (`Message not found`)
 
 **Fix**
 
-- configure a checkpointer in `10xgraph.json`
+- pass a checkpointer to `graph.compile(checkpointer=...)`. The server uses that one; a `checkpointer` key in `10xgraph.json` is not read
 - verify backend connectivity and health
 - use the `thread_id` the server returned on the first call (do not generate a new one per request, and do not make one up: the server refuses ids it did not create)
 
@@ -432,7 +472,7 @@ Enable the option in `10xgraph.json` only when the app sits behind a proxy you c
 - set `MODE=production` and remove explicit `DOCS_PATH` and `REDOCS_PATH` values, or set both to empty strings
 - replace wildcard origins with explicit domains: `ORIGINS=https://yourapp.com,https://api.yourapp.com`
 
-### Issue: `10xgraph play` works locally but deployed users cannot connect
+### Issue: `10xgraph dev` works locally but deployed users cannot connect
 
 **Symptoms**
 
@@ -441,12 +481,12 @@ Enable the option in `10xgraph.json` only when the app sits behind a proxy you c
 
 **Likely cause**
 
-- `10xgraph play` was used as a testing tool, but the deployed system needs a proper hosted API endpoint and browser-safe networking setup
+- `10xgraph dev` was used as a testing tool, but the deployed system needs a proper hosted API endpoint and browser-safe networking setup
 
 **Fix**
 
-- deploy with `10xgraph api` behind HTTPS and correct CORS/auth settings
-- treat `10xgraph play` as an interactive test path, not the deployment architecture
+- deploy the image from `10xgraph build`, which runs Gunicorn, behind HTTPS and with correct CORS and auth settings
+- treat `10xgraph dev` (a Uvicorn development server with reload) as an interactive test path, not the deployment architecture. `10xgraph api` and `10xgraph play` no longer exist (removed in 0.9.0)
 
 ## Error codes
 

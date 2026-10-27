@@ -4,7 +4,7 @@ description: "Hook into graph execution to log, validate, trace, and respond to 
 section: "Build agents"
 group: "Safety"
 order: 370
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 Callbacks and hooks let you observe and control graph execution at critical points. 10xGraph provides two levels: **invocation-level callbacks** that fire on every LLM, tool, or MCP call, and **graph-level lifecycle hooks** that fire at structural events like start, end, error, interrupt, and checkpoint. Use them for logging, metrics, tracing, validation, and compliance.
@@ -338,6 +338,10 @@ cbm.register_lifecycle_hook(ComplianceHook())
 
 app = graph.compile(callback_manager=cbm)
 ```
+
+## Run it in production
+
+Hooks and validators resolve from the global InjectQ container, so graphs in one server process share the same `CallbackManager` unless you give each graph its own container. Hooks run on every request, so keep them fast and do not put secrets in logged payloads. See the [Security model](/docs/production/security-model).
 
 ## Related pages
 

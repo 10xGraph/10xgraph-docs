@@ -4,16 +4,16 @@ description: Runnable examples and reference architectures demonstrating 10xGrap
 section: Examples
 order: 10
 label: Overview
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
-The examples section provides two types of learning resources. The first are guided walkthroughs of working example scripts from the repository's `examples/` folder: each covers a specific feature or pattern (agents, custom state, tools, streaming, MCP, memory, multi-agent handoff, testing and evaluation). The second are reference architectures for five common production use cases (customer support, data extraction, coding, research and RAG agents). Together they show how 10xGraph concepts translate into real, runnable code.
+The examples section provides two types of learning resources. The first are guided walkthroughs of working example scripts from the repository's `examples/` folder: each covers a specific feature or pattern (agents, custom state, tools, streaming, MCP, memory, multi-agent handoff, testing and evaluation). The second are reference architectures for five common production use cases (customer support, data extraction, coding, research and RAG agents). A Production group comes first on this page: it shows the same kind of agent served by 10xgraph-api. Together they show how 10xGraph concepts translate into real, runnable code.
 
 These examples sit between the quickstart and the reference documentation. If you learn best from reading and running actual code, start here. If you prefer concepts first, read the Concepts section and return here to see the patterns in action.
 
 ## Getting started with examples
 
-The examples are located in the repository at `agentflow/examples/`. Each example directory contains one or more runnable Python scripts (for example `graph.py`) and sometimes a `README.md` with setup instructions.
+The examples are located in the repository at `examples/`. Each example directory contains one or more runnable Python scripts (for example `graph.py`) and sometimes a `README.md` with setup instructions.
 
 ### Clone the repository
 
@@ -21,7 +21,7 @@ Start by cloning the 10xGraph repository:
 
 ```bash
 git clone https://github.com/10xGraph/10xGraph.git
-cd 10xGraph/agentflow
+cd 10xGraph
 ```
 
 ### Install with example dependencies
@@ -50,7 +50,7 @@ pip install "10xgraph[all]"
 
 ### Set environment variables
 
-Each example requires API keys for the model provider. Create a `.env` file in the `agentflow/` directory:
+Each example requires API keys for the model provider. Create a `.env` file in the repository root (the `10xGraph/` folder):
 
 ```bash
 # For Google Gemini
@@ -82,7 +82,18 @@ Some examples have additional setup (MCP servers, database initialization). Chec
 
 ## What you'll learn
 
-The examples are organized in five groups that build on each other. Start with the Foundations group to understand the core patterns, then move into advanced integrations, streaming, multi-agent coordination, and production-ready testing and evaluation.
+The examples are organized in groups that build on each other. If you want to see the served agent first, start with Production. Otherwise start with the Foundations group to understand the core patterns, then move into advanced integrations, streaming, multi-agent coordination, and production-ready testing and evaluation.
+
+### Production
+
+These examples show the agent served by `10xgraph-api`, with auth, thread isolation, approvals and replay-safe tools. Each page says which provider extra and key it needs.
+
+- [Serve with auth](/docs/examples/serve-with-auth): `10xgraph init`, a token, curl and `TenxGraphClient`, then `10xgraph build --docker-compose`
+- [Replay-safe payment tool](/docs/examples/payment-tool-replay-safe): approval before a charge, the checkpointer tool ledger and an idempotency key
+- [Human approval over the API](/docs/examples/human-approval-over-api): pause with `interrupt()`, resume with `interrupt_id`, and the 409 and 422 cases
+- [Multi-user isolation](/docs/examples/multi-user-isolation): two users, one server, and what each can reach
+- [Safe file and web tools](/docs/examples/safe-file-and-web-tools): a fixed file root, a host-restricted fetch tool and a media download policy
+- [Security regression evals](/docs/examples/security-regression-evals): fail the build when an agent calls a tool outside its allow-list
 
 ### Foundations
 
@@ -126,7 +137,7 @@ Persistent agent memory and multimodal input (images, audio, documents).
 - [Memory](/docs/examples/memory): Store and retrieve long-term agent memory
 - [Multimodal](/docs/examples/multimodal): Process images and other media alongside text
 
-### Production
+### Testing and operations
 
 Testing, evaluation, and graceful operation.
 
@@ -159,7 +170,9 @@ If you are new to 10xGraph, follow this recommended order:
 
 5. **Persist and enrich data.** Memory and media examples demonstrate long-term memory and multimodal input.
 
-6. **Ship to production.** The Production group covers testing, evaluation and clean shutdown.
+6. **Test and operate.** The Testing and operations group covers testing, evaluation and clean shutdown.
+
+   **Serve it safely.** The Production group shows the same agents behind `10xgraph-api`: auth, isolation, approvals and replay-safe tools.
 
 7. **Pick your use case.** Once you understand the patterns, the Use cases group shows how to apply them end-to-end.
 

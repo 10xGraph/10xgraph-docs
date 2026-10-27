@@ -1,0 +1,115 @@
+---
+title: "What production-ready means in 10xGraph, and what you still have to do"
+seoTitle: "What production-ready means in 10xGraph"
+description: "What is on by default when you serve an agent with 10xgraph-api, the config that turns each protection on, and the honest list of what stays your job."
+date: 2026-10-27
+updated: 2026-10-27
+author: Shudipto Trafder
+kind: engineering
+tags: [production, security, server, deployment]
+faq:
+  - q: Is 10xGraph production ready?
+    a: The server enforces thread ownership, scoped authorization, input limits, run limits and production-mode checks by default, and keeps state durably with PostgreSQL. It is pre-1.0, and you still own auth configuration, secrets, TLS, backups and your tools' own authorization.
+  - q: Does the server force me to configure authentication?
+    a: No. With auth set to null the server starts and is open, also with MODE=production. Nothing refuses it, so set auth to jwt or a custom BaseAuth class before you expose the server.
+  - q: Does 10xGraph stop prompt injection?
+    a: No. Validators, approval steps and tool allow-lists bound what a model can be talked into, but they do not remove prompt injection. The limits page lists what the server does not protect.
+---
+
+"Production ready" is an adjective until you can list what it means. This post lists it for one setup: you write a graph, compile it, and serve it with `10xgraph-api`. For each protection you get the default, the config that changes it, and what stays on your side. It is written for a platform lead comparing frameworks, so the "you still must" parts are as long as the "we do" parts.
+
+The short version: you build the agent, and the server owns the request surface, per-user isolation, run limits and startup checks. The one thing it does not decide for you is whether to turn authentication on.
+
+## 1. Who is calling: authentication
+
+**Default:** none. With `auth` unset or `null`, every route is open. This is the quickstart behaviour, and it also holds with `MODE=production`.
+
+**Turn it on:** set `"auth": "jwt"` in `10xgraph.json` and export `JWT_SECRET_KEY` and `JWT_ALGORITHM`, or point `auth` at your own `BaseAuth` subclass. A token needs `exp` and a non-empty `user_id`, else the server answers 401. If you set `JWT_ISSUER` or `JWT_AUDIENCE`, `iss` and `aud` are required too. An HS-family secret shorter than 32 bytes stops the server at startup in production.
+
+**You still must:** switch it on, keep the signing secret in a secret store, and make your login service the only place that mints `user_id`. [Security in five minutes](/docs/get-started/security-in-five-minutes) walks through it.
+
+## 2. Who owns what: thread ownership
+
+**Default:** once auth is configured, or `MODE=production`, the `ownership` authorization backend is on. Only a thread's owner can read, run or delete it. A foreign `invoke` or `stream` gets 403 before the graph starts. A client cannot invent a thread id: it starts a thread by omitting the id and uses the one the server returns. The check fails closed: if the checkpointer cannot name a thread's owner, requests are denied, and with auth on the server refuses to boot.
+
+**Turn it on or tune it:** pass a checkpointer to `graph.compile(checkpointer=...)`. The `checkpointer` key in `10xgraph.json` is not read by the server. `runs.thread_ids: "client"` opts out of server-made ids. `authorization` takes your own backend.
+
+**You still must:** use a checkpointer that supports owners (`PgCheckpointer`, SQLite, in-memory) and think about who may share data. The companion post [Why a user cannot read another user's thread](/blog/why-a-user-cannot-read-another-users-thread) shows the mechanism in detail.
+
+## 3. What a request may do: scoped authorization
+
+**Default:** routes check `resource:action` scopes such as `graph:invoke` from the token's `scope` or `scopes` claim. At startup a route guard refuses to boot if any non-public route has no permission guard. Only `/ping` and `/health/ready` are public. Graph introspection needs `graph:read` in production.
+
+**Config:** put scopes in your tokens, or supply an `authorization` backend. A token with no scope claim is unrestricted, so decide deliberately which of your tokens carry scopes.
+
+**You still must:** issue narrow scopes, and check permissions inside tools that touch sensitive data. The server authorizes the request, not the business logic inside your tool.
+
+## 4. What a client may send: input shaping
+
+**Default:** client messages must have the `user` role. An `assistant` or `system` message is refused with 422, so a forged "I approved it" cannot enter the thread. A `tool` message is accepted only as the answer to a pending remote tool call. `context_summary` and `execution_meta` are never client-writable, the server replaces client message ids, and reserved config keys such as `user_id`, `authz`, `tool_timeout` and `max_parallel_tool_calls` are dropped.
+
+**Config:** `runs.config_keys` and `runs.state_keys` are allow-lists for request config and state (422 on other keys).
+
+**By design:** a client may set custom state fields and `current_node`. That lets a frontend picker write a selected id straight into state, and lets a dropdown of agents start at the chosen node. If your graph needs an entry guard, enforce it inside the graph or restrict `runs.state_keys`.
+
+**You still must:** treat anything the client may put into state as untrusted input in your own nodes.
+
+## 5. How much a run may cost: limits
+
+**Defaults:**
+
+- Request bodies are capped at 10 MB (`MAX_REQUEST_SIZE`, 413 over it).
+- Each user may have 10 HTTP runs in flight (`runs.max_concurrent_per_user`, 429 over it).
+- In production a run that exceeds 300 seconds is stopped: invoke returns 504, a stream ends with an error chunk (`runs.timeout`).
+- A thread runs one request at a time. A second request waits up to 30 seconds, then gets 409 "thread is busy". `on_busy: "cancel"` stops the running one instead.
+- A model turn runs at most 10 tool calls at once (`runs.max_parallel_tool_calls`).
+
+**Config:** `rate_limit` (by `ip`, `user` or `global`, memory or Redis backend) is off until you add it to `10xgraph.json`. `websocket.max_connections` and `websocket.max_connections_per_user` cap sockets.
+
+**You still must:** add rate limiting, and set `trusted_proxies` to the real number of proxy hops. Streaming runs have no per-node or per-tool deadlines, only the run timeout.
+
+## 6. What the server reveals: production mode
+
+**Default with `MODE=production`:** an unknown `MODE` value refuses to start. A wildcard `ORIGINS` or `ALLOWED_HOST` refuses to start (`STRICT_PRODUCTION_CHECKS` is on by default in production). API docs are off, graph introspection is scoped, `IS_DEBUG` is forced off, and 5xx bodies and error chunks carry generic text. A node exception reaches the client as 500 `NODE_001` "An error occurred in a graph node.", with no stack trace. A tool that raises reaches the model only as "failed with an internal error (reference ...)"; the raw text stays in the server log under that reference.
+
+**Config:** `MODE`, `ORIGINS`, `ALLOWED_HOST`, `STRICT_PRODUCTION_CHECKS`.
+
+**You still must:** set the real origins and hosts, and read your logs, because the detail moved there.
+
+## 7. Outbound requests: SSRF and files
+
+**Default:** external media URLs in client input are checked against the graph's `MediaFetchPolicy` before the run, and a blocked URL is a 400. Downloads and the prebuilt `fetch_url` tool resolve the host once, require public addresses, pin the connection, re-check each redirect and cap the body. The prebuilt file tools are confined to a root you set in code.
+
+**Config:** `media_policy` on `compile()`, `create_file_tools(root=...)`.
+
+**You still must:** use those prebuilt tools, or apply the same discipline in your own. A hand-written tool that fetches arbitrary URLs is outside the policy.
+
+## 8. Durable and replay-safe state
+
+**Default with `PgCheckpointer`:** state is in PostgreSQL with Redis as a hot cache. Writes are versioned per thread, so a stale run cannot move the cache backwards. A tool call that finished before a crash is recorded in a ledger and not run again on resume (invoke path). Background: [hot and cold agent memory](/blog/hot-and-cold-agent-memory) and [your agent charged the card twice](/blog/your-agent-charged-the-card-twice).
+
+**Config:** `PgCheckpointer` passed to `compile()`, with `DATABASE_URL` and `REDIS_URL`.
+
+**You still must:** back up PostgreSQL and decide retention. The ledger gives at-least-once safety, not exactly-once, so give money-moving tools an idempotency key. Streaming runs do not consult the ledger.
+
+## 9. Deploy and scale
+
+**Default:** `10xgraph build` writes a Dockerfile that runs Gunicorn as a non-root user, and with flags a `docker-compose.yml` and `k8s.yaml`. `GET /ping` is liveness and `GET /health/ready` is readiness. Workers hold no conversation state; it lives in the checkpointer. With Redis configured, the ownership cache, run caps and thread locks are shared across workers.
+
+**Config:** `10xgraph build --docker-compose --k8s`, `redis` or `REDIS_URL`, `rate_limit.backend: "redis"`.
+
+**You still must:** terminate TLS at your load balancer or ingress, run two or more instances if you need availability, and size your database.
+
+## The honest list
+
+Regardless of how many boxes above are ticked:
+
+- **Auth is not forced.** `auth: null` serves everyone, including in production.
+- **Prompt injection is not solved.** Validators and approval steps bound what a model can be talked into. They do not remove it.
+- **Your tools are your code.** The server cannot know what a tool should be allowed to read.
+- **Secrets, TLS, backups, retention** are infrastructure you run.
+- **The project is pre-1.0**, needs Python 3.12 or newer, and has a smaller community than LangGraph or CrewAI. Pin versions and read the [changelog](/changelog).
+
+## Where to go next
+
+[Production readiness](/docs/production) has the full table with links to each reference page. The [security model](/docs/production/security-model) lists every threat and the six curl checks to verify it yourself, and [What 10xGraph does not protect](/docs/production/limits) expands the list above.

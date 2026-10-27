@@ -75,8 +75,10 @@ Your `10xgraph.json` already points to this graph at `graph.react:app`.
 From the folder containing `10xgraph.json`, run:
 
 ```bash
-10xgraph api --host 127.0.0.1 --port 8000
+10xgraph dev --no-open --host 127.0.0.1 --port 8000
 ```
+
+`10xgraph dev` is the development server: it reloads when your files change. `--no-open` starts the server without opening the hosted playground. For production, `10xgraph build` generates a Docker image that runs Gunicorn.
 
 Uvicorn logs show the server listening on `http://127.0.0.1:8000`. The exact log lines vary by version.
 
@@ -187,10 +189,10 @@ This endpoint does not run the graph; it only retrieves what the checkpointer sa
 
 ## Test interactively with the playground
 
-The hosted playground gives you a chat UI without writing frontend code. Stop the `10xgraph api` server first, because `10xgraph play` starts the API server itself and then opens the hosted playground:
+The hosted playground gives you a chat UI without writing frontend code. `10xgraph dev` opens it by default once the API responds. Stop the running server first, then start it without `--no-open`:
 
 ```bash
-10xgraph play --host 127.0.0.1 --port 8000
+10xgraph dev --host 127.0.0.1 --port 8000
 ```
 
 The browser opens automatically once the API responds (if not, copy the URL from the terminal). The playground connects to your local API and shows a chat interface.
@@ -254,11 +256,11 @@ Full details are in the [API reference](/docs/reference/rest-api/graph).
 
 ## What you learned
 
-- `10xgraph api` starts a production-ready FastAPI server that loads your graph from `10xgraph.json`.
+- `10xgraph dev` starts a FastAPI development server that loads your graph from `10xgraph.json`.
 - The `/v1/graph/invoke` endpoint runs the graph and returns the final messages.
 - The `/v1/graph/stream` endpoint sends one JSON chunk per line for real-time streaming.
 - Thread state is readable via `GET /v1/threads/{thread_id}/state` without replaying the graph.
-- The hosted playground (`10xgraph play`) provides a chat UI for testing without code.
+- The hosted playground (opened by `10xgraph dev`) provides a chat UI for testing without code.
 - The checkpointer saves state automatically; pass the `thread_id` the server returned to restore context across requests.
 
 ## Next step

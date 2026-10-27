@@ -1,0 +1,91 @@
+---
+title: "A prompt-injected model cannot skip your approval step"
+seoTitle: "Prompt injection cannot skip your approval step"
+description: How 10xGraph keeps handoffs, tool visibility, tool results and interrupt resumes under the graph's control, so a steered model cannot walk around a human approval.
+date: 2026-10-27
+updated: 2026-10-27
+author: Shudipto Trafder
+kind: engineering
+tags: [security, interrupts, human-in-the-loop, multi-agent]
+draft: true
+faq:
+  - q: Does this stop prompt injection?
+    a: "No. Nothing stops a model from being steered by text it reads. These controls limit what a steered model can do to the parts of the graph you did not give it: the route it takes, the tools it can call and the approval a human gives."
+  - q: Can a client approve an interrupt by sending a tool result?
+    a: No. The API accepts a tool result only as the answer to a remote tool call that is waiting for one. A result for a server tool, for a call the model never made, or a second result for the same call is refused.
+  - q: What does interrupt_id add to a resume?
+    a: It ties the answer to the exact prompt the human saw. If the thread is paused at a different interrupt, or not paused at all, the API answers 409 and nothing is recorded.
+---
+
+A human-in-the-loop design usually has the same shape: the model proposes an action, the graph stops at an approval step, a person says yes or no, and only then does the tool run. The guarantee you want is that the model has no way to reach the tool without passing the stop.
+
+That guarantee holds only if every path around the stop is closed, including the paths a model can influence by text alone. A model that has read a hostile web page or a poisoned document can be steered into producing unusual output: a tool name you did not expect, a routing hint, a message that looks like a human answer. This post lists the places where 10xGraph decides on the graph's side instead of trusting that output, and what you still have to do yourself. It describes behaviour and design, not ways to attack a particular app.
+
+The reference pages are [Interrupts](/docs/concepts/interrupts) and the [security model](/docs/production/security-model).
+
+## Handoffs only go where a handoff tool says
+
+In a multi-agent graph, one agent can hand the conversation to another through a tool made with `create_handoff_tool`. Earlier, any tool call named `transfer_to_<X>` moved the run to node `<X>`, whether or not you had registered such a tool. A steered model could name a node that your edges never lead to, and that includes a node behind an approval step.
+
+Now a handoff is honoured only when the ToolNode holds a tool of that name created by `create_handoff_tool`. Any other `transfer_to_*` call is an ordinary tool call, and if no such tool exists it gets the usual "Tool not found" result.
+
+The same rule covers `Command(goto=...)` returned from your own code. A target that is neither a node in the graph nor `END` raises `GraphError` with code `GRAPH_007`, naming the node it came from and the unknown target. Before, it surfaced as a raw `KeyError`.
+
+Starting a run at a chosen node with `current_node` is a separate, intended feature (a frontend can send the agent the user picked). If a node needs an entry guard, enforce it inside the graph. The change above is about what the model can do, not what your caller can do.
+
+## Tools hidden by `tools_tags` cannot be called
+
+An Agent can advertise only the tools that match `tools_tags`. That used to be a presentation choice: the model was shown the tagged tools, but the ToolNode would run any registered name the model happened to guess.
+
+Now the Agent records the names it advertised on the assistant message (`metadata["allowed_tools"]`), and the dispatch step refuses a call to anything outside that list with the same "Tool not found" error. If you use tags to keep a destructive tool away from a low-trust agent, the tag now holds at run time and not just in the prompt.
+
+## A tool name cannot be claimed twice
+
+When a ToolNode also connects to an MCP server, a remote tool could previously take over the name of a local tool: calls meant for your function went to the server. Now a collision between an MCP tool and a local or remote tool on the same ToolNode raises `ValueError` ("Rename one of them"), and the check runs outside the code that swallows connection errors, so it cannot be hidden by a failed server ping.
+
+## Forged tool results are refused
+
+Remote tools run on the client, and the client sends the result back to resume the run. That is the one case where the API accepts a message with the `tool` role, and it is narrow.
+
+- Client messages may only have the `user` role. The `assistant` and `system` roles are refused, and so is a `tool` message that carries anything other than tool results.
+- A tool result is accepted only for a remote tool call that is waiting for one on that thread. A result for a call the model never made, a second result for the same call, or a result for a server tool is refused.
+- A client tool can never carry the name of a server tool. Otherwise a client could declare a tool with the name of the one paused for approval and post a "result" for it.
+
+The effect is that the approval path cannot be satisfied by pretending to be the model or the tool.
+
+## A resume answers one specific question
+
+A resume carries a value, and the value can be bound to the prompt it answers:
+
+- The client can send `interrupt_id` with the resume on invoke, stream and WebSocket. If the thread is not paused, or is paused at another interrupt (a stale tab, a retried request after the first answer was consumed), the API answers 409 and records nothing. This is how a late "yes" fails to approve a different request.
+- The core checks the id again and, when the interrupt declared a `response_schema` (a JSON Schema), validates the value against it. A mismatch raises `InterruptMismatchError` (`INTERRUPT_001`), and a value that does not satisfy the schema raises `ResumeValidationError` (`INTERRUPT_002`). Nothing is recorded in either case.
+
+The core checks are in the repository and ship with the next core release (0.10.4 or later). The API check works with the core you have today, and it passes the id along for the core to enforce once you upgrade.
+
+```python
+from tenxgraph.utils import interrupt
+
+
+async def refund(amount: float) -> str:
+    decision = interrupt(
+        {"amount": amount},
+        message=f"Refund ${amount}?",
+        reason="tool_approval",
+        response_schema={
+            "type": "object",
+            "properties": {"approved": {"type": "boolean"}},
+            "required": ["approved"],
+        },
+    )
+    if not decision or not decision.get("approved"):
+        return "Refund declined"
+    return issue_refund(amount)
+```
+
+Without `interrupt_id`, a resume answers whatever the thread is paused at, as before. Send the id from any client where a person can have two tabs open.
+
+## What you still own
+
+- None of this makes a model trustworthy. It removes shortcuts around your graph.
+- Authentication, per-user thread ownership and tool authorization are separate layers, covered in the [security model](/docs/production/security-model).
+- A tool that must be safe against a steered model should still validate its own arguments and use idempotency keys. See [Interrupts](/docs/concepts/interrupts) for how to place the stop before the tool, not after it.

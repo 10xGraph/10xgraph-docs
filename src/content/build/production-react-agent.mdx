@@ -10,16 +10,16 @@ outcome:
   - Threads stored in Postgres with a Redis cache
   - Tests that run without a model API key
   - A Dockerfile and docker-compose.yml with Postgres and Redis
-versions: 10xGraph 0.9.2, API and CLI 0.5.1
+versions: 10xGraph 0.10.3, API and CLI 0.9.0
 order: 10
-updated: 2026-10-27
+updated: "2026-10-27"
 faq:
   - q: Can I use OpenAI or Claude instead of Gemini?
     a: Yes. Change the model and provider arguments of ReactAgent, for example provider="openai" or provider="anthropic", and install the matching extra (openai or anthropic) instead of google-genai. The tools, graph and server stay the same.
   - q: Do I need Redis running for local development?
     a: REDIS_URL must be set, because graph/agent.py reads it, but the server starts without a reachable Redis. The rate limiter fails open by default, which means it logs the error and lets requests through, and without DATABASE_URL the in-memory checkpointer is used.
   - q: Why do the tools raise exceptions instead of returning an error message?
-    a: A raised exception reaches the model as a failed tool result with your message, so it can explain the problem to the customer. In 10xGraph 0.9.2 a returned dictionary treats the keys error, status, is_error and success as result metadata and removes them, so an error returned that way never reaches the model.
+    a: A raised exception stops the tool and marks the result as failed. The model gets a generic failure with a reference id, and the full message goes to the server log, so internal details never reach the model or the customer. A returned dictionary treats the keys error, status, is_error and success as result metadata and removes them, so an error returned that way never reaches the model either. To give the model a message it can pass on, return it as a plain string.
 ---
 
 A production ReAct agent is more than a model calling tools in a loop. It has to know who is asking, refuse other customers' data, never repeat a side effect like a refund, keep conversations across restarts, and sit behind auth and rate limits. This guide builds all of that for a store support agent, starting from the 10xGraph production template.
@@ -162,11 +162,11 @@ Three details carry the weight here:
 
 - **`config` is injected, not chosen by the model.** 10xGraph fills parameters named `config`, `state` or `tool_call_id` itself and leaves them out of the schema the model sees. The API server puts the `user_id` from the verified JWT into `config`, so the model cannot ask for another customer's order by guessing an id. Thread ownership in `10xgraph.json` protects conversations; checks like `_owned_order` protect your business data.
 - **The idempotency key comes from the business action.** `refund:{order_id}` means one refund per order. A key built from the tool call id would not work, because models reuse ids such as `call_1` on every turn. [Your agent charged the card twice](/blog/your-agent-charged-the-card-twice) explains that failure.
-- **Errors are raised.** The model receives a failed tool result with your message and can explain it to the customer.
+- **Errors are raised.** The tool stops and the result is marked failed. The model sees `Tool '<name>' failed with an internal error (reference <ref>)`, and your message goes to the server log under the same reference. That keeps database errors and paths away from the model. If you want the model to explain a refusal to the customer in your own words, return the message as a string instead of raising.
 
 <Callout type="warning" title="Reserved keys in tool results">
 
-In 10xGraph 0.9.2, when a tool returns a dictionary, the keys `error`, `status`, `is_error` and `success` are read as result metadata and removed. That is why the lookup returns `order_status`, not `status`, and why errors are raised instead of returned as `{"error": ...}`.
+In 10xGraph 0.10.3, when a tool returns a dictionary, the keys `error`, `status`, `is_error` and `success` are read as result metadata and removed. That is why the lookup returns `order_status`, not `status`, and why errors are raised (or returned as a plain string) instead of returned as `{"error": ...}`.
 
 </Callout>
 
@@ -315,7 +315,7 @@ With this list the coupon question passes, and "Ignore previous instructions and
 ## 6. Run the server and call it
 
 ```bash
-10xgraph api
+10xgraph dev --no-open
 ```
 
 The server listens on `http://127.0.0.1:8000`. Every request needs a JWT signed with your secret, with a `user_id` and an `exp` claim. In production your login service issues it. For local testing, save this as `make_token.py`:

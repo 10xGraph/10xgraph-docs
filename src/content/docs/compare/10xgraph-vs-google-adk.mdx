@@ -5,7 +5,7 @@ description: "10xGraph vs Google ADK compared with sources: API server, auth, th
 section: Compare
 order: 60
 label: vs Google ADK
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Does 10xGraph support Vertex AI as well as Google AI Studio?
     a: Yes. The 10xGraph Google provider supports both the Gemini API and Vertex AI. Switch with use_vertex_ai=True on the Agent or the GOOGLE_GENAI_USE_VERTEXAI environment variable. See the providers/google docs for the configuration.
@@ -35,10 +35,11 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 
 | | 10xGraph | Google ADK |
 |---|---|---|
-| Production server (REST, SSE, WebSocket) in the open-source install | Yes. `10xgraph api` generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | Yes, REST and SSE. `adk api_server` exposes session endpoints and `/run` and `/run_sse` ([API server docs](https://adk.dev/runtime/api-server/)) |
+| Production server (REST, SSE, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | Yes, REST and SSE. `adk api_server` exposes session endpoints and `/run` and `/run_sse` ([API server docs](https://adk.dev/runtime/api-server/)) |
 | Auth (JWT or custom) | JWT (`"auth": "jwt"`) or a custom `BaseAuth` subclass | Not documented on the API server page ([API server docs](https://adk.dev/runtime/api-server/)) |
 | Authorization | Role scopes (such as `graph:invoke`, `checkpointer:read`) or a custom `AuthorizationBackend` | Not documented |
 | Thread ownership isolation | Built-in `"authorization": "ownership"` backend, with a two-tier cached owner check | Not documented |
+| Security and isolation defaults when served | The server refuses to start if any non-public route lacks a permission guard. With auth on or `MODE=production`, threads are owner-only. In production it refuses wildcard `ORIGINS`, and replaces 5xx error messages with a generic text. `auth: null` still starts an open server ([limits](/docs/production/limits)) | See their docs |
 | Rate limiting | Memory or Redis sliding-window limits on the API, set in `10xgraph.json` | Not documented |
 | Replay-safe tool calls after a crash | Tool ledger in the checkpointer: a tool that already ran is not executed again on resume. Needs a checkpointer | Not documented |
 | Versioned (compare-and-swap) state writes | Optimistic version check on durable writes in `PgCheckpointer` | `DatabaseSessionService` uses in-process locking, and row-level locking on PostgreSQL and MySQL, to prevent races ([sessions docs](https://adk.dev/sessions/session/)) |
@@ -124,7 +125,7 @@ app.invoke(
 ```bash
 pip install 10xgraph 10xgraph-api google-genai
 10xgraph init --yes --template production --auth jwt --rate-limit redis
-10xgraph api --host 0.0.0.0 --port 8000
+10xgraph dev --host 0.0.0.0 --port 8000 --no-open
 10xgraph build --docker-compose --k8s
 ```
 
@@ -156,7 +157,7 @@ for await (const chunk of client.stream(
 2. Tool functions go into `ToolNode([fn])`.
 3. `SequentialAgent` becomes a chain of `add_edge` calls, `ParallelAgent` becomes fan-out and fan-in nodes, and `LoopAgent` becomes a self-loop with `recursion_limit`.
 4. A session service becomes a checkpointer (`PgCheckpointer`, or `InMemoryCheckpointer` for development) plus `thread_id` in the config.
-5. Deployment becomes `10xgraph api` or the generated container files. Keep the Google provider configuration and route it through Vertex AI with `use_vertex_ai=True`.
+5. Deployment becomes the container files from `10xgraph build`. Keep the Google provider configuration and route it through Vertex AI with `use_vertex_ai=True`.
 
 ## Where Google ADK is the better choice
 

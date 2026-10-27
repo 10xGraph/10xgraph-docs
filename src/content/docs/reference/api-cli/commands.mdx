@@ -1,17 +1,17 @@
 ---
 title: CLI reference
 seoTitle: "10xGraph CLI command reference"
-description: "Every 10xGraph CLI command with its purpose, usage line, options and defaults: init, api, play, dev, build, eval, test, skills, audit, config, demo and version."
+description: "Every 10xGraph CLI command with its purpose, usage line, options and defaults: init, dev, build, eval, test, skills, audit, config, demo and version."
 section: Reference
 order: 410
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
-  - q: What is the difference between api, play and dev?
-    a: All three start the same Uvicorn development server. play also opens the hosted playground, dev opens it by default but accepts --no-open, and api never opens it. None of them is meant for production, so use build and Gunicorn there.
+  - q: What happened to the api and play commands?
+    a: Both were removed in 10xgraph-api 0.9.0. Use dev, which starts the Uvicorn development server and opens the hosted playground by default; add --no-open to serve only. dev is not meant for production, so use build and Gunicorn there.
 group: "CLI and configuration"
 ---
 
-The `10xgraph` command ships with the `10xgraph-api` package. It has twelve subcommands: `init`, `api`, `play`, `dev`, `build`, `eval`, `test`, `skills`, `audit`, `config`, `demo` and `version`. Global options go before the subcommand, and `-h` or `--help` works everywhere.
+The `10xgraph` command ships with the `10xgraph-api` package. It has ten subcommands: `init`, `dev`, `build`, `eval`, `test`, `skills`, `audit`, `config`, `demo` and `version`. Global options go before the subcommand, and `-h` or `--help` works everywhere.
 
 <Callout type="note" title="Coming from agentflow">
 
@@ -44,7 +44,7 @@ Placed before the subcommand, for example `10xgraph --no-color build`.
 
 On an interactive terminal each command opens with a short intro, under a second, that shows the CLI, core and Python versions and then leaves a one-line header in your scrollback. Press any key to skip it, or Ctrl+C to quit at once. Nothing waits for Enter unless you opted into `--fullscreen`.
 
-Wherever a command takes `--config` with the default `10xgraph.json`, it uses `agentflow.json` from the same directory when `10xgraph.json` is missing. `10xgraph api` flags the old name in its startup output.
+Wherever a command takes `--config` with the default `10xgraph.json`, it uses `agentflow.json` from the same directory when `10xgraph.json` is missing. `10xgraph dev` flags the old name in its startup output.
 
 ## init
 
@@ -68,34 +68,9 @@ Scaffold a new agent project.
 
 `--auth` and `--rate-limit` require `--template production`.
 
-## api
-
-Start the development API server (Uvicorn).
-
-```bash
-10xgraph api [--config FILE] [--host HOST] [--port PORT]
-```
-
-| Option | Default | Purpose |
-|---|---|---|
-| `--config`, `-c` | `10xgraph.json` | Config file |
-| `--host`, `-H` | `127.0.0.1` | Bind address. Use `0.0.0.0` for all interfaces |
-| `--port`, `-p` | `8000` | Port |
-| `--reload / --no-reload` | on | Auto-reload on file changes |
-| `--verbose`, `-v` | off | Verbose logging |
-| `--quiet`, `-q` | off | Errors only |
-
-## play
-
-Start the same server and open the hosted playground. Takes the same options as `api`.
-
-```bash
-10xgraph play [--config FILE] [--host HOST] [--port PORT] [--reload | --no-reload]
-```
-
 ## dev
 
-Local development server. Like `play`, with the playground opening controlled by a flag.
+Start the local development server (Uvicorn) and open the hosted playground when the API is ready. Use `--no-open` to serve only.
 
 ```bash
 10xgraph dev [--config FILE] [--host HOST] [--port PORT] [--open | --no-open]
@@ -104,11 +79,13 @@ Local development server. Like `play`, with the playground opening controlled by
 | Option | Default | Purpose |
 |---|---|---|
 | `--config`, `-c` | `10xgraph.json` | Config file |
-| `--host`, `-H` | `127.0.0.1` | Bind address |
+| `--host`, `-H` | `127.0.0.1` | Bind address. Use `0.0.0.0` for all interfaces |
 | `--port`, `-p` | `8000` | Port |
 | `--reload / --no-reload` | on | Reload on file changes |
 | `--open / --no-open` | on | Open the hosted playground when the API is ready |
 | `--verbose`, `-v` / `--quiet`, `-q` | off | Logging level |
+
+`dev` is the only server command. `10xgraph api` and `10xgraph play` were removed in `10xgraph-api` 0.9.0. For production, run Gunicorn in the image that `10xgraph build` generates.
 
 ## build
 

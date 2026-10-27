@@ -5,7 +5,7 @@ description: 10xGraph vs CrewAI compared with sources. Production server, auth, 
 section: Compare
 order: 30
 label: vs CrewAI
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Can I run CrewAI tools inside a 10xGraph graph?
     a: Any Python callable can be wrapped as a tool in a ToolNode. You typically rewrite the tool definition rather than re-using CrewAI's tool classes directly.
@@ -35,10 +35,11 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 
 | | 10xGraph | CrewAI |
 |---|---|---|
-| Production server (REST, SSE, WebSocket) in the open-source install | Yes. `10xgraph api` generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | Not documented for the open-source package. CrewAI AMP exposes deployed crews through REST endpoints ([AMP docs](https://docs-platform.crewai.com/platform/en/introduction)). AMP has a free Basic plan limited to 50 workflow executions per month, and a custom-priced Enterprise plan ([pricing](https://www.crewai.com/pricing)) |
+| Production server (REST, SSE, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | Not documented for the open-source package. CrewAI AMP exposes deployed crews through REST endpoints ([AMP docs](https://docs-platform.crewai.com/platform/en/introduction)). AMP has a free Basic plan limited to 50 workflow executions per month, and a custom-priced Enterprise plan ([pricing](https://www.crewai.com/pricing)) |
 | Auth (JWT or custom) | JWT (`"auth": "jwt"`) or a custom `BaseAuth` subclass | SSO and role-based access control are listed as Enterprise features ([pricing](https://www.crewai.com/pricing)). Not documented for the open-source package |
 | Authorization | Role scopes (such as `graph:invoke`, `checkpointer:read`) or a custom `AuthorizationBackend` | Role-based access control is listed as an Enterprise feature ([pricing](https://www.crewai.com/pricing)) |
 | Thread ownership isolation | Built-in `"authorization": "ownership"` backend, with a two-tier cached owner check | Not documented |
+| Security and isolation defaults when served | The server refuses to start if any non-public route lacks a permission guard. With auth on or `MODE=production`, threads are owner-only. In production it refuses wildcard `ORIGINS`, and replaces 5xx error messages with a generic text. `auth: null` still starts an open server ([limits](/docs/production/limits)) | See their docs |
 | Rate limiting | Memory or Redis sliding-window limits on the API, set in `10xgraph.json` | `max_rpm` on an agent limits requests per minute to avoid LLM rate limits ([agents docs](https://docs.crewai.com/en/concepts/agents)). That is outbound, not an API rate limit |
 | Replay-safe tool calls after a crash | Tool ledger in the checkpointer: a tool that already ran is not executed again on resume. Needs a checkpointer | Flows can persist state with `@persist`. The Flows docs do not address tool call replay ([Flows docs](https://docs.crewai.com/en/concepts/flows)) |
 | Versioned (compare-and-swap) state writes | Optimistic version check on durable writes in `PgCheckpointer` | Not documented |
@@ -52,7 +53,7 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 
 ## Why teams move from CrewAI to 10xGraph
 
-1. **The server layer is part of the install.** With CrewAI, serving a crew over HTTP with managed auth goes through AMP. With 10xGraph, `10xgraph api` generates the endpoints and the auth, ownership and rate-limit settings live in `10xgraph.json`.
+1. **The server layer is part of the install.** With CrewAI, serving a crew over HTTP with managed auth goes through AMP. With 10xGraph, the `10xgraph-api` server generates the endpoints and the auth, ownership and rate-limit settings live in `10xgraph.json`.
 2. **Control flow is explicit.** Nodes and edges show where a run goes next. In CrewAI's hierarchical process, a manager agent decides at runtime ([processes docs](https://docs.crewai.com/en/concepts/processes)), which suits prototypes and is harder to audit.
 3. **Side effects survive crashes.** If a worker dies after a tool returns, 10xGraph reads its tool ledger on resume and skips tools that already ran. See [replay-safe tools](/docs/concepts/replay-safe-tools).
 4. **State is typed and inspectable.** `AgentState` carries a list of typed `Message` objects you can log and migrate.
@@ -123,7 +124,7 @@ Add `ROUTER`, `BILLING` and `SHIPPING` nodes to a `StateGraph` and let the route
 ```bash
 pip install 10xgraph 10xgraph-api
 10xgraph init --yes --template production --auth jwt --rate-limit redis
-10xgraph api --host 0.0.0.0 --port 8000
+10xgraph dev --host 0.0.0.0 --port 8000 --no-open
 10xgraph build --docker-compose --k8s
 ```
 

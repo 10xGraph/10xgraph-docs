@@ -9,6 +9,8 @@ label: Long-term Memory
 updated: "2026-10-27"
 ---
 
+This page covers long-term, cross-thread memory. It is not about thread state: for how `PgCheckpointer` stores threads in Redis and PostgreSQL, see [Hot and cold state: how PgCheckpointer stores threads](/docs/concepts/memory).
+
 Your agent needs to remember facts across conversations: a user's preferences, resolved questions, learned skills. The **memory store** makes this possible by providing a semantic, searchable database of memories that persists independently of the thread. It works alongside the checkpointer to create a two-level recall system: fast thread-specific state and cross-thread semantic knowledge.
 
 ## Why long-term memory matters

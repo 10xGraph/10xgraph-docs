@@ -11,7 +11,7 @@ section: "Examples"
 group: "Foundations"
 order: 50
 label: "ReAct Agent"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 This example builds a ReAct (Reason + Act) agent: an `Agent` node reasons, a `ToolNode` runs the tool calls it requests, and a conditional edge loops between them until the model answers. It uses a weather tool, a custom state class and an `InMemoryCheckpointer`, so you see the full loop in one file.
@@ -26,7 +26,7 @@ This example builds a ReAct (Reason + Act) agent: an `Agent` node reasons, a `To
 
 ## How to run it
 
-The example file is `agentflow/examples/react/react_sync.py` in the repository. It needs a Gemini API key.
+The example file is `examples/react/react_sync.py` in the repository. It needs a Gemini API key.
 
 Install the core library with Google Gemini support:
 
@@ -43,7 +43,7 @@ export GEMINI_API_KEY="your-api-key"
 Run the example:
 
 ```bash
-python agentflow/examples/react/react_sync.py
+python examples/react/react_sync.py
 ```
 
 The script invokes the agent once with thread ID `12345` and prints each message and the token usage.
@@ -254,7 +254,7 @@ The script calls `invoke` once. If you call it again in the same process with th
 
 The full file, with the debug prints from the script:
 
-```python title="agentflow/examples/react/react_sync.py"
+```python title="examples/react/react_sync.py"
 from dotenv import load_dotenv
 
 from tenxgraph.core import Agent, StateGraph, ToolNode

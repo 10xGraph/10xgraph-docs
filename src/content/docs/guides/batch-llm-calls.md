@@ -2,7 +2,7 @@
 title: Batch LLM calls
 description: Use OpenAI and Anthropic batch APIs for cost-effective processing of large request volumes.
 label: Batch LLM calls
-updated: "2026-10-08"
+updated: "2026-10-27"
 order: 350
 group: Streaming, media and realtime
 section: Build agents
@@ -484,6 +484,10 @@ If you need to process data at scale as part of your agent system, consider:
 - Using background tasks or a job queue to process data asynchronously outside the graph and store results for the graph to query.
 
 See [Background tasks](/docs/guides/run-background-tasks) and [Streaming](/docs/guides/stream-graph) for these patterns.
+
+## Run it in production
+
+Batch jobs are long and not tied to one HTTP request, so give them their own timeout and watch them through your publishers or OTEL rather than the in-memory trace endpoint, which is disabled in production. See [Observability](/docs/server/observability) and [Scaling and reliability](/docs/production/scaling).
 
 ## Next steps
 

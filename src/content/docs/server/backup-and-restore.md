@@ -6,7 +6,7 @@ section: "API server"
 group: "Operate"
 order: 180
 label: Backup and restore
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "What happens if I restore an old Postgres backup with Redis still running?"
     answer: "The Redis cache can hold state newer than the restored database. Postgres is the source of truth and a failed version check invalidates the cache entry, but flush the 10xGraph Redis database before restoring so no stale entries survive."
@@ -19,6 +19,8 @@ faq:
 ## What is durable and what is not
 
 10xGraph persists agent conversations and execution state across two storage layers, each serving a different purpose. Understanding what each holds and which backups to keep is essential for disaster recovery.
+
+For how durable state supports restarts and multiple replicas, see [scaling and reliability](/docs/production/scaling).
 
 | Layer | Contents | Durable | Back up |
 | --- | --- | --- | --- |
@@ -115,7 +117,7 @@ pg_dump "$DATABASE_URL" --format=custom > 10xgraph-pre-upgrade.dump
 
 # Then upgrade your server
 pip install --upgrade "10xgraph[pg_checkpoint]"
-10xgraph api
+10xgraph dev --no-open
 ```
 
 If something goes wrong during migration, you can restore from the pre-upgrade dump. See [upgrading to 1.0](/docs/project/upgrade-to-1.0) for migration details.

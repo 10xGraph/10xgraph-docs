@@ -120,7 +120,7 @@ Set these when a tool or node trusts a value such as `role` or `plan` from state
 
 ### max_concurrent_per_user
 
-Caps the HTTP graph runs (invoke, stream and AG-UI) one verified user may have in flight at once, per server process. Over the cap the request gets `429`. `0` or `null` means no cap. Requests without a verified user (auth off) are not capped. The value must be a non-negative integer.
+Caps the HTTP graph runs (invoke, stream and AG-UI) one verified user may have in flight at once. The count is shared by all workers when Redis is configured (`redis` key or `REDIS_URL`) and kept per process otherwise. Over the cap the request gets `429`. `0` or `null` means no cap. Requests without a verified user (auth off) are not capped. The value must be a non-negative integer.
 
 ### timeout
 
@@ -155,7 +155,7 @@ The `memory` backend counts per process, so with N workers the real limit is `re
 
 | Key | Type | Default | Purpose |
 |---|---|---|---|
-| `websocket.max_connections` | integer or null | `1000` | Concurrent connections per process. `0` or `null` means unlimited |
+| `websocket.max_connections` | integer or null | `1000` | Concurrent connections. Shared by all workers when Redis is configured, per process otherwise. `0` or `null` means unlimited |
 | `websocket.max_connections_per_user` | integer or null | `10` | Per verified user. `0` or `null` means unlimited |
 | `websocket.realtime_models` | array of strings | `[]` | Models a `/v1/graph/live` client may request |
 | `ag_ui.enabled` | boolean | `false` | Mounts `POST /v1/ag-ui`. Needs the `ag-ui` extra |

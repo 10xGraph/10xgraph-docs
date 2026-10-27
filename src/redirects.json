@@ -12,7 +12,7 @@
   "/docs/compare/agentflow-vs-google-adk": "/docs/compare/10xgraph-vs-google-adk",
   "/docs/compare/agentflow-vs-langgraph": "/docs/compare/10xgraph-vs-langgraph",
   "/docs/compare/agentflow-vs-llamaindex-agents": "/docs/compare/10xgraph-vs-llamaindex-agents",
-  "/docs/concepts/architecture": "/docs/concepts",
+  "/docs/concepts/architecture": "/docs/production/architecture",
   "/docs/concepts/connecting-clients": "/docs/client",
   "/docs/concepts/context-id-background": "/docs/concepts/context-management",
   "/docs/concepts/prebuilt-agents-and-tools": "/docs/concepts/choosing-a-building-block",

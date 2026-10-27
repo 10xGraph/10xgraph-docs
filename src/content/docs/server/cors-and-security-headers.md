@@ -18,6 +18,8 @@ faq:
 
 Cross-origin resource sharing (CORS) controls which websites can call your API. Security headers protect against browser-based attacks. Request size limits guard against denial-of-service payloads. Trusted proxy headers let you run behind load balancers and reverse proxies safely. Together, these form the network perimeter of a production 10xGraph deployment.
 
+For how these settings fit the rest of the server's defenses, see the [security model](/docs/production/security-model).
+
 ## CORS
 
 The 10xGraph API server accepts cross-origin requests by default via Starlette's `CORSMiddleware`. Configure it to trust only the origins that call your API, and require explicit opt-in for requests that carry credentials.

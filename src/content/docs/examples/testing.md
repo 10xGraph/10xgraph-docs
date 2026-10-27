@@ -3,10 +3,10 @@ title: Testing
 seoTitle: "Testing tutorial: QuickTest without an LLM"
 description: Use QuickTest to write low-boilerplate, deterministic tests for 10xGraph graphs without hitting a live model.
 section: Examples
-group: "Production"
+group: "Testing and operations"
 order: 200
 label: Testing
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Does QuickTest call a real model?
     a: No. It builds a small graph around a TestAgent that returns the responses you supply, so tests are fast, free and need no API key.
@@ -18,11 +18,11 @@ faq:
 
 `QuickTest` lets you test a 10xGraph graph in a few lines without calling a live model. It wraps a canned `TestAgent` in a temporary graph and returns a `TestResult` with chainable assertions. This walkthrough covers single-turn, multi-turn and tool tests, and how to place them in CI.
 
-The code comes from `agentflow/examples/testing/quick_test_example.py`. It needs only the core package and no API key:
+The code comes from `examples/testing/quick_test_example.py`. It needs only the core package and no API key:
 
 ```bash
 pip install 10xgraph
-python agentflow/examples/testing/quick_test_example.py
+python examples/testing/quick_test_example.py
 ```
 
 ## Why use QuickTest for unit tests
