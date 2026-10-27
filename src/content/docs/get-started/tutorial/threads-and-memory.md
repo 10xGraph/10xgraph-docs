@@ -6,7 +6,7 @@ group: "Tutorial"
 section: "Get started"
 order: 70
 label: Add Memory
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Why does my agent forget what I said in the previous call?"
     a: "Either the graph was compiled without a checkpointer, or each call used a different thread_id. Attach a checkpointer with graph.compile(checkpointer=...) and pass the same thread_id in config on every call of the conversation."
@@ -167,7 +167,7 @@ There are two separate memory layers. Thread memory is the checkpointer: the ful
 | Thread memory (checkpointer) | Messages and state of one conversation | `thread_id` | One thread |
 | Long-term store (for example Qdrant or Mem0) | Facts, preferences, shared knowledge | Semantic search | Across threads and users |
 
-This tutorial builds thread memory. Add a long-term store when the agent must remember something across conversations, such as "remember my preferences in every chat". It is optional, and you reach it through a memory tool such as `memory_tool` or a preload node. See [Long-term memory](/docs/concepts/memory-and-store) for retrieval, scoping and when to use each approach.
+This tutorial builds thread memory. Add a long-term store when the agent must remember something across conversations, such as "remember my preferences in every chat". It is optional, and you reach it with `Agent(memory=MemoryConfig(...))`, either as memory tools the model calls (`postload`) or as memories added to the user message for you (`preload`). See [Long-term memory](/docs/concepts/memory-and-store) for retrieval, scoping and when to use each approach.
 
 ## What you learned
 

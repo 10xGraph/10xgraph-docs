@@ -339,7 +339,7 @@ agent = Agent(model="gpt-4o", tool_node=ToolNode([]), memory=memory)
 | Mode | Behaviour |
 |---|---|
 | `ReadMode.POSTLOAD` (default) | Memories are fetched on-demand via injected tools that the LLM can call. The model decides **when** and **what** to retrieve. Gives the model more agency but requires the model to recognize when memories are relevant. |
-| `ReadMode.PRELOAD` | Memories are retrieved automatically before every LLM call, using the latest user message as the query, and added to the latest user message as a fenced `<user_memories_...>` block for that request only (it is not saved in the thread). See [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text). The model always has relevant context but uses more tokens. No memory tools are exposed, so the model cannot save new memories in this mode. |
+| `ReadMode.PRELOAD` | Memories are retrieved automatically once per invocation (not on every model call; a tool loop reuses the same block), using the latest user message as the query, and added to the latest user message as a fenced `<user_memories_...>` block for that request only (it is not saved in the thread). See [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text). The model always has relevant context but uses more tokens. No memory tools are exposed, so the model cannot save new memories in this mode. |
 | `ReadMode.NO_RETRIEVAL` | No automatic retrieval. |
 
 ### UserMemoryConfig vs. AgentMemoryConfig

@@ -5,7 +5,7 @@ section: Concepts
 group: Foundations
 order: 50
 label: Choosing a building block
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: When should I use a prebuilt agent instead of building my own graph?
     a: Use a prebuilt agent when your workflow matches one of its patterns (react loop, plan-act-reflect, RAG, structured output, supervisor, swarm, audio) and you do not need extra nodes or custom routing. Switch to an Agent node in your own StateGraph when you need nodes before or after the model, several agents, or non-standard edges.
@@ -244,7 +244,7 @@ flowchart TD
 
 ## Prebuilt tools
 
-Tools are separate from agents. The package ships ready-made functions you can pass to any `ToolNode` or `tools=` list, such as `safe_calculator`, `fetch_url`, `file_read`, `file_write`, `file_search`, `google_web_search`, `vertex_ai_search`, the memory tools (`memory_tool`, `make_user_memory_tool`, `make_agent_memory_tool`) and the handoff helpers (`create_handoff_tool`, `is_handoff_tool`). The [prebuilt tools guide](/docs/guides/prebuilt-tools) covers each one.
+Tools are separate from agents. The package ships ready-made functions you can pass to any `ToolNode` or `tools=` list, such as `safe_calculator`, `fetch_url`, `file_read`, `file_write`, `file_search`, `google_web_search`, `vertex_ai_search`, the memory tool factories (`make_user_memory_tool`, `make_agent_memory_tool`) and the handoff helpers (`create_handoff_tool`, `is_handoff_tool`). The [prebuilt tools guide](/docs/guides/prebuilt-tools) covers each one.
 
 ## Related pages
 

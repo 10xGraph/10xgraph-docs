@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 170
 label: Prebuilt tools
-updated: "2026-10-26"
+updated: "2026-10-27"
 faq:
   - q: "Can I mix prebuilt tools with custom tools?"
     a: "Yes. Pass all tools to a single ToolNode. Prebuilt and custom tools coexist without conflict."
@@ -34,7 +34,6 @@ from tenxgraph.prebuilt.tools import (
     safe_calculator,
     google_web_search,
     vertex_ai_search,
-    memory_tool,
     make_user_memory_tool,
     make_agent_memory_tool,
     create_handoff_tool,
@@ -311,18 +310,7 @@ Requires: `pip install "10xgraph[google-genai]"`, Google Cloud project, and a Ve
 
 ## Memory tools
 
-Memory tools integrate with 10xGraph's long-term memory system, letting agents remember facts about users and themselves. For most cases, use `Agent(..., memory=MemoryConfig(...))` to inject memory tools automatically; these factories are useful when you need manual control.
-
-### memory_tool
-
-A legacy general-purpose memory tool for custom graphs that do not use `Agent`'s built-in memory. It is already a tool, not a factory: add it to a `ToolNode` directly. It reads the `BaseStore` registered in the dependency container (pass the store to `compile(store=...)`), and supports the actions `search`, `store`, `update` and `delete`.
-
-```python
-from tenxgraph.core.graph import ToolNode
-from tenxgraph.prebuilt.tools import memory_tool
-
-tool_node = ToolNode([memory_tool])
-```
+Memory tools integrate with 10xGraph's long-term memory system, letting agents remember facts about users and themselves. For most cases, use `Agent(..., memory=MemoryConfig(...))` to inject memory tools automatically; the factories below are useful when you need manual control. They are the only memory tools; there is no general-purpose `memory_tool`.
 
 ### make_user_memory_tool and make_agent_memory_tool
 
