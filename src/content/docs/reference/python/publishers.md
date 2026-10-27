@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 190
 label: Publishers
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "How do I attach a publisher to a graph?"
     a: "Pass the publisher, or a list of publishers, to StateGraph(publisher=...). Tracing helpers such as setup_tracing and setup_logfire must run before compile()."
@@ -325,6 +325,13 @@ class KafkaPublisher(BasePublisher):
 | `linger_ms` | `int` | `0` | Time to wait for more messages before sending a batch. |
 | `compression_type` | `str \| None` | `None` | Passed to `aiokafka` (for example `"gzip"`). |
 | `request_timeout_ms` | `int` | `30000` | Request timeout in milliseconds. |
+| `security_protocol` | `str` | not set | `"PLAINTEXT"`, `"SSL"`, `"SASL_PLAINTEXT"` or `"SASL_SSL"`. |
+| `ssl_context` | `ssl.SSLContext` | not set | Pre-built context. Wins over the file keys. |
+| `ssl_cafile`, `ssl_certfile`, `ssl_keyfile` | `str` | not set | PEM file paths. When any is set and there is no `ssl_context`, an `SSLContext` is built from them. |
+| `sasl_mechanism` | `str` | not set | For example `"PLAIN"`, `"SCRAM-SHA-256"`, `"SCRAM-SHA-512"`. |
+| `sasl_plain_username`, `sasl_plain_password` | `str` | not set | SASL credentials. |
+
+The TLS and SASL keys are opt-in and passed to `aiokafka` only when set. TLS is never forced. Events carry full message and tool content, so we recommend `"SSL"` or `"SASL_SSL"` in production, and always on networks you do not control; a broker inside a network you secure yourself can run without it. For Redis use a `rediss://` URL, and for RabbitMQ an `amqps://` URL. See [Emit events from your graph](/docs/guides/use-publishers) for a TLS and SASL example.
 
 **Returns:** from `publish`, the result of `send_and_wait`. **Raises:** `RuntimeError` if closed or `aiokafka` is missing.
 
@@ -451,12 +458,14 @@ class OtelPublisher(BasePublisher):
         self,
         tracer: Tracer | None = None,
         level: ObservabilityLevel = ObservabilityLevel.STANDARD,
+        user_id_mode: UserIdMode = "raw",
     )
 
 def setup_tracing(
     graph: StateGraph,
     tracer: Tracer | None = None,
     level: ObservabilityLevel = ObservabilityLevel.STANDARD,
+    user_id_mode: UserIdMode = "raw",
 ) -> OtelPublisher
 ```
 
@@ -464,7 +473,16 @@ def setup_tracing(
 |---|---|---|---|
 | `graph` | `StateGraph` | (required) | `setup_tracing` only. Graph to instrument. |
 | `tracer` | `Tracer \| None` | `None` | Explicit tracer. Uses the global `TracerProvider` (tracer name `10xgraph`) when omitted. |
-| `level` | `ObservabilityLevel` | `STANDARD` | Span detail level. |
+| `level` | `ObservabilityLevel` | `STANDARD` | Span detail level. Prompts and tool I/O are recorded only at `FULL`. |
+| `user_id_mode` | `"raw" \| "hash" \| "mask"` | `"raw"` | How `user_id` appears on spans. See below. |
+
+**`user_id_mode`:**
+
+- `"raw"`: the id is emitted unchanged.
+- `"hash"`: the first 16 hex characters of SHA-256 of the id. If the environment variable `TENXGRAPH_TRACE_USER_ID_KEY` is set, HMAC-SHA256 with that key is used instead. The same id always gives the same value, so one user's spans still group together. Plain SHA-256 of a short id (an email, a small integer) can be recovered by guessing, so set the key.
+- `"mask"`: ids of 4 characters or fewer become `***`; 5 to 7 characters keep one character on each side (`a***e`); 8 or more keep two on each side (`al***42`).
+
+It applies to OTEL spans, and so to Logfire and LangSmith. It does not change Redis, RabbitMQ, Kafka or Console events. An unknown value raises `ValueError`.
 
 **Returns:** `setup_tracing` returns the `OtelPublisher` it assigned to the graph. **Raises:** `ImportError` if `opentelemetry-api` is not installed.
 
@@ -514,6 +532,7 @@ def setup_logfire(
     send_to_logfire: bool = True,
     console: Any = None,
     level: ObservabilityLevel = ObservabilityLevel.STANDARD,
+    user_id_mode: UserIdMode = "raw",
     additional_span_processors: list | None = None,
     **configure_kwargs: Any,
 ) -> None
@@ -527,6 +546,7 @@ def setup_logfire(
 | `send_to_logfire` | `bool` | `True` | Export spans to Logfire. |
 | `console` | `Any` | `None` | `False` to suppress console output, a `logfire.ConsoleOptions`, or `None` for environment defaults. |
 | `level` | `ObservabilityLevel` | `STANDARD` | Span detail level. |
+| `user_id_mode` | `str` | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See `OtelPublisher`. |
 | `additional_span_processors` | `list \| None` | `None` | Extra `SpanProcessor` instances. |
 | `**configure_kwargs` | `Any` | | Forwarded to `logfire.configure()`. |
 
@@ -575,6 +595,7 @@ def setup_langsmith(
     project: str | None = None,
     endpoint: str = "https://api.smith.langchain.com/otel",
     level: ObservabilityLevel = ObservabilityLevel.STANDARD,
+    user_id_mode: UserIdMode = "raw",
     tracer_provider: Any = None,
 ) -> None
 ```
@@ -586,6 +607,7 @@ def setup_langsmith(
 | `project` | `str \| None` | `None` | Project name, sent as the `Langsmith-Project` header. |
 | `endpoint` | `str` | `https://api.smith.langchain.com/otel` | OTLP base URL. `/v1/traces` is appended. Override for regional deployments. |
 | `level` | `ObservabilityLevel` | `STANDARD` | Span detail level. |
+| `user_id_mode` | `str` | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See `OtelPublisher`. |
 | `tracer_provider` | `Any` | `None` | Existing `TracerProvider` to attach to. A new global one is created when omitted. |
 
 **Returns:** `setup_langsmith` returns `None`. **Raises:** `ImportError` if the OTLP HTTP exporter or SDK is missing; `ValueError` if no API key is given and `LANGSMITH_API_KEY` is unset.
@@ -619,7 +641,7 @@ def setup_observability(graph: StateGraph | None, config: dict[str, Any]) -> Non
 | Parameter | Type | Description |
 |---|---|---|
 | `graph` | `StateGraph \| None` | Graph to instrument. `None` configures providers only. |
-| `config` | `dict[str, Any]` | Dict with `level` (`"spans"`, `"standard"` or `"full"`; unknown values fall back to `"standard"`), `logfire` and `langsmith` blocks. |
+| `config` | `dict[str, Any]` | Dict with `level` (`"spans"`, `"standard"` or `"full"`; unknown values fall back to `"standard"`), `user_id_mode` (`"raw"`, `"hash"` or `"mask"`; top-level key), `logfire` and `langsmith` blocks. |
 
 | Config key | Description |
 |---|---|
@@ -627,6 +649,8 @@ def setup_observability(graph: StateGraph | None, config: dict[str, Any]) -> Non
 | `logfire.service_name`, `logfire.send_to_logfire`, `logfire.console` | Passed to `setup_logfire`. `send_to_logfire` defaults to `True`. |
 | `langsmith.enabled` | Turn LangSmith on. Default `False`. |
 | `langsmith.project`, `langsmith.endpoint` | Project name and OTLP base URL. |
+
+An invalid `user_id_mode` raises `ValueError`.
 
 Secrets (`LOGFIRE_TOKEN`, `LANGSMITH_API_KEY`) come from environment variables only, never from the config. It raises `ImportError` if a requested backend is not installed and `ValueError` if LangSmith is enabled without an API key.
 
@@ -641,6 +665,7 @@ graph = StateGraph()
 
 setup_observability(graph, {
     "level": "standard",
+    "user_id_mode": "hash",
     "logfire": {"enabled": True, "service_name": "my-agent"},
     "langsmith": {"enabled": True, "project": "eval"},
 })

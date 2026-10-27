@@ -391,6 +391,16 @@ OTEL_SERVICE_NAME=10xgraph-api
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
+### Traces and event publishers
+
+Traces at the `full` level and the Redis, RabbitMQ and Kafka publishers carry message and tool content, and spans carry the user id. 10xGraph never forces TLS on these connections; it is your call:
+
+- We recommend TLS in production whenever you can (`rediss://`, `amqps://`, Kafka `security_protocol="SSL"` or `"SASL_SSL"`, an `https://` OTLP endpoint), and always on a network you do not control.
+- A broker or collector reachable only inside a network you secure yourself (a private subnet or VPC, or a service mesh that already encrypts traffic) can run without it.
+- To keep real user ids out of traces, set `"observability": {"user_id_mode": "hash"}` (or `"mask"`) in `10xgraph.json`.
+
+See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
+
 ## Verification checklist
 
 Before opening the API to production traffic, run these tests:

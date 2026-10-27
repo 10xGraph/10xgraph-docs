@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Observability and operations"
 order: 390
 label: Publishers
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 Publishers allow you to observe and audit agent execution by forwarding structured events to external systems. Every time your graph runs, publishers emit events for graph starts and ends, node execution, tool calls, LLM requests, state updates, errors, and streaming tokens. You can subscribe to these events in real-time to monitor your agent, log audits, trigger alerts, or analyze behavior. Publishers are optional: your graph works without them, but adding one is essential for production deployments.
@@ -103,6 +103,8 @@ You should see output like `Event: node_execution / start`, `Event: llm_call / s
 
 ## Publisher types
 
+Redis, RabbitMQ and Kafka publishers send the full event, including message text and tool inputs and results. Send them only to systems you trust. 10xGraph never forces TLS, so it is your call: we recommend TLS in production whenever you can, and always on a network you do not control. A broker reachable only inside a network you secure yourself (a private subnet or VPC, or a service mesh that already encrypts traffic) can run without it. See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
+
 ### ConsolePublisher
 
 Prints events to stdout or the `tenxgraph.publisher` logger. Good for debugging locally in development.
@@ -184,6 +186,8 @@ Streams mode is preferred for audit logs because events are persisted and you ca
 | `socket_keepalive` | `True` | TCP keepalive. |
 | `health_check_interval` | `30` | Health-check interval in seconds. |
 
+For TLS, use a `rediss://` URL, for example `"url": "rediss://redis.example.com:6380/0"`.
+
 ---
 
 ### KafkaPublisher
@@ -237,6 +241,33 @@ asyncio.run(listen())
 | `linger_ms` | `0` | Time to wait for batching in ms. |
 | `compression_type` | `None` | `"gzip"`, `"snappy"`, `"lz4"`, `"zstd"`, or `None`. |
 | `request_timeout_ms` | `30000` | Request timeout in milliseconds. |
+| `security_protocol` | not set | `"PLAINTEXT"`, `"SSL"`, `"SASL_PLAINTEXT"` or `"SASL_SSL"`. |
+| `ssl_context` | not set | A ready `ssl.SSLContext`. Wins over the three file keys below. |
+| `ssl_cafile` | not set | Path to the CA bundle (PEM). |
+| `ssl_certfile` | not set | Path to the client certificate (PEM), for mutual TLS. |
+| `ssl_keyfile` | not set | Path to the client private key (PEM). |
+| `sasl_mechanism` | not set | `"PLAIN"`, `"SCRAM-SHA-256"` or `"SCRAM-SHA-512"`. |
+| `sasl_plain_username` | not set | SASL user name. |
+| `sasl_plain_password` | not set | SASL password. |
+
+The TLS and SASL keys are passed to `aiokafka` only when you set them. If you set any of `ssl_cafile`, `ssl_certfile` or `ssl_keyfile` and no `ssl_context`, 10xGraph builds an `SSLContext` from those files.
+
+#### Kafka with TLS and SASL
+
+```python
+import os
+from tenxgraph.runtime.publisher import KafkaPublisher
+
+publisher = KafkaPublisher({
+    "bootstrap_servers": "broker1.example.com:9093,broker2.example.com:9093",
+    "topic": "agent-events",
+    "security_protocol": "SASL_SSL",
+    "ssl_cafile": "/etc/ssl/kafka/ca.pem",
+    "sasl_mechanism": "SCRAM-SHA-512",
+    "sasl_plain_username": "agent-service",
+    "sasl_plain_password": os.environ["KAFKA_PASSWORD"],
+})
+```
 
 ---
 
@@ -289,6 +320,8 @@ asyncio.run(listen())
 | `durable` | `True` | Exchange survives broker restarts. |
 | `connection_timeout` | `10` | Connection timeout in seconds. |
 | `heartbeat` | `60` | Heartbeat interval in seconds. |
+
+For TLS, use an `amqps://` URL, for example `"url": "amqps://user:pass@mq.example.com/"`.
 
 ---
 

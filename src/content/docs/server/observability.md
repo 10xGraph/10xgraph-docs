@@ -5,7 +5,7 @@ section: "API server"
 group: "Operate"
 order: 140
 label: Observability
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 10xGraph provides multiple observability surfaces to monitor agent execution, debug issues, and track performance in production. Logs and metrics are built in; Sentry integration and tracing are optional. This page covers logs, metrics, secret redaction, Sentry setup, and the REST API endpoint to inspect run traces. For per-node spans in Logfire or LangSmith, see the link at the end.
@@ -349,6 +349,10 @@ logger = logging.getLogger("tenxgraph")
 ```
 
 For per-node spans sent to Logfire or LangSmith, see [Send traces to Logfire or LangSmith](/docs/guides/send-traces-to-logfire-langsmith).
+
+## What is in your traces
+
+Spans carry `user_id`, `thread_id` and `run_id`. Set `"observability": {"user_id_mode": "hash"}` (or `"mask"`) in `10xgraph.json` to change how the user id appears. It applies to the server's OTEL publisher, for the `observability` block and for `OTEL_ENABLED`. Prompts and tool I/O appear only at `observability.level` `full`. See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
 
 ## Related docs
 

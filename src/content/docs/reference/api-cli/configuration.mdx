@@ -161,10 +161,11 @@ The `memory` backend counts per process, so with N workers the real limit is `re
 | `ag_ui.enabled` | boolean | `false` | Mounts `POST /v1/ag-ui`. Needs the `ag-ui` extra |
 | `ag_ui.allow_client_tools` | boolean | `true` | Offer tools sent by the AG-UI client to the model |
 | `observability.level` | string | `standard` | `spans`, `standard` or `full` (`full` may record PII) |
+| `observability.user_id_mode` | string | `raw` | How traces carry the user id: `raw`, `hash` or `mask`. See [Hide the user id in traces](/docs/guides/send-traces-to-logfire-langsmith#hide-the-user-id-in-traces) |
 | `observability.logfire` | object | none | Keys include `enabled`, `service_name`, `send_to_logfire`, `console` |
 | `observability.langsmith` | object | none | Keys include `enabled`, `project`, `endpoint` |
 
-Tokens stay in the environment: `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY` are never read from the file.
+Tokens stay in the environment: `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY` are never read from the file. With `user_id_mode` set to `hash`, `TENXGRAPH_TRACE_USER_ID_KEY` (also from the environment) makes the hash keyed. See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
 
 ## media
 

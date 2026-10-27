@@ -11,7 +11,7 @@ faq:
     a: "Container orchestrators stop processes with SIGTERM, not SIGINT. GracefulShutdownManager registers handlers for both."
   - q: "What does graph.aclose() return?"
     a: "A dictionary of shutdown statistics with background_tasks, checkpointer, publisher, store and total_duration entries."
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 To shut a 10xGraph service down cleanly, register signal handlers with `GracefulShutdownManager`, stop starting work once `shutdown_requested` is set, and finish by calling `await graph.aclose()`. This example runs a tool-calling agent in a loop and walks through each of those steps, including how to read the shutdown statistics.
@@ -64,6 +64,7 @@ import sys
 
 from tenxgraph.core import Agent, StateGraph, ToolNode
 from tenxgraph.core.state import AgentState, Message
+from tenxgraph.prebuilt.tools import safe_calculator
 from tenxgraph.utils import END
 from tenxgraph.utils.shutdown import GracefulShutdownManager
 
@@ -86,20 +87,10 @@ def get_system_status(tool_call_id: str | None = None) -> str:
     return "System status: All services operational"
 
 
-def calculate(expression: str, tool_call_id: str | None = None) -> str:
-    """Safely evaluate a mathematical expression."""
-    try:
-        # Only allow basic math operations for safety
-        # Note: In production, use a proper math parser instead of eval
-        allowed_names = {"__builtins__": {}}
-        result = eval(expression, allowed_names, {})  # noqa: S307
-        return f"Result: {result}"
-    except Exception as e:
-        return f"Error calculating: {e}"
-
-
-# Create tool node with available tools
-tool_node = ToolNode([get_current_time, get_system_status, calculate])
+# Create tool node with available tools. Arithmetic uses the prebuilt safe_calculator:
+# never pass model output to eval(), even with empty builtins (it can be escaped and a
+# huge power like 9**9**9 hangs the process).
+tool_node = ToolNode([get_current_time, get_system_status, safe_calculator])
 
 
 # Create the main agent using Agent class
@@ -300,16 +291,10 @@ def get_current_time(tool_call_id: str | None = None) -> str:
 def get_system_status(tool_call_id: str | None = None) -> str:
     return "System status: All services operational"
 
-def calculate(expression: str, tool_call_id: str | None = None) -> str:
-    try:
-        allowed_names = {"__builtins__": {}}
-        result = eval(expression, allowed_names, {})
-        return f"Result: {result}"
-    except Exception as e:
-        return f"Error calculating: {e}"
+tool_node = ToolNode([get_current_time, get_system_status, safe_calculator])
 ```
 
-The `tool_call_id` parameter is injected by the graph at runtime. The `calculate` tool uses `eval` with empty builtins to keep the example short; use a real math parser in production. The Agent is configured with Google's Gemini model:
+The `tool_call_id` parameter is injected by the graph at runtime. Arithmetic uses the prebuilt `safe_calculator`, which parses the expression instead of running it. Never pass model output to `eval()`, even with empty builtins: an expression can climb from `().__class__` to the interpreter's internals, and `9**9**9` hangs the process. The Agent is configured with Google's Gemini model:
 
 ```python
 main_agent = Agent(
