@@ -433,7 +433,7 @@ ORIGINS=https://example.com,https://app.example.com
 | `SENTRY_DSN` | none | Sentry error tracking |
 | `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing |
 | `OTEL_SERVICE_NAME` | `10xgraph-api` | Service name in traces |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | OTLP collector URL; omit to log spans to console |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | OTLP collector URL; omit to print spans to the console in development (in production nothing is exported and a warning is logged) |
 | `ORIGINS` | `*` | CORS allowed origins. Production refuses `*` unless `STRICT_PRODUCTION_CHECKS=false`, so list your domains |
 | `ALLOWED_HOST` | `*` | Allowed `Host` values. Production refuses `*` unless `STRICT_PRODUCTION_CHECKS=false` |
 

@@ -197,7 +197,7 @@ app = FastAPI(lifespan=lifespan)
 
 ### Multi-user isolation
 
-By default, `PgCheckpointer` treats `user_id` as an **ownership boundary**. Threads, state, and messages are scoped to the authenticated user, so even if an attacker knows another user's `thread_id`, they cannot read, write, or delete it. This is critical in multi-tenant deployments.
+By default, `PgCheckpointer` treats `user_id` as an **ownership boundary**. Threads, state, messages, and the [tool ledger](/docs/concepts/replay-safe-tools) are scoped to the authenticated user, so even if an attacker knows another user's `thread_id`, they cannot read, write, or delete it. This is critical in multi-tenant deployments.
 
 ```python
 # Multi-tenant deployment (recommended default)

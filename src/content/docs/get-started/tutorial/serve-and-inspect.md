@@ -244,7 +244,7 @@ The server loads your config once at startup. For each request, it invokes the g
 | `/v1/graph/invoke` | POST | Invoke the graph, return final state |
 | `/v1/graph/stream` | POST | Invoke the graph, stream one JSON chunk per line |
 | `/v1/graph/stop` | POST | Stop a running graph |
-| `/v1/graph/fix` | POST | Remove broken tool calls from state |
+| `/v1/graph/fix` | POST | Remove unanswered tool calls from state |
 | `/v1/threads/{thread_id}/state` | GET | Read thread checkpoint |
 | `/v1/threads/{thread_id}/messages` | GET | List thread messages |
 | `/ping` | GET | Health check |

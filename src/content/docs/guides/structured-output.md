@@ -3,7 +3,7 @@ title: "Structured output"
 description: "Get typed output from LLMs with automatic validation and repair. Use output_schema with Agent or StructuredOutputAgent."
 seoTitle: "Structured LLM output"
 label: "Structured output"
-updated: "2026-10-08"
+updated: "2026-10-27"
 order: 60
 group: "Agents and graphs"
 section: "Build agents"
@@ -151,7 +151,7 @@ agent = StructuredOutputAgent(
             "content": "Extract person information as structured data."
         }
     ],
-    max_attempts=3,  # Retry up to 3 times if validation fails
+    max_attempts=3,  # Retry up to 3 times per turn if validation fails
     provider="openai",
 )
 

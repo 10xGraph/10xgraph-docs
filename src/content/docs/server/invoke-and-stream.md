@@ -267,7 +267,7 @@ If nothing is running, `running` is `false` (or `ok` is `false` with a `reason` 
 
 ## Fix corrupted graph state
 
-If a graph execution is interrupted or fails mid-tool-call, the checkpoint may contain tool-call messages with empty content. Use POST `/v1/graph/fix` to clean these up:
+If a graph execution is interrupted or fails mid-tool-call, the checkpoint may contain an assistant message whose tool calls never got results. Use POST `/v1/graph/fix` to clean these up:
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/fix \
@@ -277,7 +277,7 @@ curl -X POST http://localhost:8000/v1/graph/fix \
   }'
 ```
 
-The response shows how many messages were removed. `state` is the updated state serialized as a JSON string.
+The response shows how many messages were removed (`removed_count: 0` when nothing needed fixing). A thread that is paused on an interrupt, a client tool call or a human approval keeps the unanswered calls of its latest assistant message. See [POST /v1/graph/fix](/docs/reference/rest-api/graph#post-v1graphfix) for the rules. `state` is the updated state serialized as a JSON string.
 
 ```json
 {
@@ -291,7 +291,7 @@ The response shows how many messages were removed. `state` is the updated state 
 }
 ```
 
-After fixing, the thread is safe to resume. Empty tool calls typically occur when:
+After fixing, the thread is safe to resume. Unanswered tool calls typically occur when:
 - A tool was called but the client disconnected before sending the result.
 - An interrupt happened while a tool was running.
 - A network error cut off the tool response.

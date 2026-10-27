@@ -168,7 +168,7 @@ See [ID Generator](/docs/reference/python/id-generator) for the constructor cont
 | --- | --- | --- |
 | `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing |
 | `OTEL_SERVICE_NAME` | `10xgraph-api` | Service name reported in spans |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `null` | OTLP collector endpoint |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `null` | OTLP collector endpoint. Unset: spans print to the console in development; with `MODE=production` nothing is exported and a warning is logged |
 | `OTEL_LEVEL` | `standard` | Trace detail: `spans`, `standard`, or `full` |
 
 OpenTelemetry needs the extra: `pip install "10xgraph-api[otel]"`, which also brings the FastAPI instrumentation and the OTLP exporter.

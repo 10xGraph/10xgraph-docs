@@ -85,7 +85,7 @@ console.log((await client.ping()).data); // server pong string
 | `graph()` | `Promise<GraphResponse>` | Fetch graph metadata including `id_type`, `id_generator`, and state schema information. |
 | `graphStateSchema()` | `Promise<StateSchemaResponse>` | Fetch the schema of the graph's state type. |
 | `stopGraph(threadId, config?)` | `Promise<StopGraphResponse>` | Interrupt a running graph execution for `threadId`. |
-| `fixGraph(threadId, config?)` | `Promise<FixGraphResponse>` | Remove incomplete tool-call messages from a thread's state (useful after an interrupted run). |
+| `fixGraph(threadId, config?)` | `Promise<FixGraphResponse>` | Remove assistant messages whose tool calls have no result, and orphaned tool results, from a thread's state (useful after an interrupted run). |
 | `graphTools()` | `Promise<GraphToolsResponse>` | List the tools every tool node exposes, grouped by node, each tagged `local`, `mcp`, or `remote`. |
 | `observability(threadId, runId?)` | `Promise<ObservabilityResponse>` | Fetch the reconstructed trace (spans, events, token usage) for a thread's latest run, or a specific `runId`. |
 

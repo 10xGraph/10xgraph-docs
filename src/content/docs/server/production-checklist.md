@@ -391,6 +391,8 @@ OTEL_SERVICE_NAME=10xgraph-api
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
+Set the endpoint. With `MODE=production` and no endpoint, the server does not print spans to the console (they could carry request URLs and, at `OTEL_LEVEL=full`, message content); it exports nothing and logs a warning at startup.
+
 ### Traces and event publishers
 
 Traces at the `full` level and the Redis, RabbitMQ and Kafka publishers carry message and tool content, and spans carry the user id. 10xGraph never forces TLS on these connections; it is your call:

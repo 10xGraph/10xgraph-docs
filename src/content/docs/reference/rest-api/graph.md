@@ -293,7 +293,16 @@ Tool collection is best-effort per node: an MCP server that fails to respond is 
 
 ## POST /v1/graph/fix
 
-Repair a thread whose state contains messages with tool calls that have empty content, which is what an interrupted or failed tool execution leaves behind. Those messages are removed from the state.
+Repair a thread whose history is broken because a run stopped after the model asked for tools but before the results were saved.
+
+The repair works in two steps:
+
+1. An assistant message is removed when any of its tool calls has no matching tool result. Calls and results are matched by tool call id.
+2. Tool result messages whose call no longer exists, including results left over from a message removed in step 1, are then removed. Every remaining result has its call.
+
+If the thread is paused (an `interrupt()`, a client tool call waiting for its result, or a human-approval pause), the unanswered calls of the latest assistant message are kept, because the pause is waiting on them. Earlier dangling calls are still removed. Messages without tool calls are never touched.
+
+When nothing needs fixing, the response has `removed_count: 0` and the state is not written.
 
 **Request body:**
 
@@ -312,7 +321,7 @@ Repair a thread whose state contains messages with tool calls that have empty co
 {
   "data": {
     "success": true,
-    "message": "Removed 1 message with empty tool calls",
+    "message": "Removed 1 message with unanswered tool calls",
     "removed_count": 1,
     "state": {}
   },

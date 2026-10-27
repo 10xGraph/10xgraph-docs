@@ -17,7 +17,7 @@ The `10xgraph-client` TypeScript client exposes utility methods for inspecting g
 | `graphStateSchema()` | Fetch the JSON Schema describing all fields in the graph's state. |
 | `observability(threadId, runId?)` | Reconstruct and fetch the execution trace: spans, events, and token usage. |
 | `stopGraph(threadId, config?)` | Signal a running graph to stop after the current node. |
-| `fixGraph(threadId, config?)` | Remove messages whose tool calls have empty content from a thread. |
+| `fixGraph(threadId, config?)` | Remove assistant messages with unanswered tool calls, and orphaned tool results, from a thread. |
 
 ## Prerequisites
 
@@ -436,7 +436,7 @@ for await (const chunk of stream) {
 
 ## fixGraph()
 
-Removes messages whose tool calls have empty content from a thread's saved state via `POST /v1/graph/fix`. This is a recovery operation for threads that ended up in a broken state due to an interrupted execution, typically when the server was restarted mid-tool-call or when a network error cut a streaming connection.
+Repairs a thread's saved state via `POST /v1/graph/fix` when a run stopped after the model asked for tools but before the results were saved. This is a recovery operation for threads left broken by an interrupted execution, typically when the server was restarted mid-tool-call or when a network error cut a streaming connection.
 
 ```ts
 const result = await client.fixGraph('thread-abc123');
@@ -461,7 +461,7 @@ interface FixGraphResponse {
 
 ### When to call fixGraph()
 
-Call `fixGraph()` when a thread gets stuck after an interrupted execution. The symptom is a `GRAPH_ERROR` or the graph refusing to accept new messages on a thread. The root cause is a message whose tool calls carry empty content, left behind by a tool call that never completed.
+Call `fixGraph()` when a thread gets stuck after an interrupted execution. The symptom is a `GRAPH_ERROR` or the graph refusing to accept new messages on a thread. The root cause is an assistant message whose tool calls have no matching tool result, left behind by a tool call that never completed.
 
 ```ts
 async function invokeWithRecovery(threadId: string, message: string) {
@@ -489,7 +489,14 @@ async function invokeWithRecovery(threadId: string, message: string) {
 
 ### How it works
 
-`fixGraph()` loads the thread's saved state from the checkpointer and drops every message in its context that has a tool call whose `content` is `null` or an empty string. It then saves the cleaned state. If the thread has no saved state, the call returns `success: false` with `removed_count: 0` instead of an error.
+`fixGraph()` loads the thread's saved state from the checkpointer and repairs the message history in two steps:
+
+1. It removes an assistant message when any of its tool calls has no matching tool result, matched by tool call id.
+2. It then removes tool result messages whose call no longer exists, including results left over from a message removed in step 1, so every remaining result has its call.
+
+If the thread is paused (an `interrupt()`, a client tool call waiting for its result, or a human-approval pause), the unanswered calls of the latest assistant message are kept, because the pause is waiting on them. Earlier dangling calls are still removed. Messages without tool calls are never touched.
+
+When nothing needs fixing, the call returns `removed_count: 0` and does not write the state. If the thread has no saved state, the call returns `success: false` with `removed_count: 0` instead of an error.
 
 ---
 
@@ -686,4 +693,4 @@ runWithApprovalGate('Process this high-cost operation.')
 | `observability` returns `run: null` | No runs have been recorded for the thread, or telemetry is disabled. | Invoke the thread at least once to generate a run. Check the server's telemetry configuration. |
 | Stream never shows the interrupt even though `interrupt_before` is set | The default `'low'` granularity hides `updates` chunks, or the node is never reached. | Pass `response_granularity: 'full'`, or check `threadState()` after the stream. Verify `graph().data.info.interrupt_before` includes the node. |
 | `graphTools` returns empty `nodes` array | The graph has no `ToolNode`s. | Not an error if the agent doesn't need external tools. Add a `ToolNode` if you expect to see tools. |
-| `fixGraph` returns `removed_count: 0` | No messages with empty tool calls found; nothing to repair. | No action needed. The thread can proceed with the next invoke. |
+| `fixGraph` returns `removed_count: 0` | No unanswered tool calls or orphaned results found; nothing to repair. | No action needed. The thread can proceed with the next invoke. |

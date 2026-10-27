@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Prebuilt agents"
 order: 120
 label: SupervisorTeamAgent
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: When should I use SupervisorTeamAgent instead of SwarmAgent?
     a: Use SupervisorTeamAgent when you need centralized control and explicit routing logic. Use SwarmAgent when workers should hand off to each other directly. SupervisorTeamAgent is simpler when the coordinator should make all delegating decisions.
@@ -121,7 +121,7 @@ Each worker's description comes from the `description` field in its `WorkerConfi
 | `supervisor_model` | `str` | required | LLM model for the supervisor agent (e.g. `"gpt-4o"`, `"gemini-2.5-flash"`) |
 | `workers` | `dict[str, WorkerConfig]` | required | Worker registry mapping worker names (UPPER-CASE recommended) to their configs |
 | `supervisor_system_prompt` | `list[dict] \| None` | auto-generated | Custom supervisor system prompt; if None, built from worker descriptions |
-| `max_rounds` | `int` | `10` | Hard cap on supervisor→worker delegations before terminating |
+| `max_rounds` | `int` | `10` | Hard cap on supervisor→worker delegations per turn before terminating. The count is per turn (one invoke or stream of a user message): it resets when a new turn starts after a completed run, and is kept when a paused run resumes (interrupt or client tool) or the last run ended in an error or was stopped. |
 | `state` | `AgentState \| None` | `None` | Optional custom state class for the entire graph |
 | `context_manager` | `BaseContextManager \| None` | `None` | Optional custom context manager (e.g. trimming, summarization) |
 | `publisher` | `BasePublisher \| list[BasePublisher] \| None` | `None` | Event publisher for streaming events to external systems |
@@ -442,7 +442,7 @@ Or start the interactive playground:
 
 The supervisor routing function uses word-boundary regex to match worker names, preventing partial matches. For example, if you have workers named `CODE` and `CODER`, a supervisor response containing `CODER` will match `CODER`, not `CODE`. If the supervisor response does not contain any recognized worker name or FINISH, the conversation terminates and a warning is logged.
 
-The round counter lives in `execution_meta.internal_data["sta_rounds"]` and increments before each supervisor call. When `max_rounds` is reached, the supervisor is bypassed and the graph terminates immediately.
+The round counter lives in `execution_meta.internal_data["sta_rounds"]` and increments before each supervisor call. The counter is per turn and resets when a new turn starts after a completed run. When `max_rounds` is reached, the supervisor is bypassed and the graph terminates immediately.
 
 ---
 
