@@ -5,7 +5,7 @@ section: Reference
 group: "REST API"
 order: 350
 label: Memory store
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The `/v1/store` endpoints let you store, search, list, read, update, delete and bulk-forget long-term memories through the 10xGraph API server. They work only when a `store` is configured in `10xgraph.json`; without one, every endpoint returns `503` with "Store is not configured". Responses use the standard `data` and `metadata` envelope.
@@ -21,7 +21,7 @@ Every request body accepts two optional fields besides the endpoint-specific one
 | `config` | object | Values forwarded to the store backend. Defaults to `{}`. The keys `user_id`, `user`, `authz`, `remote_tools`, `collection` and any key starting with `_` are dropped by the server. |
 | `options` | object | Extra keyword arguments forwarded to the store backend. The key `memory_id` is dropped, so the store always generates IDs. |
 
-The server sets `user_id` from the authenticated user (or `anonymous` when auth is off). Sending `user_id` in `config` has no effect. See the [REST conventions](/docs/reference/rest-api/conventions) for the envelope and error format.
+The server sets `user_id` from the authenticated user (or `anonymous` when auth is off). Sending `user_id` in `config` has no effect. Store operations always need a non-empty `user_id`, so an identity without one cannot use these endpoints. Reserved ids starting with `__system__` (built with `system_user_id(name)`) own shared data such as agent memory and RAG knowledge bases, and the server refuses an authenticated identity whose `user_id` starts with `__system__`. See the [REST conventions](/docs/reference/rest-api/conventions) for the envelope and error format.
 
 ---
 

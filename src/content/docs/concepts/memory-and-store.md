@@ -176,9 +176,11 @@ You can partition memories into **scopes** so different agents or users see diff
 | **User memory** (`UserMemoryConfig`, enabled by default) | The LLM can search and write | Facts about a specific user (timezone, preferences, history) |
 | **Agent memory** (`AgentMemoryConfig`, disabled by default) | The LLM can only search | Shared knowledge scoped by `agent_id` or `app_id` (domain facts, workarounds) |
 
-**Example:** A customer support agent remembers the customer's billing cycle (user memory). Your own code seeds agent memory with known workarounds, and the model reads them through `agent_memory_tool`. The model has no tool to write agent memory.
+**Example:** A customer support agent remembers the customer's billing cycle (user memory). Your own code seeds agent memory (written under `system_user_id(agent_id)`) with known workarounds, and the model reads them through `agent_memory_tool`. The model has no tool to write agent memory.
 
 Both scopes can share one backing store or each take their own `store`, and they are queried separately.
+
+Every memory store call needs a non-empty `user_id`; an empty or missing one raises `ValueError` instead of searching across users. Agent memory is shared data, so it is always read under the reserved owner `system_user_id(agent_id)` (`"__system__:<agent_id>"`, or the `app_id` when there is no `agent_id`), not the current user. Each agent has its own owner, so agents do not see each other's memory. Seed it from your own code with `config={"user_id": system_user_id("my-agent")}`. See the [Memory stores reference](/docs/reference/python/memory-stores#the-user_id-rule-and-system_user_id).
 
 ## Choosing: memory tools (postload) vs preload
 

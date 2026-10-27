@@ -262,6 +262,8 @@ async def my_tool(config: dict, store: BaseStore):
 
 The `store` and `config` parameters are injected by name and hidden from the model; no manual wiring needed. `asearch` takes the run `config` first (it carries `user_id`), then the query.
 
+Every store call needs a non-empty `user_id` in `config`. A missing or blank one raises `ValueError`. Reads under the admin authz scope `"none"` skip the user filter; writes and `aforget_memory` never do. For shared data with no user, use `system_user_id(name)` from `tenxgraph.storage`. See the [Memory stores reference](/docs/reference/python/memory-stores#the-user_id-rule-and-system_user_id).
+
 ---
 
 ## Agent-level memory with MemoryConfig
@@ -344,6 +346,7 @@ agent = Agent(model="gpt-4o", tool_node=ToolNode([]), memory=memory)
 
 ### UserMemoryConfig vs. AgentMemoryConfig
 
+- **AgentMemoryConfig data is shared.** It is always read under `system_user_id(agent_id)` (or `system_user_id(app_id)` when there is no `agent_id`), so seed it with `await store.astore({"user_id": system_user_id("my-agent")}, "...")` (`from tenxgraph.storage import system_user_id`). Enabling it with neither `agent_id` nor `app_id` raises `ValueError`.
 - **UserMemoryConfig:** Scoped to a single user (`user_id`). The agent can both **read and write** user memories. Use this for user preferences, learned facts about the user, and conversation summaries.
 - **AgentMemoryConfig:** Scoped to the agent/application. The agent can **only read** agent memories. Use this for shared domain knowledge, FAQs, and system facts that should not be modified by user interactions.
 

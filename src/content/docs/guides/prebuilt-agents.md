@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Prebuilt agents"
 order: 80
 label: Prebuilt agents
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 10xGraph ships seven prebuilt agent classes that wrap a fully wired `StateGraph` behind a single constructor and `compile()` call. Each is a ready-made pattern for a common orchestration task. They compile to a `CompiledGraph` you can `invoke()`, `astream()`, or serve over the API server just like any graph you wrote by hand. This page helps you choose the right agent and points to detailed guides for each.
@@ -94,7 +94,7 @@ See [StructuredOutputAgent](/docs/guides/prebuilt/structured-output-agent) for r
 
 ### RAGAgent
 
-Retrieval-augmented generation. Queries a document store to find relevant context, optionally reranks results, and passes them to a wrapped agent so answers come from your documents.
+Retrieval-augmented generation. Queries a document store to find relevant context, optionally reranks results, and passes them to a wrapped agent so answers come from your documents. The documents are added to the model request only, not to the saved thread.
 
 ```python
 from tenxgraph.prebuilt.agent import RAGAgent

@@ -117,6 +117,8 @@ def list_my_orders(config: dict) -> list[dict]:
     return db.orders_for(user_id)
 ```
 
+User IDs starting with `__system__` are reserved for shared data (agent memory, RAG knowledge bases). The server refuses an authenticated identity that carries one (HTTP 401 "This user id is reserved", WebSocket close code 1008), so no caller can act as a shared owner.
+
 Never take a user ID from a tool argument. The model chooses tool arguments; a prompt-injected model could ask to see another user's data. Instead, trust the server-verified `config["user_id"]`.
 
 ## Enforce thread ownership

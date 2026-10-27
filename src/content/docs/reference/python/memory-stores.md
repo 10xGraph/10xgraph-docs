@@ -257,6 +257,30 @@ Configuration for agent/app-scoped long-term memory. The model can search but no
 | `agent_id` | `str \| None` | None | Agent identifier for scoping. |
 | `app_id` | `str \| None` | None | App identifier for scoping. |
 
+Agent memory is shared data. `agent_memory_tool` and the preload block always search it as the reserved owner `system_user_id(agent_id)` (or `system_user_id(app_id)` when `agent_id` is not set), whatever user is running, so every user of an agent sees the same agent memory. Each agent has its own owner, so two agents never see each other's shared memory, even in one Qdrant collection. Enabling `AgentMemoryConfig` with neither `agent_id` nor `app_id` raises `ValueError` when the Agent sets up its memory:
+
+```text
+ValueError: MemoryConfig.agent_memory is enabled but has neither agent_id nor app_id; set one so shared agent memory has its own owner
+```
+
+To write shared agent memory from your own code, store under the same owner. The tool searches with `user_id` set to the owner, plus `agent_id` and `thread_id` (both set to your `agent_id`) and `app_id` when set, so write with the same keys:
+
+```python
+from tenxgraph.storage import system_user_id
+
+await store.astore(
+    config={
+        "user_id": system_user_id("customer-support-v2"),
+        "agent_id": "customer-support-v2",
+        "thread_id": "customer-support-v2",
+    },
+    content="Error E42 means the license expired.",
+    category="workarounds",
+)
+```
+
+With only an `app_id`, use `{"user_id": system_user_id(app_id), "app_id": app_id}`. `QdrantStore` filters search by `user_id`, `memory_type` and `category` and ignores `agent_id`, `app_id` and `thread_id`; the per-agent owner is what keeps agents apart. `Mem0Store` also scopes by `app_id`.
+
 ---
 
 ## Memory retrieval functions
@@ -308,7 +332,7 @@ Abstract base class that every store backend implements. Every method takes a `c
 | `aget_all` | `async (config, limit=100, **kwargs) -> list[MemorySearchResult]` | List memories in the config's scope. |
 | `aupdate` | `async (config, memory_id, content, metadata=None, **kwargs) -> Any` | Update a memory's content. |
 | `adelete` | `async (config, memory_id, **kwargs) -> Any` | Delete a memory by ID. |
-| `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for a user or agent scope. Accepted keyword arguments are store-specific. |
+| `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. Accepted keyword arguments are store-specific. |
 | `asetup` | `async () -> Any` | Create the collection or other backing resources. Implemented by `QdrantStore`; the base class raises `NotImplementedError`. |
 | `arelease` | `async () -> None` | Release connections. Not abstract, but the base implementation raises `NotImplementedError`; `Mem0Store` overrides it. |
 
@@ -327,10 +351,44 @@ Each async method has a sync wrapper named without the `a` prefix (`store`, `sea
 
 ```python
 config = {
-    "user_id": "alice",      # user scope (required by Mem0Store)
+    "user_id": "alice",      # required by every store operation
     "thread_id": "thread-1", # optional; QdrantStore reads it
 }
 ```
+
+### The `user_id` rule and `system_user_id`
+
+Every long-term memory operation needs a non-empty `user_id`, taken from the `config` dict. A missing, `None`, empty or blank value raises:
+
+```text
+ValueError: user_id is required for memory operations; use system_user_id(name) for shared data
+```
+
+This applies to `astore`, `asearch`, `aget`, `aget_all`, `aupdate`, `adelete` and `aforget_memory` on both `QdrantStore` and `Mem0Store`. A store never falls back to searching or deleting across all users.
+
+Two rules refine this:
+
+- **Admin reads.** When the authz policy scope is `"none"` (admin or `allow_all`), reads and updates (`asearch`, `aget`, `aget_all`, `aupdate`, `adelete`) skip the user filter and see every user's memories. Writes (`astore`) and `aforget_memory` still need a concrete `user_id` under this policy.
+- **`aforget_memory`** always filters by `user_id`. `thread_id` is an optional extra filter, never a replacement.
+
+Data that belongs to no person, such as agent/app memory and RAG knowledge bases, is owned by a reserved system id. Three names are exported from `tenxgraph.storage.store` and `tenxgraph.storage`:
+
+| Name | Description |
+|---|---|
+| `SYSTEM_USER_PREFIX` | The constant `"__system__"`. Every system owner starts with it. |
+| `system_user_id(name)` | Returns `"__system__:<name>"`. Raises `ValueError` when `name` is empty. Each name is its own owner, so shared data sets stay separate. |
+| `is_system_user_id(user_id)` | Returns `True` for any `str` that starts with `__system__`. |
+
+```python
+from tenxgraph.storage import system_user_id, is_system_user_id
+# also available as: from tenxgraph.storage.store import system_user_id
+
+owner = system_user_id("knowledge_base")  # "__system__:knowledge_base"
+await store.astore(config={"user_id": owner}, content="Refunds take 5 days.")
+is_system_user_id(owner)  # True
+```
+
+Agent and app memory use `system_user_id(agent_id)` (or `system_user_id(app_id)`); `RAGAgent` searches `system_user_id("knowledge_base")` by default. The 10xGraph API refuses any authenticated identity whose `user_id` starts with `__system__` (HTTP 401 "This user id is reserved", WebSocket close code 1008), so no caller can act as a shared owner. Records written earlier with an empty owner are not found by any user-scoped read; re-index them under the intended owner.
 
 ---
 
@@ -434,7 +492,7 @@ store = Mem0Store(config={
 | `config` | `mem0 MemoryConfig \| dict` | Required | Mem0 configuration. A dict goes through `AsyncMemory.from_config`. |
 | `app_id` | `str \| None` | `"agentflow_app"` | App identifier. A per-call `config["app_id"]` overrides it. |
 
-`Mem0Store` delegates to Mem0's `AsyncMemory` client, created lazily on first use. Every call needs `user_id` in the `config` dict, otherwise it raises `ValueError`. `asetup` is not implemented for `Mem0Store`, so do not call it. `aforget_memory` deletes all memories for the user.
+`Mem0Store` delegates to Mem0's `AsyncMemory` client, created lazily on first use. Every call needs `user_id` in the `config` dict, otherwise it raises the same `ValueError` as `QdrantStore`. `asetup` is not implemented for `Mem0Store`, so do not call it. `aforget_memory` deletes all memories for the user.
 
 ---
 
@@ -646,6 +704,6 @@ The `store` parameter is injected when you pass `store=` to `graph.compile()`.
 | `ImportError: qdrant-client package is required for QdrantStore` | `qdrant-client` is not installed. | `pip install "10xgraph[qdrant]"`. |
 | `ImportError: mem0 package is required for Mem0Store` | `mem0ai` is not installed. | `pip install "10xgraph[mem0]"`. |
 | `ValueError: OpenAI API key must be provided...` | No `api_key` and no `OPENAI_API_KEY`. | Set the variable or pass `api_key`. |
-| `ValueError: user_id must be provided in config` | A `Mem0Store` call has no `user_id`. | Put `user_id` in the `config` dict. |
+| `ValueError: user_id is required for memory operations; use system_user_id(name) for shared data` | A store call has a missing, `None`, empty or blank `user_id`. | Put the user's id in the `config` dict, or `system_user_id(name)` for shared data. See [The `user_id` rule](#the-user_id-rule-and-system_user_id). |
 | `RuntimeError: Memory requires an existing ToolNode...` | `Agent(memory=...)` in `POSTLOAD` mode without a tool node. | Pass `tool_node=` or use `PRELOAD`. |
 | `NotImplementedError` from `asetup` | Called `asetup()` on `Mem0Store`. | Only `QdrantStore` implements it. |

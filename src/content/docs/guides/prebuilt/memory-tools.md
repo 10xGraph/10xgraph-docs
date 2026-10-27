@@ -158,14 +158,29 @@ agent = ReactAgent(
 app = agent.compile(store=store)
 ```
 
-The `agent_memory_tool` is now available to the LLM in read-only form. It searches the memories stored under the configured `agent_id` / `app_id`, not a per-user scope:
+The `agent_memory_tool` is now available to the LLM in read-only form. It searches shared memory, not a per-user scope. It always runs as the reserved owner `system_user_id(agent_id)` (here `"__system__:customer-support-v2"`; with no `agent_id` it uses the `app_id`), whichever user is chatting, so every user finds the same records and other agents do not.
+
+Your own code writes that shared memory under the same owner:
+
+```python
+from tenxgraph.storage import system_user_id
+
+await store.astore(
+    config={"user_id": system_user_id("customer-support-v2"), "agent_id": "customer-support-v2", "thread_id": "customer-support-v2"},
+    content="Refunds are accepted within 30 days with a receipt.",
+    category="policies",
+)
+```
+
+Records written under a real user's id are not found by `agent_memory_tool`. With `QdrantStore`, search filters by owner, `memory_type` and `category`. Each agent has its own owner, so agents with different `agent_id` values stay apart even in one collection. See the [Memory stores reference](/docs/reference/python/memory-stores#the-user_id-rule-and-system_user_id) for the full `user_id` rule.
 
 ```python
 result = await app.ainvoke(
     {"messages": [Message.text_message("What is your return policy?")]},
     config={"thread_id": "t1", "user_id": "alice"},
 )
-# The agent can search agent memory (policies) but cannot modify it
+# The agent can search agent memory (policies) but cannot modify it.
+# "alice" does not matter here: agent memory is read as system_user_id("customer-support-v2").
 ```
 
 ---
