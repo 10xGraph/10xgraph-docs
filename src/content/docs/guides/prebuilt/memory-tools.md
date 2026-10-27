@@ -201,7 +201,7 @@ store = create_local_qdrant_store(
 )
 ```
 
-Qdrant works offline in local mode. For production, `QdrantStore` also accepts `host`/`port` or `url` and `api_key` for a server or Qdrant Cloud. Install with `pip install "10xgraph[qdrant]"`.
+Qdrant works offline in local mode. For production, `QdrantStore` also accepts `host`/`port` or `url` and `api_key` for a server or Qdrant Cloud. Install with `pip install "10xgraph[qdrant]"` (needs `qdrant-client` 1.10.0 or newer, and Qdrant server 1.10 or newer for a server).
 
 **Mem0 (enterprise multi-agent memory):**
 

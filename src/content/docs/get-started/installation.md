@@ -96,7 +96,7 @@ Beyond model providers, optional extras unlock advanced features:
 | `pg_checkpoint` | asyncpg, redis (production durable state) | Production deployments with durable state |
 | `mcp` | fastmcp, mcp | Tools served by Model Context Protocol servers |
 | `sqlite_checkpoint` | aiosqlite | Single-machine persistence without PostgreSQL or Redis |
-| `qdrant` | qdrant-client | Long-term semantic memory and retrieval |
+| `qdrant` | qdrant-client 1.10 or newer (Qdrant server 1.10 or newer) | Long-term semantic memory and retrieval |
 | `mem0` | mem0ai | Managed vector memory store |
 | `kafka` | aiokafka | Stream execution events to Apache Kafka |
 | `rabbitmq` | aio-pika | Stream execution events to RabbitMQ |

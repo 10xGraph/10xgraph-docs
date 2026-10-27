@@ -253,7 +253,7 @@ Ownership is immutable, so it is cached by `ThreadOwnershipResolver` for scalabi
 | Tier | Details |
 |---|---|
 | L1 | In-process LRU: 10,000 entries per worker, no expiry |
-| L2 | Optional shared Redis client (key prefix `af:authz:owner`, no expiry since ownership never changes; Redis errors degrade to database lookup and never fail the request) |
+| L2 | Optional shared Redis client (owner entries under `af:authz:owner:id:<thread_id>`, kept for 1 hour; a delete removes the entry and leaves a "just deleted" marker under `af:authz:owner:tomb:<thread_id>` for 30 seconds, so the id cannot be claimed while another worker still caches the old owner; Redis errors degrade to database lookup and never fail the request) |
 
 Negative results are not cached (a missing thread could be created by a later request). The L2 tier is wired from `redis` in `10xgraph.json`, falling back to `REDIS_URL`. When neither is set or the `redis` package is not installed, L1 only is used and a warning is logged at startup.
 

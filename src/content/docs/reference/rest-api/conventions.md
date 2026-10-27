@@ -12,7 +12,7 @@ Every route in the 10xGraph REST API lives under `/v1/` (except `/ping`), return
 
 ## Base URL and response envelope
 
-Successful responses wrap the payload in `data` and add a `metadata` object with `request_id`, `timestamp` and `message`. Errors raised by the application return `error` instead, with the same `metadata`. The `details` list is empty unless the error carries extra context (validation errors, for example).
+Successful responses wrap the payload in `data` and add a `metadata` object with `request_id`, `timestamp` and `message`. Errors raised by the application return `error` instead, with the same `metadata`. The `details` list is empty unless the error carries extra context (validation errors, or the `context` of a graph or node error outside production).
 
 ```json
 {

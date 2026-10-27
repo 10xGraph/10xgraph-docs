@@ -240,6 +240,8 @@ Most errors use this body shape:
 }
 ```
 
+Outside `MODE=production`, `details` lists the exception's `context`, one entry per key: `{"loc": ["node_name"], "msg": "process_data", "type": "context"}`. In production it is always empty.
+
 A `thread is busy` or interrupt mismatch `409` uses this standard shape, with `error.code` set to `HTTPException`. Only the stale-state conflict has its own shape:
 
 ```json

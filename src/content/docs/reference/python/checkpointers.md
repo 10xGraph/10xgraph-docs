@@ -53,6 +53,8 @@ The methods below are abstract and must be implemented by a subclass:
 | `aclean_thread` | `async (config) -> Any \| None` | Delete a thread and its state and messages. |
 | `arelease` | `async () -> Any \| None` | Release resources (close pools and connections). |
 
+`alist_messages` and `alist_threads` apply `offset` and `limit` in the backend (in SQL on SQLite and Postgres). A negative `offset` or `limit` raises `ValueError`, and a `limit` above `MAX_LIST_LIMIT` (1000, in `tenxgraph.storage.checkpointer.base_checkpointer`) is lowered to it. With no `limit` (`None` or `0`) the whole list is returned, so code that reads a full thread, such as realtime history loading, still works.
+
 ### Sync wrappers
 
 For every `async axxx()` method there is a sync `xxx()` wrapper that runs the async method to completion. Use these only from non-async contexts such as a management script:

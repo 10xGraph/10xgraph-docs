@@ -48,7 +48,7 @@ class Message {
   timestamp: number;
   metadata: Record<string, any>;
   usages?: TokenUsages;
-  raw?: Record<string, any>;
+  raw?: Record<string, any>; // never set on messages the REST API returns
 
   constructor(
     role: 'user' | 'assistant' | 'system' | 'tool',

@@ -188,7 +188,7 @@ console.log(response.data.memory.score);
 |---|---|---|
 | `memoryId` | `string` | The memory ID returned by `storeMemory()`. |
 | `options.config` | `Record<string, any>` | Optional store-level config. |
-| `options.options` | `Record<string, any>` | Optional store-level options. |
+| `options.options` | `Record<string, any>` | Optional store-level options. The server forwards only `infer` and `replace_metadata`. |
 
 ---
 
@@ -292,7 +292,7 @@ for (const mem of response.data.memories) {
 
 ## `forgetMemories(options?)`
 
-Bulk-delete memories matching a type, category or metadata filter. It is one request instead of a `deleteMemory()` call per memory. Only the fields you pass are sent.
+Bulk-delete memories matching a type, category or metadata filter. It is one request instead of a `deleteMemory()` call per memory. Only the fields you pass are sent. The server applies every field you pass; with none, all of your memories are deleted. A Mem0 store can only forget by user, so it rejects `memory_type`, `category` and `filters` with an error.
 
 **Endpoint:** `POST /v1/store/memories/forget`
 

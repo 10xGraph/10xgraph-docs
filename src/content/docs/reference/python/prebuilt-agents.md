@@ -344,7 +344,7 @@ def __init__(
 | `tools` | `Iterable[Callable] \| None` | `None` | Tools available to the PLAN agent. |
 | `plan_system_prompt` | `list[dict] \| None` | `None` | Override planner system prompt. |
 | `reflect_system_prompt` | `list[dict] \| None` | `None` | Override reflector system prompt. |
-| `max_iterations` | `int` | `3` | Max PLAN→ACT→REFLECT cycles per turn. The count is per turn (one invoke or stream of a user message): it resets when a new turn starts after a completed run, and is kept when a paused run resumes (interrupt or client tool) or the last run ended in an error or was stopped. |
+| `max_iterations` | `int` | `3` | Max PLAN→ACT→REFLECT cycles per turn. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
 | `state` | `StateT \| None` | `None` | Custom AgentState. |
 | `context_manager` | `BaseContextManager[StateT] \| None` | `None` | Context manager. |
 | `publisher` | `BasePublisher \| list \| None` | `None` | Event publisher. |
@@ -442,7 +442,7 @@ def __init__(
 | `output_schema` | `type` | required | Pydantic BaseModel or TypedDict subclass. |
 | `tools` | `Iterable[Callable] \| None` | `None` | Tools available during generation. |
 | `system_prompt` | `list[dict] \| None` | `None` | System prompt for the generator. |
-| `max_attempts` | `int` | `2` | Max repair+retry attempts per turn before accepting best response. The count is per turn (one invoke or stream of a user message): it resets when a new turn starts after a completed run, and is kept when a paused run resumes (interrupt or client tool) or the last run ended in an error or was stopped. |
+| `max_attempts` | `int` | `2` | Max repair+retry attempts per turn before accepting best response. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
 | `repair_system_prompt` | `list[dict] \| None` | `None` | System prompt for dedicated repair agent (if provided). |
 | `state` | `StateT \| None` | `None` | Custom AgentState. |
 | `context_manager` | `BaseContextManager[StateT] \| None` | `None` | Context manager. |
@@ -542,7 +542,7 @@ def __init__(
 | `supervisor_model` | `str` | required | LLM model for the supervisor. |
 | `workers` | `dict[str, WorkerConfig]` | required | Mapping of UPPER-CASE names to WorkerConfigs. |
 | `supervisor_system_prompt` | `list[dict] \| None` | `None` | Override auto-generated supervisor prompt. |
-| `max_rounds` | `int` | `10` | Max supervisor→worker delegations per turn. The count is per turn (one invoke or stream of a user message): it resets when a new turn starts after a completed run, and is kept when a paused run resumes (interrupt or client tool) or the last run ended in an error or was stopped. |
+| `max_rounds` | `int` | `10` | Max supervisor→worker delegations per turn. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
 | `state` | `StateT \| None` | `None` | Custom AgentState. |
 | `context_manager` | `BaseContextManager[StateT] \| None` | `None` | Context manager. |
 | `publisher` | `BasePublisher \| list \| None` | `None` | Event publisher. |

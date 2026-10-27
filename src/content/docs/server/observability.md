@@ -169,6 +169,8 @@ From that point on, every call to `counter()` and `timer()` automatically export
 
 The 10xGraph framework automatically records these:
 
+The `tool` attribute is the tool name only when the node can run that tool. A name the model made up is recorded as `"unknown"`, so unknown names cannot create new series.
+
 | Metric | Type | Attributes |
 |---|---|---|
 | `tenxgraph.node.executions` | counter | `node` |

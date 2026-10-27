@@ -36,7 +36,7 @@ Install the dependencies for the backends you use:
 ```bash
 pip install openai              # OpenAIEmbedding
 pip install google-genai        # GoogleEmbedding
-pip install "10xgraph[qdrant]"  # QdrantStore (qdrant-client)
+pip install "10xgraph[qdrant]"  # QdrantStore (qdrant-client >= 1.10)
 pip install "10xgraph[mem0]"    # Mem0Store (mem0ai)
 ```
 
@@ -367,7 +367,7 @@ Abstract base class that every store backend implements. Every method takes a `c
 | `aget_all` | `async (config, limit=100, **kwargs) -> list[MemorySearchResult]` | List memories in the config's scope. |
 | `aupdate` | `async (config, memory_id, content, metadata=None, **kwargs) -> Any` | Update a memory's content. |
 | `adelete` | `async (config, memory_id, **kwargs) -> Any` | Delete a memory by ID. |
-| `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. Accepted keyword arguments are store-specific. |
+| `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. `QdrantStore` also narrows by the keyword arguments `memory_type`, `category` and `filters` (combined with AND; a `filters` value that is not a string, integer or boolean raises `ValueError`). `Mem0Store` can delete only by user, so it raises `ValueError` when any of the three is passed. |
 | `asetup` | `async () -> Any` | Create the collection or other backing resources. Implemented by `QdrantStore`; the base class raises `NotImplementedError`. |
 | `arelease` | `async () -> None` | Release connections. Not abstract, but the base implementation raises `NotImplementedError`; `Mem0Store` overrides it. |
 
@@ -404,7 +404,7 @@ This applies to `astore`, `asearch`, `aget`, `aget_all`, `aupdate`, `adelete` an
 Two rules refine this:
 
 - **Admin reads.** When the authz policy scope is `"none"` (admin or `allow_all`), reads and updates (`asearch`, `aget`, `aget_all`, `aupdate`, `adelete`) skip the user filter and see every user's memories. Writes (`astore`) and `aforget_memory` still need a concrete `user_id` under this policy.
-- **`aforget_memory`** always filters by `user_id`. `thread_id` is an optional extra filter, never a replacement.
+- **`aforget_memory`** always filters by `user_id`. `thread_id` is an optional extra filter, never a replacement. A narrowing argument is never dropped silently: it is applied or the call raises, so a narrow forget cannot delete everything.
 
 Data that belongs to no person, such as agent/app memory and RAG knowledge bases, is owned by a reserved system id. Three names are exported from `tenxgraph.storage.store` and `tenxgraph.storage`:
 
@@ -451,7 +451,7 @@ Vector store backed by [Qdrant](https://qdrant.tech). Production-ready for simil
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Optional dependency</p>
 
-Install with `pip install "10xgraph[qdrant]"`.
+Install with `pip install "10xgraph[qdrant]"`. This needs `qdrant-client` 1.10.0 or newer and, for a server or Qdrant Cloud, Qdrant server 1.10 or newer.
 
 </aside>
 

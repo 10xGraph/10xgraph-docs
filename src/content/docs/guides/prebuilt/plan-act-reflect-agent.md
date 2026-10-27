@@ -117,7 +117,7 @@ app = agent.compile()
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `tools` | `Iterable[Callable]` | `None` | Callables made available to the planner. If empty or `None`, the agent skips the ACT phase and performs pure reasoning. Tools run in parallel when the planner requests multiple at once. |
-| `max_iterations` | `int` | `3` | Maximum plan→act→reflect cycles per turn. Prevents runaway loops. Reaching this limit terminates the graph immediately. The count is per turn (one invoke or stream of a user message): it resets when a new turn starts after a completed run, and is kept when a paused run resumes (interrupt or client tool) or the last run ended in an error or was stopped. |
+| `max_iterations` | `int` | `3` | Maximum plan→act→reflect cycles per turn. Prevents runaway loops. Reaching this limit terminates the graph immediately. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
 | `plan_system_prompt` | `list[dict]` | built-in | Override the planner's system message. Pass a list of role/content dicts (e.g., `[{"role": "system", "content": "..."}]`). |
 | `reflect_system_prompt` | `list[dict]` | built-in | Override the reflector's system message. Same format as `plan_system_prompt`. |
 | `plan_model` | `str` | `None` | Use a different model for the planner (e.g., more capable). Falls back to `model` if not set. |

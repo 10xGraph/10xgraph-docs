@@ -58,8 +58,8 @@ The curl examples in this page assume a local server on port 8000 and a token in
 | Query parameter | Type | Default | Description |
 | --- | --- | --- | --- |
 | `search` | string | none | Free-text filter over thread records |
-| `offset` | integer | none | Number of threads to skip |
-| `limit` | integer | `100` | Page size, maximum `1000` |
+| `offset` | integer | none | Number of threads to skip. A negative value returns `422` |
+| `limit` | integer | `100` | Page size. A value above `1000` is lowered to `1000`; zero or a negative value returns `422` |
 
 ```bash
 # List the first 20 threads whose records match "weather"
@@ -132,7 +132,7 @@ curl http://localhost:8000/v1/threads/t1/state -H "Authorization: Bearer $TOKEN"
 }
 ```
 
-The exact fields depend on your `AgentState` subclass. `state` is `null` when nothing is stored.
+The exact fields depend on your `AgentState` subclass. `state` is `null` when nothing is stored. Messages in `context` carry no `raw` field, and `execution_meta.internal_data` holds only `error` when a run failed. With `MODE=production` that error is a generic message with its error code, as in stream error chunks, not the exception text. The rest of `internal_data` stays on the server.
 
 ## Update thread state
 
@@ -149,7 +149,7 @@ The merge rules are fixed. `context` is appended to the existing list, not repla
 - Messages in `context` must be user messages. A message with role `assistant` or `system` returns `422`. A `tool` message is accepted only as `tool_result` blocks that answer a pending client tool call.
 - Messages that carry a tool call return `422`, because only the model may request tools.
 - Any `message_id` you send in `context` is ignored. The server generates the ids.
-- A value that does not match the type of its state field returns `422` and names the field.
+- A value that does not match the type of its state field returns `422` and names the field. This includes `context`, which must be a list of messages.
 
 Custom state fields are allowed. If the operator set `runs.state_keys` in `10xgraph.json`, only the listed keys are accepted.
 
@@ -185,8 +185,8 @@ Here too, the inner `data` is the checkpointer's return value.
 | Query parameter | Type | Default | Description |
 | --- | --- | --- | --- |
 | `search` | string | none | Free-text filter over message content |
-| `offset` | integer | none | Number of messages to skip |
-| `limit` | integer | `100` | Page size, maximum `1000` |
+| `offset` | integer | none | Number of messages to skip. A negative value returns `422` |
+| `limit` | integer | `100` | Page size. A value above `1000` is lowered to `1000`; zero or a negative value returns `422` |
 
 ```bash
 # Read up to 50 messages from thread t1
@@ -234,7 +234,7 @@ curl -X POST http://localhost:8000/v1/threads/t1/messages \
 
 ## Get a message
 
-`GET /v1/threads/{thread_id}/messages/{message_id}` returns a single `Message` object as `data`. An empty or whitespace-only `message_id` returns `422`.
+`GET /v1/threads/{thread_id}/messages/{message_id}` returns a single `Message` object as `data`. An empty or whitespace-only `message_id` returns `422`, and a `message_id` the thread does not have returns `404`. The provider's raw response (`raw`) is never included.
 
 ```bash
 # Fetch message m1 from thread t1
@@ -261,7 +261,7 @@ The response `data` is the updated `Message`, the same shape as [Get a message](
 
 ## Delete a message
 
-`DELETE /v1/threads/{thread_id}/messages/{message_id}` removes one message. The body is required and takes the same `config` object as the other write routes.
+`DELETE /v1/threads/{thread_id}/messages/{message_id}` removes one message. The body is required and takes the same `config` object as the other write routes. A `message_id` the thread does not have returns `404`.
 
 ```bash
 # Delete message m1 from thread t1

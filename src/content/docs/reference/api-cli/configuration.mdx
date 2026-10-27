@@ -114,7 +114,7 @@ With `"client"`, any request may start a thread under an id it picks. Under owne
 
 ### config_keys and state_keys
 
-When set, a request whose `config` (or `initial_state`) carries any key not on the list is rejected with `422`. `thread_id` and `run_id` are always allowed in `config`. When the key is `null` or absent, any key passes except the ones the server owns, which it drops.
+When set, a request whose `config` (or `initial_state`) carries any key not on the list is rejected with `422`. `thread_id` and `run_id` are always allowed in `config`. When the key is `null` or absent, any key passes except the ones the server owns, which it drops. Keys the server sets itself, such as `ag_ui` on the AG-UI endpoint and `remote_tools`, are added after this check, so you never list them, and a client cannot send them.
 
 Set these when a tool or node trusts a value such as `role` or `plan` from state or config. Without an allow-list, a client can send that value.
 

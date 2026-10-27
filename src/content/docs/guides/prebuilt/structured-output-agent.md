@@ -123,7 +123,7 @@ Repair and generation control:
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `max_attempts` | `int` | `2` | Maximum validation+repair cycles per turn. After this many failures, the agent returns the best-effort response even if validation failed. The count is per turn (one invoke or stream of a user message): it resets when a new turn starts after a completed run, and is kept when a paused run resumes (interrupt or client tool) or the last run ended in an error or was stopped. |
+| `max_attempts` | `int` | `2` | Maximum validation+repair cycles per turn. After this many failures, the agent returns the best-effort response even if validation failed. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
 | `repair_system_prompt` | `list[dict] \| None` | `None` | Set to enable a dedicated LLM repair agent. Pass a list of message dicts with the repair instructions. When `None` (default), repair uses lightweight context injection (no extra LLM call). |
 | `system_prompt` | `list[dict] \| None` | `None` | System prompt for the generation agent. Example: `[{"role": "system", "content": "You are a data analyst..."}]`. |
 

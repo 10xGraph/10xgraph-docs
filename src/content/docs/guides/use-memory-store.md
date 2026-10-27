@@ -69,6 +69,8 @@ Choose based on your infrastructure preferences. For this guide, we'll show both
 pip install "10xgraph[qdrant,openai]"
 ```
 
+The `qdrant` extra needs `qdrant-client` 1.10.0 or newer. If you run a Qdrant server or use Qdrant Cloud, it must be version 1.10 or newer.
+
 You also need an embedding service to convert text to vectors. Both OpenAI and Google embeddings are built in; we show OpenAI here (use the `google-genai` extra for `GoogleEmbedding`).
 
 ### Local Qdrant (file-backed)

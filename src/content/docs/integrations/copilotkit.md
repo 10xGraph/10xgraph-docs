@@ -274,7 +274,7 @@ The state updates in real-time as the graph runs. Set initial state from the fro
 
 ## Frontend context and configuration
 
-Pass data from the frontend to your graph nodes and tools via `RunAgentInput.context`. The AG-UI request extras are available inside any node or tool as `config["ag_ui"]`:
+Pass data from the frontend to your graph nodes and tools via `RunAgentInput.context`. The AG-UI request extras are available inside any node or tool as `config["ag_ui"]`. The server sets this key itself, so it only appears on AG-UI runs: a client of `/v1/graph/invoke` or `/v1/graph/stream` cannot send it, and `runs.config_keys` does not need to list it.
 
 ```python
 # graph.py
