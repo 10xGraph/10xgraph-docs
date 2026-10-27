@@ -539,6 +539,41 @@ logging.getLogger("tenxgraph.prebuilt.rag").setLevel(logging.DEBUG)
 
 ---
 
+## A collection per company
+
+To search a single named collection, set it in `store_config`:
+
+```python
+rag = RAGAgent(store=store, agent=agent, store_config={"collection": "company_docs"})
+```
+
+Without a `user_id`, the search runs as `system_user_id("knowledge_base")`, so index with that owner.
+
+For one company per collection, use `store_config_builder`. It receives the run config and returns the config for `store.asearch()`. It replaces `store_config`, so it must include a `user_id`. Read the tenant from the authenticated `user`, never from state or any client-sent field:
+
+```python
+from tenxgraph.prebuilt.agent import RAGAgent
+from tenxgraph.storage.store import system_user_id
+
+
+def company_search_config(cfg: dict) -> dict:
+    tenant_id = (cfg.get("user") or {}).get("tenant_id")
+    if not tenant_id:
+        # Fail closed: do not search a shared collection by accident.
+        raise ValueError("The authenticated user has no tenant_id")
+    return {
+        "user_id": system_user_id(f"company:{tenant_id}"),
+        "collection": f"company_{tenant_id}",
+    }
+
+
+rag = RAGAgent(store=store, agent=agent, store_config_builder=company_search_config)
+```
+
+`cfg["user"]` is the dict your auth backend returns; a custom `BaseAuth` can add `tenant_id` to it. With auth off there is no `user` dict, so the example raises. To keep every company in one collection instead, drop the `collection` key and keep the per-company owner. The API drops `collection` from client config on every route, so a client cannot redirect the search. See [Collections: keeping data apart](/docs/concepts/memory-and-store#collections-keeping-data-apart).
+
+---
+
 ## Common patterns
 
 ### RAG + tools

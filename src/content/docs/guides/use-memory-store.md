@@ -350,6 +350,16 @@ agent = Agent(model="gpt-4o", tool_node=ToolNode([]), memory=memory)
 - **UserMemoryConfig:** Scoped to a single user (`user_id`). The agent can both **read and write** user memories. Use this for user preferences, learned facts about the user, and conversation summaries.
 - **AgentMemoryConfig:** Scoped to the agent/application. The agent can **only read** agent memories. Use this for shared domain knowledge, FAQs, and system facts that should not be modified by user interactions.
 
+### Keep kinds of data in separate collections
+
+Both configs take a `collection` (a name, or a function of the run config) that always wins over any other setting, and the `QdrantStore` default can be a name or a function too. A client can never pick a collection: the API ignores `collection` in client config. For example, keep agent memory in its own collection:
+
+```python
+AgentMemoryConfig(enabled=True, agent_id="support-bot", collection="agent_notes")
+```
+
+For the precedence rules and a collection per company, see [Collections: keeping data apart](/docs/concepts/memory-and-store#collections-keeping-data-apart).
+
 ---
 
 ## MemoryType and DistanceMetric enums

@@ -239,6 +239,7 @@ Configuration for user-scoped long-term memory. The model can both search and wr
 | `limit` | `int \| None` | None | Max memories to retrieve. If None, uses the parent config limit. |
 | `score_threshold` | `float \| None` | None | Min similarity score, must not be negative. If None, uses the parent config threshold. |
 | `config` | `dict[str, Any]` | {} | Optional config dict passed to store calls. |
+| `collection` | `str \| Callable[[dict], str] \| None` | None | Collection for this scope: a name, or a function of the run config. Always wins over any other collection. See [Collections](#collections). |
 | `user_id` | `str \| None` | None | User identifier for scoping. Blank strings are rejected. |
 
 ### `AgentMemoryConfig`
@@ -253,6 +254,7 @@ Configuration for agent/app-scoped long-term memory. The model can search but no
 | `category` | `str` | `"general"` | Default memory category. |
 | `limit` | `int \| None` | None | Max memories to retrieve. |
 | `score_threshold` | `float \| None` | None | Min similarity score. |
+| `collection` | `str \| Callable[[dict], str] \| None` | None | Collection for this scope: a name, or a function of the run config. Always wins. See [Collections](#collections). |
 | `config` | `dict[str, Any]` | {} | Optional config dict. |
 | `agent_id` | `str \| None` | None | Agent identifier for scoping. |
 | `app_id` | `str \| None` | None | App identifier for scoping. |
@@ -280,6 +282,39 @@ await store.astore(
 ```
 
 With only an `app_id`, use `{"user_id": system_user_id(app_id), "app_id": app_id}`. `QdrantStore` filters search by `user_id`, `memory_type` and `category` and ignores `agent_id`, `app_id` and `thread_id`; the per-agent owner is what keeps agents apart. `Mem0Store` also scopes by `app_id`.
+
+---
+
+### Collections
+
+`UserMemoryConfig` and `AgentMemoryConfig` share the `collection` field. A string is stripped and must not be empty (a blank name raises `ValueError` at validation). A function receives the run config and must return a non-empty string.
+
+`resolve_collection(run_config) -> str | None` returns the scope's collection: `None` when `collection` is not set, the string as is, or the function's result (stripped). A function that returns a non-string or a blank string raises `ValueError`. Memory tools and the preload block call it with the merged config when they build each scope's config, and write the result to `cfg["collection"]`.
+
+**Precedence.** The first of these that sets a collection wins:
+
+1. The scope's `collection` (`UserMemoryConfig` / `AgentMemoryConfig`). It overrides any `collection` in the merged config, including one in the run config.
+2. A `collection` in the merged config: `MemoryConfig.config`, the scope's `config`, or a run config built by your own code.
+3. The store default, `QdrantStore(collection=...)`.
+
+The API removes `collection` from client config on every route, so a client cannot supply level 2. The REST memory routes have no scope config, so they use level 3 only.
+
+```python
+from tenxgraph.storage.store import AgentMemoryConfig, UserMemoryConfig
+
+
+def company_collection(cfg: dict) -> str:
+    tenant_id = (cfg.get("user") or {}).get("tenant_id")
+    if not tenant_id:
+        raise ValueError("The authenticated user has no tenant_id")
+    return f"company_{tenant_id}"
+
+
+user_memory = UserMemoryConfig(collection=company_collection)
+agent_memory = AgentMemoryConfig(enabled=True, agent_id="support-bot", collection="agent_notes")
+```
+
+A collection function must read the authenticated identity (`cfg["user"]`, set by the auth backend, or `cfg["user_id"]`), never state. See [Collections: keeping data apart](/docs/concepts/memory-and-store#collections-keeping-data-apart) for the full guidance and the two company patterns.
 
 ---
 
@@ -460,9 +495,12 @@ asyncio.run(store.asetup())  # creates the collection; pass the store to graph.c
 | `port` | `int \| None` | Remote Qdrant port (default: `6333`). |
 | `url` | `str \| None` | Qdrant Cloud URL. |
 | `api_key` | `str \| None` | Qdrant Cloud API key. |
-| `collection` | `str \| None` | Qdrant collection name. Defaults to `DEFAULT_COLLECTION`, which is `"agentflow_memories"`. |
+| `collection` | `str \| Callable[[dict], str] \| None` | Default collection: a name, or a function `(config) -> name` called with the config of each operation. Used when the config has no `collection`. Defaults to `DEFAULT_COLLECTION`, which is `"agentflow_memories"`. A function must return a non-empty string (otherwise `ValueError`) and must read identity from `config["user"]` or `config["user_id"]`, never state. |
 | `distance_metric` | `DistanceMetric` | Distance metric for the collection. Default: `COSINE`. |
 | `**kwargs` | `Any` | Passed to `AsyncQdrantClient`. |
+
+**`asetup()` and the default collection.** With a name as the default, `asetup()` creates that collection. With a function, `asetup()` creates nothing, because there is no fixed name; each collection is created, with its payload indexes, by the first write or search that uses it. A collection named by `config["collection"]` is created the same way.
+
 
 ---
 
@@ -517,7 +555,7 @@ store = create_local_qdrant_store(
 |---|---|---|
 | `embedding` | `BaseEmbedding` | The embedding service. |
 | `path` | `str` | Local directory path for Qdrant persistence. |
-| `collection` | `str` | Collection name. Default `"agentflow_memories"`. |
+| `collection` | `str \| Callable[[dict], str]` | Default collection: a name or a function of the config. Default `"agentflow_memories"`. |
 | `**kwargs` | `Any` | Passed to `QdrantStore`. |
 
 **Returns:** A configured `QdrantStore` instance.
@@ -541,7 +579,7 @@ store = create_remote_qdrant_store(
 | `embedding` | `BaseEmbedding` | The embedding service. |
 | `host` | `str` | Remote host address. |
 | `port` | `int` | Remote server port. Required (typically 6333). |
-| `collection` | `str` | Collection name. Default `"agentflow_memories"`. |
+| `collection` | `str \| Callable[[dict], str]` | Default collection: a name or a function of the config. Default `"agentflow_memories"`. |
 | `**kwargs` | `Any` | Passed to `QdrantStore`. |
 
 **Returns:** A configured `QdrantStore` instance.
@@ -565,7 +603,7 @@ store = create_cloud_qdrant_store(
 | `embedding` | `BaseEmbedding` | The embedding service. |
 | `url` | `str` | Qdrant Cloud cluster URL. |
 | `api_key` | `str` | Qdrant Cloud API key. |
-| `collection` | `str` | Collection name. Default `"agentflow_memories"`. |
+| `collection` | `str \| Callable[[dict], str]` | Default collection: a name or a function of the config. Default `"agentflow_memories"`. |
 | `**kwargs` | `Any` | Passed to `QdrantStore`. |
 
 **Returns:** A configured `QdrantStore` instance.

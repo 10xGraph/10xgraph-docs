@@ -318,6 +318,10 @@ Answer quality depends on the index at least as much as on the model.
 - Re-index when documents change, and track when each document was last indexed.
 - Tell the model to say so when the context has no answer, as the system prompt above does, instead of letting it guess.
 
+## Separate data per company
+
+To keep each company's documents in its own collection, pass `store_config_builder` and build the collection from the authenticated user, never from state. The RAG guide has the full example: [A collection per company](/docs/guides/prebuilt/rag-agent#a-collection-per-company). The API ignores any `collection` a client sends.
+
 ## What to try next
 
 - [RAGAgent guide](/docs/guides/prebuilt/rag-agent): graph shape and customization.

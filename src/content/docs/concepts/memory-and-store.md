@@ -408,6 +408,116 @@ The model can also pass optional `memory_type`, `category` and `limit` arguments
 
 **In preload mode**, the framework does the search automatically, once per invocation, and adds the results to the latest user message as a `<user_memories_...>` block, for that request only. See [Why memories are not system text](#why-memories-are-not-system-text).
 
+## Collections: keeping data apart
+
+A Qdrant **collection** is a separate set of vectors. Use collections to keep kinds of data apart, for example:
+
+- user data (what each user told the agent),
+- shared agent or system data (an agent's own notes, a knowledge base),
+- company data (documents that belong to one customer company).
+
+Within one collection, `user_id` already separates owners. A separate collection adds physical separation on top: a search in one collection can never return rows from another.
+
+**A client never chooses the collection.** The API drops `collection` from the client's `config` on every route: invoke, stream, `/v1/graph/ws`, AG-UI and the store routes. The value is ignored, not refused, and the drop is logged at debug level. This is the same rule as for the other server-owned keys (`user_id`, `user`, `authz`, `remote_tools`, `file_tool_root`, and so on). Only your code picks collections.
+
+### Where you set the collection
+
+Three places, from strongest to weakest. The first one that sets a collection wins.
+
+| Order | Where | Form |
+|---|---|---|
+| 1 | `UserMemoryConfig(collection=...)` or `AgentMemoryConfig(collection=...)` | A name, or a function of the run config. Always wins. |
+| 2 | `collection` in a run config passed by your own code | A name. Trusted, because the API strips it from client requests. |
+| 3 | `QdrantStore(collection=...)`, the store default | A name, or a function of the config. Defaults to `"agentflow_memories"`. |
+
+For `RAGAgent`, set the collection through `store_config={"collection": ...}` or a `store_config_builder` that returns a `collection` key. See [RAGAgent](/docs/guides/prebuilt/rag-agent#a-collection-per-company).
+
+The REST memory routes (`/v1/store/...`, used by the playground's memory page) have no scope config, so they always use the store default (level 3). A practical layout: keep user memory in the store default collection, and put agent memory and RAG data in named collections. If the store default is a function, the REST routes call it too, with the authenticated `user` in the config.
+
+```python title="named_collections.py"
+from tenxgraph.storage.store import (
+    AgentMemoryConfig,
+    MemoryConfig,
+    QdrantStore,
+    UserMemoryConfig,
+)
+
+store = QdrantStore(embedding=embedding, path="./qdrant_data")  # default: "agentflow_memories"
+
+memory = MemoryConfig(
+    store=store,
+    user_memory=UserMemoryConfig(),  # uses the store default
+    agent_memory=AgentMemoryConfig(
+        enabled=True,
+        agent_id="support-bot",
+        collection="agent_notes",  # a fixed, named collection
+    ),
+)
+```
+
+### Company data
+
+Pick one of two patterns.
+
+**Pattern A: one shared collection, separated by owner.** This is the default choice and the cheapest. Every company's rows live in one collection (here `company_docs`), and each company is a reserved system owner, `system_user_id(f"company:{tenant_id}")`. Search filters on that owner, so one company never sees another's rows. `system_user_id` takes a non-empty string and returns `"__system__:<name>"`.
+
+```python title="company_shared_collection.py"
+from tenxgraph.storage.store import system_user_id
+
+# Indexing job in your own code: one owner per company, one shared collection
+await store.astore(
+    config={"user_id": system_user_id("company:acme"), "collection": "company_docs"},
+    content="Acme's refund window is 30 days.",
+)
+```
+
+To read it back from a graph run, search with the same owner and collection. The owner must come from the authenticated user, never from client input:
+
+```python
+def company_search_config(cfg: dict) -> dict:
+    tenant_id = (cfg.get("user") or {}).get("tenant_id")
+    if not tenant_id:
+        raise ValueError("The authenticated user has no tenant_id")
+    return {"user_id": system_user_id(f"company:{tenant_id}"), "collection": "company_docs"}
+```
+
+For a `RAGAgent`, pass this function as `store_config_builder` (see the [RAG guide](/docs/guides/prebuilt/rag-agent#a-collection-per-company)). The store then searches only that company's rows.
+
+**Pattern B: one collection per company.** Opt in when you need full physical separation, for example for a contract or a separate backup per customer. Collections are created on first write or search, so there is no setup step per company.
+
+```python title="company_collection_per_tenant.py"
+from tenxgraph.storage.store import MemoryConfig, QdrantStore, UserMemoryConfig
+
+
+def company_collection(cfg: dict) -> str:
+    tenant_id = (cfg.get("user") or {}).get("tenant_id")
+    if not tenant_id:
+        # Fail closed: never fall back to a collection another tenant could share.
+        raise ValueError("The authenticated user has no tenant_id")
+    return f"company_{tenant_id}"
+
+
+memory = MemoryConfig(
+    store=QdrantStore(embedding=embedding, path="./qdrant_data"),
+    user_memory=UserMemoryConfig(collection=company_collection),
+)
+```
+
+You can also make the store default a function, so every use of the store (tools, RAG and the REST routes) goes through it:
+
+```python
+store = QdrantStore(embedding=embedding, path="./qdrant_data", collection=company_collection)
+```
+
+The factories `create_local_qdrant_store`, `create_remote_qdrant_store` and `create_cloud_qdrant_store` accept the same `collection` argument. With a function default, `asetup()` creates nothing, because there is no fixed name yet.
+
+### Rules for a collection function
+
+- It receives the run config and must return a non-empty string. Anything else raises `ValueError`.
+- **Read identity from the authenticated config only**: `cfg["user"]` (the dict your auth backend returns, which a custom `BaseAuth` can extend with `tenant_id`) or `cfg["user_id"]`. Never read it from graph state or from any other client-sent field. The API strips the client's `user`, `user_id` and `collection`, so these keys can be trusted.
+- With auth off there is no `user` dict, so use `.get` as above and decide what a missing tenant means. The examples raise an error. If you prefer a default, return a fixed name such as `"company_public"` that holds no private data.
+- A tenant id becomes part of a collection name. Keep it to letters, digits, `_` and `-`, and validate it in your auth backend.
+
 ## Accessing memory in the REST API
 
 When a store is configured in `10xgraph.json`, the server exposes memory endpoints:

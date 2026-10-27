@@ -61,7 +61,7 @@ Run the graph and return the complete result when all nodes finish.
 | `initial_state` | object | no | Initial state for the run. Custom fields and `current_node` are allowed; built-in fields are not (see input rules below). |
 | `config` | object | no | Run configuration |
 | `config.thread_id` | string | no | Id of an existing thread to continue. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.meta.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `403`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
-| `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `authz` and `_`-prefixed keys. |
+| `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `authz`, `collection` and `_`-prefixed keys. A client cannot choose a memory collection; it is ignored, not refused. See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). |
 | `recursion_limit` | integer | no | Maximum graph iterations. Default `25`, range `1`-`100`. |
 | `response_granularity` | string | no | `full`, `partial`, or `low`. Default `low`. |
 
