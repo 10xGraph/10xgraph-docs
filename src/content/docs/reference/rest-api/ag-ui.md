@@ -10,7 +10,7 @@ faq:
   - q: Is POST /v1/ag-ui always available?
     a: "No. It is mounted only when 10xgraph.json has \"ag_ui\" set to {\"enabled\": true} and the ag-ui extra is installed. Without it the route returns 404."
   - q: Does the AG-UI endpoint work in production?
-    a: Yes. Unlike the evals viewer, it is mounted in every mode once enabled, and it goes through the same auth, ownership check and rate limiter as the other graph routes.
+    a: Yes. It is mounted in every mode once enabled, and it goes through the same auth, ownership check and rate limiter as the other graph routes.
 ---
 
 `POST /v1/ag-ui` runs your graph over the [AG-UI protocol](https://docs.ag-ui.com). It takes an AG-UI `RunAgentInput` and streams the run back as AG-UI events, so any AG-UI client can drive the graph, including CopilotKit through its `HttpAgent`. For the CopilotKit frontend, see [10xGraph with CopilotKit](/docs/integrations/copilotkit). For the steps to turn the endpoint on, see [Serve your agent over AG-UI](/docs/server/ag-ui).

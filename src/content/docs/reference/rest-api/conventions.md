@@ -44,7 +44,7 @@ Errors from `HTTPException` (permission denied, not found, empty upload) use the
 
 ## Authentication
 
-When `auth` is configured in `10xgraph.json`, every endpoint except `/ping` (and the public eval routes) needs a Bearer token. Send it as an `Authorization` header on HTTP routes. WebSocket clients that cannot set headers have two fallbacks, listed here in order of preference.
+When `auth` is configured in `10xgraph.json`, every endpoint except `/ping` needs a Bearer token. Send it as an `Authorization` header on HTTP routes. WebSocket clients that cannot set headers have two fallbacks, listed here in order of preference.
 
 ```text
 Authorization: Bearer <token>
@@ -70,7 +70,7 @@ Each endpoint declares one `(resource, action)` pair. On every request the serve
 
 ### Permission reference
 
-The table lists every `(resource, action)` pair the server enforces. `POST /v1/ag-ui` exists only when `ag_ui.enabled` is true in `10xgraph.json`. The `/v1/evals/*` routes are mounted only when `MODE` is not `production`.
+The table lists every `(resource, action)` pair the server enforces. `POST /v1/ag-ui` exists only when `ag_ui.enabled` is true in `10xgraph.json`.
 
 | Endpoint | Resource | Action |
 | --- | --- | --- |
@@ -109,16 +109,9 @@ The table lists every `(resource, action)` pair the server enforces. `POST /v1/a
 | `GET /v1/files/{id}/url` | `files` | `read` |
 | `GET /v1/config/multimodal` | `config` | `read` |
 | `GET /ping` | (none) | (none) |
-| `GET /v1/evals/runs` | (none) | (none) |
-| `GET /v1/evals/runs/{run_id}` | (none) | (none) |
 
-The last three rows are the complete public allowlist. Every other route must carry a `RequirePermission` guard, and the server refuses to start if one does not.
+The `/ping` row is the complete public allowlist. Every other route must carry a `RequirePermission` guard, and the server refuses to start if one does not.
 
-<aside class="callout callout-warning" role="note"><p class="callout-title">The eval endpoints are unauthenticated</p>
-
-`/v1/evals/runs*` serves the contents of `eval_reports/` to anyone who can reach the port, regardless of your `auth` setting. They are not mounted when `MODE=production`. Outside production, keep `eval_reports/` out of the deployed working directory or block `/v1/evals/*` at your ingress. See [eval endpoints](/docs/reference/rest-api/evals).
-
-</aside>
 
 ## WebSocket close codes
 

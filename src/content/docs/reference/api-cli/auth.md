@@ -396,19 +396,12 @@ The check is free per request. Starlette infrastructure routes (`/docs`, `/redoc
 
 ### Public paths
 
-These three paths are publicly accessible:
+Only this path is publicly accessible:
 
 | Path | Purpose |
 |---|---|
 | `/ping` | Health check (for load balancers and orchestrators) |
-| `/v1/evals/runs` | Eval report viewer |
-| `/v1/evals/runs/{run_id}` | Eval report viewer |
 
-<aside class="callout callout-warning" role="note"><p class="callout-title">Eval endpoints are unauthenticated</p>
-
-The eval routes read `eval_reports/*.json` from the server's working directory and serve it to anyone who reaches the port, regardless of your `auth` setting. They exist as a local report viewer. On a deployment reachable from a network you do not control, keep `eval_reports/` out of the working directory or block `/v1/evals/*` at your ingress. See [REST API: Evals](/docs/reference/rest-api/evals).
-
-</aside>
 
 Adding paths to the allowlist requires editing the source frozenset, which is deliberate: opening a route becomes a reviewable change.
 

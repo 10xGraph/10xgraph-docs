@@ -249,19 +249,14 @@ RuntimeError: Refusing to start: the following routes are not protected:
 
 This is intentional: a forgotten guard becomes a deploy-time error, not a silent open endpoint.
 
-### Eval endpoints are unauthenticated
-
-`/v1/evals/runs` and `/v1/evals/runs/{run_id}` serve eval results without auth. For that reason they are **not mounted when `MODE=production`**, and the generated `.dockerignore` keeps `eval_reports/` out of the image. On any other deployment, block these routes at your ingress or delete the eval files before serving.
-
 ## Production recommendations
 
 1. Always set `"auth"` in production; never leave it `null`
 2. Use HTTPS everywhere
 3. Keep `JWT_SECRET_KEY` outside version control; inject it at deploy time
 4. Use short-lived tokens and rotate secrets intentionally
-5. Block or remove the eval endpoints on public deployments
-6. Set `MODE=production` to disable `/docs` and `/redoc` (enable only if intentional)
-7. Test both successful and rejected requests before release, asserting on the error code
+5. Set `MODE=production` to disable `/docs` and `/redoc` (enable only if intentional)
+6. Test both successful and rejected requests before release, asserting on the error code
 
 ## See also
 

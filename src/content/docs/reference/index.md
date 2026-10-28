@@ -109,7 +109,6 @@ Set both `DOCS_PATH` and `REDOCS_PATH` to empty values in production to turn off
 | [Files](/docs/reference/rest-api/files) | `/v1/files`, upload, download and signed URLs |
 | [Config](/docs/reference/rest-api/config) | `/v1/config/multimodal`, server configuration |
 | [Observability](/docs/reference/rest-api/observability) | `/v1/observability/{thread_id}`, run inspection |
-| [Evals](/docs/reference/rest-api/evals) | `/v1/evals/runs`, evaluation runs |
 | [AG-UI](/docs/reference/rest-api/ag-ui) | `/v1/ag-ui`, AG-UI protocol |
 | [Ping](/docs/reference/rest-api/ping) | `/ping`, health checks |
 

@@ -67,7 +67,7 @@ The playground is organized into pages in a left navigation rail:
 | Interact | Chat | `/chat` | Send messages and receive replies; choose between streaming, invoke, or WebSocket transport |
 | Interact | Live | `/live` | Voice-to-voice sessions for realtime agents (Gemini live, Claude realtime, etc.) |
 | Inspect | Thread Inspector | `/threads` | Browse saved threads, messages, and checkpointed state |
-| Inspect | Observability | `/observability` | Trace spans, event timelines, and token cost for a run |
+| Inspect | Run trace | `/trace` | Trace spans, event timelines, and token cost for a run |
 | Inspect | Evals | `/evals` | View evaluation runs and drill into individual cases |
 | Inspect | Memory Inspector | `/memory` | Search and browse the memory store |
 | Build | Graph | `/graph` | Render the compiled graph as a node-and-edge canvas with live node highlighting during runs |
@@ -106,9 +106,13 @@ Build a realtime agent with [Use realtime audio](/docs/guides/use-realtime-audio
 
 **Thread Inspector** lists all saved threads (if your graph has a checkpointer). Select one to see its messages, state, and checkpoint data in three tabs: Messages, State & checkpoint, and Raw JSON. Threads can be deleted from here.
 
-**Observability** shows a span timeline (root → node → llm | tool), an event list, and token cost. Click any span or event to see details. Observability reads the active thread, so send a message in Chat first; with no runs recorded, it shows a placeholder.
+**Run trace** shows a span timeline (root → node → llm | tool), an event list, and token cost. Click any span or event to see details. It reads the active thread, so send a message in Chat first; with no runs recorded, it shows a placeholder.
 
-**Evals** lists evaluation runs from the server with per-case drilldown, mirroring the output of `10xgraph eval` in the CLI.
+> **Run trace is a development tool.** It exists for the playground. It is turned off in production mode: nothing is recorded, and the endpoint returns `enabled: false`.
+>
+> The data comes from a small in-memory store that the server creates only when `MODE` is not `production`, and a restart clears it. For production tracing, use OTEL, LangSmith or Logfire through [publishers](/docs/guides/use-publishers). See [Observability](/docs/server/observability) for the endpoint.
+
+**Evals** opens a report file written by `10xgraph eval` (file picker or drag and drop) and shows per-case drilldown. Viewing is local and needs no server. It can also download a Markdown report.
 
 **Memory Inspector** searches and browses the memory store (if configured on the server). Narrow results by memory type (episodic, semantic, procedural, entity, relationship, declarative, custom), pick a retrieval strategy and similarity metric, and open any memory record to see its full content.
 

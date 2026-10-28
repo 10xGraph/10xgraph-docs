@@ -241,7 +241,7 @@ def get_eval_config() -> EvalConfig:
 
 ### Run the evaluation
 
-Point `10xgraph eval` at the folder. It runs every case, prints a summary and writes HTML and JSON reports to `eval_reports/` unless you pass `--no-report`.
+Point `10xgraph eval` at the folder. It runs every case, prints a summary and writes a JSON report to `eval_reports/` unless you pass `--no-report`.
 
 ```bash
 10xgraph eval evals/
@@ -254,17 +254,17 @@ Criteria  weather_eval.py  (source: per-file)
   tool_name_match    threshold=1.0
   rouge_match        threshold=0.4
 ...
-HTML report: eval_reports/<report file>.html
+JSON report: eval_reports/<report file>.json
+Open it in the playground: Evals > Open report file.
 ```
 
-Each case passes only when every criterion meets its threshold. Open the HTML report to see the conversation, tool calls and per-criterion scores of each failed case.
+Each case passes only when every criterion meets its threshold. Open the JSON file in the playground (Evals > Open report file) to see the conversation, tool calls and per-criterion scores of each failed case.
 
 | Flag | Short | Default | Purpose |
 |---|---|---|---|
 | `--output` | `-o` | `eval_reports` | Directory for reports |
 | `--no-report` | | off | Print the summary only |
 | `--threshold` | `-t` | none | Exit with an error if the overall pass rate is below this value (0.0 to 1.0) |
-| `--open` | | off | Open the HTML report when done |
 | `--parallel` | `-p` | off | Run cases concurrently |
 | `--max-concurrency` | `-c` | 4 | Concurrent cases with `--parallel` |
 

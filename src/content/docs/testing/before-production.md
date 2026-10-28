@@ -33,7 +33,7 @@ Evals score real agent behavior. Use `--threshold` to turn them into a release g
 10xgraph eval --threshold 0.9
 ```
 
-The run exits 1 when the overall pass rate is below `0.9`. Without `--threshold`, the run exits 1 unless every case passes. Reports go to `eval_reports/` as HTML and JSON (`--no-report` skips them). See [run evaluations](/docs/testing/run-evals).
+The run exits 1 when the overall pass rate is below `0.9`. Without `--threshold`, the run exits 1 unless every case passes. Reports go to `eval_reports/` as JSON (`--no-report` skips it). See [run evaluations](/docs/testing/run-evals).
 
 ## 3. Audit the environment
 

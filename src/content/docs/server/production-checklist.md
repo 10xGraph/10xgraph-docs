@@ -25,7 +25,6 @@ With `MODE=production`, the server does these for you. You do not configure them
 - Validates `MODE` at startup: a typo stops the server instead of running with development defaults.
 - Runs strict production checks (`STRICT_PRODUCTION_CHECKS`, on by default): wildcard `ORIGINS` or `ALLOWED_HOST`, wildcard CORS with credentials and enabled docs paths are refused at boot, and short HMAC JWT secrets are rejected.
 - Turns off the `/docs` and `/redocs` pages unless you set their paths.
-- Does not mount the unauthenticated `/v1/evals` routes.
 - Replaces 5xx error text, including streamed error chunks, with a generic message. Raise `ClientInputError` for 422 messages that must reach the client.
 - Cancels a graph run after 300 seconds unless you set `runs.timeout`.
 - Scopes graph introspection (`GET /v1/graph`, `/v1/graph/tools`, `/v1/graph:StateSchema`) to callers with the `graph:read` scope, unless you set `graph_introspection` to `"open"`.
@@ -65,7 +64,7 @@ LOG_LEVEL=INFO
 
 `MODE` accepts `production` (or `prod`) and `development` (or `dev`, `local`), trimmed and case-insensitive. Unset means `development`. Any other value, such as a typo, stops the server at startup, so a misspelling cannot run with the development defaults.
 
-`MODE=production` enforces stricter validation at startup: wildcard CORS origins combined with credentials fail the server boot, and HMAC JWT secrets shorter than 32 bytes are rejected. `STRICT_PRODUCTION_CHECKS` is on by default in production and also stops startup on a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST`, or enabled `DOCS_PATH` and `REDOCS_PATH`. Set `STRICT_PRODUCTION_CHECKS=false` to start with warnings only. It also turns off the `/docs` and `/redocs` pages unless you set their paths explicitly, and it does not mount the eval report routes. Leave `IS_DEBUG=false`. In production the server forces `IS_DEBUG` off and logs a warning if it was set to true.
+`MODE=production` enforces stricter validation at startup: wildcard CORS origins combined with credentials fail the server boot, and HMAC JWT secrets shorter than 32 bytes are rejected. `STRICT_PRODUCTION_CHECKS` is on by default in production and also stops startup on a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST`, or enabled `DOCS_PATH` and `REDOCS_PATH`. Set `STRICT_PRODUCTION_CHECKS=false` to start with warnings only. It also turns off the `/docs` and `/redocs` pages unless you set their paths explicitly. Leave `IS_DEBUG=false`. In production the server forces `IS_DEBUG` off and logs a warning if it was set to true.
 
 ## 2. Secrets and authentication
 
@@ -368,11 +367,7 @@ MEDIA_CLOUD_PREFIX=10xgraph-media
 
 Ensure the storage directory (or cloud bucket) is writable and has sufficient capacity. Monitor disk or cloud storage usage.
 
-## 10. Eval endpoints
-
-The eval report routes (`/v1/evals/runs`) have no authentication. The server does not mount them when `MODE=production`, so no extra configuration is needed. Confirm `MODE=production` is set in every environment that faces users.
-
-## 11. Database backups
+## 10. Database backups
 
 PostgreSQL holds all thread history, messages, and state snapshots. Back it up regularly:
 
@@ -405,6 +400,8 @@ SENTRY_TRACES_SAMPLE_RATE=0.1
 ```
 
 Sampling 10% of traces is typical for production.
+
+The playground's Run trace endpoint (`GET /v1/observability/{thread_id}`) is a development tool. With `MODE=production` it records nothing and returns `enabled: false`, so you have nothing to configure or secure for it. Use OTEL or a publisher for production traces.
 
 The API reports only server faults: 4xx responses are logged at WARNING and never become events, and request bodies are never sent to Sentry. If an alert matches ERROR logs for client errors, match WARNING instead.
 

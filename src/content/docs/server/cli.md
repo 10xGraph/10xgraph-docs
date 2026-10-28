@@ -86,13 +86,15 @@ After building a graph, run your test suite with `10xgraph test`. It wraps pytes
 10xgraph test -k "test_routing"        # Run tests matching a pattern
 ```
 
-Evaluate your agent's behavior with `10xgraph eval`. The command discovers eval files, runs all cases, and generates HTML and JSON reports to `eval_reports/`:
+Evaluate your agent's behavior with `10xgraph eval`. The command discovers eval files, runs all cases, and writes a JSON report to `eval_reports/`:
 
 ```bash
 10xgraph eval                          # Run all evals
 10xgraph eval --parallel               # Run cases concurrently
-10xgraph eval --threshold 0.9 --open   # Fail if pass rate below 90%, open report
+10xgraph eval --threshold 0.9         # Fail if pass rate below 90%
 ```
+
+Open the JSON report in the playground: Evals > Open report file.
 
 See [Run tests](/docs/testing/run-tests) and [Run evaluations](/docs/testing/run-evals) for detailed guides.
 

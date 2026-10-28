@@ -104,7 +104,7 @@ Run it:
 10xgraph eval --threshold 1.0
 ```
 
-`10xgraph eval` finds `*_eval.py` and `eval_*.py` files, loads the agent from `10xgraph.json`, runs each case, and writes HTML and JSON reports to `eval_reports/`. `--threshold` makes the command exit non-zero when the pass rate is below it, so a CI job fails on a regression. Other flags: `--output`, `--no-report`, `--parallel`, `--max-concurrency`. With the empty `expected_tools` list, `trajectory` with `EXACT` scores 0 for any tool call, and `tool_name_match` scores 0.5, below the 1.0 threshold.
+`10xgraph eval` finds `*_eval.py` and `eval_*.py` files, loads the agent from `10xgraph.json`, runs each case, and writes a JSON report to `eval_reports/`. `--threshold` makes the command exit non-zero when the pass rate is below it, so a CI job fails on a regression. Other flags: `--output`, `--no-report`, `--parallel`, `--max-concurrency`. With the empty `expected_tools` list, `trajectory` with `EXACT` scores 0 for any tool call, and `tool_name_match` scores 0.5, below the 1.0 threshold.
 
 The tool-call criteria need no judge model, so this file costs only the agent's own calls.
 
