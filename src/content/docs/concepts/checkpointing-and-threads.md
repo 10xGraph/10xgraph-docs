@@ -4,7 +4,7 @@ description: How checkpointers save and restore conversation state across calls 
 section: Concepts
 order: 100
 group: "Memory and reliability"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 A **checkpointer** saves state as the graph runs and reloads it at the start of the next call for the same **thread**. `compile()` creates an `InMemoryCheckpointer` when you pass none, so state persists within one process but is lost on restart. Pass a durable checkpointer for anything that must survive. This enables multi-turn conversations where the agent remembers what happened before.
@@ -26,7 +26,7 @@ config = {
 }
 ```
 
-`thread_id` is the primary key for all state, message, and metadata operations. `user_id` scopes thread ownership in a multi-tenant deployment. `PgCheckpointer` enforces it by default (`enforce_user_isolation=True`), so one user cannot read another's threads; the other checkpointers enforce owner-only access only when the API server's authorization policy asks for it. Each user can have many threads; each thread persists independently until explicitly deleted.
+`thread_id` is the primary key for all state, message, and metadata operations. `user_id` scopes thread ownership in a multi-tenant deployment. `PgCheckpointer` enforces it by default (`enforce_user_isolation=True`), so one user cannot read another's threads; the other checkpointers enforce owner-only access only when the API server's authorization policy asks for it. Each user can have many threads; each thread persists independently until explicitly deleted. When you call the compiled graph from Python, you choose the `thread_id`. Behind the API server, the server picks the id of a new thread (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)), and clients send it back to continue.
 
 ## How checkpointing works
 

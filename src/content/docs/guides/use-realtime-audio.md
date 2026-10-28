@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Streaming, media and realtime"
 order: 340
 label: Realtime audio (Gemini Live)
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The realtime subsystem adds live, audio-to-audio sessions to 10xGraph. Unlike `invoke` and `stream`, which traverse a turn-based super-step loop, a realtime graph is driven by a separate runtime: the provider owns the turn loop and 10xGraph wraps it.
@@ -356,7 +356,7 @@ config = RealtimeConfig(
 
 ## API server WebSocket bridge
 
-When the configured graph is rooted at a `LiveAgent` (i.e. built with `AudioAgent`), `10xgraph api` automatically exposes a WebSocket endpoint at `/v1/graph/live`.
+When the configured graph is rooted at a `LiveAgent` (i.e. built with `AudioAgent`), `10xgraph dev` automatically exposes a WebSocket endpoint at `/v1/graph/live`.
 
 ### Setup
 
@@ -386,7 +386,7 @@ app = AudioAgent(
 
 ```bash
 export GEMINI_API_KEY=...
-10xgraph api
+10xgraph dev --no-open
 # WebSocket available at ws://localhost:8000/v1/graph/live
 ```
 
@@ -452,4 +452,8 @@ python examples/realtime/audio_agent_mic.py
 - Tools, system prompts, skills, and memory work the same as `ReactAgent` but are fixed at connect time.
 - Checkpointing enables transcript persistence and cross-session resume.
 - Reconnection is automatic; configure backoff via `ReconnectConfig`.
-- `10xgraph api` exposes `ws://.../v1/graph/live` when the graph uses `AudioAgent`.
+- `10xgraph dev` exposes `ws://.../v1/graph/live` when the graph uses `AudioAgent`.
+
+## Run it in production
+
+Realtime audio runs over a long-lived connection, so authenticate the socket and apply the WebSocket limits from `10xgraph.json`. See [WebSockets](/docs/server/websockets), [Server auth](/docs/server/auth) and [Rate limiting](/docs/server/rate-limiting).

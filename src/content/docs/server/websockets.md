@@ -4,10 +4,12 @@ description: "Bidirectional WebSocket endpoints for turn-based agent streaming a
 order: 100
 group: "Interfaces"
 section: "API server"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 10xGraph exposes two WebSocket endpoints: `/v1/graph/ws` for turn-based agent interactions and `/v1/graph/live` for realtime audio conversations. WebSockets keep a persistent connection open so the server can stream responses token-by-token, the client can resume from checkpoints, and (for realtime agents) both sides can exchange audio in near-real-time. Both endpoints support the same authentication, rate limiting, and concurrency controls as REST APIs.
+
+WebSocket auth and connection limits are part of the [security model](/docs/production/security-model).
 
 ## When to use WebSocket
 
@@ -29,6 +31,8 @@ Both endpoints use the same credential methods as REST APIs. The bearer token ca
 3. **`?token=` query parameter** (fallback): the token is visible in logs and browser history, so avoid in production
 
 At the WebSocket handshake, the server verifies the token. Before every graph run on `/v1/graph/ws` (the client can send several messages on one socket), the token is verified again: if it expires or is revoked between runs, the server sends an error chunk and closes the socket with code 1008.
+
+On `/v1/graph/live` there is no run boundary, so the token is checked again after the init frame and then every 30 seconds for as long as the session lasts. The checks cover expiry and revocation, and they fail closed: if the revocation backend cannot answer, the token counts as revoked. When a check fails, the server sends a fatal `session_expired` error event and closes the socket with code 1008. Reconnect with a fresh token.
 
 **Setting the subprotocol** (if using `10xgraph-bearer`): offer two subprotocols, the sentinel first and the raw token second.
 
@@ -57,7 +61,7 @@ Client → Server:
     {"role": "user", "content": [{"type": "text", "text": "What is 2 + 2?"}]}
   ],
   "config": {
-    "thread_id": "optional-id-or-omit-for-new-thread"
+    "thread_id": "existing-thread-id-or-omit-for-new-thread"
   }
 }
 
@@ -72,14 +76,14 @@ The final `{"event": "updates", "data": {"status": "done"}}` chunk is sent by th
 
 **Resume after remote tool call:**
 
-When a run ends on a remote (client-executed) tool call, the client executes the tool (for example in the browser) and sends the result back. The server does not inspect chunks for tool calls; detecting them is the client library's job. The `resume` frame needs `tool_result` and `config.thread_id`:
+When a run ends on a remote (client-executed) tool call, the client executes the tool (for example in the browser) and sends the result back. The server does not inspect chunks for tool calls; detecting them is the client library's job. The `resume` frame needs `tool_result` and `config.thread_id`. Each `tool_result` message must be a `tool` message of `tool_result` blocks that answers a pending remote tool call, or the server returns 422:
 
 ```json
 Client → Server:
 {
   "invoke_type": "resume",
   "tool_result": [
-    {"role": "tool", "content": [{"type": "text", "text": "result here"}]}
+    {"role": "tool", "content": [{"type": "tool_result", "call_id": "call-abc123", "output": "result here"}]}
   ],
   "config": {
     "thread_id": "same-thread-from-checkpoint"
@@ -90,13 +94,44 @@ Server → Client:
 (same format: StreamChunk lines, ending with updates/status:done)
 ```
 
+**Resume a human-in-the-loop pause:**
+
+A `fresh` frame can also answer an `interrupt()` pause. Send `resume` (any JSON value, including `null` to cancel) with the thread's `config.thread_id`. No `messages` are needed. Add `interrupt_id` to bind the answer to the interrupt it belongs to:
+
+```json
+Client → Server:
+{
+  "invoke_type": "fresh",
+  "resume": {"approved": true},
+  "interrupt_id": "int_abc123...",
+  "config": {"thread_id": "same-thread-from-checkpoint"}
+}
+```
+
+Get the id from the `interrupt` object of the `interrupted` update chunk, or from the thread state at `execution_meta.interrupt_data.interrupt.id`. If the thread is not paused, or is paused at a different interrupt, the server sends an `error` chunk and runs nothing. A `resume` that fails the interrupt's `response_schema` also gets an `error` chunk. The socket stays open. See [Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt).
+
 ### Thread IDs
 
-- Omit `thread_id` or send `"new"` to create a fresh thread each time.
+- Omit `thread_id` or send `"new"` to start a new thread. The server picks the id and puts it on each chunk as `thread_id`.
 - Send an existing `thread_id` to resume that thread's conversation.
-- A blank or missing `thread_id` also means "create a new one", so the server generates an ID.
+- A blank or missing `thread_id` also means "start a new thread".
+- With the default `runs.thread_ids` of `"server"`, a `thread_id` that does not exist is refused like a thread you do not own. Do not invent ids. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 - `resume` runs require `config.thread_id`.
-- When auth is enabled, the thread is owner-checked before each run. An unauthorized thread gets an `error` chunk with `Not authorized to stream thread ...` and the socket stays open.
+- When auth is enabled, the thread is owner-checked before each run. An unauthorized or unknown thread gets an `error` chunk with `Not authorized to stream thread ...` and the socket stays open.
+
+### One run per thread
+
+The server runs one graph run at a time on a thread, and each run on the socket takes the thread's lock first. A run that finds the thread busy waits up to 30 seconds. After that the server sends an `error` chunk and the socket stays open:
+
+```json
+{"event": "error", "data": {"reason": "thread is busy"}}
+```
+
+To stop the running run and take its place, add `"on_busy": "cancel"` to the frame (the default is `"wait"`). New threads are locked as soon as their id exists. When Redis is configured, the lock is shared across processes. `/v1/graph/live` is not covered.
+
+### Request limits and error text
+
+A frame is limited to 500 messages (in `messages` or `tool_result`), 100 content blocks per message and 1,000,000 characters of text in total. An oversized frame gets 422 from the schema check. In production (`MODE=production`), `error` chunks from a failing node or tool carry a generic message instead of the raw exception text. Development shows the details.
 
 ### Rate limiting and concurrency
 
@@ -105,7 +140,7 @@ Every WebSocket handshake and every graph run on the socket counts against the g
 - A handshake over the limit is refused before `accept()` with close code 1013.
 - A run over the limit gets an `error` chunk whose `data` has `reason` and `retry_after_seconds`. The run is skipped and the socket stays open; the check runs again on the next frame.
 
-Connection caps apply at the handshake only: `websocket.max_connections` (per process) and `websocket.max_connections_per_user`. Over either cap, the handshake is refused with close code 1013.
+Connection caps apply at the handshake only: `websocket.max_connections` and `websocket.max_connections_per_user`. Over either cap, the handshake is refused with close code 1013. Live sessions on `/v1/graph/live` count against `websocket.max_connections_per_user` like any other socket.
 
 ## Realtime audio: `/v1/graph/live`
 
@@ -131,6 +166,8 @@ Client → Server:
   "thread_id": "optional-thread-id"
 }
 ```
+
+The realtime client makes its own thread id when you do not pass one, and `/v1/graph/live` accepts it even with `runs.thread_ids` set to `"server"`. The caller owns that new thread.
 
 The `model` override is honored only if it is listed in `websocket.realtime_models`; otherwise it is ignored and the agent's own model is used. A bad value (for example an invalid `modalities` entry) returns a fatal `error` event with code `invalid_config`.
 
@@ -167,7 +204,7 @@ WebSocket behavior is controlled by keys in the `websocket` object within `10xgr
 }
 ```
 
-In a multi-worker deployment (Gunicorn + Uvicorn), these limits are **per process**, not global. Size them accordingly: if you run 4 workers with `max_connections: 1000`, the server can hold 4000 concurrent sockets total.
+In a multi-worker deployment (Gunicorn + Uvicorn), these limits are global when `redis` (or `REDIS_URL`) is configured: all workers and replicas count their sockets in Redis, so `max_connections: 1000` means 1000 in total. Slots held by a worker that dies expire on their own, and a Redis error lets the connection through (logged). Without Redis, each process counts its own sockets, so 4 workers with `max_connections: 1000` can hold 4000.
 
 ## Close codes
 
@@ -177,7 +214,7 @@ WebSocket close codes follow RFC 6455. The server sends these in specific situat
 |---|---|---|
 | 1000 | Normal closure (client initiated or clean shutdown) | No |
 | 1003 | Unsupported data: the `/v1/graph/live` init frame is not a JSON object or could not be parsed | No |
-| 1008 | Policy violation: wrong endpoint for the agent type, token expired/revoked between runs, or auth/authorization failure at the handshake | No |
+| 1008 | Policy violation: wrong endpoint for the agent type, token expired/revoked between runs (or during a live session), or auth/authorization failure at the handshake | No |
 | 1011 | Unexpected server error during run | May retry after brief delay |
 | 1013 | Try again later: rate limit or connection cap exceeded at the handshake | Yes, after a delay |
 
@@ -241,12 +278,13 @@ const client = new TenxGraphClient({
   authToken: "your-jwt-token",
 });
 
-// wsStream() has the same signature as stream(), but runs over /v1/graph/ws
-const stream = client.wsStream([Message.text_message("What is 2 + 2?")], {
-  config: { thread_id: "my-thread" },
-});
+// wsStream() has the same signature as stream(), but runs over /v1/graph/ws.
+// Omit thread_id to start a new thread. The server picks it and sends it on each chunk.
+const stream = client.wsStream([Message.text_message("What is 2 + 2?")]);
 
+let threadId: string | undefined;
 for await (const chunk of stream) {
+  if (chunk.thread_id) threadId = chunk.thread_id;
   if (chunk.event === "message") {
     console.log("Message:", chunk.message);
   }
@@ -300,7 +338,7 @@ socket.onclose = (event) => {
 
 **Socket closes with code 1008**
 - If the message is "This graph is a live agent...", you're using `/v1/graph/ws` on a realtime agent. Switch to `/v1/graph/live`.
-- If the message is "Session expired...", your token has expired. Reconnect with a fresh token.
+- If the message is "Session expired...", your token has expired or was revoked. On `/v1/graph/live` this can happen mid-session, and the server sends a `session_expired` error event first. Reconnect with a fresh token.
 
 **Socket closes with code 1013**
 - Rate limit or connection cap exceeded at the handshake. Wait and reconnect.

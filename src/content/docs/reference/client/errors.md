@@ -6,10 +6,10 @@ section: Reference
 group: "TypeScript client"
 order: 560
 label: "Error handling"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
-When the server returns a non-2xx response, `TenxGraphClient` throws an `TenxGraphError` or one of its 14 subclasses. The class is chosen from the response's error code first, then from the HTTP status. Network failures and client timeouts are not API errors: they throw a plain `Error`.
+When the server returns a non-2xx response, `TenxGraphClient` throws an `TenxGraphError` or one of its 15 subclasses. The class is chosen from the response's error code first, then from the HTTP status. Network failures and client timeouts are not API errors: they throw a plain `Error`.
 
 **Import:** `import { TenxGraphError } from '10xgraph-client';`
 
@@ -29,9 +29,9 @@ The client reads the JSON error body, then matches the error `code` by prefix, t
 | 6 | Code starts with `METRICS` | `MetricsError` |
 | 7 | Code starts with `SCHEMA_VERSION` | `SchemaVersionError` |
 | 8 | Code starts with `SERIALIZATION` | `SerializationError` |
-| 9 | Status 400, 401, 403, 404, 422 | `BadRequestError`, `AuthenticationError`, `PermissionError`, `NotFoundError`, `ValidationError` |
+| 9 | Status 400, 401, 403, 404, 409, 422 | `BadRequestError`, `AuthenticationError`, `PermissionError`, `NotFoundError`, `ConflictError`, `ValidationError` |
 | 10 | Status 500, 502, 503, 504 | `ServerError` |
-| 11 | Any other status | `TenxGraphError` with code `UNKNOWN_ERROR` (unless the body gave one) |
+| 11 | Any other status, including 429 | `TenxGraphError` with code `UNKNOWN_ERROR` (unless the body gave one) |
 
 If the body is not JSON or cannot be parsed, the same status mapping applies with `requestId` set to `'unknown'`.
 
@@ -87,15 +87,16 @@ try {
 
 ## HTTP status errors
 
-These five classes map to one status each. They carry no recovery suggestion, so read `message` and `details`.
+These six classes map to one status each. They carry no recovery suggestion, so read `message` and `details`.
 
 | Class | Status | Error code | Thrown when |
 |---|---|---|---|
 | `BadRequestError` | 400 | `BAD_REQUEST` | The server rejects the request as malformed. |
 | `AuthenticationError` | 401 | `AUTHENTICATION_FAILED` | Credentials are missing, invalid or expired. |
-| `PermissionError` | 403 | `PERMISSION_ERROR` | The caller is authenticated but not allowed to perform the action. |
+| `PermissionError` | 403 | `PERMISSION_ERROR` | The caller is authenticated but not allowed to perform the action. With the default `runs.thread_ids`, a `thread_id` that does not exist or belongs to another user also gives this error. |
 | `NotFoundError` | 404 | `RESOURCE_NOT_FOUND` | The thread, message, memory or file does not exist. |
-| `ValidationError` | 422 | `VALIDATION_ERROR` | The request body fails schema validation. `details` lists the failing fields. |
+| `ConflictError` | 409 | `CONFLICT` | The thread is still busy with another run after the server's 30 second wait, or a resume's `interrupt_id` does not match the open interrupt. The client never retries it. |
+| `ValidationError` | 422 | `VALIDATION_ERROR` | The request body fails schema validation, is over a size limit (500 messages, 100 blocks per message, 1,000,000 characters of text), or a resume answer fails the interrupt's `response_schema`. The message names the size limit that was hit; `details` lists the failing fields (development only). |
 
 ```ts title="http-status-errors.ts"
 import {
@@ -119,6 +120,57 @@ try {
     for (const detail of err.details) {
       console.error(`Field ${detail.loc?.join('.')}: ${detail.msg}`);
     }
+  } else {
+    throw err;
+  }
+}
+```
+
+### Handle a busy thread
+
+The server runs one graph run at a time on a thread. A second call on a busy thread waits up to 30 seconds and then fails with `ConflictError`. Retry later, or send `on_busy: 'cancel'` to stop the running run and take its place:
+
+```ts title="busy-thread.ts"
+import { ConflictError, Message } from '10xgraph-client';
+
+try {
+  await client.invoke([Message.text_message('Hi')], {
+    config: { thread_id: 'order-42' },
+  });
+} catch (err) {
+  if (err instanceof ConflictError) {
+    // Busy thread, or interrupt_id did not match. Check err.message.
+    await client.invoke([Message.text_message('Hi')], {
+      config: { thread_id: 'order-42' },
+      on_busy: 'cancel',
+    });
+  } else {
+    throw err;
+  }
+}
+```
+
+The same class covers a resume whose `interrupt_id` does not match the open interrupt. Do not retry that one with `on_busy`: read the thread state and send the current id.
+
+The server's body for these errors is the standard envelope, with `error.code` set to `HTTPException`. The client picks `ConflictError` from the 409 status.
+
+### Rate limit and run cap (429)
+
+The server answers 429 in two cases: the `rate_limit` sliding window is exhausted, or one user already has `runs.max_concurrent_per_user` graph runs in flight (default 10). The client has no class for 429, so both arrive as a plain `TenxGraphError` with `statusCode` 429. Check `statusCode`, not `instanceof`.
+
+- Rate limit: the body has `error.code` `RATE_LIMIT_EXCEEDED`, so `errorCode` is `RATE_LIMIT_EXCEEDED`, and the message ends with `Retry after <n>s.` The response also carries a `Retry-After` header (seconds).
+- Run cap: the body is the standard envelope with `error.code` `HTTPException`, so `errorCode` is `HTTPException`. The message says too many runs are in progress for this user. There is no `Retry-After` header; wait for a run to finish.
+
+The error object does not keep response headers, so `Retry-After` is not available on it. Read the seconds from the message, or use your own backoff.
+
+```ts title="rate-limit.ts"
+import { TenxGraphError } from '10xgraph-client';
+
+try {
+  await client.invoke([Message.text_message('Hi')]);
+} catch (err) {
+  if (err instanceof TenxGraphError && err.statusCode === 429) {
+    // Back off, then retry. err.errorCode is RATE_LIMIT_EXCEEDED for the rate limit.
   } else {
     throw err;
   }

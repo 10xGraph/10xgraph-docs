@@ -64,6 +64,8 @@ Replay safety requires two things: a checkpointer that implements the ledger, an
 | `InMemoryCheckpointer` | Yes, in process memory | No |
 | `SqliteCheckpointer` | Not implemented | Not applicable |
 
+`PgCheckpointer` scopes ledger reads to the thread's owner, the same way it scopes messages: with `enforce_user_isolation=True` (the default), or when the API server's authorization policy asks for owner isolation, a caller that names another user's `thread_id` finds no recorded result, and recording one into that thread raises an error. With `enforce_user_isolation=False` the read skips the ownership join. Behind the API server, a run on another user's thread is already refused before the graph starts, so this check matters when you call the checkpointer from your own code. See [Multi-user isolation](/docs/guides/set-up-checkpointing#multi-user-isolation).
+
 For production, install the extra and compile the graph with `PgCheckpointer`:
 
 ```bash

@@ -5,7 +5,7 @@ section: API server
 group: Interfaces
 order: 120
 label: Files and multimodal
-updated: '2026-10-08'
+updated: "2026-10-27"
 faq:
   - q: How do I restrict which file types my agent accepts?
     a: Set MEDIA_ALLOWED_CONTENT_TYPES to a comma-separated list of MIME types or wildcards (e.g., image/*,application/pdf). Empty (the default) accepts all types.
@@ -16,6 +16,8 @@ faq:
 ---
 
 The 10xGraph API server accepts file uploads from clients and injects the media into your graph's execution. Upload once, reference by ID, and rely on the server to resolve the reference before model calls. This works the same way across REST (`/v1/graph/invoke`, `POST /v1/graph/stream`) and WebSocket (`WS /v1/graph/ws`), with built-in ownership enforcement so users cannot reference each other's files.
+
+Upload ownership and size limits are part of the [security model](/docs/production/security-model).
 
 ## How it works
 
@@ -71,7 +73,12 @@ The server reads uploads in 1 MiB chunks, so oversized files are rejected before
 | Status | Meaning |
 |---|---|
 | `415 Unsupported Media Type` | The file's MIME type is not in `MEDIA_ALLOWED_CONTENT_TYPES`. |
+| `415 Unsupported Media Type` (content check) | The first bytes of the file do not match its declared type. The detail is `file content does not match <type>`. |
 | `413 Payload Too Large` | The file exceeds `MEDIA_MAX_SIZE_MB`. The limit is checked during streaming, so rejection occurs before the full body is loaded. |
+
+### Content check on upload
+
+The type of an upload comes from the client's `Content-Type` header, so the server also compares the first bytes of the file with that type. A file labelled `image/png` must start like a PNG. The check covers PNG, JPEG, GIF, WebP, BMP, TIFF, ICO, PDF, Office files (ZIP-based and legacy OLE formats), MP3, WAV, OGG, FLAC, MP4 and WebM. A mismatch returns `415`. Types with no reliable signature, such as plain text, JSON and CSV, are accepted as before. EXIF data in images is kept.
 
 ### Content-type restrictions
 
@@ -113,10 +120,7 @@ Once uploaded, use the `file_id` in a content block. Send the message to the gra
         }
       ]
     }
-  ],
-  "config": {
-    "thread_id": "thread-123"
-  }
+  ]
 }
 ```
 
@@ -160,7 +164,9 @@ When you upload a document and `DOCUMENT_HANDLING=extract_text` (the default), t
 - **In-process cache** (per worker): immediate lookups for the same file.
 - **Checkpointer cache** (if configured): shared across workers with a 24-hour TTL in the `media:extraction` namespace.
 
-Extractable MIME types are:
+Extractable MIME types are listed below. HTML, XML, CSV, Markdown, JSON and plain-text files over 5 MiB are not parsed: they are stored without extracted text, so `extracted_text` is `null` and a warning is logged. The upload still succeeds. At most 2 extractions run at the same time.
+
+Extractable MIME types:
 
 - `application/pdf` (PDF documents)
 - `application/msword` (legacy Word .doc)
@@ -189,6 +195,54 @@ Set the mode via the `DOCUMENT_HANDLING` environment variable.
 ### Multi-worker extraction
 
 If you run multiple workers without a checkpointer, each worker maintains its own in-process extraction cache. A document uploaded through worker A may be re-extracted on worker B, wasting CPU. Configure a checkpointer (PostgreSQL + Redis recommended for production) to share the extraction cache across workers.
+
+## External media URLs
+
+A client can send a media block with a URL instead of a `file_id`. Before the run starts, the server checks every external URL (`http(s)://`, `gs://` and so on) in client input against the graph's media fetch policy. This covers invoke, stream, WebSocket, AG-UI, `POST /v1/threads/{thread_id}/messages` and `PUT /v1/threads/{thread_id}/state`. A blocked URL returns `400` with the policy's message. On the WebSocket it comes back as an error chunk. The check touches no network.
+
+The policy is `MediaFetchPolicy` from core. You set it in code with `graph.compile(media_policy=...)`, and the API has no setting for it. Without one, the default policy applies: `http` and `https` to public hosts only. A client `gs://` URL is refused unless its bucket is listed in `allowed_gcs_buckets`, because on Vertex AI the server reads `gs://` with its own credentials. Your own graph code may still pass any `gs://` URL. All fields, the rules that cannot be disabled and an example are in [Sending media from Python](/docs/guides/send-media#control-which-urls-the-server-downloads).
+
+The check needs a core release that ships `MediaFetchPolicy`. On older cores it is skipped.
+
+## Delete a file and file lifecycle
+
+`DELETE /v1/files/{file_id}` deletes a file and its metadata. Only the uploader can delete it. A missing file, or a file that belongs to someone else, returns `404`, never `403`. The route needs the `files:delete` scope, which roles granted `"*"` have.
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/v1/files/a8f2k9x1m5p3 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "data": {"file_id": "a8f2k9x1m5p3", "deleted": true},
+  "metadata": {"request_id": "...", "timestamp": "...", "message": "OK"}
+}
+```
+
+You rarely need it, because uploaded files are cleaned up with the conversations that use them:
+
+- When an accepted message references `graph://media/<key>`, the server adds the thread id to the file's `threads` metadata. Only files the caller owns are tracked.
+- Deleting a message removes the link, but only when no other message in that thread still uses the file. Deleting a thread removes its links.
+- A file with no thread left is deleted.
+- A file shared by two threads stays until both are gone.
+- Files uploaded before this tracking existed have no `threads` record and are never deleted automatically.
+- With auth off, uploads have no owner and nothing is tracked, so nothing is deleted automatically.
+- A cleanup failure is logged. It never fails the delete of the message or thread.
+
+Tracking needs a core release with `BaseMediaStore.update_metadata`. On older cores, nothing is tracked or deleted automatically.
+
+To keep files after their messages and threads are gone, set `media.delete_with_thread` to `false` in `10xgraph.json`. The server still records the links but never deletes a file automatically. The default is `true`. You can also edit it in `10xgraph config`.
+
+```json
+{
+  "media": {
+    "delete_with_thread": false
+  }
+}
+```
+
+Where the bytes live is your choice: set `MEDIA_STORAGE_TYPE` to `memory`, `local` or `cloud` (see [Storage backends](#storage-backends)).
 
 ## Query the server's media configuration
 
@@ -231,7 +285,7 @@ MEDIA_STORAGE_TYPE=local
 MEDIA_STORAGE_PATH=./uploads
 ```
 
-Files are written to the configured directory. The default is `./uploads` relative to the working directory. This backend assumes a shared filesystem across workers (e.g., NFS or attached storage), so each worker can read files uploaded by any other worker. Without shared storage, files uploaded to one worker are not visible to the others.
+Files are written to the configured directory. The default is `./uploads` relative to the working directory. Directories are created with mode `0700` and files with `0600`, so only the user running the server can read them. A different OS user or service that serves or reads uploads (for example a web server) loses access, so run it as the same user or share the files another way. Existing files and folders keep their mode, and this has no effect on Windows. This backend assumes a shared filesystem across workers (e.g., NFS or attached storage), so each worker can read files uploaded by any other worker. Without shared storage, files uploaded to one worker are not visible to the others.
 
 ### Cloud storage (AWS S3 or Google Cloud Storage)
 

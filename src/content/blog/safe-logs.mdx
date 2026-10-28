@@ -1,0 +1,74 @@
+---
+title: "Logs that are safe to ship"
+seoTitle: "Safe logs and traces for AI agents"
+description: "What 10xGraph keeps out of logs, traces and Sentry: hashed user ids, redacted Redis URLs, tool error references, escaped client values and generic errors in production."
+date: 2026-10-27
+updated: 2026-10-27
+author: Shudipto Trafder
+kind: engineering
+tags: [observability, security, logging, privacy]
+draft: true
+faq:
+  - q: How do I keep raw user ids out of traces?
+    a: Set observability.user_id_mode in 10xgraph.json to hash or mask. Hash gives 16 hex characters of SHA-256, or HMAC-SHA256 when TENXGRAPH_TRACE_USER_ID_KEY is set. Mask keeps the ends, for example al***42. The default is raw.
+  - q: Does user_id_mode remove message content from traces?
+    a: No. It changes only how the user id appears. Message and tool content stay in traces at the full observability level, so choose the level with that in mind.
+  - q: Does Sentry receive request bodies?
+    a: No. The server starts Sentry with request bodies off, local variables off and personal data off, and only ERROR logs become events. Warnings and info lines stay as breadcrumbs.
+---
+
+Logs leave your process. They go to a log aggregator, a trace backend, an error tracker, sometimes to a vendor in another country. Whatever the server writes ends up in every one of those places and stays there for the retention period. So the useful question is what the server refuses to write, not how much it can.
+
+This post lists what 10xGraph and `10xgraph-api` keep out of logs, traces and error reports by default, and the one setting you choose yourself. The setup steps are on the [observability page](/docs/server/observability).
+
+## User ids in traces
+
+A trace span carries the id of the user who made the run. That is useful when you debug and a liability when the id is an email address.
+
+`observability.user_id_mode` in `10xgraph.json` decides how the id appears on spans:
+
+| Value | What the span carries |
+|---|---|
+| `raw` (default) | The id as is |
+| `hash` | 16 hex characters of SHA-256, or HMAC-SHA256 when `TENXGRAPH_TRACE_USER_ID_KEY` is set |
+| `mask` | The ends of the id with the middle hidden, for example `al***42` |
+
+Prefer `hash` with the key set. A plain SHA-256 of a short id can be guessed by hashing candidates, and the keyed form cannot. The setting applies to the `observability` block and to `OTEL_ENABLED`, and it is in the `10xgraph config` editor. A core older than the option keeps the raw id and logs a warning, so check the version.
+
+This changes the user id only. Message and tool content stay in traces at the `full` observability level, so choose the level deliberately.
+
+## Secrets in connection strings
+
+`RedisPublisher` used to put the URL it failed to connect to in its error, password included. The error now shows the URL through `redact_url`, which removes the userinfo, query and fragment, so `redis://:s3cret@host:6379/0` reads as `redis://host:6379/0`. The same helper keeps IPv6 hosts in brackets and returns `<invalid url>` for a string with no scheme or host. Media download warnings use it as well, so a signed URL does not leak its query string.
+
+## Tool failures: a reference, not the exception
+
+An unexpected error in a local or MCP tool used to put its message into the tool result and into events: database URLs, file paths, SQL errors. The model saw it, and so did anything that stored the conversation.
+
+Now the model gets `Tool '<name>' failed with an internal error (reference <ref>)`. The full error, with the same reference, is logged on the server. When a user reports a failure, the reference takes you from their screen to the stack trace. Argument errors, "Tool not found" and timeouts still reach the model as before, because the model can act on those.
+
+## Client values cannot forge log lines
+
+Thread ids, file names, request paths and similar values come from clients. A value with a newline in it can end a log entry and start a fake one; one with an escape character can act on the terminal of whoever tails the log.
+
+The API writes client-influenced values through `log_safe`. It escapes CR and LF, writes the other control characters (ESC and the rest of C0, and DEL) as `\xNN`, and keeps tab. The upload route logs the client file name this way, and request logs escape thread ids. In production, the per-run observability, stop, fix and WebSocket run lines no longer log the thread id at all. Warnings that must stay in production escape it.
+
+## Errors in production
+
+With `MODE=production`, the error text a client sees is generic. A node that raises answers `An error occurred in a graph node.` with its code, such as `NODE_001`. The same swap applies to invoke, stream, WebSocket and AG-UI error chunks, and to `GET /v1/threads/{id}/state`, which used to return the raw exception text in `execution_meta`. The tool failure reference above is kept, since it contains no detail. Development shows the full text.
+
+Without this, a connection string inside an exception message travels to the browser.
+
+## Sentry
+
+If you enable Sentry, the server starts it with request bodies off (`max_request_body_size="never"`), local variables off and personal data off.
+
+Log levels follow the status code the handler returns. A 4xx (401, 403, 404, 413, 422, 429 and so on) is one WARNING line with the method, path, status and error code, with no traceback and no body. A 5xx stays an ERROR with the traceback. Only ERROR logs become Sentry events, and WARNING and INFO stay breadcrumbs. A bad token or a probing scanner no longer pages you.
+
+One thing to change when you upgrade: an alert that matched ERROR for client errors must match WARNING.
+
+## What you still own
+
+- Anything your own code logs. Escape client values and strip secrets from URLs before you log them. `redact_url` is in `tenxgraph.storage.media.url_policy`.
+- Prompts, tool arguments and results in traces at the `full` level. Pick a lower level if conversations are sensitive.
+- Retention and access on the log backend itself.

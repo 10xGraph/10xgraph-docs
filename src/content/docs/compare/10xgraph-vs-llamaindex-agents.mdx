@@ -5,7 +5,7 @@ description: "10xGraph vs LlamaIndex Agents compared with sources: server, auth,
 section: Compare
 order: 50
 label: vs LlamaIndex Agents
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Can I use my LlamaIndex indexes inside a 10xGraph agent?
     a: Yes. Wrap your query engine in a Python function, hand it to a ToolNode, and the agent calls it like any other tool. Your indexing and retrieval stack stays the same.
@@ -35,10 +35,11 @@ The first rows are where the two differ most. Orchestration and retrieval basics
 
 | | 10xGraph | LlamaIndex |
 |---|---|---|
-| Production server (REST, SSE, WebSocket) in the open-source install | Yes. `10xgraph api` generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | The workflow server wraps workflows as REST endpoints with event streaming. `llamactl serve` runs it locally, and LlamaCloud or self-hosted infrastructure are the documented deployment options ([workflow server docs](https://developers.llamaindex.ai/python/llamaagents/llamactl/workflow-api/), [overview](https://developers.llamaindex.ai/python/llamaagents/overview/)) |
+| Production server (REST, SSE, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | The workflow server wraps workflows as REST endpoints with event streaming. `llamactl serve` runs it locally, and LlamaCloud or self-hosted infrastructure are the documented deployment options ([workflow server docs](https://developers.llamaindex.ai/python/llamaagents/llamactl/workflow-api/), [overview](https://developers.llamaindex.ai/python/llamaagents/overview/)) |
 | Auth (JWT or custom) | JWT (`"auth": "jwt"`) or a custom `BaseAuth` subclass | Local development runs unprotected. Cloud deployments use a LlamaCloud API token ([workflow server docs](https://developers.llamaindex.ai/python/llamaagents/llamactl/workflow-api/)) |
 | Authorization | Role scopes (such as `graph:invoke`, `checkpointer:read`) or a custom `AuthorizationBackend` | Not documented |
 | Thread ownership isolation | Built-in `"authorization": "ownership"` backend, with a two-tier cached owner check | Not documented |
+| Security and isolation defaults when served | The server refuses to start if any non-public route lacks a permission guard. With auth on or `MODE=production`, threads are owner-only. In production it refuses wildcard `ORIGINS`, and replaces 5xx error messages with a generic text. `auth: null` still starts an open server ([limits](/docs/production/limits)) | See their docs |
 | Rate limiting | Memory or Redis sliding-window limits on the API, set in `10xgraph.json` | Not documented |
 | Replay-safe tool calls after a crash | Tool ledger in the checkpointer: a tool that already ran is not executed again on resume. Needs a checkpointer | Not documented. The docs mention durable workflows without detail ([workflow server docs](https://developers.llamaindex.ai/python/llamaagents/llamactl/workflow-api/)) |
 | Versioned (compare-and-swap) state writes | Optimistic version check on durable writes in `PgCheckpointer` | Not documented |
@@ -134,7 +135,7 @@ app.invoke(
 ```bash
 pip install "10xgraph[google-genai,pg_checkpoint]" 10xgraph-api llama-index
 10xgraph init --yes --template production --auth jwt --rate-limit redis
-10xgraph api --host 0.0.0.0 --port 8000
+10xgraph dev --host 0.0.0.0 --port 8000 --no-open
 10xgraph build --docker-compose --k8s
 ```
 
@@ -163,7 +164,7 @@ console.log(result.messages.at(-1)?.text());
 2. Replace `FunctionAgent` or `AgentWorkflow` with a 10xGraph `ReactAgent`, or an `Agent` plus a `ToolNode` and conditional edges.
 3. Replace Workflow events with explicit graph nodes and `add_conditional_edges`.
 4. Replace saved `Context` objects with a checkpointer and `thread_id`.
-5. Replace your server with `10xgraph api`.
+5. Replace your server with `10xgraph-api`.
 
 ## Where LlamaIndex is the better choice
 

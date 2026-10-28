@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 510
 label: "realtime()"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 `client.realtime()` opens a realtime, audio-to-audio session over the server's `/v1/graph/live` WebSocket and returns a `RealtimeSession`. You stream PCM16 microphone audio up and receive PCM16 model audio back, plus transcripts, tool calls, and lifecycle events.
@@ -170,9 +170,9 @@ type RealtimeEvent =
 
 ## Authentication
 
-The bearer token is sent using the browser-safe `agentflow-bearer` WebSocket subprotocol, and it is never placed in the URL. On Node runtimes the `Authorization` header is also set. You provide the token the same way as for every other client call, via `authToken` or `auth` on the `TenxGraphClient` config (see [`reference/client/auth`](/docs/reference/client/auth)); `realtime()` reuses it automatically.
+The bearer token is sent using the browser-safe `10xgraph-bearer` WebSocket subprotocol, and it is never placed in the URL. On Node runtimes the `Authorization` header is also set. You provide the token the same way as for every other client call, via `authToken` or `auth` on the `TenxGraphClient` config (see [`reference/client/auth`](/docs/reference/client/auth)); `realtime()` reuses it automatically.
 
-The server accepts the token via the `Authorization` header, the `agentflow-bearer` subprotocol, or a `?token=` query fallback. The client uses the subprotocol so the token is never logged in a URL.
+The server accepts the token via the `Authorization` header, the `10xgraph-bearer` subprotocol, or a `?token=` query fallback. The client uses the subprotocol so the token is never logged in a URL.
 
 ---
 
@@ -321,6 +321,7 @@ Constants `REALTIME_INPUT_SAMPLE_RATE` (16000) and `REALTIME_OUTPUT_SAMPLE_RATE`
 |---|---|---|
 | Socket closes with code `1008` immediately, after an `error` event with `code: 'not_live'` | The configured graph is not rooted at a `LiveAgent`. | Point `10xgraph.json` at an `AudioAgent`-based graph. |
 | Socket closes with code `1008` after the init frame | Not authorized for the requested `thread_id`. Preceded by an `error` event with `code: 'not_authorized'`. | Check the token and the server's `AuthorizationBackend`. |
+| Socket closes with code `1008` in the middle of a session, after an `error` event with `code: 'session_expired'` | The token expired or was revoked. The server re-checks it every 30 seconds. | Reconnect with a fresh token. |
 | Socket closes with code `1011` | An unexpected server-side error ended the session. | Check the server logs. |
 | Socket closes with code `1003` | Invalid init frame (e.g. an unsupported `modalities` value). | Check `model` and `modalities`; read the `error` event for the reason. |
 | `No WebSocket implementation available` thrown | Running on Node < 21 without a global `WebSocket`. | Pass `webSocketImpl` (the `ws` package) in the client config. |
@@ -334,7 +335,7 @@ Constants `REALTIME_INPUT_SAMPLE_RATE` (16000) and `REALTIME_OUTPUT_SAMPLE_RATE`
 - `client.realtime(init, options?)` returns a transport-only `RealtimeSession` over `/v1/graph/live`.
 - Send PCM16 @ 16 kHz with `sendAudio`; receive PCM16 @ 24 kHz on the `'audio'` channel; capture and playback are your responsibility.
 - Subscribe to typed events (`output_transcript`, `tool_call`, `interrupted`, ...) with `session.on(...)`.
-- Auth uses the browser-safe `agentflow-bearer` subprotocol automatically; pass `webSocketImpl` on Node < 21.
+- Auth uses the browser-safe `10xgraph-bearer` subprotocol automatically (needs `10xgraph-api` 0.7.0 or later); pass `webSocketImpl` on Node < 21.
 - The session auto-reconnects with backoff and resumes the same `thread_id`, unless you call `close()` or a fatal error occurs.
 
 ## Next step

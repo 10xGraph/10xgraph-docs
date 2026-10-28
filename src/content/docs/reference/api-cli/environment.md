@@ -6,7 +6,7 @@ section: Reference
 group: "CLI and configuration"
 order: 1770
 label: Environment Variables
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The 10xGraph API server and CLI read configuration from environment variables. This page lists every variable with its default and effect, grouped by area. Set server variables in a `.env` file referenced by `10xgraph.json` or in the process environment. CLI variables control terminal output.
@@ -35,7 +35,7 @@ MODE=production
 ### At the process level
 
 ```bash
-MODE=production 10xgraph api --no-reload
+MODE=production 10xgraph dev --no-reload
 ```
 
 ---
@@ -46,12 +46,13 @@ MODE=production 10xgraph api --no-reload
 | --- | --- | --- |
 | `APP_NAME` | `MyApp` | Application name shown in logs |
 | `APP_VERSION` | `0.1.0` | Application version |
-| `MODE` | `development` | `development` or `production`. Normalized to lowercase. Drives several defaults, including the authorization backend and whether the CORS check is fatal. |
+| `MODE` | `development` | `production` (or `prod`), or `development` (or `dev`, `local`). Trimmed and case-insensitive. Unset means `development`. Any other value stops the server at startup, and `10xgraph dev` exits with code 2; the message lists the accepted values. Drives several defaults, including the authorization backend, the run timeout and the strict startup checks. |
+| `STRICT_PRODUCTION_CHECKS` | on in production | In production, refuse to start on a wildcard `ALLOWED_HOST`, a wildcard `ORIGINS`, or an enabled `DOCS_PATH` or `REDOCS_PATH`. Set `false` to log warnings instead. Has no effect outside production. |
 | `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `IS_DEBUG` | `true` | Enable debug mode. Set `false` in production; leaving it on logs a startup warning. |
 | `SUMMARY` | `10xGraph Backend` | One-line service summary shown in the OpenAPI schema |
 | `LOGGER_NAME` | `10xgraph-api` | Name of the root logger the server writes under. Read at import time, so it must be a process environment variable; setting it in `.env` is too late. |
-| `GRAPH_PATH` | `10xgraph.json` | Path to the config file the ASGI app loads. `10xgraph api --config` sets this for you; set it directly when running the app under an external server such as Gunicorn or Uvicorn. |
+| `GRAPH_PATH` | `10xgraph.json` | Path to the config file the ASGI app loads. `10xgraph dev --config` sets this for you; set it directly when running the app under an external server such as Gunicorn or Uvicorn. |
 
 The settings model allows extra variables, so unknown names in the environment are tolerated rather than rejected.
 
@@ -87,16 +88,18 @@ Applied by the security-headers middleware when `SECURITY_HEADERS_ENABLED` is tr
 
 <aside class="callout callout-danger" role="note"><p class="callout-title">Wildcard origins plus credentials refuses to start in production</p>
 
-`ORIGINS=*` on its own is a legitimate choice for a public, token-less API. The dangerous combination is wildcard origins **together with** credentials: Starlette reflects the caller's `Origin` back alongside `Access-Control-Allow-Credentials: true`, which turns every origin into a trusted, credentialed one.
+`ORIGINS=*` on its own is a legitimate choice for a public, token-less API, but in production it needs `STRICT_PRODUCTION_CHECKS=false`, because the strict checks refuse a wildcard. The dangerous combination is wildcard origins **together with** credentials: Starlette reflects the caller's `Origin` back alongside `Access-Control-Allow-Credentials: true`, which turns every origin into a trusted, credentialed one.
 
-With `MODE=production`, that combination raises `InsecureCorsConfigError` at startup and the server does not boot. There are exactly two ways forward:
+With `MODE=production`, that combination raises `InsecureCorsConfigError` at startup and the server does not boot, whatever `STRICT_PRODUCTION_CHECKS` says. There are exactly two ways forward:
 
 ```bash
 # 1. Name the origins explicitly (the usual answer)
 ORIGINS=https://yourapp.com,https://api.yourapp.com
 
 # 2. Or serve a public, non-credentialed API from any origin
+#    (production also needs the strict checks off)
 CORS_ALLOW_CREDENTIALS=false
+STRICT_PRODUCTION_CHECKS=false
 ```
 
 In development the same combination only logs a warning, which tells you the deploy will fail before it does.
@@ -165,7 +168,7 @@ See [ID Generator](/docs/reference/python/id-generator) for the constructor cont
 | --- | --- | --- |
 | `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing |
 | `OTEL_SERVICE_NAME` | `10xgraph-api` | Service name reported in spans |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `null` | OTLP collector endpoint |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `null` | OTLP collector endpoint. Unset: spans print to the console in development; with `MODE=production` nothing is exported and a warning is logged |
 | `OTEL_LEVEL` | `standard` | Trace detail: `spans`, `standard`, or `full` |
 
 OpenTelemetry needs the extra: `pip install "10xgraph-api[otel]"`, which also brings the FastAPI instrumentation and the OTLP exporter.
@@ -252,7 +255,7 @@ REDOCS_PATH=
 | --- | --- | --- |
 | `WEB_CONCURRENCY` | Unset (`2` in the generated Dockerfile) | Number of Gunicorn workers. Gunicorn reads this variable natively; without it Gunicorn runs one worker. The Dockerfile from `10xgraph build` sets `ENV WEB_CONCURRENCY=2`; override it at deploy time, for example `docker run -e WEB_CONCURRENCY=8 ...`. |
 
-Only Gunicorn reads this variable, for example when started as `gunicorn -k uvicorn.workers.UvicornWorker tenxgraph_api.src.app.main:app`. The development server (`10xgraph api`) does not use it.
+Only Gunicorn reads this variable, for example when started as `gunicorn -k uvicorn_worker.UvicornWorker tenxgraph_api.src.app.main:app`. The development server (`10xgraph dev`) does not use it.
 
 ---
 

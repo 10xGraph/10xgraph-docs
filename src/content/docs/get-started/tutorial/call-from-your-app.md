@@ -5,12 +5,12 @@ group: "Tutorial"
 section: "Get started"
 order: 90
 label: Call from your app
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Which package do I install to call a 10xGraph server from TypeScript?"
     a: "Install 10xgraph-client and import TenxGraphClient and Message from it."
   - q: "How does the agent remember earlier messages?"
-    a: "Pass the same thread_id in the config option of every invoke or stream call. The server checkpointer stores the conversation under that ID and restores it on the next call."
+    a: "Omit thread_id on the first call. The server starts a thread and returns its id in result.meta.thread_id. Pass that id in the config option of later invoke or stream calls. The server checkpointer stores the conversation under that id and restores it on the next call."
   - q: "Is the stream Server-Sent Events?"
     a: "No. client.stream() reads newline-delimited JSON (NDJSON) over a normal HTTP response from POST /v1/graph/stream."
 ---
@@ -21,7 +21,7 @@ In this step you call the agent server from step 4 with the TypeScript client. Y
 
 You need the server from [Serve and inspect](/docs/get-started/tutorial/serve-and-inspect) running, and Node.js 18 or later (the client uses the built-in `fetch`).
 
-- The API server is started with `10xgraph api --host 127.0.0.1 --port 8000`, from the folder that holds `10xgraph.json`.
+- The API server is started with `10xgraph dev --no-open --host 127.0.0.1 --port 8000`, from the folder that holds `10xgraph.json`.
 - The graph has a weather tool and a checkpointer, as built in the previous steps.
 - The server is reachable at `http://127.0.0.1:8000`.
 
@@ -75,11 +75,8 @@ import { TenxGraphClient, Message } from "10xgraph-client";
 const client = new TenxGraphClient({ baseUrl: "http://127.0.0.1:8000" });
 
 async function main() {
-  // Send one user message on a named thread
-  const result = await client.invoke(
-    [Message.text_message("What is the weather in Tokyo?")],
-    { config: { thread_id: "tutorial-thread" } },
-  );
+  // Send one user message. With no thread_id, the server starts a new thread.
+  const result = await client.invoke([Message.text_message("What is the weather in Tokyo?")]);
 
   // The last message is the agent's final answer
   const reply = result.messages.at(-1);
@@ -100,7 +97,7 @@ The output depends on your model. It looks like this:
 
 ```text
 Agent replied: The weather in Tokyo is sunny and 22°C.
-Thread: tutorial-thread new: true
+Thread: 7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f new: true
 ```
 
 What the call does:
@@ -115,18 +112,18 @@ If the graph asks the client to run a tool in your app (a remote tool), `invoke(
 
 ## Keep a conversation on one thread
 
-A `thread_id` names a conversation. The server stores the state under that ID through the checkpointer, so a second call with the same ID continues where the first stopped.
+A `thread_id` names a conversation. The server picks the id when it starts a thread, and stores the state under it through the checkpointer. A second call with the same id continues where the first stopped. By default the server refuses an id it did not create (`403`), so do not make one up.
 
 ```ts title="multi-turn.ts"
 import { TenxGraphClient, Message } from "10xgraph-client";
 
 const client = new TenxGraphClient({ baseUrl: "http://127.0.0.1:8000" });
-const config = { thread_id: "conversation-with-user-123" };
 
 async function main() {
-  // First turn: give the agent a fact
-  const first = await client.invoke([Message.text_message("My name is Alex.")], { config });
+  // First turn: no thread_id, so the server starts a thread. Keep its id.
+  const first = await client.invoke([Message.text_message("My name is Alex.")]);
   console.log(first.messages.at(-1)?.text());
+  const config = { thread_id: first.meta.thread_id };
 
   // Second turn: same thread_id, so the server restores the history
   const second = await client.invoke([Message.text_message("What is my name?")], { config });
@@ -136,7 +133,7 @@ async function main() {
 main().catch(console.error);
 ```
 
-The second answer mentions Alex because the server, not your app, holds the history. You send only the new message each time. A different `thread_id` starts a fresh conversation. Reading and editing stored threads is covered in [Manage threads](/docs/client/manage-threads).
+The second answer mentions Alex because the server, not your app, holds the history. You send only the new message each time. Leaving `thread_id` out starts a fresh conversation. Reading and editing stored threads is covered in [Manage threads](/docs/client/manage-threads).
 
 ## Stream the reply as it is generated
 
@@ -150,7 +147,6 @@ const client = new TenxGraphClient({ baseUrl: "http://127.0.0.1:8000" });
 async function main() {
   const stream = client.stream(
     [Message.text_message("Write a short story about a robot.")],
-    { config: { thread_id: "streaming-demo" } },
   );
 
   // Print each piece of the reply as soon as it arrives
@@ -190,7 +186,6 @@ const client = new TenxGraphClient({ baseUrl: "http://127.0.0.1:8000" });
 async function main() {
   const stream = client.stream(
     [Message.text_message("What is 2 + 2? Explain briefly.")],
-    { config: { thread_id: "event-demo" } },
   );
 
   for await (const chunk of stream) {
@@ -277,7 +272,6 @@ async function testInvoke() {
   console.log("Testing invoke...");
   const result = await client.invoke(
     [Message.text_message("Hello, what tools do you have?")],
-    { config: { thread_id: "test-invoke" } },
   );
   console.log("Reply:", result.messages.at(-1)?.text());
   console.log("Thread ID:", result.meta.thread_id);
@@ -288,7 +282,6 @@ async function testStream() {
   let count = 0;
   const stream = client.stream(
     [Message.text_message("Tell me a fact.")],
-    { config: { thread_id: "test-stream" } },
   );
   for await (const chunk of stream) {
     count++;
@@ -313,7 +306,7 @@ npx tsx verify.ts
 
 ### Common errors
 
-- **`fetch failed` or connection refused:** the server is not running or `baseUrl` is wrong. Check `10xgraph api` is up on the same host and port.
+- **`fetch failed` or connection refused:** the server is not running or `baseUrl` is wrong. Check `10xgraph dev` is up on the same host and port.
 - **HTTP 401 or 403:** the server requires auth. Pass `authToken` as shown above.
 - **CORS error in a browser:** the server must allow your page's origin through the `ORIGINS` environment variable. See the [production checklist](/docs/server/production-checklist).
 - **`Request timeout after 300000ms`:** the run took longer than `timeout`. Raise `timeout` or use `stream()`.
@@ -325,7 +318,7 @@ More fixes are in [Client troubleshooting](/docs/troubleshooting/client).
 - `TenxGraphClient` talks to your running server; only `baseUrl` is required.
 - `client.invoke()` returns the full reply in one call, with `messages` and `meta`.
 - `client.stream()` yields NDJSON chunks; `message`, `updates`, `state` and `error` are the event types.
-- A shared `thread_id` makes the server restore the conversation on every call.
+- Leave `thread_id` out to start a thread, then pass the returned `meta.thread_id` to make the server restore the conversation.
 - `authToken` or `headers` carry credentials, and tokens stay on the server side in browser apps.
 
 ## Next steps

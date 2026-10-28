@@ -1,24 +1,24 @@
 ---
 title: Playground Troubleshooting
-description: Symptoms, causes, and fixes for hosted playground connection issues when using 10xgraph play.
+description: Symptoms, causes, and fixes for hosted playground connection issues when using 10xgraph dev.
 section: Troubleshooting
 order: 60
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
-When the hosted playground opened by `10xgraph play` will not connect, fails silently, or shows a page as unavailable, the cause is usually the local API, the `backendUrl`, or a missing capability on your graph. This page lists each symptom with its likely causes and a fix, then a short checklist.
+When the hosted playground opened by `10xgraph dev` will not connect, fails silently, or shows a page as unavailable, the cause is usually the local API, the `backendUrl`, or a missing capability on your graph. This page lists each symptom with its likely causes and a fix, then a short checklist.
 
-## How `10xgraph play` works
+## How `10xgraph dev` works
 
 ```mermaid
 flowchart LR
-    A[10xgraph play] --> B[Local API server starts]
+    A[10xgraph dev] --> B[Local API server starts]
     B --> C[Browser opens hosted playground]
     C --> D[Playground uses backendUrl]
     D --> E[Requests local API]
 ```
 
-The playground is hosted externally. `10xgraph play` does not run a separate local frontend.
+The playground is hosted externally. `10xgraph dev` does not run a separate local frontend.
 
 ## Issue: browser opens but playground cannot connect
 
@@ -55,7 +55,7 @@ The playground is hosted externally. `10xgraph play` does not run a separate loc
 **Fix**
 
 - inspect browser devtools network panel
-- inspect API logs in the terminal running `10xgraph play`
+- inspect API logs in the terminal running `10xgraph dev`
 - test the same request against the API directly with curl
 
 ## Issue: every page says you are not connected
@@ -72,7 +72,7 @@ The playground is hosted externally. `10xgraph play` does not run a separate loc
 **Fix**
 
 - open Connect (`/`), confirm the backend URL, pick the auth mode that matches the server's `10xgraph.json`, and connect
-- `10xgraph play` pre-fills the URL, so this usually means the connection attempt failed rather than that it was never made. Check the capability chips and the error shown on the Connect page
+- `10xgraph dev` pre-fills the URL, so this usually means the connection attempt failed rather than that it was never made. Check the capability chips and the error shown on the Connect page
 
 ## Issue: the Live page will not start a session
 
@@ -174,7 +174,7 @@ Denial is handled, not fatal: the session stays open and the turn is ended clean
 
 ## Verification checklist
 
-1. run `10xgraph play --host 127.0.0.1 --port 8000`
+1. run `10xgraph dev --host 127.0.0.1 --port 8000`
 2. confirm the server terminal shows the local API URL
 3. run `curl http://127.0.0.1:8000/ping`
 4. confirm the browser URL contains the same host and port in `backendUrl`
@@ -189,6 +189,6 @@ Denial is handled, not fatal: the session stays open and the turn is ended clean
 ## What you learned
 
 - How to troubleshoot the hosted playground by separating browser connectivity from API health.
-- Why `10xgraph play` is a testing path and not a separate frontend runtime.
+- Why `10xgraph dev` is a testing path and not a separate frontend runtime.
 - That the playground is connect-first, and that Live, Chat, and the Inspect pages gate themselves on capabilities read from `GET /v1/graph`.
 - That file attachments are not implemented in the playground yet.

@@ -5,7 +5,7 @@ description: The files that 10xgraph init --template production generates, what 
 group: "Next steps"
 section: "Get started"
 order: 120
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Which template should I start from?
     a: Use quick-start to try an idea, since it writes a graph, an env example and 10xgraph.json. Use production when the agent will be deployed, because it adds a state class, a tool, a prompt-injection validator, lifecycle hooks, evals, tests, ruff and pre-commit setup, and optional JWT or custom auth with rate limiting.
@@ -350,8 +350,8 @@ LOG_LEVEL="INFO"
 IS_DEBUG="false"
 SUMMARY="MyAgent Backend"
 
-ORIGINS="*"
-ALLOWED_HOST="*"
+ORIGINS="https://your-app.example.com"
+ALLOWED_HOST="your-app.example.com"
 
 ROOT_PATH="/"
 DOCS_PATH=""
@@ -429,7 +429,7 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
 | `injectq` | Production | `graph.agent:container` (see the warning below) |
 | `rate_limit` | Production with a rate-limit backend | `enabled`, `backend`, `requests`, `window`, `by`, `trusted_proxy_headers`, `exclude_paths` |
 
-Defaults come from the prompts or flags: 100 requests per 60 seconds, counted `ip` (interactive mode also offers `global`), with `trusted_proxy_headers` true only if you say you are behind a reverse proxy. Keys such as `test`, `evaluation`, `remote_tools`, `checkpointer` and `store` are not written for production, though you can add them yourself. The quick-start template adds none of these either. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
+Defaults come from the prompts or flags: 100 requests per 60 seconds, counted `ip` (interactive mode also offers `global`), with `trusted_proxy_headers` true only if you say you are behind a reverse proxy. Keys such as `test`, `evaluation`, `remote_tools` and `store` are not written for production, though you can add them yourself. There is no `checkpointer` key to set: the server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The quick-start template adds none of these either. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
 
 ## Fix these before you deploy
 
@@ -457,7 +457,7 @@ The template uses `InMemoryCheckpointer`, so threads and state vanish when the s
 
 <Callout type="note" title="Tighten the env defaults">
 
-`.env.example` ships `ORIGINS="*"` and `ALLOWED_HOST="*"`. Restrict both to your real domains before production. Leave `DOCS_PATH` and `REDOCS_PATH` empty to keep the API docs off. Never commit `.env`.
+`.env.example` ships placeholder values for `ORIGINS` and `ALLOWED_HOST`. Replace both with your real domains. With `MODE=production` the server refuses to start on a wildcard for either one, or on enabled docs paths. Leave `DOCS_PATH` and `REDOCS_PATH` empty to keep the API docs off. Never commit `.env`.
 
 </Callout>
 

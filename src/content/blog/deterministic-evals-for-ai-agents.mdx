@@ -1,0 +1,359 @@
+---
+title: "Moving past vibe checks: deterministic agent evals in CI"
+seoTitle: "Deterministic agent evals in CI/CD"
+description: "Gate pull requests on what an AI agent did: which tools it called and with what arguments. Uses 10xGraph eval sets, trajectory scoring with no judge model, and pytest."
+date: 2026-10-26
+updated: 2026-10-27
+author: "Shudipto Trafder"
+kind: "engineering"
+tags: [testing, evaluation, ci-cd, reliability, pytest]
+faq:
+  - q: "Can I run agent evaluations in CI without paying for an LLM judge on every pull request?"
+    a: "Yes. EvalPresets.tool_usage() scores tool names, tool order and tool arguments by comparing the recorded trajectory with the expected one. No judge model is called. You still pay for the agent's own model calls, because the agent under test runs for real."
+  - q: "Are these evals fully deterministic?"
+    a: "The scoring is. The agent is not: the same prompt can produce a different tool choice on another run. Keep hard rules at a 100% pass rate, use a pass-rate threshold for broad suites, and pin the model version you test against."
+  - q: "How do 10xGraph evals plug into pytest?"
+    a: "Build the instrumented app once with create_eval_app from tenxgraph.qa.evaluation.testing, then either decorate a test with @eval_test to run a whole eval set file, or call AgentEvaluator.evaluate_case for one case and assert on the result."
+  - q: "What is the difference between a unit test and an evaluation in 10xGraph?"
+    a: "Unit tests swap the LLM for TestAgent and check graph wiring with no model calls. Evaluations run the real model and check whether it picked the right tools, in the right order, with the right arguments, and whether the reply is acceptable."
+  - q: "Can 10xGraph simulate multi-turn conversations?"
+    a: "Yes. UserSimulator plays the user from a ConversationScenario, checks after each turn which goals have been met, and stops when all goals are met or max_turns is reached. It calls an LLM for the user turns and the goal checks, so it belongs in a nightly job rather than on every pull request."
+---
+
+Most agent changes ship after a vibe check. Someone edits the system prompt, tries three queries in the playground, likes the answers and opens a pull request.
+
+Two days later a customer asks to cancel a subscription and the agent replies "done" without ever calling the cancellation tool. Or a prompt change meant to improve refund answers makes the agent call `issue_refund` before it has looked up whether the order was returned.
+
+Neither failure shows up in the text of a reply that reads well. Both show up in the agent's trajectory: the tools it called, the arguments it passed and the order in which the graph ran. That trajectory is data, and data can be checked in CI without asking another model for an opinion.
+
+This post shows how to do that with `tenxgraph.qa.evaluation`: record the trajectory, score it in pytest with no judge model, put a hard rule in its own test, and leave the expensive multi-turn simulation for a nightly job.
+
+## What you can check without a judge model
+
+Mocking every LLM response gives you fast tests that never exercise the model's choices. Grading every reply with another frontier model on every commit makes pull requests slow, adds judge cost and variance on top of the agent's own, and the scores still drift. Most teams need something in between: run the real agent, but score it by rules that need no judgement.
+
+10xGraph splits its criteria along that line:
+
+| | Trajectory and string checks | LLM-judged checks |
+|---|---|---|
+| Criteria | `tool_name_match`, `trajectory`, `node_order`, `rouge_match`, `contains_keywords` | `response_match`, `llm_judge`, `rubric_based`, `factual_accuracy`, `hallucination`, `safety`, `simulation_goals` |
+| Judge calls | None | One or more per criterion per case |
+| Scoring | Deterministic for a given trajectory | Varies with the judge |
+| Run time | The agent's own model calls; scoring is effectively free | The agent's calls plus judge calls |
+| Where it runs | Every pull request | Nightly or before a release |
+
+One caveat sits under the whole left column: the scoring is deterministic, the agent is not. The same input can produce a different tool choice on the next run. A deterministic check makes a regression visible, but it cannot make the model behave the same way twice. The last sections of this post come back to what that means for thresholds.
+
+## How an evaluation runs
+
+```
+  EvalSet (cases)
+       │
+       ▼
+  AgentEvaluator ── runs each case ──▶ compiled graph
+       │                                    │ node and tool events
+       │                                    ▼
+       │                           TrajectoryCollector
+       │                                    │
+       ▼                                    ▼
+  EvalConfig criteria  ◀── ExecutionResult (tools, args, nodes, reply)
+       │
+       ▼
+  EvalReport ──▶ console, JSON, HTML, JUnit XML reporters
+```
+
+An `EvalSet` holds the cases: the user query plus whatever you expect, such as tool calls with arguments, the order of nodes or a reference reply. The `TrajectoryCollector` is wired into the graph through its `callback_manager` at compile time and records node visits, tool calls with their arguments, the final reply, token usage and timing. `AgentEvaluator` runs each case, hands the recorded execution to every criterion enabled in the `EvalConfig`, and returns an `EvalReport` with a score, a pass flag and a reason for each criterion.
+
+## Building the eval set
+
+The agent under test is an e-commerce support agent with three tools: `lookup_order`, `get_shipping_status` and `issue_refund`. Two rules matter more than anything else it does:
+
+1. Asked about an order, it must call `lookup_order` with the order ID from the message.
+2. For an order that has not been returned, it must never call `issue_refund`.
+
+The first rule fits an eval set file, which `EvalSetBuilder` writes:
+
+```python title="tests/evals/build_cases.py"
+from tenxgraph.qa.evaluation import EvalSetBuilder
+
+support_eval_set = (
+    EvalSetBuilder("support-agent-core")
+    # One expected tool call with exact arguments
+    .add_tool_test(
+        query="Where is my package for order ORD-9921?",
+        tool_name="lookup_order",
+        tool_args={"order_id": "ORD-9921"},
+        expected_response="ORD-9921",
+        case_id="lookup_valid_order",
+    )
+    # Two tools in order, and the agent node runs again after the tools
+    .add_case(
+        query="Track my package for order ORD-4410 and tell me when it arrives",
+        expected="Estimated delivery",
+        expected_tools=["lookup_order", "get_shipping_status"],
+        expected_node_order=["agent", "agent"],
+        case_id="order_tracking_flow",
+    )
+    .build()
+)
+
+support_eval_set.to_file("tests/fixtures/support_cases.evalset.json")
+```
+
+Four details are easy to miss. The collector records tool calls as tool calls, not as visits to the tool node, so `node_visits` for this graph looks like `["__start__", "agent", "agent"]` and the expected order lists only the agent node. A tool given by name only, as in the second case, matches any arguments. Arguments that are given are compared as a whole dict, so an extra optional key the model adds makes the call fail to match. And `expected` and `expected_response` are stored with the case but only scored if you enable a response criterion such as `rouge_match`; the tool-usage preset below ignores them.
+
+## Scoring the trajectory
+
+`EvalPresets.tool_usage()` enables two criteria: `tool_name_match`, which checks the expected tool names were called, and `trajectory`, which checks order and, with `check_args=True`, arguments. With `strict=True` the order check uses `MatchType.EXACT`; with `strict=False` it uses `IN_ORDER`. The preset does not score `expected_node_order`, so add a `node_order` criterion if you want the graph path checked:
+
+```python title="tests/evals/test_agent_quality.py"
+from tenxgraph.qa.evaluation import CriteriaConfig, CriterionConfig, EvalConfig, MatchType
+from tenxgraph.qa.evaluation.config.presets import EvalPresets
+
+CI_CONFIG = EvalPresets.combine(
+    EvalPresets.tool_usage(threshold=1.0, strict=True, check_args=True),
+    EvalConfig(
+        criteria=CriteriaConfig(
+            # Expected nodes must appear in this order; extra loops are allowed
+            node_order=CriterionConfig.node_order(match_type=MatchType.IN_ORDER),
+        )
+    ),
+)
+```
+
+None of these criteria calls a model. If a prompt change makes the agent answer the first case with `search_knowledge_base(query="order ORD-9921")` instead of `lookup_order(order_id="ORD-9921")`, the trajectory criterion scores 0.0 and records why:
+
+```text
+Matched 0% of expected tools. Expected ['lookup_order'], got ['search_knowledge_base'].
+```
+
+## Running it in pytest
+
+`create_eval_app` compiles an uncompiled `StateGraph` with an `InMemoryCheckpointer` and a `TrajectoryCollector`, and returns both. Build it once per session and share it:
+
+```python title="tests/evals/conftest.py"
+import pytest
+from tenxgraph.qa.evaluation.testing import create_eval_app
+
+from my_project.graph import build_support_agent
+
+
+@pytest.fixture(scope="session")
+def support_agent_app():
+    """Compile the support graph once with a trajectory collector attached."""
+    return create_eval_app(build_support_agent())  # (compiled_app, collector)
+```
+
+The evaluator resets the collector before each case, so one app can serve every test in the session.
+
+### A whole eval set with `@eval_test`
+
+`@eval_test` takes the eval set path and a config. The decorated test returns the `(app, collector)` pair; the decorator runs every case and fails the test if the pass rate is below `threshold`, which defaults to `1.0`. In the same file as `CI_CONFIG`:
+
+```python title="tests/evals/test_agent_quality.py"
+from tenxgraph.qa.evaluation.testing import eval_test
+
+
+@eval_test("tests/fixtures/support_cases.evalset.json", config=CI_CONFIG)
+async def test_support_agent_tool_compliance(support_agent_app):
+    return support_agent_app
+```
+
+The tests are async, so enable auto mode in pytest-asyncio:
+
+```toml title="pyproject.toml"
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+```
+
+When the first case regresses as above, pytest reports the failing case and which criteria failed:
+
+```text
+FAILED tests/evals/test_agent_quality.py::test_support_agent_tool_compliance
+Failed: Evaluation failed: 50.0% pass rate (threshold: 100.0%)
+Failed cases:
+  - lookup_valid_order: tool_name_match_score, tool_trajectory_avg_score
+```
+
+The per-criterion reasons, including the expected and actual tool lists, are in the `EvalReport`, and in the HTML report when you run through the CLI.
+
+### A hard rule as its own test
+
+Rule 2 is a prohibition, and the trajectory criteria do not express it. They check that the expected calls happened. They do not reject extra ones: an agent that calls `lookup_order` and then `issue_refund` still matches an expected trajectory of `lookup_order` alone. So assert on the recorded calls directly with `evaluate_case`:
+
+```python title="tests/evals/test_agent_quality.py"
+from tenxgraph.qa.evaluation import AgentEvaluator, EvalCase, ToolCall
+
+
+async def test_no_refund_for_unreturned_order(support_agent_app):
+    app, collector = support_agent_app
+    evaluator = AgentEvaluator(app, collector, config=CI_CONFIG)
+
+    # In the test fixtures, ORD-5530 is delivered and not returned
+    case = EvalCase.single_turn(
+        eval_id="refund_unreturned_order",
+        user_query="I changed my mind about order ORD-5530, refund me now",
+        expected_tools=[ToolCall(name="lookup_order", args={"order_id": "ORD-5530"})],
+    )
+    result = await evaluator.evaluate_case(case)
+
+    called = [t.name for t in result.actual_tool_calls]
+    assert "issue_refund" not in called, f"refund issued for unreturned order: {called}"
+    assert result.passed, [c.details.get("reason") for c in result.failed_criteria]
+```
+
+`EvalCaseResult` also carries `node_visits`, `actual_response` and per-node token usage, so any rule you can state about the run can become an assertion. This test still exercises the model's judgement: the tools behind it should read fixture data, so the order really is unreturned when the agent looks it up.
+
+## Simulating multi-turn conversations
+
+Single-turn cases miss what only goes wrong as a conversation grows: the agent asks for the order number twice, loops between two tools, or forgets a constraint from the first message. `UserSimulator` plays the user from a `ConversationScenario`:
+
+```python title="tests/evals/test_simulator.py"
+from tenxgraph.qa.evaluation import (
+    ConversationScenario,
+    CriterionConfig,
+    SimulationGoalsCriterion,
+    UserSimulator,
+)
+
+
+async def test_defective_keyboard_return(support_agent_app):
+    app, _ = support_agent_app
+
+    scenario = ConversationScenario(
+        scenario_id="defective_keyboard_return",
+        description="A polite customer wants to return a defective keyboard from order ORD-110.",
+        starting_prompt="Hi, the keyboard I bought doesn't work properly.",
+        goals=[
+            "Give the order number when asked",
+            "Explain that the spacebar does not register",
+            "Receive a prepaid return shipping label",
+        ],
+        max_turns=6,
+    )
+    simulator = UserSimulator(
+        model="gemini/gemini-2.5-flash",
+        criteria=[SimulationGoalsCriterion(config=CriterionConfig(threshold=0.7))],
+    )
+
+    result = await simulator.run(app, scenario)
+
+    assert result.error is None, result.error
+    assert result.completed, f"goals met: {result.goals_achieved}"
+    assert result.turns <= 5
+    assert result.criterion_scores["simulation_goals"] >= 0.7
+```
+
+Each turn sends the conversation so far to the graph, asks the simulator model which goals are now met, and writes the next user message toward the remaining goals. The run stops when every goal is met or `max_turns` is reached. `result.conversation` holds the transcript for the failure message or a report, and `result.simulator_token_usage` tells you what the simulation cost.
+
+The simulator's user turns and goal checks are LLM calls, and so is `SimulationGoalsCriterion`. This test belongs in the judged column of the table, which is why the workflow below runs it on a schedule rather than on every pull request.
+
+## Gating pull requests in GitHub Actions
+
+The workflow runs the trajectory tests on every pull request and the simulation every night:
+
+```yaml title=".github/workflows/agent-evals.yml"
+name: Agent evals
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *"
+
+jobs:
+  trajectory-evals:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest pytest-asyncio "10xgraph[openai]"
+
+      - name: Trajectory and tool-rule evals
+        env:
+          # The agent under test calls its model for real
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: pytest tests/evals/test_agent_quality.py --junitxml=reports/eval-junit.xml
+
+      - name: Publish results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: reports/eval-junit.xml
+
+  simulation-evals:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest pytest-asyncio "10xgraph[openai,google-genai]"
+
+      - name: Multi-turn simulation
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: pytest tests/evals/test_simulator.py
+```
+
+The pull-request job pays for the agent's own model calls and nothing else. GitHub does not pass repository secrets to workflows triggered from forks, so on an open-source repository those runs will fail to authenticate. Run the job only for branches in your own repository, or move it to a trigger you control.
+
+## Running suites from the CLI
+
+For larger suites, or a release check that should leave reports behind, `10xgraph eval` (from `10xgraph-api`) discovers `*_eval.py` and `eval_*.py` files in `evals/`, or in the file or folder you pass. Each file exposes `get_eval_set()` and `get_eval_config()`; the CLI loads the agent from `10xgraph.json`:
+
+```python title="evals/support_eval.py"
+from tenxgraph.qa.evaluation import EvalConfig, EvalSet
+from tenxgraph.qa.evaluation.config.presets import EvalPresets
+
+
+def get_eval_config() -> EvalConfig:
+    return EvalPresets.tool_usage(threshold=1.0, strict=True)
+
+
+def get_eval_set() -> EvalSet:
+    return EvalSet.from_file("tests/fixtures/support_cases.evalset.json")
+```
+
+```bash
+10xgraph eval evals/ --parallel --max-concurrency 5 --output eval_reports --open
+```
+
+The command always writes HTML and JSON reports to the output directory unless you pass `--no-report`. The HTML report shows each case with its criterion scores and reasons, the trajectory steps, the per-node responses and the token usage per node. The command exits non-zero unless every case passes, so it can gate a release on its own. `--threshold` adds a message when the pass rate falls below it, but does not relax the exit code.
+
+## Current limits
+
+- The agent is not deterministic. A model can pass a case nine times and fail it on the tenth. Keep rules like "never refund an unreturned order" at a 100% pass rate and treat any failure as real. For broad suites where some variance is acceptable, pass a lower `threshold` to `@eval_test`, and pin the model version you test against.
+- Trajectory criteria check that expected tool calls happened, not that nothing else did. Write prohibitions as assertions on `result.actual_tool_calls`, as in the refund test.
+- When the model requests several tools in one turn, 10xGraph runs them in parallel, and the recorded order can differ from the order the model listed them in. An `EXACT` order check on such a turn can fail even when the agent did the right thing. Use `strict=False` (`IN_ORDER`), or a `trajectory` criterion with `MatchType.ANY_ORDER`, for cases where the calls can come back in either order.
+- Arguments are compared as a whole dict. Leave optional arguments out of the expected `ToolCall`, or give only the tool name, when exact arguments are not the point of the case.
+
+For the wider set of checks to run before you ship, including auth and isolation tests against a running server, see [Test before production](/docs/testing/before-production).
+
+## Further reading
+
+- [Evals in pytest](/docs/testing/evals-in-pytest) covers `create_eval_app`, `@eval_test` and the assertion helpers.
+- [Criteria](/docs/testing/criteria) lists every criterion, what it scores and whether it calls a model.
+- [Presets](/docs/testing/presets) shows what each `EvalPresets` method enables.
+- [User simulation](/docs/testing/user-simulation) goes further into scenarios and batch simulation.
+- [Running evals](/docs/testing/run-evals) and [Reports](/docs/testing/reports) cover the `10xgraph eval` CLI and its output.
+- [Unit tests](/docs/testing/unit-tests) covers `TestAgent` for graph tests that make no model calls at all.

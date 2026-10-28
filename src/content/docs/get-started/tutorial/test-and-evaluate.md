@@ -2,7 +2,7 @@
 title: "Test and evaluate"
 seoTitle: "Test and evaluate a 10xGraph agent"
 description: "Write a unit test with a mocked model, then run a small evaluation set against your weather agent with the 10xgraph eval command."
-updated: "2026-10-08"
+updated: "2026-10-27"
 order: 110
 group: "Tutorial"
 section: "Get started"
@@ -290,6 +290,6 @@ Do not use evaluations to test wiring bugs: a failing case does not tell you whe
 You have finished the tutorial track. Continue with:
 
 - [Testing](/docs/testing) for unit test patterns, criteria, presets and user simulation.
-- [Run the server](/docs/server/run-the-server) to serve the agent over HTTP with `10xgraph api` and `10xgraph play`.
+- [Run the server](/docs/server/run-the-server) to serve the agent over HTTP with `10xgraph dev`.
 - [Production checklist](/docs/server/production-checklist) before you deploy.
 - [Prebuilt agents](/docs/guides/prebuilt-agents) and [Concepts](/docs/concepts) for the next level of detail.

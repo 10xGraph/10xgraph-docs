@@ -5,14 +5,14 @@ section: Reference
 group: "REST API"
 order: 300
 label: Conventions and permissions
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 Every route in the 10xGraph REST API lives under `/v1/` (except `/ping`), returns the same JSON envelope, authenticates with a Bearer token, and is guarded by a resource and action permission pair. This page lists those shared rules, the full permission table, the WebSocket close codes and the HTTP status codes.
 
 ## Base URL and response envelope
 
-Successful responses wrap the payload in `data` and add a `metadata` object with `request_id`, `timestamp` and `message`. Errors raised by the application return `error` instead, with the same `metadata`. The `details` list is empty unless the error carries extra context (validation errors, for example).
+Successful responses wrap the payload in `data` and add a `metadata` object with `request_id`, `timestamp` and `message`. Errors raised by the application return `error` instead, with the same `metadata`. The `details` list is empty unless the error carries extra context (validation errors, or the `context` of a graph or node error outside production).
 
 ```json
 {
@@ -40,7 +40,7 @@ Successful responses wrap the payload in `data` and add a `metadata` object with
 }
 ```
 
-Errors from `HTTPException` (permission denied, not found, empty upload) use the code `HTTPException`. Request validation failures use `VALIDATION_ERROR`. Three responses come from middleware and do not use this exact shape: `409`, `413` and `429` (see [HTTP status codes](#http-status-codes)).
+Errors from `HTTPException` (permission denied, not found, empty upload) use the code `HTTPException`. Request validation failures use `VALIDATION_ERROR`. Three responses come from middleware and do not use this exact shape: the `state_conflict` `409`, `413` and `429` (see [HTTP status codes](#http-status-codes)).
 
 ## Authentication
 
@@ -90,7 +90,8 @@ The table lists every `(resource, action)` pair the server enforces. `POST /v1/a
 | `DELETE /v1/threads/{id}/state` | `checkpointer` | `delete` |
 | `GET /v1/threads/{id}/messages` | `checkpointer` | `read` |
 | `GET /v1/threads/{id}/messages/{msg}` | `checkpointer` | `read` |
-| `POST /v1/threads/{id}/messages` | `checkpointer` | `write` |
+| `POST /v1/threads/{id}/messages` | `checkpointer` | `import` (explicit grant, admin only) |
+| `PUT /v1/threads/{id}/messages/{msg}` | `checkpointer` | `write` |
 | `DELETE /v1/threads/{id}/messages/{msg}` | `checkpointer` | `delete` |
 | `GET /v1/threads` | `checkpointer` | `read` |
 | `GET /v1/threads/{id}` | `checkpointer` | `read` |
@@ -141,10 +142,11 @@ These are the status codes the server returns. Routes document their own specifi
 | `401` | Missing, invalid or expired credentials |
 | `403` | Insufficient permissions, or access to a thread you do not own |
 | `404` | File, thread, message or eval run not found |
+| `409` | A run on this thread is still active after 30 seconds (`message` is `thread is busy`), or a `resume` named an `interrupt_id` that does not match the open interrupt. Standard error body with code `HTTPException`. See [One run per thread](/docs/reference/rest-api/graph#one-run-per-thread) |
 | `409` | Another run updated the thread while yours was in flight. Body is `{"error": "state_conflict", "detail": "...", "thread_id": ...}`. Reload the thread and retry |
 | `413` | Request body over `MAX_REQUEST_SIZE` (default 10 MB), or upload over `MEDIA_MAX_SIZE_MB` (default 25) |
 | `415` | Uploaded content type not allowed |
-| `422` | Request validation error (malformed body or invalid parameter) |
-| `429` | Rate limit exceeded. Body has `error.code` `RATE_LIMIT_EXCEEDED`; the `Retry-After` and `X-RateLimit-*` headers say when to retry |
+| `422` | Request validation error (malformed body or invalid parameter), a request over the [size limits](/docs/reference/rest-api/graph) (500 messages, 100 blocks per message, 1,000,000 characters of text), or a resume answer that fails the interrupt's `response_schema` |
+| `429` | Rate limit exceeded. Body has `error.code` `RATE_LIMIT_EXCEEDED`; the `Retry-After` and `X-RateLimit-*` headers say when to retry. The same status is returned when a user has more than `runs.max_concurrent_per_user` runs in flight (default 10); that body has code `HTTPException` and no `Retry-After` |
 | `500` | Unexpected server error |
 | `503` | Checkpointer or storage temporarily unavailable |

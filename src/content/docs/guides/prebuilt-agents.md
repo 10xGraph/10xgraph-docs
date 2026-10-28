@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Prebuilt agents"
 order: 80
 label: Prebuilt agents
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 10xGraph ships seven prebuilt agent classes that wrap a fully wired `StateGraph` behind a single constructor and `compile()` call. Each is a ready-made pattern for a common orchestration task. They compile to a `CompiledGraph` you can `invoke()`, `astream()`, or serve over the API server just like any graph you wrote by hand. This page helps you choose the right agent and points to detailed guides for each.
@@ -94,7 +94,7 @@ See [StructuredOutputAgent](/docs/guides/prebuilt/structured-output-agent) for r
 
 ### RAGAgent
 
-Retrieval-augmented generation. Queries a document store to find relevant context, optionally reranks results, and passes them to a wrapped agent so answers come from your documents.
+Retrieval-augmented generation. Queries a document store to find relevant context, optionally reranks results, and passes them to a wrapped agent so answers come from your documents. The documents are added to the model request only, not to the saved thread.
 
 ```python
 from tenxgraph.prebuilt.agent import RAGAgent
@@ -251,6 +251,10 @@ Prebuilt agents are opinionated. If you need:
 - A node that is not an Agent or ToolNode
 
 then read the agent's page for its graph layout, and move to a custom `StateGraph`. You get the same execution runtime, checkpointing, and streaming tools; you just define the nodes and edges yourself. See [Build a graph](/docs/guides/build-a-graph) for the pattern.
+
+## Run it in production
+
+Every prebuilt agent compiles to an ordinary graph, so `10xgraph dev` serves it with no extra code. Pass a durable checkpointer to `compile()` and turn on auth before exposing it. See [Production readiness](/docs/production) and the [production checklist](/docs/server/production-checklist).
 
 ## Next steps
 

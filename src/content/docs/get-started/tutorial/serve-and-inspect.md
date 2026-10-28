@@ -6,7 +6,7 @@ group: "Tutorial"
 section: "Get started"
 order: 80
 label: Serve and inspect
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 So far, you have built and tested an agent locally in Python. To use it from a web application or share it across a team, you need to expose it as an HTTP API. 10xGraph's API server turns your compiled graph into a production-ready FastAPI service in one command.
@@ -75,8 +75,10 @@ Your `10xgraph.json` already points to this graph at `graph.react:app`.
 From the folder containing `10xgraph.json`, run:
 
 ```bash
-10xgraph api --host 127.0.0.1 --port 8000
+10xgraph dev --no-open --host 127.0.0.1 --port 8000
 ```
+
+`10xgraph dev` is the development server: it reloads when your files change. `--no-open` starts the server without opening the hosted playground. For production, `10xgraph build` generates a Docker image that runs Gunicorn.
 
 Uvicorn logs show the server listening on `http://127.0.0.1:8000`. The exact log lines vary by version.
 
@@ -106,32 +108,32 @@ The `/v1/graph/invoke` endpoint executes the graph end-to-end and returns the fi
 curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
   -d '{
-    "messages": [{"role": "user", "content": [{"type": "text", "text": "What is the weather in Paris?"}]}],
-    "config": {"thread_id": "step4-thread-1"}
+    "messages": [{"role": "user", "content": [{"type": "text", "text": "What is the weather in Paris?"}]}]
   }'
 ```
 
-The request body takes `messages`, `config`, and optional `initial_state`, `recursion_limit` (default 25) and `response_granularity`. By default the response lists the messages produced by this run, each with `message_id`, `role` and a `content` array of typed blocks (abbreviated here):
+The request body takes `messages` and optional `config`, `initial_state`, `recursion_limit` (default 25) and `response_granularity`. By default the response lists the messages produced by this run, each with `message_id`, `role` and a `content` array of typed blocks (abbreviated here):
 
 ```json
 {
   "data": {
     "messages": [
       {"role": "assistant", "content": [{"type": "text", "text": "The weather in Paris is sunny and 22°C."}]}
-    ]
+    ],
+    "meta": {"thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f", "is_new_thread": true}
   },
   "metadata": {"request_id": "...", "timestamp": "...", "message": "OK"}
 }
 ```
 
-The `thread_id` in config tells the checkpointer which thread to use. Send another message on the same thread to test memory:
+The request had no `thread_id`, so the server started a new thread, picked its id and returned it in `data.meta.thread_id`. Send that id back as `config.thread_id` to continue the thread and test memory. By default the server refuses an id that does not exist (`403`), so use the id it returned instead of making one up. Replace `THREAD_ID` with the id from your response:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{"role": "user", "content": [{"type": "text", "text": "What did I ask about first?"}]}],
-    "config": {"thread_id": "step4-thread-1"}
+    "config": {"thread_id": "THREAD_ID"}
   }'
 ```
 
@@ -145,15 +147,14 @@ For real-time feedback, use `/v1/graph/stream`. The server sends one JSON object
 curl -X POST http://127.0.0.1:8000/v1/graph/stream \
   -H "Content-Type: application/json" \
   -d '{
-    "messages": [{"role": "user", "content": [{"type": "text", "text": "What is the weather in London?"}]}],
-    "config": {"thread_id": "step4-thread-2"}
+    "messages": [{"role": "user", "content": [{"type": "text", "text": "What is the weather in London?"}]}]
   }' | head -20
 ```
 
 Output (abbreviated; each line is a separate JSON object, and the fields inside `message` are the same as in the invoke response):
 
 ```json
-{"event":"message","message":{"role":"assistant","delta":true,"content":[...]},"thread_id":"step4-thread-2",...}
+{"event":"message","message":{"role":"assistant","delta":true,"content":[...]},"thread_id":"7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f",...}
 ...
 ```
 
@@ -161,10 +162,10 @@ Chunks with `"delta": true` are partial text. The streaming format is useful for
 
 ## Read thread state over REST
 
-You can inspect any thread without invoking the graph again. The `GET /v1/threads/{thread_id}/state` endpoint returns the saved state:
+You can inspect any thread you own without invoking the graph again. Use the thread id from step one in place of `THREAD_ID`. The `GET /v1/threads/{thread_id}/state` endpoint returns the saved state:
 
 ```bash
-curl http://127.0.0.1:8000/v1/threads/step4-thread-1/state
+curl http://127.0.0.1:8000/v1/threads/THREAD_ID/state
 ```
 
 Response:
@@ -182,16 +183,16 @@ Response:
 }
 ```
 
-Custom fields from your `AgentState` subclass appear next to `context`. To list only the messages, call `GET /v1/threads/step4-thread-1/messages`.
+Custom fields from your `AgentState` subclass appear next to `context`. To list only the messages, call `GET /v1/threads/THREAD_ID/messages`.
 
 This endpoint does not run the graph; it only retrieves what the checkpointer saved. It is useful for debugging, auditing, or building a chat history UI without replaying the graph.
 
 ## Test interactively with the playground
 
-The hosted playground gives you a chat UI without writing frontend code. Stop the `10xgraph api` server first, because `10xgraph play` starts the API server itself and then opens the hosted playground:
+The hosted playground gives you a chat UI without writing frontend code. `10xgraph dev` opens it by default once the API responds. Stop the running server first, then start it without `--no-open`:
 
 ```bash
-10xgraph play --host 127.0.0.1 --port 8000
+10xgraph dev --host 127.0.0.1 --port 8000
 ```
 
 The browser opens automatically once the API responds (if not, copy the URL from the terminal). The playground connects to your local API and shows a chat interface.
@@ -245,7 +246,7 @@ The server loads your config once at startup. For each request, it invokes the g
 | `/v1/graph/invoke` | POST | Invoke the graph, return final state |
 | `/v1/graph/stream` | POST | Invoke the graph, stream one JSON chunk per line |
 | `/v1/graph/stop` | POST | Stop a running graph |
-| `/v1/graph/fix` | POST | Remove broken tool calls from state |
+| `/v1/graph/fix` | POST | Remove unanswered tool calls from state |
 | `/v1/threads/{thread_id}/state` | GET | Read thread checkpoint |
 | `/v1/threads/{thread_id}/messages` | GET | List thread messages |
 | `/ping` | GET | Health check |
@@ -255,12 +256,12 @@ Full details are in the [API reference](/docs/reference/rest-api/graph).
 
 ## What you learned
 
-- `10xgraph api` starts a production-ready FastAPI server that loads your graph from `10xgraph.json`.
+- `10xgraph dev` starts a FastAPI development server that loads your graph from `10xgraph.json`.
 - The `/v1/graph/invoke` endpoint runs the graph and returns the final messages.
 - The `/v1/graph/stream` endpoint sends one JSON chunk per line for real-time streaming.
 - Thread state is readable via `GET /v1/threads/{thread_id}/state` without replaying the graph.
-- The hosted playground (`10xgraph play`) provides a chat UI for testing without code.
-- The checkpointer saves state automatically; pass the same `thread_id` to restore context across requests.
+- The hosted playground (opened by `10xgraph dev`) provides a chat UI for testing without code.
+- The checkpointer saves state automatically; pass the `thread_id` the server returned to restore context across requests.
 
 ## Next step
 

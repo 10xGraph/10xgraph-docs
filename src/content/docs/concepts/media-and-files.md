@@ -6,7 +6,7 @@ section: Concepts
 order: 200
 group: "Serving"
 label: Media and Files
-updated: "2026-10-08"
+updated: "2026-10-26"
 faq:
   - q: "What's the difference between file_id, url, and data?"
     a: "file_id stores media in a backend store and references it by key (best for production); url points to external media the provider fetches; data embeds bytes inline as base64 (only for small payloads)."
@@ -95,7 +95,10 @@ class BaseMediaStore(ABC):
     async def delete(storage_key: str) -> bool
     async def exists(storage_key: str) -> bool
     async def get_metadata(storage_key: str) -> dict | None
+    async def update_metadata(storage_key: str, updates: dict) -> bool
 ```
+
+`update_metadata` shallow-merges `updates` into the stored metadata (a value of `None` removes the key) and returns `False` when the object does not exist. The three built-in stores implement it. A custom store that does not override it raises `NotImplementedError`, and the API server then does not track which threads use a file.
 
 All methods are async; they are safe to call from agent nodes and tools via normal `await`.
 
@@ -110,6 +113,8 @@ All methods are async; they are safe to call from agent nodes and tools via norm
 **InMemoryMediaStore** stores files in RAM. Data is lost on process restart and is not shared across workers. Use it for testing and local development.
 
 **LocalFileMediaStore** shards files on disk under a base directory. Each file is stored as `{base_dir}/{key[:2]}/{key[2:4]}/{key}{ext}` with a `.meta.json` sidecar. The default `base_dir` is `./agentflow_media`. Suitable for single-server deployments or development environments with persistent storage.
+
+On POSIX systems, `LocalFileMediaStore` creates its directories with mode `0o700` and its data and sidecar files with `0o600`. The sidecar holds the owner id and the original filename. Existing files keep their mode, and a stricter process umask wins. Other OS users or services that read these files, such as a web server serving uploads, lose access.
 
 **CloudMediaStore** offloads to S3 or GCS via the cloud-storage-manager SDK. Requires the `cloud-storage` extra (`pip install "10xgraph[cloud-storage]"`). Generates signed URLs so providers can fetch media directly without re-downloading to your server. The right choice for distributed systems and production deployments.
 
@@ -140,6 +145,14 @@ agent = Agent(
 4. **unsupported**: The provider does not support this media type.
 
 You do not manually manage this chain. The capability matrix lists a transport order per provider, model and media type, and the resolver tries each in turn, moving to the next when one fails.
+
+## Which URLs the server downloads
+
+A `kind="url"` reference is untrusted when a client sends it. OpenAI and Anthropic fetch the URL themselves, so the server only passes it on. On the Google GenAI path, the Google File API path and the inline-bytes transport, the server downloads it first, under a `MediaFetchPolicy`.
+
+The default policy allows `http` and `https` to public hosts, accepts `image/*` and `application/pdf` responses, and caps a download at 20 MiB and 10 seconds. Cloud metadata addresses, private addresses (unless you opt in for listed hosts), unchecked redirects and other schemes are always refused. Set your own policy with `StateGraph.compile(media_policy=...)`.
+
+A `gs://` URL is a special case. On Vertex AI it is read with the server's credentials, so the API rejects a client `gs://` URL unless its bucket is in `allowed_gcs_buckets`. The field list and a code example are in [Sending media from Python](/docs/guides/send-media#control-which-urls-the-server-downloads). The API server applies the policy before the run starts, as described in [Files and multimodal on the server](/docs/server/files-and-multimodal#external-media-urls).
 
 ## Trade-offs and design decisions
 

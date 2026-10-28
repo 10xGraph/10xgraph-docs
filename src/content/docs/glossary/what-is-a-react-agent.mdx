@@ -5,7 +5,7 @@ description: "A ReAct agent alternates reasoning and acting: it calls tools, obs
 section: Glossary
 order: 30
 label: What is a ReAct agent?
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Where does the name ReAct come from?
     a: "ReAct stands for Reasoning and Acting. It was introduced in the paper 'ReAct: Synergizing Reasoning and Acting in Language Models' by Shunyu Yao et al., published in 2022 (arXiv:2210.03629). The paper showed that combining chain-of-thought reasoning with tool-use actions significantly outperforms either approach alone."
@@ -59,6 +59,7 @@ Each cycle is a "thought → action → observation" triplet. The loop continues
 ```python
 from tenxgraph.prebuilt.agent import ReactAgent
 from tenxgraph.core.state import AgentState, Message
+from tenxgraph.prebuilt.tools import safe_calculator
 
 def get_stock_price(ticker: str) -> str:
     """Get the current stock price for a ticker symbol."""
@@ -66,17 +67,13 @@ def get_stock_price(ticker: str) -> str:
     prices = {"AAPL": "182.50", "GOOG": "175.30", "MSFT": "420.10"}
     return f"${prices.get(ticker.upper(), 'not found')}"
 
-def calculate(expression: str) -> str:
-    """Evaluate a mathematical expression. E.g. '182.50 * 100'."""
-    try:
-        return str(eval(expression, {"__builtins__": {}}, {}))
-    except Exception as e:
-        return f"Error: {e}"
+# For arithmetic use the prebuilt safe_calculator. Never pass model output to eval(),
+# even with empty builtins: it can be escaped, and 9**9**9 hangs the process.
 
 agent = ReactAgent(
     model="google/gemini-2.5-flash",
     system_prompt=[{"role": "system", "content": "You are a financial assistant. Use tools to look up real data."}],
-    tools=[get_stock_price, calculate],
+    tools=[get_stock_price, safe_calculator],
 )
 
 app = agent.compile()
@@ -87,7 +84,7 @@ result = app.invoke(
 )
 print(result["messages"][-1].text())
 # Agent will: call get_stock_price("AAPL") → get $182.50
-# Then call: calculate("182.50 * 100") → get 18250.0
+# Then call: safe_calculator("182.50 * 100") → get 18250.0
 # Then respond: "100 shares of AAPL are worth $18,250."
 ```
 
@@ -100,7 +97,7 @@ from tenxgraph.core.graph import Agent, StateGraph, ToolNode
 from tenxgraph.core.state import AgentState, Message
 from tenxgraph.utils import END
 
-tools = [get_stock_price, calculate]
+tools = [get_stock_price, safe_calculator]
 tool_node = ToolNode(tools)
 
 agent_node = Agent(
@@ -139,7 +136,7 @@ Point `10xgraph.json` at your compiled app and start the server:
 ```
 
 ```bash
-10xgraph api
+10xgraph dev
 ```
 
 You now have a production REST + SSE API for your ReAct agent with no extra code.

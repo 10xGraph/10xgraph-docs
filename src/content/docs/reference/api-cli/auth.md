@@ -6,7 +6,7 @@ section: Reference
 group: "CLI and configuration"
 order: 440
 label: Authentication
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 By default, the 10xGraph API accepts all requests without authentication (suitable for local development). For production, configure either JWT or a custom `BaseAuth` backend to verify identity, and optionally set authorization rules via `AuthorizationBackend` to control what authenticated users may do.
@@ -56,7 +56,7 @@ Send a Bearer token in the `Authorization` header:
 curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1..." \
   -H "Content-Type: application/json" \
-  -d '{"messages": [...], "config": {"thread_id": "t1"}}'
+  -d '{"messages": [...]}'
 ```
 
 The server decodes and validates the JWT on every request. The decoded payload becomes the `user` context, available to your graph as `config["user"]`.
@@ -68,11 +68,16 @@ The built-in backend requires:
 | Claim | Notes |
 |---|---|
 | `exp` | Expiry time, required. No token is treated as permanently valid; a missing `exp` is rejected with 401. |
-| `user_id` | Identity key. The `sub` claim is not accepted; you must use `user_id`. |
+| `user_id` | Identity key. The `sub` claim is not accepted; you must use `user_id`. It must be a non-empty string or a whole number (not a boolean). A number is stored as a string. Anything else, such as an empty or whitespace-only string, a boolean, a float, a list or an object, is rejected with 401. |
 
 If `JWT_ISSUER` or `JWT_AUDIENCE` is set, the matching `iss` or `aud` claim is also required.
 
 Other claims (`roles`, `scopes`, `email`, custom fields) are passed through to `config["user"]` unchanged.
+
+Two claims are also read by the server:
+
+- `scope` (a space-separated string, as in OAuth) and `scopes` (a list of strings, or a space-separated string). Both are merged into one set of scope names, and a scope matches only by its exact name. `graph:invoke_admin` does not grant `graph:invoke`. A token with neither claim is not scope-restricted. A token with `scope` set to an empty string is restricted to no scopes at all. A scope claim of the wrong type (a number, an object, or a list that holds non-strings) is rejected with 401.
+- `jti`, the token ID. When `token_revocation` is set in `10xgraph.json`, a revoked `jti` is refused. The check runs even when `user_id` is missing or unusual.
 
 ### Status codes for JWT failures
 
@@ -80,7 +85,7 @@ Other claims (`roles`, `scopes`, `email`, custom fields) are passed through to `
 |---|---|---|
 | 401 | `REVOKED_TOKEN` | No credential was presented (missing Authorization header, missing WebSocket auth, missing query param) |
 | 401 | `EXPIRED_TOKEN` | Token `exp` is in the past |
-| 401 | `INVALID_TOKEN` | Signature or structure is invalid, or `user_id` is missing |
+| 401 | `INVALID_TOKEN` | Signature or structure is invalid, `user_id` is missing or malformed, or a `scope` or `scopes` claim has the wrong type |
 | 500 | `JWT_SETTINGS_NOT_CONFIGURED` | `JWT_SECRET_KEY` or `JWT_ALGORITHM` is unset at request time |
 
 On WebSocket routes, errors become a clean close with code 1008 instead of an HTTP response.
@@ -114,6 +119,8 @@ WebSocket routes check three places in order for a credential:
 2. **`Sec-WebSocket-Protocol: 10xgraph-bearer, <token>`**: preferred for browsers (the token stays in headers, never in URLs or logs). The server echoes the sentinel back on accept, which browsers require.
 3. **`?token=<jwt>`**: last resort for WebSocket only; the token appears in URLs and access logs.
 
+HTTP routes read the `Authorization` header only. The subprotocol and the `?token=` parameter are honoured on WebSocket connections and nowhere else.
+
 Example:
 
 ```javascript
@@ -125,7 +132,7 @@ const ws = new WebSocket(
 
 The subprotocol offer must be exactly two entries with the sentinel first. Anything else falls through to the query parameter.
 
-The older sentinel `agentflow-bearer` is still accepted until 2.0, and the server echoes whichever one you send. The TypeScript client still sends `agentflow-bearer`.
+The older sentinel `agentflow-bearer` is still accepted until 2.0, and the server echoes whichever one you send. The TypeScript client sends `10xgraph-bearer` since 0.6.0.
 
 ## Custom authentication backend
 
@@ -190,11 +197,11 @@ Two backends ship built in; choose one or write your own:
 
 | Value | Behavior |
 |---|---|
-| `"ownership"` | Owner-only threads: a thread is readable, runnable, stoppable, fixable, and deletable **only by the user who created it**. A request for another user's thread is rejected with 403 before it reaches the graph. |
+| `"ownership"` | Owner-only threads: a thread is readable, runnable, stoppable, fixable, and deletable **only by the user who created it**. A request for another user's thread is rejected with 403 before it reaches the graph. With the default `runs.thread_ids` of `server`, a request that names a thread that does not exist is rejected the same way. |
 | `"allow_all"` (also `"default"`, `"none"`) | Any authenticated user may do anything. |
 | `"module:attr"` | Your custom `AuthorizationBackend`. |
 | `{ ... }` (object) | RBAC config block (see below). |
-| `null` | **Mode-based default:** `"ownership"` in production, `"allow_all"` in development. |
+| `null` | **Default:** `"ownership"` whenever auth is configured or `MODE=production`; `"allow_all"` only with auth off in development. |
 
 Example:
 
@@ -230,12 +237,12 @@ Decision table:
 | Thread does not exist | Allow (new session; `invoke`/`stream` will create it owned by the caller) |
 | Thread exists and caller owns it | Allow |
 | Thread exists and someone else owns it | **Deny**, including on `invoke` and `stream` |
-| Checkpointer cannot resolve ownership (`aget_thread_owner` not implemented) | Allow with warning |
+| No checkpointer, or one that cannot resolve ownership (`aget_thread_owner` not implemented) | **Deny** (fails closed). With auth on, the server refuses to start in this setup |
 | Ownership lookup fails | **Deny** (failures never grant access) |
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Ownership requires a checkpointer that tracks owners</p>
 
-Ownership comes from `BaseCheckpointer.aget_thread_owner`. `PgCheckpointer`, SQLite, and the in-memory checkpointer implement it; the base class raises `NotImplementedError`. With no checkpointer configured, requests pass through with a warning. The in-memory checkpointer records owners only when explicitly writing a thread, so ownership is the production default (with Postgres) but development defaults to `DefaultAuthorizationBackend`.
+Ownership comes from `BaseCheckpointer.aget_thread_owner`. `PgCheckpointer`, SQLite, and the in-memory checkpointer implement it; the base class raises `NotImplementedError`. The backend fails closed: with no checkpointer, or one that cannot resolve owners, thread requests are denied, and with ownership active the server refuses to start. The server uses the checkpointer passed to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. The in-memory checkpointer records owners only when explicitly writing a thread, so ownership is the production default (with Postgres) but development defaults to `DefaultAuthorizationBackend`.
 
 </aside>
 
@@ -245,8 +252,8 @@ Ownership is immutable, so it is cached by `ThreadOwnershipResolver` for scalabi
 
 | Tier | Details |
 |---|---|
-| L1 | In-process LRU: 10,000 entries per worker, no expiry |
-| L2 | Optional shared Redis client (key prefix `af:authz:owner`, no expiry since ownership never changes; Redis errors degrade to database lookup and never fail the request) |
+| L1 | In-process LRU: 10,000 entries per worker, 30 s TTL |
+| L2 | Optional shared Redis client (owner entries under `af:authz:owner:id:<thread_id>`, kept for 1 hour; a delete removes the entry and leaves a "just deleted" marker under `af:authz:owner:tomb:<thread_id>` for 30 seconds, so the id cannot be claimed while another worker still caches the old owner; Redis errors degrade to database lookup and never fail the request) |
 
 Negative results are not cached (a missing thread could be created by a later request). The L2 tier is wired from `redis` in `10xgraph.json`, falling back to `REDIS_URL`. When neither is set or the `redis` package is not installed, L1 only is used and a warning is logged at startup.
 
@@ -278,6 +285,7 @@ class MyAuthBackend(AuthorizationBackend):
 
     def isolation_scope(self) -> str:
         """Storage partitioning: "owner" scopes rows to caller; "none" does not.
+        Defaults to "owner". Return "none" only to share data between users.
         Stamped server-side into config["user"]["authz"]; the client cannot forge it.
         """
         return "owner"
@@ -286,6 +294,8 @@ class MyAuthBackend(AuthorizationBackend):
         """Scopes this identity carries, or None for unrestricted (default)."""
         return user.get("scopes")
 ```
+
+`isolation_scope()` defaults to `"owner"`, so a backend that only implements `authorize` still gives each user their own threads and memories. To share data on purpose, return `"none"`. Before this default, a custom backend shared every thread and memory with every user.
 
 Point `10xgraph.json` at it (no `method` wrapper, just the path):
 
@@ -352,7 +362,7 @@ Point `10xgraph.json` at it with `"authorization": "module:backend"`. Subclass i
 A request is allowed only if the identity's scopes include the endpoint's `"<resource>:<action>"`. Scopes are resolved in order:
 
 1. `authz.scopes_for(user)` from your backend (if it defines the method).
-2. `user["scopes"]` from the authenticated identity (only if step 1 returns `None`).
+2. The scope claims on the authenticated identity, `scope` and `scopes` (only if step 1 returns `None`).
 
 A backend that returns a list wins outright; the identity's own `scopes` claim cannot widen it.
 
@@ -362,7 +372,7 @@ A backend that returns a list wins outright; the identity's own `scopes` claim c
 | Non-empty list | Only listed `"<resource>:<action>"` pairs are allowed; anything else is 403. |
 | Empty list (`[]`) | **Denies everything.** Not the same as `None`: no endpoint passes the check. |
 
-The base `AuthorizationBackend.scopes_for` passes through `user["scopes"]` if it is a list/tuple/set, otherwise returns `None` (why an identity with no `scopes` claim stays unrestricted).
+The base `AuthorizationBackend.scopes_for` reads the `scope` claim (space-separated) and the `scopes` claim (a list or a space-separated string), merges them, and matches by exact name. It returns `None` when the identity has neither claim, which is why such an identity stays unrestricted. A claim of the wrong type gets 401. An empty `scope` claim resolves to an empty list, which denies everything.
 
 After a successful check, the resolved list is stamped into `user["authz"]["scopes"]` server-side, so downstream code reads the trusted value.
 

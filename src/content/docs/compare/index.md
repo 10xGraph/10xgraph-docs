@@ -5,7 +5,7 @@ description: Sourced comparisons of 10xGraph with LangGraph, CrewAI, AutoGen, Ll
 section: Compare
 order: 10
 label: Overview
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 These pages compare **10xGraph** with other Python agent frameworks, written by the 10xGraph team. Every claim about a competitor links to its official documentation or package metadata, and each page lists its sources with the date they were checked (2026-10-06). Each page also says where the other framework is the better choice, and where 10xGraph is weaker.

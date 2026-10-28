@@ -5,7 +5,7 @@ description: How to report a vulnerability in 10xGraph, what response to expect,
 section: Project
 order: 40
 label: Security
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 ## Reporting a vulnerability
@@ -64,7 +64,7 @@ Prompt injection is a property of language models, not a defect in the graph
 engine. The framework gives you the controls to bound it: input validators,
 per-tool authorization, and human-in-the-loop interrupts. However, it cannot
 decide for you which tool calls are acceptable. See [security and
-validators](/docs/concepts/security-and-validators).
+validators](/docs/concepts/security-and-validators). For how stored memories are kept out of system text, see [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text).
 
 ### Development defaults are permissive
 

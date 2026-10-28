@@ -3,7 +3,7 @@ title: TypeScript client
 description: "Connect browser and Node.js apps to 10xGraph over REST, streaming, and WebSockets with the typed SDK."
 section: "TypeScript client"
 order: 10
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "What are the transport options?"
     answer: "REST invoke for final results, NDJSON streaming for real-time tokens, WebSocket for low-latency bidirectional communication, and realtime audio for voice-to-voice. Pick based on latency requirements and application type."
@@ -13,7 +13,9 @@ faq:
     answer: "Yes. Register handlers for remote tools declared in the server's 10xgraph.json and the client executes them without the server owning the implementation."
 ---
 
-The `10xgraph-client` TypeScript SDK is a typed wrapper that connects browser and Node.js apps to a running 10xGraph API. It handles session threading, multiple transport modes, auth headers, file uploads, memory access, and client-side tool execution.
+This section is about connecting your frontend to the production server securely. The `10xgraph-client` TypeScript SDK is a typed wrapper that connects browser and Node.js apps to a running 10xGraph API. It handles session threading, multiple transport modes, auth headers, file uploads, memory access, and client-side tool execution.
+
+The server checks identity, thread ownership and rate limits on every request, so the part left to your frontend is to carry credentials without leaking them. Read [Secure your frontend](/docs/client/secure-your-frontend) before you ship, and see [Production readiness](/docs/production) for what the server enforces.
 
 ## What you need
 
@@ -77,7 +79,7 @@ All modes restore your conversation history from the thread automatically, so yo
 
 ## Core concepts
 
-**Threads**: Pass a `thread_id` to maintain a conversation across multiple API calls. The checkpointer on the server persists the full agent state, so each new request picks up where the last one stopped.
+**Threads**: Omit `thread_id` to start a thread. The server picks the id and returns it in `result.meta.thread_id` (or on each stream chunk). Pass it back to maintain a conversation across multiple API calls. The checkpointer on the server persists the full agent state, so each new request picks up where the last one stopped.
 
 **Remote tools**: Tool schemas live on the server (in `10xgraph.json`), but implementation runs in your client. This lets you call browser APIs (clipboard, geolocation), keep secrets local, or run integrations the server cannot access.
 
@@ -87,6 +89,7 @@ All modes restore your conversation history from the thread automatically, so yo
 
 ### Basics
 
+- [Secure your frontend](/docs/client/secure-your-frontend): Proxy or short-lived tokens, WebSocket auth, remote tool trust, and 401, 403, 409, 429
 - [Create and configure a client](/docs/client/create-client): Set auth tokens, timeout, proxy headers, and environment-specific URLs
 - [Invoke and get results](/docs/client/invoke-agent): Call the agent and await the final response
 - [Stream responses](/docs/client/stream-responses): Consume token-by-token or message-by-message as they arrive

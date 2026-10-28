@@ -5,7 +5,7 @@ section: "TypeScript client"
 group: "Features"
 order: 100
 label: Realtime audio conversations
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 `client.realtime()` opens a WebSocket connection that carries bidirectional PCM16 audio frames and JSON control events between your browser and a live agent. The API is transport only: it handles the audio bytes and event delivery, but leaves microphone capture and speaker playback to you. This guide covers both sides: building a mic capturer to send PCM16 at 16 kHz, a PCM16 player to receive audio at 24 kHz, managing the session lifecycle, and handling interrupts.
@@ -292,7 +292,7 @@ The 10xGraph playground (`agentflow-playground/`) includes a complete, productio
 | `src/pages/live/components/live-session.jsx` | Session lifecycle, push-to-talk button handler, transcript coalescing, interruption handling, and cleanup. |
 | `src/pages/live/live-page.jsx` | The live-capable UI gate (Step 7), based on the `is_realtime` flag. |
 
-To run it: `10xgraph play` (starts the API server and playground together), then open the **Live** page to test the realtime audio session.
+To run it: `10xgraph dev` (starts the API server and opens the hosted playground), then open the **Live** page to test the realtime audio session.
 
 ---
 

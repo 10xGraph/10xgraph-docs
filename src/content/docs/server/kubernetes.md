@@ -5,7 +5,7 @@ section: "API server"
 group: "Operate"
 order: 160
 label: Deploy on Kubernetes
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "Why does the termination grace period need to be so long?"
     answer: "Agent runs are not typical web requests. An LLM call alone can take minutes, and tools add more time. Kubernetes default 30-second termination grace period kills pods mid-run. The server uses 600 seconds for shutdown, so the termination window must exceed that."
@@ -20,6 +20,8 @@ faq:
 A typical agent invocation chains several operations: the client calls the server, the server awaits an LLM response (up to 10 minutes for some models), the LLM might trigger tool calls, tools execute, results return to the LLM, and the response streams back to the client. The entire request can stay open for 20 minutes or more.
 
 Kubernetes' default pod lifecycle is hostile to this. When you trigger a rolling deploy, the kubelet gives a pod 30 seconds to shut down gracefully before sending SIGKILL. If the app is still in an LLM call, the pod dies mid-request, and the client's stream breaks.
+
+For the scaling model behind these settings, see [scaling and reliability](/docs/production/scaling). Draining runs on shutdown is covered in [Graceful shutdown](/docs/guides/graceful-shutdown).
 
 `10xgraph build --k8s` generates a manifest that fixes this: it sets the termination grace period, pre-termination delay, and probe timeouts so that in-flight runs finish normally, even during deploys.
 
@@ -47,12 +49,29 @@ The manifest is a working skeleton. It sets these values, which are easy to get 
 | --- | --- | --- |
 | `terminationGracePeriodSeconds` | 660 | Exceeds the app's 600-second graceful timeout. Ensures SIGKILL does not arrive until the app has fully drained. |
 | `preStop` sleep | 15 seconds | Gives the load balancer time to notice the pod is terminating and stop routing new requests. Without it, new traffic arrives while the app shuts down. |
-| `readinessProbe` | 10s interval, 5s initial delay | Removes unhealthy pods from the load balancer quickly. Checked via `GET /ping`. |
+| `readinessProbe` | 10s interval, 5s initial delay | Removes unhealthy pods from the load balancer quickly. Checked via `GET /health/ready`. |
 | `livenessProbe` | 30s interval, 30s initial delay, 5 failures | Deliberately slack. A worker handling a long run must not be restarted. Checked via `GET /ping`. |
 
-The readiness probe is strict (10-second intervals) because false positives only temporarily remove a pod from rotation. The liveness probe is slack (30-second intervals, 5 consecutive failures required) because a false positive kills the pod mid-run. Both hit the `/ping` endpoint, which does not require authentication.
+The readiness probe is strict (10-second intervals) because false positives only temporarily remove a pod from rotation. The liveness probe is slack (30-second intervals, 5 consecutive failures required) because a false positive kills the pod mid-run. Readiness hits `/health/ready` (checkpointer, store and Redis reachable) and liveness hits `/ping`; neither requires authentication.
 
 Default resource requests and limits are also set (500m CPU and 512 Mi memory requested; 2 CPU and 2 Gi memory as limits), but you should tune these based on your agents and deployment environment.
+
+### Security defaults
+
+The pod is locked down out of the box:
+
+| Setting | Value | Purpose |
+| --- | --- | --- |
+| `automountServiceAccountToken` | `false` | The server never calls the Kubernetes API, so a compromised pod gets no cluster token. |
+| `runAsNonRoot`, `runAsUser`, `runAsGroup`, `fsGroup` | `true`, 10001 | Matches the image's numeric `USER 10001:10001`. |
+| `seccompProfile` | `RuntimeDefault` | Blocks syscalls a web server never needs. |
+| `readOnlyRootFilesystem` | `true` | Code and dependencies cannot be modified at runtime. |
+| `allowPrivilegeEscalation` | `false` | No setuid binaries can raise privileges. |
+| `capabilities.drop` | `ALL` | The server binds a port above 1024 and needs no Linux capabilities. |
+| `emptyDir` volumes | `/tmp`, `/app/uploads` | The only writable paths: Gunicorn worker heartbeats and local media uploads. |
+| `envFrom.secretRef` | `<service>-secrets` | Every secret comes from a Kubernetes Secret. |
+
+If your graph writes to another path (a SQLite checkpointer file, for example), add a volume for it. A Dockerfile generated before this change runs as a named user without a fixed uid; regenerate it with `10xgraph build --force` so `runAsNonRoot` can verify the user.
 
 ## Customize before applying
 
@@ -61,7 +80,7 @@ The manifest is not production-ready as-is. You must edit these values:
 ```yaml
 containers:
   - name: my-agent
-    image: 10xgraph-api:latest        # Replace with your own pinned image reference
+    image: registry.example.com/my-agent:1.0.0   # Replace with your own pinned image reference
     env:
       - name: ORIGINS
         value: "https://your-frontend.example.com"   # Set to your actual origin
@@ -73,7 +92,7 @@ containers:
 
 ### Pin the image
 
-The manifest uses `10xgraph-api:latest` as a placeholder image name. Build your own image from the generated `Dockerfile`, push it to your registry, and reference it immutably. A moving `latest` tag makes rollbacks ambiguous and makes image-related issues hard to debug:
+The manifest uses `registry.example.com/<service>:1.0.0` as a placeholder image name. Build your own image from the generated `Dockerfile`, push it to your registry, and reference it immutably. A moving `latest` tag makes rollbacks ambiguous and makes image-related issues hard to debug:
 
 - A digest: `my-registry/my-agent@sha256:abc123...`
 - A version tag: `my-registry/my-agent:1.4.0`
@@ -88,11 +107,11 @@ The manifest sets `ORIGINS` to the placeholder `https://your-frontend.example.co
   value: "https://app.example.com,https://app-staging.example.com"
 ```
 
-With `MODE=production`, the server refuses to start if `ORIGINS` is the wildcard `*` while credentials are enabled, which is the default (`CORS_ALLOW_CREDENTIALS=true`). If you truly need wildcard origins, set `CORS_ALLOW_CREDENTIALS=false`, which is rare.
+With `MODE=production`, the server refuses to start if `ORIGINS` or `ALLOWED_HOST` is the wildcard `*`. The check is `STRICT_PRODUCTION_CHECKS`, which is on by default in production. The generated manifest sets placeholders for both, so replace them. If you truly need wildcard origins, set `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false`, which is rare.
 
 ### Mount secrets, do not bake them
 
-API keys, database passwords, and JWT secrets must come from Kubernetes Secrets, never from plain values in the manifest or baked into the image. The generated manifest does not reference a Secret, so add an `envFrom` entry to the container yourself:
+API keys, database passwords, and JWT secrets must come from Kubernetes Secrets, never from plain values in the manifest or baked into the image. The generated manifest already reads every key of a Secret named after the service, and the pod does not start until that Secret exists:
 
 ```yaml
 envFrom:
@@ -112,7 +131,7 @@ kubectl create secret generic my-agent-secrets \
   --from-literal=REDIS_URL="redis://..."
 ```
 
-Alternatively, use your favorite secrets management tool (Sealed Secrets, External Secrets, Vault, etc.) to manage these safely.
+Use `--from-literal`, not `--from-env-file=.env`: `kubectl` keeps the quotes from a `.env` file as part of each value. Alternatively, use your favorite secrets management tool (Sealed Secrets, External Secrets, Vault, etc.) to manage these safely.
 
 ## Apply and verify
 
@@ -219,7 +238,7 @@ CPU is the provided metric, but it is a poor signal for agent workloads. Agents 
 | Pods restart during long runs | Liveness probe is too strict (failing too quickly) | Loosen the liveness probe (`periodSeconds: 30`, `failureThreshold: 5`). The readiness probe should be strict; the liveness probe should not. |
 | Thread history disappears or threads resolve differently | Replicas do not share a checkpointer | Ensure the Postgres DSN and `REDIS_URL` your graph module uses point to shared instances. Do not use `InMemoryCheckpointer` in production. |
 | Random 409 errors under high load | Two requests wrote to the same thread concurrently | This is expected with optimistic concurrency. Retry with exponential backoff, or serialize writes to the same thread. |
-| Server exits at startup with a CORS error | `ORIGINS` is `*` while credentials are enabled | Set `ORIGINS` to your real domain. If you need wildcard, set `CORS_ALLOW_CREDENTIALS=false` (unusual). |
+| Server exits at startup with a CORS or host error | `ORIGINS` or `ALLOWED_HOST` is `*` | Set both to your real values. If you need wildcard origins, set `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false` (unusual). |
 | Browser requests fail CORS checks | `ORIGINS` still holds the placeholder | Set `ORIGINS` to your real domain. |
 
 ## Related

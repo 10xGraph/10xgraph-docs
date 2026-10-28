@@ -5,7 +5,7 @@ section: "Build agents"
 group: "State, memory and context"
 order: 250
 label: Memory store
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 ## What the memory store solves
@@ -68,6 +68,8 @@ Choose based on your infrastructure preferences. For this guide, we'll show both
 ```bash
 pip install "10xgraph[qdrant,openai]"
 ```
+
+The `qdrant` extra needs `qdrant-client` 1.10.0 or newer. If you run a Qdrant server or use Qdrant Cloud, it must be version 1.10 or newer.
 
 You also need an embedding service to convert text to vectors. Both OpenAI and Google embeddings are built in; we show OpenAI here (use the `google-genai` extra for `GoogleEmbedding`).
 
@@ -262,6 +264,8 @@ async def my_tool(config: dict, store: BaseStore):
 
 The `store` and `config` parameters are injected by name and hidden from the model; no manual wiring needed. `asearch` takes the run `config` first (it carries `user_id`), then the query.
 
+Every store call needs a non-empty `user_id` in `config`. A missing or blank one raises `ValueError`. Reads under the admin authz scope `"none"` skip the user filter; writes and `aforget_memory` never do. For shared data with no user, use `system_user_id(name)` from `tenxgraph.storage`. See the [Memory stores reference](/docs/reference/python/memory-stores#the-user_id-rule-and-system_user_id).
+
 ---
 
 ## Agent-level memory with MemoryConfig
@@ -311,7 +315,7 @@ memory = MemoryConfig(
     limit=5,                                  # max memories to retrieve per search
     score_threshold=0.0,                      # minimum similarity score (must be >= 0)
     max_tokens=None,                          # cap total tokens across all memories
-    inject_system_prompt=True,                # prepend memories to system prompt
+    inject_system_prompt=True,                # add memory instructions to the system prompt
 
     user_memory=UserMemoryConfig(
         enabled=True,
@@ -339,13 +343,24 @@ agent = Agent(model="gpt-4o", tool_node=ToolNode([]), memory=memory)
 | Mode | Behaviour |
 |---|---|
 | `ReadMode.POSTLOAD` (default) | Memories are fetched on-demand via injected tools that the LLM can call. The model decides **when** and **what** to retrieve. Gives the model more agency but requires the model to recognize when memories are relevant. |
-| `ReadMode.PRELOAD` | Memories are retrieved automatically before every LLM call, using the latest user message as the query, and added as a system message. The model always has relevant context but uses more tokens. No memory tools are exposed, so the model cannot save new memories in this mode. |
+| `ReadMode.PRELOAD` | Memories are retrieved automatically once per invocation (not on every model call; a tool loop reuses the same block), using the latest user message as the query, and added to the latest user message as a fenced `<user_memories_...>` block for that request only (it is not saved in the thread). See [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text). The model always has relevant context but uses more tokens. No memory tools are exposed, so the model cannot save new memories in this mode. |
 | `ReadMode.NO_RETRIEVAL` | No automatic retrieval. |
 
 ### UserMemoryConfig vs. AgentMemoryConfig
 
+- **AgentMemoryConfig data is shared.** It is always read under `system_user_id(agent_id)` (or `system_user_id(app_id)` when there is no `agent_id`), so seed it with `await store.astore({"user_id": system_user_id("my-agent")}, "...")` (`from tenxgraph.storage import system_user_id`). Enabling it with neither `agent_id` nor `app_id` raises `ValueError`.
 - **UserMemoryConfig:** Scoped to a single user (`user_id`). The agent can both **read and write** user memories. Use this for user preferences, learned facts about the user, and conversation summaries.
 - **AgentMemoryConfig:** Scoped to the agent/application. The agent can **only read** agent memories. Use this for shared domain knowledge, FAQs, and system facts that should not be modified by user interactions.
+
+### Keep kinds of data in separate collections
+
+Both configs take a `collection` (a name, or a function of the run config) that always wins over any other setting, and the `QdrantStore` default can be a name or a function too. A client can never pick a collection: the API ignores `collection` in client config. For example, keep agent memory in its own collection:
+
+```python
+AgentMemoryConfig(enabled=True, agent_id="support-bot", collection="agent_notes")
+```
+
+For the precedence rules and a collection per company, see [Collections: keeping data apart](/docs/concepts/memory-and-store#collections-keeping-data-apart).
 
 ---
 
@@ -554,6 +569,10 @@ Map your use case to a memory type:
 - **DECLARATIVE:** "Our return policy is 30 days", company policies or rules.
 
 ---
+
+## Run it in production
+
+Pass the store the server should use through the `store` key in `10xgraph.json`. Scope every memory to the authenticated `user_id`: an empty `user_id` raises `ValueError`, and the reserved `system_user_id` namespaces are for your own shared data. See [Configure the server](/docs/server/configure) and the [Security model](/docs/production/security-model).
 
 ## Next steps
 

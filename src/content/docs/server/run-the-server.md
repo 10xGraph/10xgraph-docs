@@ -1,22 +1,24 @@
 ---
 title: Run the API Server
 seoTitle: "Run the 10xGraph API server"
-description: "Start the 10xGraph API server with 10xgraph api, play, or dev commands for development and production deployment."
+description: "Start the 10xGraph development server with 10xgraph dev, and run it in production with the Gunicorn image from 10xgraph build."
 section: "API server"
 group: "Basics"
 order: 20
 label: Run the API Server
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
-  - question: "Can I use 10xgraph api in production?"
-    answer: "No. The 10xgraph api command runs a single-worker development server. For production, use Docker with Gunicorn and multiple Uvicorn workers. Generate production files with 10xgraph build --docker-compose."
+  - question: "Can I use 10xgraph dev in production?"
+    answer: "No. The 10xgraph dev command runs a single-worker development server with reload. There is no separate production command. For production, use Docker with Gunicorn and multiple Uvicorn workers. Generate production files with 10xgraph build --docker-compose."
   - question: "How do I check if the server is running?"
     answer: "Call the /ping endpoint via curl. It returns a JSON object with success true and data pong, and requires no authentication."
   - question: "Why does my server restart when I save a file?"
-    answer: "Auto-reload is enabled by default in development. Files are watched and the server reloads when any Python file changes. Disable it with --no-reload (required in production and containers)."
+    answer: "Auto-reload is enabled by default in development. Files are watched and the server reloads when any Python file changes. Disable it with --no-reload."
 ---
 
-The `10xgraph api` command starts a FastAPI-based HTTP server that loads your graph and exposes it over REST and WebSocket. This guide covers running the server for development and production, configuring it, and troubleshooting deployment issues.
+The `10xgraph dev` command starts a FastAPI-based development HTTP server that loads your graph and exposes it over REST and WebSocket. This guide covers running the server for development and production, configuring it, and troubleshooting deployment issues.
+
+For a production setup see the [production checklist](/docs/server/production-checklist); stopping the server without losing runs is covered in [Graceful shutdown](/docs/guides/graceful-shutdown).
 
 ## Prerequisites
 
@@ -37,26 +39,18 @@ Both commands must succeed without errors. If they fail, see [Configure the serv
 From the folder containing `10xgraph.json`, run the server with auto-reload enabled:
 
 ```bash
-10xgraph api
+10xgraph dev --no-open
 ```
 
-The server binds to `http://127.0.0.1:8000` and restarts whenever you edit any Python file. This is the fastest way to iterate on your graph locally. Auto-reload is the default; to disable it, pass `--no-reload` (required for containers).
+The server binds to `http://127.0.0.1:8000` and restarts whenever you edit any Python file. This is the fastest way to iterate on your graph locally. Auto-reload is the default; to disable it, pass `--no-reload`.
 
-To open the interactive playground alongside the API, use the `play` command instead:
-
-```bash
-10xgraph play
-```
-
-This starts the server and opens the playground in your browser at the address shown. It is equivalent to `10xgraph api` with a browser tab launched when the server is ready.
-
-The `dev` command also opens the playground by default; pass `--no-open` to skip it:
+`10xgraph dev` opens the hosted playground in your browser once the API responds. Pass `--no-open` to start the server only, as above. To open the playground, leave the flag out:
 
 ```bash
 10xgraph dev
 ```
 
-All three commands accept `--host`, `--port`, `--reload/--no-reload`, `--config`, and the verbosity flags. `dev` adds `--open/--no-open`.
+Flags: `--config`/`-c`, `--host`/`-H`, `--port`/`-p`, `--reload/--no-reload`, `--open/--no-open`, `--verbose`/`-v` and `--quiet`/`-q`. The commands `10xgraph api` and `10xgraph play` were removed in `10xgraph-api` 0.9.0; use `10xgraph dev`.
 
 ## Verify the server is running
 
@@ -92,10 +86,11 @@ Both show the full endpoint list, parameters, request/response shapes, and authe
 
 ```json
 {
-  "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}],
-  "config": {"thread_id": "test-thread-1"}
+  "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}]
 }
 ```
+
+Leave `config` out. The server starts a new thread and returns its id in `data.meta.thread_id`. By default it refuses a `thread_id` that does not exist yet.
 
 5. Click "Execute"
 
@@ -108,13 +103,13 @@ You will see the full response, including the graph's output, any tool calls, an
 By default, the server binds to `127.0.0.1:8000`. To accept connections from other machines (e.g., in Docker or on a network), bind to `0.0.0.0`:
 
 ```bash
-10xgraph api --host 0.0.0.0 --port 8000
+10xgraph dev --no-open --host 0.0.0.0 --port 8000
 ```
 
 To use a different port:
 
 ```bash
-10xgraph api --port 8001
+10xgraph dev --no-open --port 8001
 ```
 
 ### Environment variables and config file
@@ -133,13 +128,13 @@ Or pass them directly to the shell:
 ```bash
 export GOOGLE_API_KEY=your_key
 export REDIS_URL=redis://localhost:6379
-10xgraph api
+10xgraph dev --no-open
 ```
 
 To use a non-default config file:
 
 ```bash
-10xgraph api --config config/staging.json
+10xgraph dev --no-open --config config/staging.json
 ```
 
 This is useful when you have separate configs for dev, staging, and production.
@@ -149,13 +144,13 @@ This is useful when you have separate configs for dev, staging, and production.
 Enable verbose output for debugging (shows request details, node execution times, checkpointer operations):
 
 ```bash
-10xgraph api --verbose
+10xgraph dev --no-open --verbose
 ```
 
 Or suppress all output except errors:
 
 ```bash
-10xgraph api --quiet
+10xgraph dev --no-open --quiet
 ```
 
 ## Disable API documentation
@@ -165,14 +160,14 @@ The interactive docs (`/docs` and `/redocs`) expose your endpoint structure. If 
 ```bash
 export DOCS_PATH=""
 export REDOCS_PATH=""
-10xgraph api --no-reload
+10xgraph dev --no-open --no-reload
 ```
 
 When `MODE=production`, these paths default to empty unless explicitly set. In other modes, they are enabled by default.
 
 ## Production: deploy with Docker and workers
 
-The `10xgraph api` command runs a **development server only** (single Uvicorn worker with file watching). It is not suitable for production traffic.
+The `10xgraph dev` command runs a **development server only** (single Uvicorn worker with file watching). It is not suitable for production traffic. Production runs Gunicorn with Uvicorn workers inside the image that `10xgraph build` generates.
 
 For production, generate a Docker setup with multiple workers and production configuration:
 
@@ -211,7 +206,7 @@ If `Address already in use` appears, either choose a different port or kill the 
 
 ```bash
 # Use a different port
-10xgraph api --port 8001
+10xgraph dev --no-open --port 8001
 
 # Or find and kill the process on port 8000
 lsof -ti :8000 | xargs kill -9
@@ -233,7 +228,7 @@ If you see an error like `"GOOGLE_API_KEY" not set`, either export it before sta
 
 ```bash
 export GOOGLE_API_KEY=your_value
-10xgraph api
+10xgraph dev --no-open
 ```
 
 Or add it to a `.env` file and configure `10xgraph.json`:
@@ -253,7 +248,7 @@ Check whether the slowness is in the server or your graph:
 
 ```bash
 # Enable verbose logging
-10xgraph api --verbose
+10xgraph dev --no-open --verbose
 ```
 
 Look at the logs to see if the server itself is slow (networking, checkpointer reads) or if the graph is slow (tool execution, model latency). Check:

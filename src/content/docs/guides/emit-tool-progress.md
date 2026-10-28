@@ -4,7 +4,7 @@ description: Learn how to send live progress, errors, and status updates from to
 section: "Build agents"
 group: "Tools and MCP"
 order: 220
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 ## Overview
@@ -284,3 +284,7 @@ for i, item in enumerate(items):
 - [Streaming Architecture](/docs/concepts/streaming), How streaming chunks and granularity work
 - [Dependency Injection](/docs/concepts/dependency-injection), How parameters like `emit` and `state` are injected
 - [Example: react_stream/stream_sync.py](https://github.com/10xGraph/10xGraph/blob/main/examples/react_stream/stream_sync.py), Full working example in the repository
+
+## Run it in production
+
+Progress events travel on the same stream the client already reads, so no extra server setup is needed. Each stream is one long HTTP request, so check idle timeouts on your load balancer. See [Invoke and stream](/docs/server/invoke-and-stream) and [Production readiness](/docs/production).

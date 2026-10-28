@@ -5,7 +5,7 @@ description: An AI agent is a program that uses an LLM to perceive input, reason
 section: Glossary
 order: 20
 label: What is an AI agent?
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: What is the difference between an AI agent and an LLM?
     a: An LLM is a model that generates text given a prompt. An AI agent is a program built on top of an LLM that can also call tools, maintain state across multiple steps, and take actions in a loop until it completes a goal. An LLM is a component inside an AI agent, not the agent itself.
@@ -88,7 +88,7 @@ Once you have a compiled agent, one command starts a production HTTP server:
 ```bash
 pip install "10xgraph[google-genai]" 10xgraph-api
 10xgraph init
-10xgraph api
+10xgraph dev
 ```
 
 This gives you `POST /v1/graph/invoke`, `POST /v1/graph/stream` (NDJSON), and `GET /v1/threads/{thread_id}/state` endpoints with no extra FastAPI code required.

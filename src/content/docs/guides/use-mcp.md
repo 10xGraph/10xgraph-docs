@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 210
 label: MCP tools
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Can I use MCP tools without a local Python function?"
     a: "Yes. Pass an empty list to ToolNode(tools=[]) and provide the MCP client. The graph will offer only the MCP server's tools."
@@ -159,7 +159,7 @@ tool_node = ToolNode(
 )
 ```
 
-When the LLM requests a tool, `ToolNode` runs it on the MCP client if the name is one of the MCP tools it listed, otherwise it runs the local function. Avoid giving a local function and an MCP tool the same name: the MCP tool wins.
+When the LLM requests a tool, `ToolNode` runs it on the MCP client if the name is one of the MCP tools it listed, otherwise it runs the local function. A local function and an MCP tool must not share a name. `ToolNode` raises `ValueError` when an MCP tool has the same name as a local or remote tool, so rename one of them.
 
 ## Forwarding user context to MCP
 
@@ -376,6 +376,10 @@ print(result["messages"][-1].content)
 - Forward user context to MCP servers with `pass_user_info_to_mcp=True`.
 - Filter MCP tools by tag with `tools_tags` on the `Agent`.
 - Test MCP tools without a real server using `MockMCPClient`.
+
+## Run it in production
+
+MCP servers run with whatever access you give them, and a tool name that clashes with another tool raises `ValueError` at setup. Pin and review the servers your graph connects to before exposing the agent. See the [Security model](/docs/production/security-model) and [What 10xGraph does not protect](/docs/production/limits).
 
 ## Next steps
 

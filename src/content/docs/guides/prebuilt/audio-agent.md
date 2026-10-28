@@ -6,7 +6,7 @@ section: "Build agents"
 group: "Prebuilt agents"
 order: 150
 label: AudioAgent
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 AudioAgent wraps Gemini Live into a graph-based realtime audio-to-audio conversation system. Unlike ReactAgent, which processes discrete requests, AudioAgent maintains a live WebSocket connection where the model controls the turn-taking and you send audio, text, or images in real-time via an input queue. Tools, memory, and skills are flattened into the initial system instruction and executed during the session without breaking the audio stream.
@@ -94,7 +94,7 @@ AudioAgent accepts most of the same parameters as `ReactAgent`, with provider fi
 | `client` | `Any` | `None` | FastMCP client for remote MCP-hosted tools. |
 | `pass_user_info_to_mcp` | `bool` | `False` | Forward `user_id` and `config` to MCP tool calls. |
 | `skills` | `SkillConfig \| None` | `None` | Dynamic skills (Agent Skills spec); flattened into system instruction at connect. Activate new skills mid-session via `activate_skill()`. |
-| `memory` | `MemoryConfig \| None` | `None` | Long-term semantic memory; preloaded into system instruction at connect. Use memory tools to add facts mid-session. |
+| `memory` | `MemoryConfig \| None` | `None` | Long-term semantic memory; loaded once at connect as a fenced `<user_memories_...>` block (see [why](/docs/concepts/memory-and-store#why-memories-are-not-system-text)). Use memory tools to add facts mid-session. |
 | `realtime_client_factory` | `Callable[[], RealtimeClient] \| None` | `None` | Override the default Gemini Live client factory. Useful for testing with a mock. |
 | `live_node_name` | `str` | `"LIVE"` | Name of the graph node running the `LiveAgent`. Rarely changed. |
 | `state` | `AgentState \| None` | `None` | Custom `AgentState` subclass for your domain. |
@@ -407,3 +407,7 @@ The `arealtime()` generator yields events as they occur during the session. List
 - **Realtime API reference:** [`realtime` reference](/docs/reference/python/realtime) covers `RealtimeConfig`, `VADConfig`, `ReconnectConfig`, `LiveInputQueue`, event types, and `RealtimeClient`.
 - **Step-by-step guide:** [Use realtime audio](/docs/guides/use-realtime-audio) shows how to wire AudioAgent into a microphone or WAV file pipeline, build a WebSocket bridge for the API server, and set up resilient reconnect.
 - **Testing:** See [Testing](/docs/testing/unit-tests) for how to mock a realtime client in unit tests.
+
+## Run it in production
+
+Audio runs over a long-lived connection, so authenticate the socket and rate limit it. See [WebSockets](/docs/server/websockets) and [Server auth](/docs/server/auth).

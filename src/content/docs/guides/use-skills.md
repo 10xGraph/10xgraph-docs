@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Agent Skills"
 order: 430
 label: Skills
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 A skill is a folder of instructions, and optionally scripts, reference docs and data, that an agent loads only when a task needs it. 10xGraph follows the [Agent Skills specification](https://agentskills.io/specification), so the same folder works in 10xGraph, Claude Code, Codex and GitHub Copilot.
@@ -240,6 +240,10 @@ Skills from Claude Code (`.claude/skills/`), Codex or Copilot (`.agents/skills/`
 | The model never activates a skill | The description doesn't say when to use it. | Rewrite the description around the user's requests; add `metadata.triggers`. |
 | `read_skill_resource` says the file was not found | The path is relative to the project, not the skill. | Use paths relative to the skill folder; the error lists the files that exist. |
 | A skill is missing from the catalog | Another skill with the same name was found first. | Check the log for `shadowed`, and rename one of the skills. |
+
+## Run it in production
+
+Skill text is added to the prompt as data and is not run through `str.format`, but anyone who can edit a skill file can change agent behavior. Treat the skills directory as code that you review and deploy. See the [Security model](/docs/production/security-model).
 
 ## Related
 

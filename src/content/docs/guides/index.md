@@ -4,14 +4,14 @@ description: "Task-oriented guides for building, deploying and monitoring produc
 label: "Build agents"
 section: "Build agents"
 order: 10
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 Guides are hands-on, task-oriented instructions that walk you through solving specific problems. Unlike concepts, which explain how 10xGraph works, guides show you how to do something: build a graph, add tools, set up memory, handle errors, or deploy to production.
 
 Each guide is self-contained and runnable. You get complete code examples with all imports and no placeholders, plus how to verify the result worked. Guides assume you have read the [Get Started](/docs/get-started) section and understand the basics.
 
-## Five most common tasks
+## Six most common tasks
 
 Start here if you are building an agent for the first time. These cover the decisions you make in almost every project.
 
@@ -24,6 +24,8 @@ Start here if you are building an agent for the first time. These cover the deci
 4. **[Set up checkpointing and memory](/docs/guides/set-up-checkpointing)**: Enable thread state persistence so runs resume correctly after crashes. Choose a checkpointer for your durability needs: in-memory for development, SQLite for single-server, or Postgres+Redis for production.
 
 5. **[Stream and monitor runs](/docs/guides/stream-graph)**: Use Python's `astream()` to emit tokens or messages as they arrive, inspect intermediate steps, and understand the streaming event types.
+
+6. **[Secure and serve your agent](/docs/production)**: Serve the graph with `10xgraph-api`, turn on auth and request limits, and work through the [production checklist](/docs/server/production-checklist). Guides here end with a "Run it in production" section that links to the relevant server page.
 
 ## How guides are organized
 

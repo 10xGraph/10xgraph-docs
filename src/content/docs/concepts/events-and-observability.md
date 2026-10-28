@@ -1,7 +1,7 @@
 ---
 title: Events and observability
 description: How 10xGraph emits structured events, publishes them to external systems, and exposes metrics and tracing for production monitoring.
-updated: "2026-10-08"
+updated: "2026-10-27"
 order: 180
 group: "Serving"
 section: Concepts
@@ -234,6 +234,16 @@ When you integrate with an OTEL collector (e.g., Jaeger, Datadog, New Relic), sp
 - Set alerts on error rates or latency percentiles.
 - Sample traces for inspection (e.g., every 100th request, or all errors).
 
+## What is in your traces and events
+
+Content stays in events and spans on purpose, because debugging needs it. What leaves your process depends on the sink:
+
+- **Redis, RabbitMQ and Kafka publishers** send the full event as JSON, including message text and tool inputs and results. Send them only to systems you trust.
+- **OTEL spans** (and so Logfire and LangSmith) carry prompts, completions and tool I/O only at `ObservabilityLevel.FULL`. At `SPANS` and `STANDARD` they carry structure, timing, token counts and model names.
+- **Ids.** Spans always carry `user_id`, `thread_id` and `run_id`. Events carry the same ids.
+- **TLS is your choice. 10xGraph never forces it.** We recommend TLS in production whenever you can, because events carry message and tool content. If the broker runs only inside a network you secure yourself (for example a private subnet or VPC, or a service mesh that already encrypts traffic), a plain connection can be fine. For Redis use a `rediss://` URL, for RabbitMQ an `amqps://` URL, and for Kafka the opt-in `security_protocol`, `ssl_*` and `sasl_*` config keys. See [Emit events from your graph](/docs/guides/use-publishers).
+- **`user_id_mode`** changes how `user_id` appears on OTEL spans: `"raw"` (default, unchanged), `"hash"` or `"mask"`. It does not change Redis, RabbitMQ, Kafka or Console events. See [Hide the user id in traces](/docs/guides/send-traces-to-logfire-langsmith#hide-the-user-id-in-traces).
+
 ## Where each sink is configured
 
 Here is a reference table of where each piece is configured:
@@ -244,7 +254,7 @@ Here is a reference table of where each piece is configured:
 | Redis | - | `RedisPublisher({"url": ...})` | - |
 | Kafka | - | `KafkaPublisher({"bootstrap_servers": ...})` | - |
 | RabbitMQ | - | `RabbitMQPublisher({"url": ...})` | - |
-| OTEL tracing | standard OTEL SDK variables | `OtelPublisher(level=...)`, `setup_tracing(graph)` | - |
+| OTEL tracing | standard OTEL SDK variables | `OtelPublisher(level=..., user_id_mode=...)`, `setup_tracing(graph)` | `observability.level`, `observability.user_id_mode` |
 | LangSmith | `LANGSMITH_API_KEY` | `setup_langsmith(graph)` | `observability.langsmith.enabled` |
 | Logfire | `LOGFIRE_TOKEN` | `setup_logfire(graph)` | `observability.logfire.enabled` |
 | Metrics | - | `setup_otel_metrics()` | - |

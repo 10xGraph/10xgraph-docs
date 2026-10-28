@@ -6,7 +6,7 @@ section: "Build agents"
 group: "Prebuilt agents"
 order: 110
 label: SwarmAgent
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 SwarmAgent implements a peer-to-peer multi-agent pattern where any agent can hand off control directly to any other agent. Unlike supervisor-based architectures with a single coordinator routing all work, swarms distribute decision-making across members. This produces flexible, decentralized workflows with no central bottleneck, each member acts independently and delegates when it determines another member is better suited for the task.
@@ -62,14 +62,14 @@ flowchart TD
 
 After each member's LLM call, a routing function inspects the last message for tool calls and decides what happens next. The decision tree is simple:
 
-1. **Handoff tool call detected** (`transfer_to_<member_name>`): Route to that member immediately (if allowed by `can_handoff_to`). The handoff tool is never executed; the graph intercepts the call and navigates to the target.
+1. **Handoff tool call detected** (`transfer_to_<member_name>`): Route to that member immediately, but only if the target is allowed by `can_handoff_to`. The handoff tool body is never executed; the routing function reads the call and navigates to the target. SwarmAgent registers handoff tools only for allowed targets, so a call to any other `transfer_to_*` name is an ordinary unknown tool call: it is not routed, and the member's tool node, if it has one, answers "Tool not found".
 2. **Regular tool call detected**: If the member has tools (like web search or calculator), route to the member's `MEMBER_TOOL` node to execute those tools. The member loops back and tries again.
 3. **No tool calls detected**: The member finished its work. Route to `END` to complete the run.
 
 ```python
 # Simplified from tenxgraph/prebuilt/agent/swarm.py
 for tc in last_message.tools_calls:
-    is_handoff, target = is_handoff_tool(tc.get("name", ""))  # "transfer_to_researcher"
+    is_handoff, target = is_handoff_tool(tool_call_name(tc))  # "transfer_to_researcher"
     if is_handoff and target and target.upper() in allowed_set:
         return target.upper()                                  # route to that member
 
@@ -86,7 +86,7 @@ This ensures:
 
 ### Handoff tools injected automatically
 
-SwarmAgent generates `transfer_to_<member_name>` (lowercase member name) tools for each member's allowed targets and injects them into the member's `ToolNode`. These are not executed as tools; when the LLM calls one, the routing logic intercepts the call and navigates the graph directly to the target member. This prevents spurious `tool` role messages in the conversation history, the handoff is clean, and the next member sees a natural continuation of the conversation.
+SwarmAgent generates `transfer_to_<member_name>` (lowercase member name) tools for each member's allowed targets and injects them into the member's `ToolNode`. These are made with `create_handoff_tool`. They are not executed as tools; when the LLM calls one, the routing logic intercepts the call and navigates the graph directly to the target member. This prevents spurious `tool` role messages in the conversation history, the handoff is clean, and the next member sees a natural continuation of the conversation.
 
 Each handoff tool's docstring includes the target member's `description` field, so the LLM understands when and why to route there. For example, if RESEARCHER has `description="Gathers facts from the web"`, the handoff tool is named `transfer_to_researcher`, takes no arguments, and carries "Gathers facts from the web" as its description.
 
@@ -389,7 +389,7 @@ app = swarm.compile()
 
 ## Testing and serving
 
-### Test interactively with `10xgraph play`
+### Test interactively with `10xgraph dev`
 
 Use the playground UI to test your swarm without writing client code. The playground streams messages and shows which member is active at each step, making it easy to debug handoff logic and member behavior.
 
@@ -442,7 +442,6 @@ app = swarm.compile()
   "agent": "graph:app",
   "env": ".env",
   "auth": null,
-  "checkpointer": null,
   "injectq": null,
   "store": null,
   "redis": null,
@@ -451,7 +450,7 @@ app = swarm.compile()
 ```
 
 ```bash
-10xgraph play
+10xgraph dev
 ```
 
 Open your browser (the command prints the URL) and start a conversation. You will see:
@@ -465,7 +464,7 @@ Open your browser (the command prints the URL) and start a conversation. You wil
 To call your swarm from a client (TypeScript, Python, curl), serve it with the 10xGraph API server:
 
 ```bash
-10xgraph api
+10xgraph dev --no-open
 ```
 
 This exposes the swarm at `/v1/graph/invoke` and `/v1/graph/stream`. See `/docs/server/invoke-and-stream` for full details.
@@ -575,3 +574,7 @@ For the complete parameter list and advanced options, see the [reference page](/
 - **Handoff tool not in docstring**: Ensure the target member has a non-empty `description`. Handoff tools inherit their docstring from it so the LLM knows when to route there.
 - **LLM gets confused about who to call**: Keep descriptions short and distinct. "Gathers facts" and "Analyzes data" are clearer than "Does stuff."
 - **Token limits**: Long lists of handoff tools (20+ members) can exceed model context. Consider a two-tier swarm (triage agent routes to team leads, then to specialists) or using a custom graph instead.
+
+## Run it in production
+
+Handoffs are limited to the agents each one is allowed to hand off to; a call to any other target returns tool-not-found. A caller can still start at a chosen node with `current_node`, so restrict it with `runs.state_keys` if needed. See the [Security model](/docs/production/security-model).

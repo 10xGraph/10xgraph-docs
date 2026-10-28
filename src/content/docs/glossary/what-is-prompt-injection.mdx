@@ -1,0 +1,58 @@
+---
+title: What Is Prompt Injection?
+seoTitle: "What is prompt injection in AI agents?"
+description: Prompt injection is text that makes a model follow an attacker's instructions instead of yours. See direct and indirect forms, what validators catch and what they do not.
+section: Glossary
+order: 130
+label: What is prompt injection?
+updated: "2026-10-27"
+faq:
+  - q: What is the difference between direct and indirect prompt injection?
+    a: Direct injection is in text the user types, such as "ignore all previous instructions". Indirect injection is hidden in content the agent reads on its own, such as a web page, a document or a tool result.
+  - q: Can a validator stop prompt injection?
+    a: Only partly. Pattern matching catches known tricks and costs little, but a rephrased attack can pass. Treat validators as one layer, and limit what a successful injection can do with narrow tool permissions.
+  - q: Does 10xGraph cover indirect injection?
+    a: Not by validators. Input validators check what the user sends, not what a tool fetches. Validate tool results inside your tools, and keep side-effecting tools behind scopes or human approval.
+  - q: Is prompt injection a bug in the model provider?
+    a: No. A model reads instructions and data in the same stream of text, so it cannot reliably tell them apart. That is a property of the current approach, which is why defenses focus on limiting impact.
+---
+
+**Prompt injection is text that makes a language model follow an attacker's instructions in place of the developer's.** The model reads your system prompt and the user's message as one stream of text. If the user's text says "ignore all previous instructions", the model may comply. OWASP lists it as LLM01 in its Top 10 for LLM applications.
+
+## What are the two forms?
+
+- **Direct.** The attacker is the user. They type instructions that try to override your prompt, change the agent's role, or make it reveal its system prompt.
+- **Indirect.** The instructions sit in content the agent reads: a web page a tool fetches, a document in a retrieval index, an email, a tool result. The user may never see them.
+
+Indirect injection is the harder one, because the agent trusts the tool it called.
+
+## Why is it dangerous for agents?
+
+A chatbot that is tricked says something wrong. An agent that is tricked can act: send a message, issue a refund, delete a record. The damage depends on what tools the agent can call and with whose permissions.
+
+## What defends against it?
+
+No single control stops it. Combine layers:
+
+1. **Input validation.** Reject messages with known override patterns, role-change phrases, delimiter tricks and encoded payloads before the model sees them.
+2. **Narrow tools.** Give the agent only the tools it needs, and check scopes inside tools that change data.
+3. **Replay-safe, idempotent tools.** So a tool called twice, or called in error, does not do the damage twice.
+4. **Human approval.** Pause before a risky tool runs.
+5. **Server-side identity.** Never take the user's identity from model output or message text. Identity must come from the authenticated request.
+
+## What does 10xGraph provide?
+
+`PromptInjectionValidator` checks messages for excessive length, instruction-override patterns, role manipulation, system-prompt leakage requests, delimiter confusion and encoding tricks. It raises a `ValidationError` before the model is called when `strict_mode` is on. Register it with `register_default_validators`.
+
+The limits are stated plainly: validators are heuristic, so a rephrased attack can pass, and they do not cover indirect injection. They also do not replace authorization. See [Validate input and guard prompts](/docs/guides/protect-against-prompt-injection) and [Security and validators](/docs/concepts/security-and-validators).
+
+## Next steps
+
+<CardGrid>
+
+<LinkCard title="Validate input and guard prompts" href="/docs/guides/protect-against-prompt-injection" description="Register and tune the built-in validators." eyebrow="Guide" />
+<LinkCard title="Security and validators" href="/docs/concepts/security-and-validators" description="The protection layers and their limits." eyebrow="Concept" />
+<LinkCard title="What 10xGraph does not protect" href="/docs/production/limits" description="Honest limits of the server." eyebrow="Production" />
+<LinkCard title="Add human approval" href="/docs/guides/add-human-approval" description="Pause before a risky tool runs." eyebrow="Guide" />
+
+</CardGrid>

@@ -4,7 +4,7 @@ description: "Configure client-executed tools on the server: define them in 10xg
 order: 130
 group: "Interfaces"
 section: "API server"
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "Can a client call a tool that isn't registered as a remote tool?"
     answer: "No. The server only presents remote tools from 10xgraph.json to the model. If ag_ui.allow_client_tools is true, AG-UI clients can bring their own tools for that run, but plain REST/WebSocket callers cannot. See the AG-UI documentation for per-run client tools."
@@ -15,6 +15,8 @@ faq:
 ---
 
 Remote tools are trusted tool schemas configured on the server that the model can call but the client executes. This page covers server-side setup: how to declare remote tools in 10xgraph.json, attach them to graph nodes, and verify they are available when the model runs.
+
+Remote tools are trusted by configuration, not by the client; see the [security model](/docs/production/security-model) for the trust boundary.
 
 ## Why remote tools
 
@@ -149,10 +151,8 @@ client.registerToolHandler('read_clipboard', async () => {
 });
 
 // Now stream or invoke. The client will run registered tools when the model calls them.
-const stream = client.stream(
-  [Message.text_message('Where am I?')],
-  { config: { thread_id: 'thread-123' } }
-);
+// Omit thread_id to start a new thread. Each chunk carries the id the server picked.
+const stream = client.stream([Message.text_message('Where am I?')]);
 
 for await (const chunk of stream) {
   // Process streaming response
@@ -173,7 +173,7 @@ The server validates remote tool configurations at startup. Configuration errors
 - `parameters.type` must be `"object"`, `properties` must be an object and `required` a list of strings.
 - The `node` must exist in the compiled graph and be a `ToolNode`.
 
-If validation or attachment fails, the server fails to start. Run `10xgraph audit` to check the config file before starting, and read the `10xgraph api` output for the message.
+If validation or attachment fails, the server fails to start. Run `10xgraph audit` to check the config file before starting, and read the `10xgraph dev` output for the message.
 
 ## Examples
 

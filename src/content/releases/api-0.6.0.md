@@ -1,7 +1,7 @@
 ---
 package: api
 version: "0.6.0"
-date: 2026-10-06
+date: 2026-10-07
 summary: Final release as 10xscale-agentflow-cli. Adds the AG-UI endpoint, interrupt resume over invoke and stream, server-declared remote tools, a browser config editor, and stricter handling of client-sent config.
 breaking: true
 ---

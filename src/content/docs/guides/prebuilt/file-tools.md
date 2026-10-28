@@ -6,14 +6,25 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 190
 label: File Tools
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 File tools give your agent filesystem access in a secure, controlled way. Three complementary tools handle reading text files, writing output, and searching by filename or content. All three are workspace-scoped: paths are resolved under a configured root directory, and paths that escape the root are rejected. This prevents agents from accessing sensitive files outside the intended workspace.
 
 **Import path:** `tenxgraph.prebuilt.tools`
 
-The workspace root is read from `config["file_tool_root"]`, then `config["workspace_root"]`, and defaults to the current directory (`.`) if neither is set. You can pass it at runtime via `invoke(config={"file_tool_root": "/path/to/root"})` or set it once in your agent's configuration.
+For any graph that serves requests, create the tools with `create_file_tools(root)`. The root is fixed in your code, so nothing in the run config can move it:
+
+```python
+from tenxgraph.core.graph import ToolNode
+from tenxgraph.prebuilt.tools import create_file_tools
+
+tool_node = ToolNode(create_file_tools("/srv/workspace", write=False))
+```
+
+`create_file_tools` takes `read`, `write` and `search` flags (all `True` by default) to pick which tools you get. It raises `ValueError` if `root` is not an existing directory.
+
+The module-level `file_read`, `file_write` and `file_search` still work, but reading the root from `config["file_tool_root"]` or `config["workspace_root"]` is deprecated: it emits a `DeprecationWarning` and is removed in 0.11, because anyone who can set the run config can point the tools at any directory. The examples below use `create_file_tools`, which also hides secret files by default.
 
 ## When to use file tools
 
@@ -46,7 +57,7 @@ Reads a UTF-8 text file from the workspace and returns its content, with optiona
 | `start_line` | `int` | `1` | First line to read (1-based, inclusive) |
 | `end_line` | `int` | `0` | Last line to read (1-based, inclusive); `0` means end of file |
 | `max_chars` | `int` | `20000` | Maximum characters to return; longer files are truncated |
-| `config` | `dict` | `None` | Runtime config dict; pass `file_tool_root` or `workspace_root` here |
+| `config` | `dict` | `None` | Runtime config dict. `file_tool_root` and `workspace_root` are deprecated; use `create_file_tools(root)` |
 
 ### Return format
 
@@ -74,14 +85,14 @@ Returns a JSON string:
 ### Usage example
 
 ```python
-from tenxgraph.prebuilt.tools import file_read
+from tenxgraph.prebuilt.tools import create_file_tools
 from tenxgraph.core.state import Message
 from tenxgraph.prebuilt.agent import ReactAgent
 
-# Create an agent with file_read access
+# Create an agent with read-only access to one directory
 agent = ReactAgent(
     model=\"gpt-4o-mini\",
-    tools=[file_read],
+    tools=create_file_tools("/home/user/project", write=False, search=False),
     system_prompt=[{
         "role": "system",
         "content": "You are a code reviewer. Read the provided files and give feedback.",
@@ -89,10 +100,10 @@ agent = ReactAgent(
 )
 graph = agent.compile()
 
-# Invoke with a workspace root
+# The root was fixed when the tools were created
 result = await graph.ainvoke(
     {"messages": [Message.text_message("Review src/utils.py")]},
-    config={"thread_id": "review-1", "file_tool_root": "/home/user/project"}
+    config={"thread_id": "review-1"}
 )
 ```
 
@@ -104,7 +115,7 @@ To avoid reading a huge file, specify a line range:
 # Read lines 50-100 of a large file
 await graph.ainvoke(
     {"messages": [Message.text_message("Show me lines 50-100 of main.py")]},
-    config={"thread_id": "t1", "file_tool_root": "."}
+    config={"thread_id": "t1"}
 )
 ```
 
@@ -140,7 +151,7 @@ Writes UTF-8 text to a file under the workspace root. Three modes control whethe
 | `content` | `str` | required | UTF-8 text to write |
 | `mode` | `str` | `"create"` | Write mode: `"create"`, `"overwrite"`, or `"append"` |
 | `create_dirs` | `bool` | `False` | If `True`, create missing parent directories; if `False`, fail if parent doesn't exist |
-| `config` | `dict` | `None` | Runtime config; pass `file_tool_root` or `workspace_root` here |
+| `config` | `dict` | `None` | Runtime config. `file_tool_root` and `workspace_root` are deprecated; use `create_file_tools(root)` |
 
 ### Return format
 
@@ -167,13 +178,13 @@ Returns a JSON string:
 ### Usage example
 
 ```python
-from tenxgraph.prebuilt.tools import file_read, file_write
+from tenxgraph.prebuilt.tools import create_file_tools
 from tenxgraph.core.state import Message
 from tenxgraph.prebuilt.agent import ReactAgent
 
 agent = ReactAgent(
     model=\"gpt-4o-mini\",
-    tools=[file_read, file_write],
+    tools=create_file_tools("/home/user/project", search=False),
     system_prompt=[{
         "role": "system",
         "content": (
@@ -186,7 +197,7 @@ graph = agent.compile()
 
 result = await graph.ainvoke(
     {"messages": [Message.text_message("Create a new test file for utils.py")]},
-    config={"thread_id": "t1", "file_tool_root": "/home/user/project"}
+    config={"thread_id": "t1"}
 )
 ```
 
@@ -245,7 +256,7 @@ Searches text files under the workspace root by filename and content. Skips bina
 | `path` | `str` | `""` | Sub-directory to search within (relative to root); empty string searches the root |
 | `glob` | `str` | `"**/*"` | Filename glob pattern, e.g. `"*.py"` or `"*.md"`. Only the file-name part of the pattern is matched (for example `*.py`). |
 | `max_results` | `int` | `20` | Maximum matches to return (capped at 100) |
-| `config` | `dict` | `None` | Runtime config; pass `file_tool_root` or `workspace_root` here |
+| `config` | `dict` | `None` | Runtime config. `file_tool_root` and `workspace_root` are deprecated; use `create_file_tools(root)` |
 
 ### Return format
 
@@ -285,13 +296,13 @@ The `match_type` is either `"filename"` (query found in the file name) or `"cont
 ### Usage example
 
 ```python
-from tenxgraph.prebuilt.tools import file_read, file_search
+from tenxgraph.prebuilt.tools import create_file_tools
 from tenxgraph.core.state import Message
 from tenxgraph.prebuilt.agent import ReactAgent
 
 agent = ReactAgent(
     model=\"gpt-4o-mini\",
-    tools=[file_read, file_search],
+    tools=create_file_tools("/home/user/project", write=False),
     system_prompt=[{
         "role": "system",
         "content": (
@@ -304,7 +315,7 @@ graph = agent.compile()
 
 result = await graph.ainvoke(
     {"messages": [Message.text_message("Find all files that import asyncio")]},
-    config={"thread_id": "t1", "file_tool_root": "/home/user/project"}
+    config={"thread_id": "t1"}
 )
 ```
 
@@ -346,14 +357,14 @@ Search in a specific directory:
 Here's an agent that combines all three file tools to search a codebase, read relevant files, and generate a report:
 
 ```python
-from tenxgraph.prebuilt.tools import file_read, file_write, file_search
+from tenxgraph.prebuilt.tools import create_file_tools
 from tenxgraph.core.state import Message
 from tenxgraph.prebuilt.agent import ReactAgent
 
 # Create the agent with all file tools
 agent = ReactAgent(
     model="gpt-4o-mini",
-    tools=[file_read, file_write, file_search],
+    tools=create_file_tools("/home/user/my-project"),
     system_prompt=[{
         "role": "system",
         "content": (
@@ -378,10 +389,7 @@ result = await graph.ainvoke(
             )
         ]
     },
-    config={
-        "thread_id": "analysis-1",
-        "file_tool_root": "/home/user/my-project"
-    }
+    config={"thread_id": "analysis-1"}
 )
 
 print(result["messages"][-1].text())
@@ -395,6 +403,28 @@ The agent will:
 ---
 
 ## Workspace security and limits
+
+### Hidden files
+
+Secret files are hidden by default, for any root, including the working-directory default. The tools refuse to read or write them, and `file_search` skips them and never shows their names or contents. Hidden paths are:
+
+- `.env` and `.env.*`
+- `*.pem`, `*.key`, `*.p12`, `*.pfx`
+- `*key*.json` and `service_account*.json`
+- `id_rsa*` and `id_ed25519*`
+- `.netrc`, `.npmrc` and `.pypirc`
+- anything under a directory named `.ssh`, `.aws`, `.gnupg` or `.git`
+
+Matching ignores case and uses the resolved path, so symlinks, `..` and case changes do not get around it. A read or write of a hidden path returns the same `path is not allowed` error whether or not the file exists, so the model cannot use the error to find out what is there.
+
+Add your own patterns with `deny=`. Each glob is matched, ignoring case, against every part of the path under the root and against the whole relative path:
+
+```python
+tools = create_file_tools("/srv/workspace", deny=["secrets/*", "*.sqlite"])
+```
+
+Set `use_default_deny=False` to drop the default patterns. Only do this when the root holds nothing sensitive. Patterns you pass in `deny=` still apply.
+
 
 ### Path security
 
@@ -417,6 +447,10 @@ For example, if the root is `/home/user/project/`, the paths `"src/main.py"`, `"
 | Preview length | 240 chars | `file_search` | Line previews are truncated to keep results compact |
 
 ---
+
+## Run it in production
+
+A served agent should build its tools with `create_file_tools(root)`, so the root is fixed in code. The server also drops client-sent `file_tool_root` and `workspace_root` from run config. Give the process a root that holds nothing you would not let a prompt-injected model read. See the [Security model](/docs/production/security-model).
 
 ## Related pages
 

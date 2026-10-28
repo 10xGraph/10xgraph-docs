@@ -1,0 +1,94 @@
+---
+title: "Why a user cannot read another user's thread"
+seoTitle: "How 10xGraph isolates users' threads"
+description: "How 10xgraph-api keeps tenants apart: fail-closed ownership checks, 403 before the graph runs, server-made thread ids, checkpointer isolation and JWT validation."
+date: 2026-10-27
+updated: 2026-10-27
+author: Shudipto Trafder
+kind: engineering
+tags: [security, authorization, multi-tenant, jwt]
+faq:
+  - q: What happens when user B asks for user A's thread?
+    a: The server answers 403 before the request reaches the graph or the checkpointer. This holds for invoke, stream, stop and every thread read, write and delete.
+  - q: Can a client choose its own thread id or user id?
+    a: By default no. With runs.thread_ids set to server, a client may only name an existing thread it owns, and starts a new one by omitting the id. The user id comes only from the verified token, and an identity starting with __system__ is refused.
+  - q: Does a custom authorization backend need to implement isolation?
+    a: No. isolation_scope defaults to owner, so a custom backend that only implements authorize still scopes threads and memories per user. Return none on purpose to share data.
+---
+
+If you run a multi-tenant product on an agent framework, the question a security reviewer asks first is simple: can one customer read another customer's conversation? This post walks through the layers that answer it in `10xgraph-api` and `PgCheckpointer`. It names the mechanisms, the config, and the checks you can run yourself. It does not claim the server makes your tools safe. That part is yours, and the last section says so.
+
+## Layer 1: identity comes from the token, nowhere else
+
+Authentication runs before anything else. With `"auth": "jwt"`, `JwtAuth` requires `exp` on every token and a `user_id` that is a non-empty string or a whole number; anything else is a 401. When `JWT_ISSUER` or `JWT_AUDIENCE` is set, `iss` and `aud` are required and checked as well. Scope claims must have the right type, or the request gets a 401. Revoked tokens are rejected when you configure `token_revocation`, and a backend failure there fails closed with a 503.
+
+The verified `user_id` is the only identity the server uses. A `user`, `user_id` or `authz` key in the request config is dropped, and state or message content is never read for identity. Your tools get the verified identity through dependency injection.
+
+Identities that start with the reserved `__system__` prefix are refused at authentication. That matters because shared data (for example, memories written by the system) is owned by such an identity. No caller can authenticate as the owner of shared data.
+
+## Layer 2: an ownership check on every thread-touching step
+
+Once auth is configured, or `MODE=production`, the `ownership` authorization backend is the default. Ownership is object-level: invoke, stream, stop, and every checkpointer read, write and delete resolves the thread's owner and compares it with the caller. A foreign `invoke` or `stream` is rejected with 403 up front, so the graph never runs and the model never sees the other user's history.
+
+The check fails closed:
+
+- If the checkpointer cannot report a thread's owner, thread requests are denied. With auth on, the server refuses to boot in that setup rather than serve without the check.
+- A thread with no owner allows only the actions that create one (`graph:invoke`, `graph:stream`, `checkpointer:write`, `checkpointer:import`). State and message writes claim the thread first.
+
+## Layer 3: the client cannot pick a thread to attack
+
+By default `runs.thread_ids` is `server`. A client may only name a thread that already exists, and then only if it owns it. A new thread starts by omitting the id, and the server returns the one it made. This closes the gap where a client invents an id that another tenant will need later. The two frontends that create their own ids (AG-UI and the realtime live endpoint) are exempt, and the caller owns the id it creates. Set `runs.thread_ids: "client"` only if you accept client-chosen ids.
+
+## Layer 4: the checkpointer is isolated too
+
+The API check is the front door. `PgCheckpointer` adds a second lock, so a bug in a route cannot read across users. `enforce_user_isolation` is `True` by default:
+
+- The Redis cache key includes both ids, `state_cache:<thread_id>:<user_id>`, so one user's cache lookup cannot return another user's entry.
+- Durable reads, writes and deletes are scoped to the owner. On write the thread row is locked and its owner checked, and a write to another user's thread raises `STORAGE_FORBIDDEN_001`.
+- Tool-ledger reads (`aget_tool_result`) apply the same owner filter, so naming another user's thread returns no recorded result. This is in the core changelog under the release after 0.10.3.
+- Message ids are unique per `(thread_id, message_id)`, so claiming an id in your thread cannot break another thread's checkpoint. Same release.
+- Paging is capped at 1000 rows per call.
+
+Set `enforce_user_isolation=False` only for a single-tenant app. More in [hot and cold agent memory](/blog/hot-and-cold-agent-memory).
+
+## Layer 5: custom backends are isolated by default
+
+If you write your own `AuthorizationBackend`, `isolation_scope()` defaults to `"owner"`. A backend that implements only `authorize()` still scopes threads and memories per user. Sharing is something you opt into by returning `"none"`, which is what the `allow_all` backend does.
+
+## Layer 6: ownership is cached, and deletes are handled
+
+Resolving the owner on every request would cost a database call each time. Ownership never changes, so the server caches it: an in-process LRU (L1, 30 seconds by default) and, when Redis is configured, a shared tier (L2, one hour by default). When a thread is deleted, the cache entry is evicted and a tombstone is left for one L1 TTL, in L1 and in Redis. Without it, another worker that still cached the old owner could let someone else recreate the deleted id and inherit a stale record. The tombstone window is why multi-worker deployments should configure Redis: with only the in-process tier the tombstone exists on the worker that handled the delete.
+
+## Check it yourself
+
+This is the sequence from [Security in five minutes](/docs/get-started/security-in-five-minutes). `ALICE_TOKEN` and `BOB_TOKEN` are JWTs for two different `user_id` values signed with your `JWT_SECRET_KEY`.
+
+```bash
+# 1. No token: 401, the graph never runs
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:8000/v1/graph/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":[{"type":"text","text":"Where is order 1042?"}]}]}'
+# 401
+
+# 2. Alice runs the agent: 200. Copy data.meta.thread_id into THREAD_ID.
+curl -s -X POST http://127.0.0.1:8000/v1/graph/invoke \
+  -H "Authorization: Bearer $ALICE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":[{"type":"text","text":"Where is order 1042?"}]}]}'
+
+# 3. Bob reads Alice's thread: 403
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "Authorization: Bearer $BOB_TOKEN" \
+  http://127.0.0.1:8000/v1/threads/$THREAD_ID/messages
+# 403
+```
+
+The same request with `$ALICE_TOKEN` returns 200 with her messages, and Bob also gets 403 when he tries to `invoke` on her `thread_id`.
+
+## What this does not cover
+
+- **`auth: null` is open.** Without authentication there is no identity to isolate, and the server starts anyway, also in production. Configure auth first.
+- **Your tools.** A tool that queries your own database must check that the caller may see the row. The server authorizes the request, not the logic inside the tool.
+- **Single-tenant switch.** `enforce_user_isolation=False` and `isolation_scope` returning `"none"` are real off switches. Use them knowingly.
+- **Shared state by design.** A client may write custom state fields and `current_node`. That is a feature, restricted with `runs.state_keys`. Identity never comes from it.
+
+The full list of threats and defaults is in the [security model](/docs/production/security-model), and the overview of everything else the server does by default is in [Production readiness](/docs/production).

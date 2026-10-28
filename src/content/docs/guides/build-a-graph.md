@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Agents and graphs"
 order: 20
 label: Build a graph
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "What imports do I need?"
     a: "Import `StateGraph`, `Agent`, `ToolNode` from `tenxgraph.core.graph`, `AgentState` and `Message` from `tenxgraph.core.state`, and `START`, `END` from `tenxgraph.utils`."
@@ -46,16 +46,14 @@ from tenxgraph.utils import START, END
 Tools are plain Python functions. The LLM sees the function name, docstring, and type-annotated parameters. This schema determines what tools the LLM can call.
 
 ```python
+from tenxgraph.prebuilt.tools import safe_calculator
+
 def get_weather(city: str) -> str:
     """Return current weather for a city."""
     return f"Weather in {city}: 22°C, partly cloudy."
 
-def calculate(expression: str) -> str:
-    """Evaluate a math expression safely."""
-    try:
-        return str(eval(expression, {"__builtins__": {}}, {}))
-    except Exception as e:
-        return f"Error: {e}"
+# Arithmetic: use the prebuilt safe_calculator. Never pass model output to eval(),
+# even with empty builtins: it can be escaped, and 9**9**9 hangs the process.
 ```
 
 ## Create a ToolNode
@@ -63,7 +61,7 @@ def calculate(expression: str) -> str:
 Group tools in a `ToolNode`. Each function's `__name__` becomes the tool name the LLM uses. The node runs all tools in parallel when the LLM requests several at once.
 
 ```python
-tool_node = ToolNode([get_weather, calculate])
+tool_node = ToolNode([get_weather, safe_calculator])
 ```
 
 ## Create an Agent node
@@ -271,20 +269,16 @@ Here is a working agent that can check weather and do math:
 ```python
 from tenxgraph.core.graph import StateGraph, Agent, ToolNode
 from tenxgraph.core.state import AgentState, Message
+from tenxgraph.prebuilt.tools import safe_calculator
 from tenxgraph.utils import END
 
 def get_weather(city: str) -> str:
     """Get the weather for a city."""
     return f"Weather in {city}: 22°C, sunny."
 
-def calculate(expression: str) -> str:
-    """Evaluate a math expression."""
-    try:
-        return str(eval(expression, {"__builtins__": {}}, {}))
-    except Exception as e:
-        return f"Error: {e}"
-
-tool_node = ToolNode([get_weather, calculate])
+# Arithmetic: use the prebuilt safe_calculator. Never pass model output to eval(),
+# even with empty builtins: it can be escaped, and 9**9**9 hangs the process.
+tool_node = ToolNode([get_weather, safe_calculator])
 
 agent = Agent(
     model="gemini-2.5-flash",
@@ -318,6 +312,10 @@ for msg in result["messages"]:
 ```
 
 The output includes the assistant's tool call turn, the tool results (`Weather in Tokyo: 22°C, sunny.` and `5000`) and a final assistant answer. Exact wording depends on the model.
+
+## Run it in production
+
+Serve this graph with `10xgraph dev` while you build, then ship the image from `10xgraph build`. The server loads the compiled `app` once at startup and adds auth, request limits and error handling around it, so you do not write them in the graph. Start at [Production readiness](/docs/production) and [Run the server](/docs/server/run-the-server).
 
 ## Next steps
 

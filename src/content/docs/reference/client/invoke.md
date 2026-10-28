@@ -6,12 +6,12 @@ section: Reference
 group: "TypeScript client"
 order: 490
 label: "invoke()"
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "When should I use invoke() instead of stream()?"
     a: "Use invoke() when you need the complete answer before updating your UI or returning from a function. Use stream() when you want tokens or messages as they are produced."
   - q: "How do I continue a conversation across invoke() calls?"
-    a: "Pass the same thread_id at the top level of the config option on every call. You can read the id used by the server from result.meta.thread_id."
+    a: "Omit thread_id on the first call. The server starts a thread and returns its id in result.meta.thread_id. Pass that id at the top level of the config option on later calls."
   - q: "Why does invoke() make more than one HTTP request?"
     a: "When the agent asks for a remote tool, the client runs your registered handler locally and sends the result back in a new request. This repeats until no remote tool calls remain or recursion_limit is reached."
 ---
@@ -34,6 +34,9 @@ invoke(
     initial_state?: Record<string, any>;
     config?: Record<string, any>;
     recursion_limit?: number;
+    on_busy?: 'wait' | 'cancel';
+    resume?: unknown;
+    interrupt_id?: string;
     response_granularity?: 'full' | 'partial' | 'low';
     onPartialResult?: InvokeCallback;
   }
@@ -63,8 +66,11 @@ All options are optional. The defaults below are the values the client applies w
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `initial_state` | `Record<string, any>` | none | State values to seed the graph. Sent only on the first request of a call, not on the follow-up requests that return tool results. |
-| `config` | `Record<string, any>` | none | Run configuration. Put `thread_id` at the top level of this object to keep and checkpoint a conversation. |
+| `config` | `Record<string, any>` | none | Run configuration. Put `thread_id` at the top level of this object to continue an existing thread. Omit it to start a new one. |
 | `recursion_limit` | `number` | `25` | Maximum number of requests the client makes in one `invoke()` call. The server accepts values from 1 to 100. |
+| `on_busy` | `'wait' \| 'cancel'` | server default (`'wait'`) | What the server does when another run is active on the same thread. `'wait'` queues behind it for up to 30 seconds, then fails with `ConflictError`. `'cancel'` stops the running run and starts this one. Needs a `10xgraph-api` version that supports it. |
+| `resume` | `unknown` | none | The answer to an `interrupt()` pause on the thread (any JSON value, `null` to cancel). Pass an empty `messages` array with it. |
+| `interrupt_id` | `string` | none | The id of the interrupt `resume` answers. The client does not track ids: pass the one you got from the server (`execution_meta.interrupt_data.interrupt.id` in the thread state, or the `interrupt` object of the `interrupted` update). A mismatch fails with `ConflictError`. |
 | `response_granularity` | `'full' \| 'partial' \| 'low'` | `'full'` | How much data the server returns per request. See [Response granularity](#response-granularity). |
 | `onPartialResult` | `InvokeCallback` | none | Called after every request with that iteration's results. |
 
@@ -88,10 +94,8 @@ All options are optional. The defaults below are the values the client applies w
 Use `meta.thread_id` to continue a conversation in a later call:
 
 ```ts
-// First turn: the thread is created with the id you choose
-const first = await client.invoke([Message.text_message('Hi')], {
-  config: { thread_id: 'conv-001' },
-});
+// First turn: no thread_id, so the server starts a thread and picks its id
+const first = await client.invoke([Message.text_message('Hi')]);
 
 // Second turn: reuse the id reported by the server
 const followUp = await client.invoke([Message.text_message('Tell me more')], {
@@ -153,7 +157,19 @@ The client resolves remote tool calls for you. When a response contains a `remot
 3. The tool result messages are added to `all_messages` and posted to the same endpoint as the next request.
 4. Steps 2 and 3 repeat until a response has no remote tool calls or `recursion_limit` is reached.
 
-Only the first request carries `initial_state`. See [Register remote tools](/docs/client/remote-tools) for how to register handlers.
+Only the first request carries `initial_state`. `resume` and `interrupt_id` are sent on the first request of a call only, not on the follow-up requests that return tool results. `on_busy` is sent on every request.
+
+Resume a paused thread like this:
+
+```ts
+const result = await client.invoke([], {
+  config: { thread_id: 'order-42' },
+  resume: { approved: true },
+  interrupt_id: 'int_abc123',
+});
+```
+
+ See [Register remote tools](/docs/client/remote-tools) for how to register handlers.
 
 ## InvokeRequest
 
@@ -165,6 +181,9 @@ interface InvokeRequest {
   initial_state?: Record<string, any>;
   config?: Record<string, any>;
   recursion_limit?: number;
+  on_busy?: 'wait' | 'cancel';
+  resume?: unknown;
+  interrupt_id?: string;
   response_granularity?: 'full' | 'partial' | 'low';
 }
 ```
@@ -193,19 +212,20 @@ console.log(result.messages[0].content[0]);
 
 ### Chat on a persistent thread
 
-Reusing one `thread_id` makes the server load the saved state, so the agent remembers earlier turns. This needs a checkpointer on the server.
+Reusing one `thread_id` makes the server load the saved state, so the agent remembers earlier turns. This needs a checkpointer on the server. Do not invent the id: the first call omits it and the server returns it. By default the server answers `403` for an id that does not exist.
 
 ```ts
 import { TenxGraphClient, Message } from '10xgraph-client';
 
 const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
-const THREAD_ID = 'user-123-session-456';
+let threadId: string | undefined; // set from the first response
 
 async function chat(userInput: string): Promise<string> {
   const result = await client.invoke([Message.text_message(userInput)], {
-    config: { thread_id: THREAD_ID },
+    config: threadId ? { thread_id: threadId } : undefined,
     response_granularity: 'low', // messages only
   });
+  threadId = result.meta.thread_id;
 
   // Pick the assistant's text block out of the returned messages
   const assistantMsg = result.messages.find((m) => m.role === 'assistant');
@@ -219,12 +239,11 @@ console.log(await chat('What did I just say?')); // sees the previous turn
 
 ### Seed the graph with initial state
 
-`initial_state` sets state keys before the run. Use keys that exist in your graph's state schema.
+`initial_state` sets state keys before the run. Use keys that exist in your graph's state schema. The server answers 422 for `context_summary`, `execution_meta`, an unknown `current_node`, or a value of the wrong type. Do not put identity such as a user ID in state and trust it on the server, because any client can set it.
 
 ```ts
 const result = await client.invoke([Message.text_message('Continue where we left off')], {
   initial_state: { user_preferences: { language: 'en', theme: 'dark' } },
-  config: { thread_id: 'thread-789' },
 });
 ```
 
@@ -236,6 +255,7 @@ A non-2xx response throws a subclass of `TenxGraphError`, chosen by status code.
 |---|---|---|
 | `AuthenticationError` (401) | Missing or invalid credentials. | Set `authToken` or `auth` in the client config. |
 | `ValidationError` (422) | The server rejected the payload, for example an empty `messages` array. | Send at least one message and check `config`. |
+| `ConflictError` (409) | The thread is busy with another run (after the server waited 30 seconds), or `interrupt_id` does not match the open interrupt. | Wait and send again, set `on_busy: 'cancel'`, or fetch the current interrupt id. The client never retries it. |
 | `ServerError` (500, 502, 503, 504) | The graph failed or the server is unavailable. | Check the server logs, then retry. |
 | `Error: Request timeout after <n>ms` | One request exceeded the client `timeout` (default 300000 ms). | Raise `timeout` in the client config or shorten the graph. |
 | `recursion_limit_reached: true` | The loop used all allowed iterations. | Raise `recursion_limit` (maximum 100), or check that tools return and do not loop. |

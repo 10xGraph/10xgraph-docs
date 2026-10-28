@@ -6,7 +6,7 @@ section: Reference
 group: TypeScript client
 order: 500
 label: stream()
-updated: '2026-10-08'
+updated: "2026-10-27"
 ---
 
 `client.stream()` sends a list of messages to the agent graph and returns an `AsyncGenerator` that yields `StreamChunk` objects as the server produces them. Use it to show incremental output (token by token, update by update) instead of waiting for the full response. For a single final result, use `invoke()`.
@@ -44,8 +44,11 @@ Same as [`invoke()`](/docs/reference/client/invoke#parameters). An array of `Mes
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `initial_state` | `Record<string, any>` | `undefined` | Initial state values to seed the graph. |
-| `config` | `Record<string, any>` | `undefined` | Run config. Set `thread_id` at the top level of this object for persistent state. |
+| `config` | `Record<string, any>` | `undefined` | Run config. Set `thread_id` at the top level of this object to continue an existing thread. Omit it to start a new one; the server picks the id and sends it on each chunk as `thread_id`. |
 | `recursion_limit` | `number` | `25` | Maximum recursion depth for the graph. |
+| `on_busy` | `'wait' \| 'cancel'` | server default (`'wait'`) | What the server does when another run is active on the same thread. `'wait'` queues behind it for up to 30 seconds, then fails with `ConflictError`. `'cancel'` stops the running run and starts this one. |
+| `resume` | `unknown` | none | The answer to an `interrupt()` pause on the thread (any JSON value, `null` to cancel). Pass an empty `messages` array with it. |
+| `interrupt_id` | `string` | none | The id of the interrupt `resume` answers. The client does not track ids: pass the one you got from the server (`execution_meta.interrupt_data.interrupt.id` in the thread state, or the `interrupt` object of the `interrupted` update). A mismatch fails with `ConflictError`. |
 | `response_granularity` | `'full' \| 'partial' \| 'low'` | `'low'` | How much data the server returns: `'full'` is state plus latest messages, `'partial'` is context, summary and latest messages, `'low'` is latest messages only. Streaming defaults to `'low'`, unlike `invoke()` which defaults to `'full'`. |
 
 ---
@@ -120,7 +123,6 @@ console.log('\n--- Stream complete ---');
 const stream = client.stream(
   [Message.text_message('Analyse this dataset.')],
   {
-    config: { thread_id: 'analysis-001' },
     response_granularity: 'full',
   }
 );
@@ -215,14 +217,12 @@ async function streamToString(messages: Message[]): Promise<string> {
 Breaking out of the loop stops reading locally, but the server keeps running the graph until you call `stopGraph()` with the thread ID:
 
 ```ts
-const threadId = 'story-001';
-const stream = client.stream(
-  [Message.text_message('Tell me a very long story')],
-  { config: { thread_id: threadId } }
-);
+const stream = client.stream([Message.text_message('Tell me a very long story')]);
+let threadId: string | undefined; // the server picks it and sends it on each chunk
 let wordCount = 0;
 
 for await (const chunk of stream) {
+  if (chunk.thread_id) threadId = chunk.thread_id;
   if (chunk.event === StreamEventType.MESSAGE && chunk.message) {
     const textBlock = chunk.message.content.find(b => b.type === 'text');
     if (textBlock && 'text' in textBlock) {
@@ -232,7 +232,7 @@ for await (const chunk of stream) {
 
   if (wordCount > 500) {
     // Request a server-side stop, then stop iterating locally
-    await client.stopGraph(threadId);
+    if (threadId) await client.stopGraph(threadId);
     break;
   }
 }
@@ -250,6 +250,9 @@ interface StreamRequest {
   initial_state?: Record<string, any>;
   config?: Record<string, any>;
   recursion_limit?: number;       // default 25
+  on_busy?: 'wait' | 'cancel';
+  resume?: unknown;
+  interrupt_id?: string;
   response_granularity?: 'full' | 'partial' | 'low';
 }
 ```
@@ -305,7 +308,8 @@ curl --no-buffer -X POST http://localhost:8000/v1/graph/stream \
 | `TenxGraphError` status `401` | Missing or invalid auth. | Set `auth` in the client config. See [auth](/docs/reference/client/auth). |
 | `Request timeout after Nms` | The connection exceeded the client `timeout`. | Raise `timeout` in the client config or retry. |
 | Stream stops mid-response | Server timeout or network issue. | Wrap the `for await` loop in try/catch and retry. |
-| `event: 'error'` chunks | Graph execution error. | Read `chunk.data` for the error message and check server logs. |
+| `ConflictError` (409) | The thread is busy with another run, or `interrupt_id` does not match the open interrupt. Thrown before any chunk arrives. | Wait and retry, set `on_busy: 'cancel'`, or fetch the current interrupt id. |
+| `event: 'error'` chunks | Graph execution error. | Read `chunk.data` for the error message and check server logs. In production the message is generic. |
 
 ---
 

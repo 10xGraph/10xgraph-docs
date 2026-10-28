@@ -5,7 +5,7 @@ group: "Errors"
 section: Reference
 order: 570
 label: Error Codes
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Which 10xGraph errors can I retry?"
     a: "TransientStorageError (STORAGE_TRANSIENT_000) is retryable with backoff. StaleStateError (STORAGE_CONFLICT_000) is retryable after you reload the latest state. NodeTimeoutError is sometimes retryable, depending on whether the hang was transient."
@@ -34,6 +34,8 @@ graph TD
     GraphError --> NodeError
     NodeError --> NodeTimeoutError
     GraphError --> GraphRecursionError
+    GraphError --> InterruptMismatchError
+    GraphError --> ResumeValidationError
 
     StorageError --> TransientStorageError
     StorageError --> SerializationError
@@ -53,10 +55,12 @@ from tenxgraph.core.exceptions import (
     GraphError,
     GraphRecursionError,
     GraphStopRequested,
+    InterruptMismatchError,
     MetricsError,
     NodeError,
     NodeTimeoutError,
     ResourceNotFoundError,
+    ResumeValidationError,
     SchemaVersionError,
     SerializationError,
     StaleStateError,
@@ -77,6 +81,8 @@ Use this table to find an exception by its code prefix. Codes ending in `_000` a
 | `NODE_000` | `NodeError` | Depends on cause | 500 |
 | `NODE_TIMEOUT_000` | `NodeTimeoutError` | Sometimes | 500 |
 | `RECURSION_000` | `GraphRecursionError` | No, needs a config change | 500 |
+| `INTERRUPT_001` | `InterruptMismatchError` | No, send the current interrupt id | 409 |
+| `INTERRUPT_002` | `ResumeValidationError` | No, send an answer that fits the schema | 422 |
 | `STORAGE_000` | `StorageError` | No | 500 |
 | `STORAGE_TRANSIENT_000` | `TransientStorageError` | Yes, with backoff | 503 |
 | `STORAGE_SERIALIZATION_000` | `SerializationError` | No | 500 |
@@ -200,6 +206,16 @@ Fix: reload the latest state and retry the turn rather than overwriting blindly.
 
 `MetricsError` (`METRICS_000`) reports a failed metrics emission. It is not retryable and is non-critical: a metrics failure should not interrupt a run.
 
+## Resume errors
+
+Both errors come from resuming a thread paused by `interrupt()`. Each is also a `ValueError`, and nothing is recorded when either is raised.
+
+`InterruptMismatchError` (`INTERRUPT_001`): the resume input carried `resume_interrupt_id`, and it is not the id of the pending interrupt. Typical causes are a stale tab or a retried request after the first answer was consumed. The `context` has `expected` and `received`. Fix: read the pending interrupt again and send its id.
+
+`ResumeValidationError` (`INTERRUPT_002`): the resume value fails the interrupt's `response_schema`. The `context` has `interrupt_id` and `errors`. Only `type`, `enum`, `properties`, `required` and `items` are checked. Fix: send a value that fits the schema. A `None` resume is never checked.
+
+The API server returns 409 for the first and 422 for the second. See [Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt).
+
 ## Control flow signals
 
 `GraphStopRequested` is not a failure. It is raised inside a node when a stop is requested mid-run. The execution loop catches it, marks the run stopped, persists that, and returns normally. It has no error code and one attribute, `node_name`, the node that was running when the stop arrived.
@@ -281,6 +297,9 @@ Start from what you see and jump to the code that explains it.
 | Checkpoint fails to encode or decode | `STORAGE_SERIALIZATION_000` | Keep state to JSON-serializable types |
 | Errors after upgrading the package | `STORAGE_SCHEMA_000` | Migrate the database |
 | Concurrent writes to one thread fail | `STORAGE_CONFLICT_000` | Reload state and retry |
+| Resume rejected with a wrong-interrupt message | `INTERRUPT_001` | Read the pending interrupt and send its id |
+| Resume rejected for the answer's shape | `INTERRUPT_002` | Send a value that matches `response_schema` |
+| `409 thread is busy` from the API server | none (not a core error) | Wait for the running run, or send `on_busy: "cancel"` |
 | User input rejected | `ValidationError` | Inspect `violation_type`, tune the validator |
 | Media input rejected | `UnsupportedMediaInputError` | Use a model that supports the media type |
 | A tool or node raised | `NODE_000` | Read the tool error in the logs, test the tool alone |
@@ -306,6 +325,14 @@ The server maps exceptions to responses in `tenxgraph_api/src/app/core/exception
 | `ValidationError` (input validators), `SchemaVersionError` | 422 |
 | `GraphError`, `NodeError`, `GraphRecursionError`, `StorageError` (including `StaleStateError`, `ResourceNotFoundError`), `SerializationError`, `MetricsError` | 500 |
 | `TransientStorageError` | 503 |
+| `InterruptMismatchError` and a resume `interrupt_id` that does not match | 409 |
+| `ResumeValidationError` | 422 |
+
+A `429` is not a core exception either. The server returns it when the `rate_limit` window is used up (`error.code` `RATE_LIMIT_EXCEEDED`, with a `Retry-After` header) or when one user has more than `runs.max_concurrent_per_user` runs in flight (standard body, code `HTTPException`, no `Retry-After`).
+
+In production the message of a 5xx response is replaced by a generic text and the real error goes to the server log. Messages of 4xx `HTTPException` errors are kept. Handled 4xx errors are logged at `WARNING` with no traceback, and 5xx errors at `ERROR` with the traceback, so alert rules for 4xx traffic must match `WARNING` (API changelog, Unreleased after 0.9.0). A missing checkpointer answers `503` (`Checkpointer is not configured`), a thread state update with a bad `context` answers `422`, and a message id missing from a thread answers `404`.
+
+A `409` with the message `thread is busy` is not a core exception. The server returns it when another run is still active on the thread after 30 seconds. It uses the standard error body (`error.code` `HTTPException`), not the `state_conflict` shape.
 
 ## Structured error responses
 

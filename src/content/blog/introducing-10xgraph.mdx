@@ -3,7 +3,7 @@ title: Agentflow is now 10xGraph
 seoTitle: "Agentflow is now 10xGraph: what changes"
 description: Agentflow is now 10xGraph. Why we renamed it, what the framework is, what stays the same in your code, what changes in package names, and the honest gaps.
 date: 2026-10-03
-updated: 2026-10-10
+updated: 2026-10-27
 author: Shudipto Trafder
 kind: news
 tags: [announcement, rename]
@@ -19,13 +19,15 @@ You write a Python agent as a graph of nodes and tools. From the same install yo
 
 ## The five pillars
 
-1. **The production server ships in the box.** The API server, auth, rate limits and deployment files come with the framework under the MIT license, not as a separate product. See [Serving agents](/docs/concepts/serving-agents) and [Production runtime](/docs/concepts/serving-agents).
+1. **The production server ships in the box.** The API server, auth, rate limits and deployment files come with the framework under the MIT license, not as a separate product. See [Serving agents](/docs/concepts/serving-agents) and [Production runtime](/docs/production).
 2. **Correct under failure.** Tool calls are replay-safe: if a process dies mid-run, a tool that already finished is not executed again, so a resumed run does not charge a card twice. Durable writes are versioned, and nodes and tools have real timeouts. Read [Replay-safe tools](/docs/concepts/replay-safe-tools) and the engineering post [Your agent charged the card twice](/blog/your-agent-charged-the-card-twice).
 3. **Built to scale.** Active thread state is cached in Redis for fast reads, while full history lives in PostgreSQL. Events can be published to Kafka, Redis Pub/Sub, RabbitMQ or OpenTelemetry. See [Checkpointing and threads](/docs/concepts/checkpointing-and-threads) and [Memory and store](/docs/concepts/memory-and-store).
 4. **One stack, from backend to frontend.** A typed TypeScript client covers invoke, stream, threads, memory and files, and tools can run in the user's browser. See [Connecting clients](/docs/client) and [Remote tools](/docs/concepts/remote-tools).
 5. **You own it.** MIT licensed, self-hosted, and not tied to one model vendor. It works with OpenAI, Google Gemini, Anthropic and any OpenAI-compatible endpoint. See [Providers](/docs/integrations/models).
 
 Graph orchestration, tool-calling loops, MCP and streaming are in there too, but every serious framework has those. The pillars above are why you would pick this one.
+
+**Since then:** the hardening that followed the rename is written up in [What production-ready means in 10xGraph](/blog/what-production-ready-means-in-10xgraph), and the full list of defaults is in [Production readiness](/docs/production).
 
 ## What stays the same
 

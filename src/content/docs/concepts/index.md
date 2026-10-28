@@ -3,7 +3,7 @@ title: Concepts
 description: Understand how 10xGraph works, from its three-layer architecture to request flow, the execution model, and production patterns.
 section: Concepts
 order: 1
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Do I need the API server and TypeScript client to use 10xGraph?"
     a: "No. The Python library works on its own, so you can run a compiled graph in a script or embed it in your own app. Add the API server to serve it over HTTP and the client to call it from a frontend."
@@ -11,7 +11,7 @@ faq:
     a: "A node is a function that does work and returns a message or state update. An edge connects two nodes and decides which one runs next, either always (static) or based on the state (conditional)."
 ---
 
-The Concepts section explains how 10xGraph works: the three-layer architecture (library, server, client), how a request flows from client through the server to your graph, the execution model (state, messages, nodes, edges), and advanced patterns for memory, reliability, and production deployments. Read this section to understand the mental model before building.
+The Concepts section explains how 10xGraph works: the three-layer architecture (library, server, client), how a request flows from client through the server to your graph, the execution model (state, messages, nodes, edges), and advanced patterns for memory, reliability, and production deployments. Read this section to understand the mental model before building. To see what the server adds once your agent is built (auth, limits, durability, scaling), go to [Production](/docs/production).
 
 ## Why graphs?
 
@@ -58,7 +58,7 @@ Python code imports from `tenxgraph`, for example `from tenxgraph.core.graph imp
 
 When you call an agent over HTTP, here is what happens:
 
-1. **Client sends a request** (TypeScript SDK or curl) to `POST /v1/graph/invoke` with `messages` and a `config` that carries the `thread_id`.
+1. **Client sends a request** (TypeScript SDK or curl) to `POST /v1/graph/invoke` with `messages` and, to continue a conversation, a `config` that carries the `thread_id`. A new conversation omits it, and the server picks and returns the id.
 2. **API server verifies auth** via JWT or custom auth middleware.
 3. **Server loads the graph** from the module path in `10xgraph.json`, then loads the thread state (if resuming) or starts fresh.
 4. **Server calls the compiled graph** with the input state and config.
@@ -267,7 +267,7 @@ Production patterns: serving agents over HTTP, auth, observability, media handli
 
 1. **First read** (15 min): [StateGraph](/docs/concepts/state-graph) to see how the workflow engine chains nodes.
 2. **Then read** (30 min): [State and messages](/docs/concepts/state-and-messages), [Agents and tools](/docs/concepts/agents-and-tools), and [Streaming](/docs/concepts/streaming) to understand the execution model and granularity.
-3. **Go build** in the [Get started](/docs/get-started) section. Build a graph in Python, serve it with `10xgraph api`, and call it from TypeScript. The tutorial is more hands-on.
+3. **Go build** in the [Get started](/docs/get-started) section. Build a graph in Python, serve it with `10xgraph dev`, and call it from TypeScript. The tutorial is more hands-on.
 4. **Return here** to dive deeper: checkpointing, memory, context management, error handling, auth, observability.
 
 ## Next steps

@@ -5,16 +5,16 @@ section: Integrations
 group: Frameworks
 order: 60
 label: with FastAPI
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
-`10xgraph api` is the fastest path from a compiled graph to an HTTP endpoint. But many production teams already run a FastAPI service with auth, middleware, and routes they cannot rewrite. Embedding 10xGraph directly into that service lets you share business logic, authentication, and database connections without HTTP hops.
+`10xgraph-api` is the fastest path from a compiled graph to an HTTP endpoint (`10xgraph dev` locally, the image from `10xgraph build` in production). But many production teams already run a FastAPI service with auth, middleware, and routes they cannot rewrite. Embedding 10xGraph directly into that service lets you share business logic, authentication, and database connections without HTTP hops.
 
 This guide covers both approaches, how to stream responses, manage resources with FastAPI lifespan, and test your embedded routes.
 
 ## Two approaches
 
-**1. Run `10xgraph api` as a separate service.** Your FastAPI app proxies to it. Cleanest separation, independent scaling, separate deployments. One extra network hop. Best for most teams.
+**1. Run the `10xgraph-api` server as a separate service.** Your FastAPI app proxies to it. Cleanest separation, independent scaling, separate deployments. One extra network hop. Best for most teams.
 
 **2. Embed the graph directly in your FastAPI app.** Call the compiled graph from your routes. Fewer hops, zero network latency, shared Python objects (databases, ML models). More code, tighter coupling. Best when you have shared business logic.
 
@@ -35,7 +35,7 @@ services:
   agent:
     image: my-agent:latest
     ports: ["8001:8001"]
-    command: 10xgraph api --host 0.0.0.0 --port 8001
+    command: gunicorn -k uvicorn_worker.UvicornWorker -b 0.0.0.0:8001 tenxgraph_api.src.app.main:app
 ```
 
 Your FastAPI app proxies requests to the agent service:
@@ -362,7 +362,7 @@ class TestAuth(BaseAuth):
         return {"user_id": user_id, "email": f"{user_id}@test.local"}
 ```
 
-This is for the sidecar setup, where `10xgraph api` runs the auth class named in `10xgraph.json`. `authenticate` must return a dict with a `user_id` key (or raise on failure); the returned keys are merged into the graph config.
+This is for the sidecar setup, where the `10xgraph-api` server runs the auth class named in `10xgraph.json`. `authenticate` must return a dict with a `user_id` key (or raise on failure); the returned keys are merged into the graph config.
 
 ## Dependency injection and shared state
 
@@ -413,7 +413,7 @@ See [dependency injection guide](/docs/guides/use-dependency-injection) for the 
 
 ## Further reading
 
-- [Run the API server](/docs/server/run-the-server): `10xgraph api` as a standalone service
+- [Run the API server](/docs/server/run-the-server): the `10xgraph-api` server as a standalone service
 - [Configure the server](/docs/server/configure): `10xgraph.json` options
 - [Streaming concepts](/docs/concepts/streaming): transports, granularity, and event model
 - [Dependency injection](/docs/guides/use-dependency-injection): injectable parameters and InjectQ

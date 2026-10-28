@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 460
 label: "TenxGraphClient"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 `TenxGraphClient` is the main class of the `10xgraph-client` package. It wraps the 10xGraph REST and WebSocket endpoints in one typed object, so a TypeScript or JavaScript app can invoke, stream, manage threads, use memory and files, and run client-side tools without writing fetch code.
@@ -52,7 +52,7 @@ new TenxGraphClient(config: TenxGraphConfig)
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Auth on WebSocket routes</p>
 
-`wsStream()` and `realtime()` send only a bearer token, as the `agentflow-bearer` WebSocket subprotocol (never in the URL). `auth` takes precedence over `authToken`, as for HTTP. If `auth` is `basic` or `header`, no bearer token is sent on the socket, so use a bearer token for these methods.
+`wsStream()` and `realtime()` send only a bearer token, as the `10xgraph-bearer` WebSocket subprotocol (never in the URL). `auth` takes precedence over `authToken`, as for HTTP. If `auth` is `basic` or `header`, no bearer token is sent on the socket, so use a bearer token for these methods.
 
 </aside>
 
@@ -85,7 +85,7 @@ console.log((await client.ping()).data); // server pong string
 | `graph()` | `Promise<GraphResponse>` | Fetch graph metadata including `id_type`, `id_generator`, and state schema information. |
 | `graphStateSchema()` | `Promise<StateSchemaResponse>` | Fetch the schema of the graph's state type. |
 | `stopGraph(threadId, config?)` | `Promise<StopGraphResponse>` | Interrupt a running graph execution for `threadId`. |
-| `fixGraph(threadId, config?)` | `Promise<FixGraphResponse>` | Remove incomplete tool-call messages from a thread's state (useful after an interrupted run). |
+| `fixGraph(threadId, config?)` | `Promise<FixGraphResponse>` | Remove assistant messages whose tool calls have no result, and orphaned tool results, from a thread's state (useful after an interrupted run). |
 | `graphTools()` | `Promise<GraphToolsResponse>` | List the tools every tool node exposes, grouped by node, each tagged `local`, `mcp`, or `remote`. |
 | `observability(threadId, runId?)` | `Promise<ObservabilityResponse>` | Fetch the reconstructed trace (spans, events, token usage) for a thread's latest run, or a specific `runId`. |
 
@@ -115,7 +115,8 @@ See [Graph](/docs/reference/client/graph) for full details on the graph-control 
 | `updateThreadState(threadId, config, state)` | `Promise<UpdateThreadStateResponse>` | Write a new state snapshot for a thread. |
 | `clearThreadState(threadId)` | `Promise<ClearThreadStateResponse>` | Delete all checkpointed state for a thread. |
 | `threadMessages(threadId, request?)` | `Promise<ThreadMessagesResponse>` | List messages in a thread with optional search and pagination. |
-| `addThreadMessages(threadId, messages, config?, metadata?)` | `Promise<AddThreadMessagesResponse>` | Append messages to a thread's history. |
+| `addThreadMessages(threadId, messages, config?, metadata?)` | `Promise<AddThreadMessagesResponse>` | Deprecated. Append messages to a thread's history. Needs the admin scope `checkpointer:import`. |
+| `updateThreadMessageFeedback(threadId, messageId, feedback)` | `Promise<UpdateThreadMessageFeedbackResponse>` | Set `metadata.feedback` on a message. |
 | `singleMessage(threadId, messageId)` | `Promise<ThreadMessageResponse>` | Fetch a single message by ID. |
 | `deleteMessage(threadId, messageId, config?)` | `Promise<DeleteThreadMessageResponse>` | Delete a message by ID. |
 | `deleteThread(threadId, config?)` | `Promise<DeleteThreadResponse>` | Delete a thread and all its state and messages. |
@@ -143,6 +144,7 @@ See [Memory](/docs/reference/client/memory) for full details.
 | `uploadFile(file)` | `Promise<FileUploadResponse>` | Upload an image, audio, or document file. Returns `file_id` and access URL. |
 | `getFile(fileId)` | `Promise<Blob>` | Download a file by ID as a raw `Blob`. |
 | `getFileInfo(fileId)` | `Promise<FileInfoResponse>` | Fetch metadata (MIME type, size, extracted text) for a stored file. |
+| `deleteFile(fileId)` | `Promise<DeleteFileResponse>` | Delete a file you uploaded. Needs the `files:delete` scope; 404 for a missing file or someone else's. |
 | `getFileAccessUrl(fileId)` | `Promise<FileAccessUrlResponse>` | Get the best access URL for a file (signed URL for cloud storage, or a direct API URL). |
 | `getMultimodalConfig()` | `Promise<MultimodalConfigResponse>` | Fetch the server's multimodal configuration (storage backend, max size, etc.). |
 

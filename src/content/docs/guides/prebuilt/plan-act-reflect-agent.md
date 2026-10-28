@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Prebuilt agents"
 order: 100
 label: PlanActReflectAgent
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 PlanActReflectAgent is a self-improving agent that breaks tasks into steps, executes them, then explicitly evaluates whether the work is complete. If not, it iterates. This pattern solves a common problem in agent workflows: standard ReAct loops can get stuck or produce incomplete answers because they lack a clear evaluation step. By adding a dedicated critic that inspects all work and decides whether to continue or stop, this agent achieves higher task completion rates on complex assignments like research, analysis, and planning.
@@ -68,7 +68,7 @@ Three separate `Agent` instances execute inside the graph, each with its own sys
 
 **At REFLECT:** Two exit conditions:
 1. The reflector's output contains `[DONE]` (case-insensitive): signals successful completion.
-2. The iteration counter reaches `max_iterations`: hard cap to prevent runaway loops.
+2. The iteration counter reaches `max_iterations` for the current turn: hard cap to prevent runaway loops.
 
 If neither condition is met, the counter increments and the graph loops back to PLAN.
 
@@ -117,7 +117,7 @@ app = agent.compile()
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `tools` | `Iterable[Callable]` | `None` | Callables made available to the planner. If empty or `None`, the agent skips the ACT phase and performs pure reasoning. Tools run in parallel when the planner requests multiple at once. |
-| `max_iterations` | `int` | `3` | Maximum plan→act→reflect cycles. Prevents runaway loops. Reaching this limit terminates the graph immediately. |
+| `max_iterations` | `int` | `3` | Maximum plan→act→reflect cycles per turn. Prevents runaway loops. Reaching this limit terminates the graph immediately. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
 | `plan_system_prompt` | `list[dict]` | built-in | Override the planner's system message. Pass a list of role/content dicts (e.g., `[{"role": "system", "content": "..."}]`). |
 | `reflect_system_prompt` | `list[dict]` | built-in | Override the reflector's system message. Same format as `plan_system_prompt`. |
 | `plan_model` | `str` | `None` | Use a different model for the planner (e.g., more capable). Falls back to `model` if not set. |
@@ -368,7 +368,6 @@ app = agent.compile()
   "agent": "graph:app",
   "env": ".env",
   "auth": null,
-  "checkpointer": null,
   "injectq": null,
   "store": null,
   "redis": null,
@@ -386,13 +385,13 @@ GOOGLE_API_KEY=AIza...
 **Launch the playground** to test interactively:
 
 ```bash
-10xgraph play
+10xgraph dev
 ```
 
 **Launch the API server** to serve the agent over HTTP:
 
 ```bash
-10xgraph api
+10xgraph dev --no-open
 ```
 
 The server opens Swagger docs at `http://localhost:8000/docs` with full route reference.
@@ -461,6 +460,10 @@ result = await app.ainvoke(
 ```
 
 ---
+
+## Run it in production
+
+`max_iterations` counts one turn and resets when the next turn starts, so cost per request stays bounded on a long-lived thread. Serve it with a durable checkpointer passed to `compile()`. See [Errors and limits](/docs/concepts/errors-and-limits) and [Scaling and reliability](/docs/production/scaling).
 
 ## See also
 

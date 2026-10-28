@@ -5,7 +5,7 @@ section: "Build agents"
 group: "State, memory and context"
 order: 241
 label: "Durability and concurrency"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 When you run multi-turn agents in production, multiple executions may touch the same thread from different servers or clients. 10xGraph protects your data and prevents lost updates through thread isolation, versioned state, and idempotent tool execution. This guide covers the guarantees that PgCheckpointer provides and how to handle concurrency conflicts.
@@ -255,3 +255,7 @@ async def handle_request(user_id: str, thread_id: str, message: str):
 - **Per-step checkpoints**: default `True` for safety on long runs; set `durable_checkpoint_every_step=False` to reduce database load if needed.
 - **Tool idempotency**: completed tool calls are recorded in the ledger and not re-executed on replay, preventing duplicate side effects.
 - **Multi-instance deployment**: use thread isolation, optimistic concurrency, and the ledger to safely run multiple servers against one Postgres+Redis backend.
+
+## Run it in production
+
+The server returns `409` when a second run starts on a busy thread (or waits up to 30 seconds with `on_busy`), and `StaleStateError` surfaces as a conflict instead of a lost write. Run `PgCheckpointer` with the shared Postgres and Redis behind every worker, and back up Postgres. See [Scaling and reliability](/docs/production/scaling) and [Backup and restore](/docs/server/backup-and-restore).

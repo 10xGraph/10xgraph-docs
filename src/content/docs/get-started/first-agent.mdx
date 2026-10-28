@@ -4,21 +4,21 @@ seoTitle: "10xGraph quickstart: agent, API and TS client"
 description: Install 10xGraph, build a support agent in Python, serve it with the API server, then call it with curl and the TypeScript client.
 section: "Get started"
 order: 40
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Do I need ReactAgent, or should I write a StateGraph myself?
     a: Start with ReactAgent. It builds the standard reason-and-act graph for you (one agent node, one tool node, a conditional edge between them) and returns a normal compiled graph. Move to StateGraph when you need custom routing or several agents.
   - q: Can I use OpenAI or Anthropic instead of Google?
     a: Yes. Change the model string and the provider argument, and install the matching extra. The graph, the tools and the API server stay the same.
   - q: Which Node.js version does the TypeScript client need?
-    a: Node.js 18 or newer. Install the client with npm and point TenxGraphClient at the baseUrl of your running 10xgraph api server.
+    a: Node.js 18 or newer. Install the client with npm and point TenxGraphClient at the baseUrl of your running 10xgraph dev server.
   - q: How do I authenticate the TypeScript client?
     a: Pass an auth option to the TenxGraphClient constructor, for example bearerAuth("your-token"). The client also exports basicAuth(username, password) and headerAuth(name, value).
   - q: Why does the second curl call remember the first one?
     a: Both calls send the same thread_id, and the compiled graph has a checkpointer. The checkpointer stores the conversation per thread, so the next call on that thread continues it.
 ---
 
-To build your first 10xGraph agent, install the packages, define a ReactAgent with two tools, run it from Python, serve it with `10xgraph api`, and call it with curl and the TypeScript client. This page takes you through all of it with one support agent.
+To build your first 10xGraph agent, install the packages, define a ReactAgent with two tools, run it from Python, serve it with `10xgraph dev`, and call it with curl and the TypeScript client. This page takes you through all of it with one support agent.
 
 You need Python 3.12 or newer and an API key for your chosen model provider (Google, OpenAI, or Anthropic).
 
@@ -228,7 +228,7 @@ You will create two Python files: one that defines the agent, and one that runs 
 4. **Start the API server**
 
    ```bash
-   10xgraph api
+   10xgraph dev --no-open
    ```
 
    Expected output:
@@ -237,7 +237,7 @@ You will create two Python files: one that defines the agent, and one that runs 
    INFO: Uvicorn running on http://127.0.0.1:8000
    ```
 
-   The server listens on `127.0.0.1:8000` by default. Use `--host 0.0.0.0` to accept connections from other machines and `--port` to use a different port. The server needs the same provider API key in its environment, so run it from the shell where you exported the key.
+   The server listens on `127.0.0.1:8000` by default. Without `--no-open`, `10xgraph dev` also opens the hosted playground, and it reloads when your files change. Use `--host 0.0.0.0` to accept connections from other machines and `--port` to use a different port. The server needs the same provider API key in its environment, so run it from the shell where you exported the key.
 
 5. **Call the agent over HTTP**
 
@@ -252,8 +252,7 @@ You will create two Python files: one that defines the agent, and one that runs 
            "role": "user",
            "content": [{"type": "text", "text": "Where is order 1042?"}]
          }
-       ],
-       "config": {"thread_id": "quickstart-2"}
+       ]
      }'
    ```
 
@@ -269,7 +268,7 @@ You will create two Python files: one that defines the agent, and one that runs 
        "state": null,
        "context": null,
        "summary": null,
-       "meta": null
+       "meta": {"thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f", "is_new_thread": true}
      },
      "metadata": {
        "request_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -303,16 +302,14 @@ const client = new TenxGraphClient({
 });
 
 async function main() {
-  // Send one user message on thread quickstart-3
+  // Send one user message. With no thread_id, the server starts a new thread.
   const result = await client.invoke(
     [Message.text_message("Where is order 1042?")],
-    {
-      config: { thread_id: "quickstart-3" },
-      recursion_limit: 10,
-    }
+    { recursion_limit: 10 }
   );
 
   console.log(result.messages.at(-1)?.text());
+  console.log("Thread:", result.meta.thread_id); // keep it to continue the conversation
 }
 
 main();
@@ -337,8 +334,7 @@ const client = new TenxGraphClient({ baseUrl: "http://127.0.0.1:8000" });
 
 async function main() {
   const stream = client.stream(
-    [Message.text_message("Refund order 1042 for 59.00")],
-    { config: { thread_id: "quickstart-4" } }
+    [Message.text_message("Refund order 1042 for 59.00")]
   );
 
   // Print each message chunk as it arrives
@@ -376,7 +372,7 @@ When you call `/v1/graph/invoke`, you send a `GraphInputSchema` and get back a `
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `messages` | Message[] | `[]` | List of messages. Required unless `resume` is set. |
-| `config` | object | null | Run settings. `thread_id` selects which thread (conversation) to run. |
+| `config` | object | null | Run settings. `thread_id` continues an existing thread. Omit it to start a new one. |
 | `initial_state` | object | null | Initial values for custom state fields. |
 | `recursion_limit` | number | 25 | Maximum steps the graph can take. Allowed: 1 to 100. |
 | `response_granularity` | string | `low` | Response detail level: `low` (messages only), `partial` (messages, context and summary), or `full` (messages and full state). |
@@ -390,19 +386,19 @@ When you call `/v1/graph/invoke`, you send a `GraphInputSchema` and get back a `
 | `state` | object | Full state (only when `response_granularity` is `full`). |
 | `context` | Message[] | Context window (only when `response_granularity` is `partial`). |
 | `summary` | string | Conversation summary (only when `response_granularity` is `partial`). |
-| `meta` | object | Custom metadata from your agent. |
+| `meta` | object | Run metadata: `thread_id` (the thread the run used) and `is_new_thread`. |
 
 **Message format**: A message is an object with `role` (user, assistant, or tool) and `content` (a list of typed blocks). A text block is `{"type": "text", "text": "..."}`. Images, audio, and documents use other types (see [Send media](/docs/guides/send-media)).
 
-<Callout type="tip" title="Always send a thread_id">
+<Callout type="tip" title="Let the server pick the thread id">
 
-If you omit `thread_id` from `config`, the server creates a new thread for each request. The request works, but you cannot resume or stop that conversation later because nobody has its id. Always send one.
+Omit `thread_id` from `config` to start a new thread. The server picks the id and returns it in `data.meta.thread_id`, and on every chunk of a stream. Send that id on later requests to continue, resume or stop the conversation. By default the server refuses an id it did not create (`403`), so do not make one up. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 
 </Callout>
 
 <Callout type="note" title="InMemoryCheckpointer restarts with the server">
 
-`InMemoryCheckpointer` stores threads in the Python process and loses everything when the server stops. It is perfect for development and testing. For production or long-lived services, use a durable checkpointer like `SqliteCheckpointer` or `PgCheckpointer`. See [Memory: hot and cold](/docs/concepts/memory).
+`InMemoryCheckpointer` stores threads in the Python process and loses everything when the server stops. It is perfect for development and testing. For production or long-lived services, use a durable checkpointer like `SqliteCheckpointer` or `PgCheckpointer`. See [Set up checkpointing](/docs/guides/set-up-checkpointing).
 
 </Callout>
 
@@ -412,7 +408,18 @@ The `refund_order` tool moves money. If a run is interrupted and later resumed, 
 
 </Callout>
 
-## Next steps
+## Make it production ready
+
+The server you just ran is open: no auth, in-memory state. Close the gap before anyone else can reach it.
+
+<CardGrid>
+
+<LinkCard title="Security in five minutes" href="/docs/get-started/security-in-five-minutes" description="Turn on JWT, then watch the server refuse a missing token and a second user reading the first user's thread." eyebrow="Next" />
+<LinkCard title="Production readiness" href="/docs/production" description="What you get when you serve with 10xgraph-api, and what is still yours to configure." eyebrow="Production" />
+
+</CardGrid>
+
+## More to read
 
 You now have a working agent, API server, and TypeScript client. Here is what to read next:
 
@@ -422,7 +429,7 @@ You now have a working agent, API server, and TypeScript client. Here is what to
 <LinkCard title="Build a graph by hand" href="/docs/get-started/tutorial/build-a-graph" description="Create nodes and edges yourself to understand how ReactAgent works." eyebrow="Tutorial" />
 <LinkCard title="Create a client" href="/docs/client/create-client" description="Client configuration, authentication, and options." eyebrow="How-to" />
 <LinkCard title="Project structure" href="/docs/get-started/project-structure" description="What 10xgraph init generates for a production project." eyebrow="Get started" />
-<LinkCard title="Memory: hot and cold" href="/docs/concepts/memory" description="How to persist threads and choose a checkpointer." eyebrow="Concept" />
-<LinkCard title="Add JWT authentication" href="/docs/server/auth" description="Secure your API server before deploying." eyebrow="How-to" />
+<LinkCard title="Long-term memory" href="/docs/concepts/memory-and-store" description="Remember facts across conversations with the memory store." eyebrow="Concept" />
+<LinkCard title="Authentication reference" href="/docs/server/auth" description="JWT options, custom auth and scopes." eyebrow="How-to" />
 
 </CardGrid>

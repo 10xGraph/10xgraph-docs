@@ -4,7 +4,7 @@ description: Launch fire-and-forget async tasks from a node without blocking the
 section: "Build agents"
 group: "Multi-agent and control flow"
 order: 300
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: When should I use background tasks instead of just returning from my node?
     a: Use background tasks when the operation is not critical to the current response (e.g., notifications, webhooks, logging). If the operation's result is needed by the user or later in the graph, process it synchronously instead.
@@ -189,6 +189,10 @@ await app.aclose()
 | Background tasks are cut off at exit | `aclose()` cancels pending tasks. | Call `await task_manager.wait_for_all(timeout=...)` before `aclose()` if they must finish. |
 | Timeout warnings in logs | Task takes longer than the `timeout`. | Increase the timeout value if the external service is expected to be slow, or investigate why the service is slow. |
 | Task dropped, queue full | 1000 or more tasks in flight (backpressure). `create_task` returns `None` and logs a warning. | Reduce the rate at which you create background tasks, or handle backpressure upstream. |
+
+## Run it in production
+
+Background tasks live in the worker process that started them, so a restart or a different worker does not carry them over. Put anything that must finish into a node that the checkpointer records, and give workers time to drain on shutdown. See [Scaling and reliability](/docs/production/scaling) and [Graceful shutdown](/docs/guides/graceful-shutdown).
 
 ## Related pages
 

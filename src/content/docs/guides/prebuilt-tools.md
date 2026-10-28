@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 170
 label: Prebuilt tools
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Can I mix prebuilt tools with custom tools?"
     a: "Yes. Pass all tools to a single ToolNode. Prebuilt and custom tools coexist without conflict."
@@ -34,7 +34,6 @@ from tenxgraph.prebuilt.tools import (
     safe_calculator,
     google_web_search,
     vertex_ai_search,
-    memory_tool,
     make_user_memory_tool,
     make_agent_memory_tool,
     create_handoff_tool,
@@ -124,203 +123,35 @@ app = agent.compile()
 
 ## Fetch URLs with fetch_url
 
-The `fetch_url` tool retrieves the text content of public HTTP/HTTPS URLs. It blocks private and loopback IP addresses, enforces timeouts, and truncates long responses to prevent context overflow.
+`fetch_url` retrieves the text of a public HTTP or HTTPS URL. It only connects to globally routable addresses, re-checks every redirect hop (at most 5), connects to the address it checked, ignores proxy environment variables, strips HTML to text, and truncates to `max_chars` (default and cap 20000). On failure it returns a JSON object with an `error` key. Tags: `["web", "fetch", "network"]`.
 
-### Parameters
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `url` | `str` | required | Public HTTP/HTTPS URL to fetch. |
-| `timeout` | `float` | `10.0` | Request timeout in seconds (clamped to 1-30). |
-| `max_chars` | `int` | `20000` | Maximum characters to return (capped at 20000). |
-
-### Return value
-
-```json
-{
-  "url": "https://example.com",
-  "status_code": 200,
-  "content_type": "text/html",
-  "content": "...",
-  "truncated": false
-}
-```
-
-On failure the tool returns a JSON object with an `error` key instead, for example `{"error": "URL host is not public or could not be resolved"}` or `{"error": "HTTP error: 404", "status_code": 404}`.
-
-### Security
-
-- Blocks private IPs, loopback (127.x), link-local, multicast, and reserved ranges
-- Allows only `http` and `https` schemes
-- Enforces a maximum timeout of 30 seconds
-- Strips HTML markup, extracting text only
-- Truncates responses longer than `max_chars`
-
-### Tags
-
-`["web", "fetch", "network"]`
+Parameters, the response shape and common errors are in the [web tools guide](/docs/guides/prebuilt/web-tools#fetch_url-fetch-and-parse-web-pages).
 
 ## File tools: read, write, search
 
-The file tools (`file_read`, `file_write`, `file_search`) provide controlled access to the local filesystem. All three enforce that paths stay within the configured workspace root, preventing escape attempts.
+`file_read`, `file_write` and `file_search` give an agent controlled access to one directory. Paths stay inside the root, and secret files (`.env`, `*.pem`, anything under `.ssh` or `.git`) are hidden and refused with the same `path is not allowed` error whether or not they exist. Tags: `["file", "filesystem", "search"]`.
 
-### file_read: Read files
-
-Read UTF-8 text files with optional line ranges.
-
-```python
-from tenxgraph.prebuilt.tools import file_read
-from tenxgraph.core.graph import ToolNode, Agent
-
-tool_node = ToolNode([file_read])
-
-agent = Agent(
-    model="gpt-4o",
-    tool_node=tool_node,
-)
-```
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `path` | `str` | required | Relative or absolute path to the file. |
-| `start_line` | `int` | `1` | 1-based starting line (inclusive). |
-| `end_line` | `int` | `0` | 1-based ending line (inclusive); 0 means end of file. |
-| `max_chars` | `int` | `20000` | Maximum characters to return (capped at 20000). |
-| `config` | `dict` | `None` | Injected run config; `file_tool_root` or `workspace_root` sets the root (default: current directory). |
-
-**Return value:**
-
-```json
-{
-  "path": "src/main.py",
-  "start_line": 1,
-  "end_line": 10,
-  "content": "...",
-  "truncated": false
-}
-```
-
-**Tags:** `["file", "filesystem", "read"]`
-
-### file_write: Write and append
-
-Write UTF-8 text files with three modes.
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `path` | `str` | required | Path to write to. |
-| `content` | `str` | required | Text content to write. |
-| `mode` | `str` | `"create"` | `"create"` (fail if exists), `"overwrite"` (replace), `"append"`. |
-| `create_dirs` | `bool` | `False` | Create parent directories if they do not exist. Content is limited to 200,000 characters. |
-| `config` | `dict` | `None` | Injected run config; `file_tool_root` or `workspace_root` sets the root. |
-
-**Return value:**
-
-```json
-{
-  "status": "written",
-  "path": "output.txt",
-  "bytes": 1024,
-  "mode": "create"
-}
-```
-
-**Tags:** `["file", "filesystem", "write"]`
-
-### file_search: Find files and lines
-
-Search files by name and content.
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `query` | `str` | required | Search string for filename or content match. |
-| `path` | `str` | `""` | Root directory to search from (relative to workspace root). |
-| `glob` | `str` | `"**/*"` | Glob pattern for files to include. |
-| `max_results` | `int` | `20` | Maximum results to return (capped at 100). |
-| `config` | `dict` | `None` | Injected run config; `file_tool_root` or `workspace_root` sets the root. |
-
-**Return value:**
-
-```json
-{
-  "query": "search_term",
-  "root": ".",
-  "results": [
-    {
-      "path": "src/main.py",
-      "match_type": "filename",
-      "line": null,
-      "preview": "main.py"
-    },
-    {
-      "path": "src/config.py",
-      "match_type": "content",
-      "line": 42,
-      "preview": "search_term appears on this line..."
-    }
-  ]
-}
-```
-
-**Tags:** `["file", "filesystem", "search"]`
-
-## Web search: google_web_search and vertex_ai_search
-
-These tools leverage Google's models to search the public web or a private Vertex AI Search datastore.
-
-### google_web_search
-
-Search the public web with Gemini Google Search grounding, which returns both a grounded answer and supporting search metadata.
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `query` | `str` | required | Search query string. |
-| `model` | `str` | `"gemini-2.5-flash"` | Gemini model to use for grounding. |
-| `max_chars` | `int` | `20000` | Maximum characters in the response (capped at 20000). |
-
-Requires: `pip install "10xgraph[google-genai]"` and Google Cloud credentials (GOOGLE_API_KEY or Application Default Credentials).
-
-**Tags:** `["web", "search", "google"]`
-
-### vertex_ai_search
-
-Search a Vertex AI Search datastore with Gemini grounding. Useful for querying proprietary documents or internal knowledge bases.
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `query` | `str` | required | Search query string. |
-| `datastore` | `str` | required | Full Vertex AI Search datastore resource path. |
-| `model` | `str` | `"gemini-2.5-flash"` | Gemini model to use for grounding. |
-| `max_chars` | `int` | `20000` | Maximum characters in the response. |
-
-Requires: `pip install "10xgraph[google-genai]"`, Google Cloud project, and a Vertex AI Search datastore.
-
-**Tags:** `["search", "google", "vertex_ai"]`
-
-## Memory tools
-
-Memory tools integrate with 10xGraph's long-term memory system, letting agents remember facts about users and themselves. For most cases, use `Agent(..., memory=MemoryConfig(...))` to inject memory tools automatically; these factories are useful when you need manual control.
-
-### memory_tool
-
-A legacy general-purpose memory tool for custom graphs that do not use `Agent`'s built-in memory. It is already a tool, not a factory: add it to a `ToolNode` directly. It reads the `BaseStore` registered in the dependency container (pass the store to `compile(store=...)`), and supports the actions `search`, `store`, `update` and `delete`.
+For a graph that serves requests, build the tools with `create_file_tools(root)` so the root is fixed in code and the run config cannot move it:
 
 ```python
 from tenxgraph.core.graph import ToolNode
-from tenxgraph.prebuilt.tools import memory_tool
+from tenxgraph.prebuilt.tools import create_file_tools
 
-tool_node = ToolNode([memory_tool])
+file_read, file_write, file_search = create_file_tools("/path/to/allowed/dir")
+tool_node = ToolNode([file_read, file_search])  # read-only: leave file_write out
 ```
+
+Parameters, return formats, the full list of hidden patterns, `deny=` and limits are in the [file tools guide](/docs/guides/prebuilt/file-tools).
+
+## Web search: google_web_search and vertex_ai_search
+
+`google_web_search` searches the public web with Gemini Google Search grounding. `vertex_ai_search` searches a private Vertex AI Search datastore. Both need `pip install "10xgraph[google-genai]"` and Google Cloud credentials, and both default to `gemini-2.5-flash`. Tags: `["web", "search", "google"]` and `["search", "google", "vertex_ai"]`.
+
+Parameters and examples are in the [web tools guide](/docs/guides/prebuilt/web-tools).
+
+## Memory tools
+
+Memory tools integrate with 10xGraph's long-term memory system, letting agents remember facts about users and themselves. For most cases, use `Agent(..., memory=MemoryConfig(...))` to inject memory tools automatically; the factories below are useful when you need manual control. They are the only memory tools; there is no general-purpose `memory_tool`.
 
 ### make_user_memory_tool and make_agent_memory_tool
 
@@ -503,17 +334,15 @@ pip install 10xgraph
 
 ### "fetch_url fails with hostname resolution"
 
-The tool blocks private IPs (10.x, 192.168.x, 127.x, etc.). Ensure the URL is publicly accessible.
+The tool blocks private IPs (10.x, 192.168.x, 127.x, etc.), and it checks every redirect hop again, so a public URL that redirects to a private address is refused too. Ensure the URL is publicly accessible.
 
 ### "File tool says path is outside workspace root"
 
-File tools enforce a security boundary. Confirm the path is relative to the configured workspace root (default: current working directory). You can override via the `config` parameter:
+File tools enforce a security boundary. Confirm the path is relative to the tools' root. Set the root in code with `create_file_tools`; passing `file_tool_root` or `workspace_root` in the run config is deprecated and removed in 0.11:
 
 ```python
-result = file_read(
-    "relative/path.txt",
-    config={"workspace_root": "/path/to/allowed/dir"}
-)
+file_read, file_write, file_search = create_file_tools("/path/to/allowed/dir")
+result = file_read("relative/path.txt")
 ```
 
 ### "google_web_search says SDK is not installed"
@@ -529,6 +358,10 @@ export GOOGLE_API_KEY=your-key
 # or
 export GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
 ```
+
+## Run it in production
+
+Tools that reach outside the process (`fetch_url`, file tools) are the ones to review before you expose an agent. Fix the file root in code with `create_file_tools`, and read what the server does and does not guard in the [Security model](/docs/production/security-model) and [What 10xGraph does not protect](/docs/production/limits).
 
 ## Related pages
 

@@ -5,16 +5,16 @@ description: How 10xgraph.json wires a compiled graph to the API server, plus au
 section: Concepts
 group: "Serving"
 order: 160
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
-The 10xGraph API server transforms a compiled graph into a production-ready HTTP service. This page explains how the server loads and runs your agent, how authentication and authorization protect it, how publishers stream execution events to external systems, and what configuration controls each piece.
+The 10xGraph API server transforms a compiled graph into a production-ready HTTP service. This page explains how the server loads and runs your agent, how authentication and authorization protect it, how publishers stream execution events to external systems, and what configuration controls each piece. For the summary of what you get when you serve with `10xgraph-api`, see [Production readiness](/docs/production).
 
 ## How the server loads and runs your graph
 
 ```mermaid
 flowchart TB
-  subgraph "10xgraph api process"
+  subgraph "10xgraph server process"
     UV[Uvicorn ASGI]
     FA[FastAPI]
     RATE[RateLimitMiddleware]
@@ -34,7 +34,7 @@ flowchart TB
   GRAPH -->|EventModel| PUB_C & PUB_R & PUB_K & PUB_Q & PUB_O
 ```
 
-The API server is a Uvicorn ASGI process that loads your compiled graph **once at startup** and reuses it for every request. This avoids module-loading overhead. The graph itself is stateless; per-request isolation comes from the `thread_id` in the request. In development, `10xgraph api --reload` auto-restarts on file changes. In production, run multiple workers behind a load balancer and use `PgCheckpointer` to share state across them.
+The API server is a Uvicorn ASGI process that loads your compiled graph **once at startup** and reuses it for every request. This avoids module-loading overhead. The graph itself is stateless; per-request isolation comes from the `thread_id` in the request. In development, `10xgraph dev` auto-restarts on file changes (`--no-reload` turns that off). In production, the image from `10xgraph build` runs Gunicorn with multiple workers; put them behind a load balancer and use `PgCheckpointer` to share state across them.
 
 ## Configuration: `10xgraph.json`
 
@@ -96,10 +96,10 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
 **Starting the server:**
 
 ```bash
-10xgraph api                                    # development, auto-reload
-10xgraph api --config custom.json              # explicit config path (also -c)
-10xgraph api --host 0.0.0.0 --port 8000        # bind address
-10xgraph play                                   # API + playground in browser
+10xgraph dev                                    # development server, auto-reload, opens the hosted playground
+10xgraph dev --no-open                         # server only
+10xgraph dev --config custom.json              # explicit config path (also -c)
+10xgraph dev --host 0.0.0.0 --port 8000        # bind address
 ```
 
 ## REST endpoints and request flow
@@ -109,7 +109,7 @@ The API exposes these routers (all under `/v1` except `/ping`):
 | Router | Endpoints | Purpose |
 |---|---|---|
 | Graph | `POST /v1/graph/invoke`, `POST /v1/graph/stream`, `WebSocket /v1/graph/ws`, `WebSocket /v1/graph/live`, `POST /v1/graph/stop`, `POST /v1/graph/fix`, `GET /v1/graph`, `GET /v1/graph/tools` | Invoke or stream the agent, stop a run, fix interrupted state, get graph info. |
-| Threads | `GET /v1/threads`, `GET /v1/threads/{id}`, `GET`/`PUT`/`DELETE /v1/threads/{id}/state`, `GET`/`POST /v1/threads/{id}/messages` | Manage thread state and message history. |
+| Threads | `GET /v1/threads`, `GET /v1/threads/{id}`, `GET`/`PUT`/`DELETE /v1/threads/{id}/state`, `GET`/`POST /v1/threads/{id}/messages`, `GET`/`PUT`/`DELETE /v1/threads/{id}/messages/{message_id}` | Manage thread state and message history. `POST` messages is admin-only; `PUT` message sets feedback. |
 | Store | `POST /v1/store/memories`, `POST /v1/store/memories/list`, `POST /v1/store/memories/{id}`, `POST /v1/store/search` | Long-term memory operations. |
 | Files | `POST /v1/files/upload`, `GET /v1/files/{id}`, `GET /v1/files/{id}/info`, `GET /v1/files/{id}/url` | Upload, retrieve, and get signed URLs for media. |
 | Config | `GET /v1/config/multimodal` | Get multimodal settings. |
@@ -415,7 +415,7 @@ For production scale, run multiple worker processes behind a load balancer. Beca
 Key environment variables (set in `.env`, as Docker `ENV`, or via `--env-file`):
 
 ```bash
-MODE=production              # enables security guards
+MODE=production              # enables security guards and strict startup checks
 REDIS_URL=redis://redis:6379
 JWT_SECRET_KEY=your-secret-32-chars
 SENTRY_DSN=https://...@sentry.io/123
@@ -427,14 +427,15 @@ ORIGINS=https://example.com,https://app.example.com
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MODE` | `development` | Set to `production` to enable security checks |
+| `MODE` | `development` | `production` or `prod` enables security checks; `development`, `dev` and `local` are the other values. Anything else stops startup |
 | `REDIS_URL` | none | Redis connection used by server components such as the ownership cache |
 | `JWT_SECRET_KEY` | none | Required for JWT auth; use 32+ random chars |
 | `SENTRY_DSN` | none | Sentry error tracking |
 | `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing |
 | `OTEL_SERVICE_NAME` | `10xgraph-api` | Service name in traces |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | OTLP collector URL; omit to log spans to console |
-| `ORIGINS` | `*` | CORS allowed origins; restrict in production |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | OTLP collector URL; omit to print spans to the console in development (in production nothing is exported and a warning is logged) |
+| `ORIGINS` | `*` | CORS allowed origins. Production refuses `*` unless `STRICT_PRODUCTION_CHECKS=false`, so list your domains |
+| `ALLOWED_HOST` | `*` | Allowed `Host` values. Production refuses `*` unless `STRICT_PRODUCTION_CHECKS=false` |
 
 ## OpenTelemetry
 

@@ -5,7 +5,7 @@ section: "API server"
 group: "Basics"
 order: 30
 label: Configure 10xgraph.json
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The `10xgraph.json` file tells the API server which graph to load, how to persist state, who can access it, and how to manage resources. This guide covers the keys you need to configure for a working deployment. For a complete list of every key, type and default, see the [configuration reference](/docs/reference/api-cli/configuration).
@@ -162,7 +162,7 @@ A minimally secured production config looks like this:
 ```
 
 - `"auth": "jwt"` requires `JWT_SECRET_KEY` (at least 32 characters; shorter keys are rejected in production) and `JWT_ALGORITHM` (for example `HS256`) in the environment. See [Authentication](/docs/server/auth) for custom auth.
-- `"authorization": "ownership"` makes threads private to their creator. With `allow_all`, any authenticated user who knows a thread ID can read it.
+- `"authorization": "ownership"` makes threads private to their creator. With the default `runs.thread_ids` of `"server"`, it also refuses thread ids the server did not create (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)). With `allow_all`, any authenticated user who knows a thread ID can read it.
 - The rate limit `backend: "redis"` shares the limit across all replicas. The `"memory"` backend counts per process, so three replicas allow three times the configured limit, making it unsuitable for production.
 
 ## Share a Redis connection for the thread cache
@@ -177,7 +177,7 @@ The top-level `redis` key is a URL string used by the optional shared thread-own
 }
 ```
 
-If the `redis` key is not set, the server falls back to the `REDIS_URL` environment variable. With neither, the ownership cache is per-process. Without a shared cache, each replica maintains its own view of which user owns each thread, leading to inconsistent access control across replicas.
+If the `redis` key is not set, the server falls back to the `REDIS_URL` environment variable. With neither, the ownership cache is per-process (an L1 cache with a 30 second TTL; with Redis, an L2 cache with a 1 hour TTL). Without a shared cache, each replica maintains its own view of which user owns each thread, leading to inconsistent access control across replicas.
 
 ## Set test and evaluation defaults
 
@@ -236,14 +236,50 @@ The `websocket` key manages connection limits for `/v1/graph/ws` (streaming) and
   "websocket": {
     "max_connections": 1000,
     "max_connections_per_user": 10,
-    "realtime_models": ["gemini-2.5-flash-live"]
+    "realtime_models": ["gemini-2.5-flash-live"],
+    "realtime_client_overrides": ["voice", "modalities", "vad"]
   }
 }
 ```
 
-- `max_connections` caps the concurrent WebSocket connections this server process accepts (default 1000). Multiple replicas each have this limit.
+- `max_connections` caps the concurrent WebSocket connections (default 1000).
 - `max_connections_per_user` prevents a single authenticated user from hogging all slots (default 10). Set to `0` or `null` for unlimited.
-- `realtime_models` lists the models a `/v1/graph/live` client may request (empty by default, meaning clients cannot choose). Limits are per process, so size them based on your expected worker count.
+- `realtime_models` lists the models a `/v1/graph/live` client may request (empty by default, meaning clients cannot choose).
+- `realtime_client_overrides` lists the session options a `/v1/graph/live` client may set in its init frame: any of `voice`, `modalities`, `vad` and `system_prompt`. The default is `["voice", "modalities", "vad"]`. `system_prompt` replaces the agent's instructions, so list it only when every caller is trusted to rewrite them.
+- `enabled` set to `false` leaves `/v1/graph/ws` and `/v1/graph/live` out of the app.
+
+When `redis` (or `REDIS_URL`) is configured, the connection caps are shared by all workers and replicas through Redis. Without Redis, each process counts its own connections, so the real cap is the limit times the number of workers. If a worker dies, its slots expire on their own. If Redis is unreachable, the server allows the connection and logs the error.
+
+## Limit concurrent runs per user
+
+`runs.max_concurrent_per_user` caps the graph runs (invoke, stream, AG-UI) one verified user can have in flight (default 10). Over the cap, the request gets `429`. Set it to `0` or `null` for no cap. Requests with no verified user (auth off) are not capped. Like the WebSocket caps, the count is shared across workers and replicas through Redis when `redis` or `REDIS_URL` is set, and per process otherwise.
+
+```json
+{
+  "agent": "graph.react:app",
+  "runs": { "max_concurrent_per_user": 10 }
+}
+```
+
+## Control who can read the graph structure
+
+`graph_introspection` decides who may call `GET /v1/graph`, `GET /v1/graph/tools` and `GET /v1/graph:StateSchema`, which expose node names, tool schemas and the state schema:
+
+- `"open"`: any authenticated user.
+- `"scoped"`: only identities that carry the `graph:read` scope (from JWT claims or an RBAC role). An identity with no scopes is refused with `403`.
+
+The default is `"scoped"` when `MODE=production` and `"open"` otherwise. With auth off there is no identity, so these routes stay open in either mode.
+
+```json
+{
+  "agent": "graph.react:app",
+  "graph_introspection": "open"
+}
+```
+
+## Keys the server owns in request config
+
+A client can send a `config` object with a run, and your nodes and tools can read its keys. The server drops these keys from client config before the graph sees them (no error is returned): `authz`, `user`, `user_id`, `remote_tools`, `ag_ui`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection`, and any key that starts with `_`. Identity comes from the verified token, never from config. To narrow the rest, list allowed keys in `runs.config_keys` and `runs.state_keys`. See [Invoke and stream](/docs/server/invoke-and-stream).
 
 ## Environment variable expansion in Redis URLs
 
@@ -276,11 +312,11 @@ config/
 
 ```bash
 # Development: auto-reload, all features open
-10xgraph api --config config/dev.json
+10xgraph dev --no-open --config config/dev.json
 
 # Production-like local run: no reload, hardened settings
 # (for real deployments use `10xgraph build`, see the deploy guide)
-MODE=production 10xgraph api --config config/prod.json --no-reload
+MODE=production 10xgraph dev --no-open --config config/prod.json --no-reload
 ```
 
 A typical dev config:
@@ -327,7 +363,7 @@ With `auth` unset or `null`, every request is accepted. This is fine for interna
 
 ### 2. Set authorization policy
 
-If `authorization` is unset, the server uses `ownership` when `MODE=production` and `allow_all` otherwise. With `allow_all`, any authenticated user who knows a thread ID can read that conversation. In production, set `"authorization": "ownership"` so threads are visible only to their creator. Alternatively, implement a custom `AuthorizationBackend` for role-based access control. In development, `"allow_all"` is fine. Set it explicitly rather than relying on the `MODE` default.
+If `authorization` is unset, the server uses `ownership` whenever auth is configured or `MODE=production`, and `allow_all` only with auth off in development. With `allow_all`, any authenticated user who knows a thread ID can read that conversation. In production, set `"authorization": "ownership"` so threads are visible only to their creator. Alternatively, implement a custom `AuthorizationBackend` for role-based access control. A custom backend isolates users by default, because `isolation_scope()` returns `"owner"`. Return `"none"` from it only if users should share threads and memories. In development, `"allow_all"` is fine. Set it explicitly rather than relying on the `MODE` default.
 
 ### 3. Use a shared, durable checkpointer
 
@@ -339,7 +375,7 @@ The `"memory"` backend counts per process, so with three workers you allow three
 
 ### 5. Wire observability
 
-A production agent you cannot trace is one you cannot debug. At minimum, set `MODE=production` and `IS_DEBUG=false` in the environment, and configure logging. See [Observability](/docs/server/observability).
+A production agent you cannot trace is one you cannot debug. At minimum, set `MODE=production` and `IS_DEBUG=false` in the environment (the server forces debug off in production anyway), and configure logging. See [Observability](/docs/server/observability).
 
 ## Verify before you deploy
 
@@ -355,7 +391,7 @@ Then start the server and verify each control:
 
 ```bash
 # 1. Config loads and graph imports
-10xgraph api --no-reload &
+10xgraph dev --no-open --no-reload &
 
 # 2. The health endpoint works
 curl http://127.0.0.1:8000/ping
@@ -369,7 +405,7 @@ for i in $(seq 1 120); do
 done
 ```
 
-Finally, verify that persistence survives a restart: start a thread, restart the server, and read the thread back via `/v1/threads/{thread_id}`.
+Finally, verify that persistence survives a restart: start a thread by invoking without a `thread_id`, restart the server, and read the thread back via `/v1/threads/{thread_id}` using the id the server returned.
 
 ## Common configuration issues
 

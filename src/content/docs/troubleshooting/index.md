@@ -5,7 +5,7 @@ description: "Find the right 10xGraph troubleshooting page by symptom: install f
 section: Troubleshooting
 order: 10
 label: Overview
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Where do I find error codes like RECURSION_000?"
     a: "Go to the Error codes reference page. It lists every code with its cause, the exception class, and the structured error response the server returns."
@@ -42,6 +42,8 @@ faq:
 | Provider API keys look unset, `.env` is ignored, or auth fails with a provider | [Provider errors](/docs/troubleshooting/providers) or [Installation troubleshooting](/docs/troubleshooting/installation), section on environment variables |
 | The server will not start, refuses unprotected routes, rejects a CORS setting, or the port is in use | [API server troubleshooting](/docs/troubleshooting/api-server) |
 | A request returns `403 Missing required scope`, WebSocket closes immediately, or `/ping` works but graph routes fail | [API server troubleshooting](/docs/troubleshooting/api-server) |
+| The server refuses to start in production, or you are unsure it is locked down | [Test before production](/docs/testing/before-production) and the [production checklist](/docs/server/production-checklist) |
+| A request returns `429`, or errors show a generic message in production | [API server troubleshooting](/docs/troubleshooting/api-server) |
 | Every client request fails, the browser fails but curl works, threads do not persist, or streaming behaves differently than invoke | [Client troubleshooting](/docs/troubleshooting/client) |
 | The playground opens but cannot connect, the Live page will not start, or the microphone does not work | [Playground troubleshooting](/docs/troubleshooting/playground) |
 | A run stops on a step limit, a node times out, a thread is not found, or a checkpoint fails to save | [Error codes reference](/docs/reference/error-codes), which has a symptom lookup table |

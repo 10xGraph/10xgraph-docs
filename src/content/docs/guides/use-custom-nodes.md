@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Agents and graphs"
 order: 50
 label: Custom nodes
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Do all custom nodes need both state and config parameters?"
     a: "No. The runtime inspects the signature and only provides what is declared. Omit state if you only need config, and vice versa."
@@ -375,6 +375,10 @@ print(result["messages"][-1].text())
 - Return a `str`, `Message`, `list`, `AgentState`, or `Command`. Update state fields by changing `state` and returning it.
 
 ---
+
+## Run it in production
+
+Nodes run inside the server's per-run limits (`recursion_limit`, `node_timeout`, `tool_timeout`), so a stuck custom node ends with a timeout error instead of hanging the worker. See [Errors and limits](/docs/concepts/errors-and-limits) and [Production readiness](/docs/production).
 
 ## Next steps
 

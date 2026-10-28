@@ -1,0 +1,87 @@
+---
+title: "Agents that fetch URLs: SSRF-safe tools and media by default"
+seoTitle: "SSRF-safe URL fetching for AI agents"
+description: "How fetch_url and client-supplied media links are limited to public addresses in 10xGraph: pinned connections, checked redirects, a MediaFetchPolicy and a pre-run 400."
+date: 2026-10-27
+updated: 2026-10-27
+author: Shudipto Trafder
+kind: engineering
+tags: [security, tools, media, ssrf]
+draft: true
+faq:
+  - q: Can the model fetch http://localhost or a cloud metadata address with fetch_url?
+    a: No. Every address a name resolves to must be globally routable, and the connection goes to the exact address that was checked. Redirects are followed by hand, up to 5, and each hop is checked again.
+  - q: Does fetch_url use my HTTP_PROXY settings?
+    a: No. It reads no proxy environment variables, so a proxy setting cannot route a request around the address check.
+  - q: Why did my audio or video link stop loading on a Google graph?
+    a: The default MediaFetchPolicy accepts image/* and application/pdf only. Allow the audio or video content types in a policy passed to graph.compile(media_policy=...).
+---
+
+An agent that browses or reads files from links sends requests that you did not write, to hosts that a model or a user chose. On a server, that is a request-forgery risk: if the URL points at `127.0.0.1`, at a private network address or at a cloud metadata endpoint, the server fetches it from inside your network and may hand the answer back to the model, and from there to the user.
+
+Two places in 10xGraph fetch a URL on behalf of someone else: the prebuilt `fetch_url` tool, and the media path that downloads a link a client put in a message. Both now use the same small HTTP client with fixed rules. This post lists the rules, the policy you can tune, and the check the API does before a run starts. Reference: [Web tools](/docs/guides/prebuilt/web-tools) and the [security model](/docs/production/security-model).
+
+## What the rules are
+
+The shared client (`tenxgraph.utils.safe_http`) follows these rules, and none of them can be turned off:
+
+- Only `http` and `https`. `file:` and every other scheme is refused.
+- The host name is resolved once, and every address it resolves to must be globally routable. That rejects loopback, private ranges, link-local addresses such as the metadata address `169.254.169.254`, the shared address space `100.64.0.0/10`, and the NAT64 and IPv4-compatible forms of internal addresses.
+- The connection goes to the address that was checked, not to the name again, so DNS cannot answer differently the second time.
+- Redirects are followed by hand, one hop at a time, 5 at most, and each hop goes through the same checks. A public page that redirects to an internal address is refused at that hop.
+- No proxy environment variables are read.
+- The body has a size cap.
+
+## `fetch_url`
+
+`fetch_url` is a prebuilt tool with the tags `web`, `fetch` and `network`. It returns normalised page text, caps `max_chars` at 20,000, and runs the blocking client in a worker thread so it does not stall the event loop.
+
+Before this change it checked the first host only, then let `urllib` follow redirects anywhere, and it resolved the name twice. A public page could redirect to an internal address, and DNS rebinding could change the answer between the check and the connection. Both are closed by the rules above.
+
+## Client-supplied media links
+
+Some model providers (OpenAI, Anthropic) fetch a media URL themselves. On other paths, notably Google GenAI, the Google File API and inline bytes, your server downloads it. That URL came from a client, so it is untrusted input. A `MediaFetchPolicy` says what may be downloaded:
+
+| Field | Default |
+|---|---|
+| `enabled` | `True` |
+| `allowed_schemes` | `("https", "http")` |
+| `allowed_hosts` | empty, meaning any public host |
+| `allow_private_for_allowed_hosts` | `False` |
+| `allowed_content_types` | `("image/*", "application/pdf")` |
+| `max_bytes` | 20 MB |
+| `timeout` | 10 seconds for the whole download, redirects included |
+| `allowed_gcs_buckets` | empty, so every `gs://` URL is rejected |
+
+Set a policy when you compile the graph:
+
+```python
+from tenxgraph.storage.media import MediaFetchPolicy
+
+app = graph.compile(
+    checkpointer=checkpointer,
+    media_policy=MediaFetchPolicy(
+        allowed_hosts=("cdn.example.com", "*.example.org"),
+        allowed_content_types=("image/*", "application/pdf", "audio/*"),
+    ),
+)
+```
+
+`allow_private_for_allowed_hosts` is for on-premises setups where a listed host really lives on a private address. Cloud metadata addresses stay blocked even then. Without a policy, the default one applies.
+
+A refused or failed download does not fail the run. It becomes a `[Failed to load image]` or `[Failed to load media]` text part, and the warning logs the URL without its query string, since signed URLs carry secrets there.
+
+One behaviour change to plan for: on Google graphs, audio and video links stop downloading until you allow those content types in the policy.
+
+`gs://` URLs are passed through to Vertex AI unchanged, and Vertex AI reads them with the server's own credentials. That is why the bucket list exists. The bucket list is enforced by `check_url`, not by the converters.
+
+## The API refuses bad URLs before the run starts
+
+When you serve with `10xgraph-api`, every external media URL in an incoming message goes through the graph's `media_policy.check_url` before anything runs. The check touches no network: it looks at the enabled flag, the scheme, the host allow-list and, for an IP literal, whether the address may be reached. A blocked URL returns 400 with the policy's message. Names are resolved at download time, and their addresses are checked then.
+
+So there are two layers. The API rejects URLs that are wrong on their face, cheaply and early. The download client then checks what a name actually resolves to, on every hop.
+
+## What this does not cover
+
+- A tool you write yourself that calls `requests` or `httpx` gets none of this. Use `tenxgraph.utils.safe_http` or put your own checks in front of it.
+- `fetch_url` returns text from a public page to the model. That text is untrusted input to the model, which is a prompt-injection question and not an SSRF one. See [A prompt-injected model cannot skip your approval step](/blog/approval-step-prompt-injection) for how the graph limits what a steered model can do.

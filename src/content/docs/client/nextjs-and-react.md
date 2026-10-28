@@ -6,7 +6,7 @@ section: "TypeScript client"
 group: "Frameworks"
 order: 120
 label: with Next.js
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "Do I need to expose my 10xGraph bearer token in the browser?"
     answer: "No. Always proxy requests through a Next.js route handler or Server Action. The route handler runs on the server, where it can safely hold your token."
@@ -84,7 +84,9 @@ export async function POST(req: NextRequest) {
   if (!user) return new Response("Unauthorized", { status: 401 });
 
   // Parse the client request
-  const { text } = await req.json();
+  // threadId is absent on the first message. Later messages send back the id
+  // the server picked, which the browser read from the stream.
+  const { text, threadId } = await req.json();
 
   // Create a client instance with your API key
   const client = new TenxGraphClient({
@@ -96,7 +98,9 @@ export async function POST(req: NextRequest) {
   const stream = client.stream(
     [Message.text_message(text)],
     {
-      config: { thread_id: `user-${user.id}` }, // Isolate by user
+      // Omit thread_id to start a new thread. Do not make one up: the server
+      // refuses ids it did not create.
+      config: threadId ? { thread_id: threadId } : undefined,
       recursion_limit: 25,
     }
   );
@@ -139,7 +143,7 @@ export async function POST(req: NextRequest) {
 }
 ```
 
-The `recursion_limit` caps how many tool-execution rounds the client runs (default 25). The `thread_id` keeps conversation history separate per user. The default `response_granularity` for `stream()` is `'low'`, which yields only `message` and `error` chunks. Pass `response_granularity: 'full'` if you also want `updates` chunks.
+The `recursion_limit` caps how many tool-execution rounds the client runs (default 25). The `thread_id` keeps conversation history on one thread. The first request leaves it out, and every chunk then carries the id the server picked, so the browser can send it back. Store the id next to your user record and check that it belongs to the signed-in user before you pass it on. The default `response_granularity` for `stream()` is `'low'`, which yields only `message` and `error` chunks. Pass `response_granularity: 'full'` if you also want `updates` chunks.
 
 ## React streaming component
 
@@ -150,7 +154,7 @@ On the client, create a component that opens an SSE stream from your route handl
 ```tsx title="lib/useAgentStream.tsx"
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 
 // Mirrors the StreamChunk type from the SDK.
 // When chunks cross the network as JSON, they are plain objects, not class instances.
@@ -190,6 +194,8 @@ export function useAgentStream(): UseAgentStreamReturn {
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [reader, setReader] = useState<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  // The thread the server started on the first message
+  const threadIdRef = useRef<string | undefined>(undefined);
 
   const abort = useCallback(() => {
     if (reader) {
@@ -211,7 +217,7 @@ export function useAgentStream(): UseAgentStreamReturn {
         const response = await fetch("/api/agent/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text, threadId: threadIdRef.current }),
           signal,
         });
 
@@ -250,6 +256,7 @@ export function useAgentStream(): UseAgentStreamReturn {
 
             try {
               const chunk = JSON.parse(dataMatch[1]) as StreamChunk;
+              if (chunk.thread_id) threadIdRef.current = chunk.thread_id;
 
               if (chunk.event === "message") {
                 setOutput((prev) => prev + extractText(chunk));
@@ -348,17 +355,25 @@ const client = new TenxGraphClient({
   authToken: process.env.TENXGRAPH_API_TOKEN!,
 });
 
-export async function askAgent(text: string): Promise<string> {
+// Pass threadId from the previous answer to continue a conversation.
+// Leave it out to start a new thread.
+export async function askAgent(
+  text: string,
+  threadId?: string
+): Promise<{ text: string; threadId: string }> {
   const user = await auth();
   if (!user) throw new Error("Unauthorized");
 
   const result = await client.invoke(
     [Message.text_message(text)],
-    { config: { thread_id: `user-${user.id}` } }
+    { config: threadId ? { thread_id: threadId } : undefined }
   );
 
-  // Extract the last message's text
-  return result.messages.at(-1)?.text() ?? "";
+  // Extract the last message's text and the thread id the server used
+  return {
+    text: result.messages.at(-1)?.text() ?? "",
+    threadId: result.meta.thread_id,
+  };
 }
 ```
 
@@ -378,7 +393,7 @@ export default function SimpleChat() {
     setLoading(true);
     try {
       const answer = await askAgent("What is 2 + 2?");
-      setResponse(answer);
+      setResponse(answer.text);
     } catch (e) {
       setResponse(`Error: ${String(e)}`);
     } finally {
@@ -405,7 +420,7 @@ The route handler or Server Action validates the user and creates a scoped sessi
 
 ### Pass-through authentication
 
-Validate the user in Next.js, then send a server-held bearer token to 10xGraph. Use the user ID as the thread ID to isolate conversations:
+Validate the user in Next.js, then send a server-held bearer token to 10xGraph. Keep each conversation's thread id, which the server returns on the first call, in your own storage:
 
 ```tsx
 const client = new TenxGraphClient({
@@ -415,7 +430,7 @@ const client = new TenxGraphClient({
 
 const result = await client.invoke(
   messages,
-  { config: { thread_id: `user-${user.id}` } }
+  { config: threadId ? { thread_id: threadId } : undefined }
 );
 ```
 
@@ -450,7 +465,7 @@ TENXGRAPH_URL=http://localhost:8000
 TENXGRAPH_API_TOKEN=your_api_key_here
 ```
 
-Run the 10xGraph API server locally (`10xgraph api`) and your Next.js dev server (`npm run dev`) in separate terminals.
+Run the 10xGraph API server locally (`10xgraph dev --no-open`) and your Next.js dev server (`npm run dev`) in separate terminals.
 
 ### Streaming and function timeouts
 
@@ -464,7 +479,7 @@ export const maxDuration = 60; // 60 seconds
 
 2. **Deploy 10xGraph separately** (e.g., on AWS, Fly.io, or Railway) and Next.js to Vercel. This isolates the compute and lets you tune each independently.
 
-3. **Self-host both** on the same infrastructure (Docker, Kubernetes, VPS). Run `next start` and `10xgraph api` on the same machine.
+3. **Self-host both** on the same infrastructure (Docker, Kubernetes, VPS). Run `next start` and the production image from `10xgraph build` on the same machine.
 
 For non-streaming requests, Vercel's default timeout is usually fine.
 

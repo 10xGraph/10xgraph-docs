@@ -5,7 +5,7 @@ section: "TypeScript client"
 group: "Features"
 order: 70
 label: "Files and multimodal"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The 10xGraph client supports multimodal messages: you upload files once, then reference them by `file_id` in as many messages as you need. The server handles access control and media resolution, so you never expose public URLs or inline base64.
@@ -196,9 +196,9 @@ The message works unchanged across all three call methods:
 ### With `invoke()`
 
 ```ts
-const result = await client.invoke([msg], {
-  config: { thread_id: 'vision-demo-1' },
-});
+// No thread_id: the server starts a thread. Keep result.meta.thread_id to continue it.
+const result = await client.invoke([msg]);
+const threadId = result.meta.thread_id;
 
 const last = result.messages.at(-1);
 const text = (last?.content ?? [])
@@ -214,7 +214,6 @@ console.log(text);
 import { StreamEventType } from '10xgraph-client';
 
 const stream = client.stream([msg], {
-  config: { thread_id: 'vision-demo-1' },
   response_granularity: 'low',
 });
 
@@ -246,7 +245,7 @@ const followUp = Message.withFile(
   upload.data.mime_type,
 );
 
-await client.invoke([followUp], { config: { thread_id: 'vision-demo-1' } });
+await client.invoke([followUp], { config: { thread_id: threadId } });
 ```
 
 Because the thread is checkpointed, the earlier turn is already in context. Re-attaching the file ensures the model can look at the pixels again rather than relying on its own earlier description.
@@ -301,6 +300,18 @@ link.download = 'downloaded-file';
 link.click();
 URL.revokeObjectURL(objUrl);
 ```
+
+---
+
+## Step 8: Delete a file
+
+Remove a file you uploaded with `deleteFile()`:
+
+```ts
+await client.deleteFile(upload.data.file_id);
+```
+
+It needs the `files:delete` scope, and only the uploader can delete a file. A missing file, or one that belongs to someone else, gives a `404`. You usually do not need this, because the server deletes uploaded files when the last message or thread that references them is deleted.
 
 ---
 
@@ -370,7 +381,7 @@ The underlying LLM determines which types it can process. Check your model's doc
 | `extracted_text` is `null` on a PDF | `document_handling` is `pass_raw` or `skip`, or the PDF is scanned images with no text layer. | Use `extract_text` with a text-bearing PDF, or run OCR before uploading. |
 | A rendered preview 403s after a while | The signed URL expired. | Fetch a fresh one with `getFileAccessUrl(file_id)`. |
 | `TenxGraphError` with `statusCode` 413 | The file is larger than `media_max_size_mb`. | Compress it, or raise the limit on the server. |
-| `TenxGraphError` with `statusCode` 415 | MIME type not allowed by the server's `MEDIA_ALLOWED_CONTENT_TYPES`. | Use a supported file type (see table above). |
+| `TenxGraphError` with `statusCode` 415 | MIME type not allowed by the server's `MEDIA_ALLOWED_CONTENT_TYPES`, or the file's first bytes do not match the type you declared (for example a text file labelled `image/png`). | Use a supported file type (see table above). |
 | `TenxGraphError` with `statusCode` 404 on download | `file_id` not found, or not owned by the caller. | Re-upload the file. |
 
 ---

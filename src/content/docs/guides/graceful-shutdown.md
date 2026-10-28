@@ -2,7 +2,7 @@
 title: "Graceful shutdown"
 description: "Handle agent shutdown cleanly with signal handlers, timeout coordination, and protected cleanup sections."
 label: "Graceful shutdown"
-updated: "2026-10-08"
+updated: "2026-10-27"
 order: 420
 group: "Observability and operations"
 section: "Build agents"
@@ -239,7 +239,7 @@ Press Ctrl+C to trigger shutdown. The manager catches the signal and waits for c
 
 ## Integration with the API server
 
-If you deploy your graph with `10xgraph api`, the server process (uvicorn) handles shutdown signals. You do not need to call `GracefulShutdownManager` directly in most cases. However, if you embed a 10xGraph in your own FastAPI application, you can use graceful shutdown to coordinate graph cleanup with the server shutdown lifecycle. See `/docs/integrations/fastapi` for details on embedding a graph.
+If you deploy your graph with the API server (Gunicorn in the `10xgraph build` image, Uvicorn under `10xgraph dev`), the server process handles shutdown signals. You do not need to call `GracefulShutdownManager` directly in most cases. However, if you embed a 10xGraph in your own FastAPI application, you can use graceful shutdown to coordinate graph cleanup with the server shutdown lifecycle. See `/docs/integrations/fastapi` for details on embedding a graph.
 
 ## Best practices
 
@@ -249,6 +249,10 @@ If you deploy your graph with `10xgraph api`, the server process (uvicorn) handl
 - **Log what you are doing.** Graceful shutdown logs signal reception and callback execution at info/warning level; add your own logs so operators know the app is shutting down cleanly.
 - **Close resources explicitly.** Call `.aclose()` on your compiled graph and any external connections (databases, caches) in the finally block.
 - **Test shutdown behavior.** Kill the process with `kill -TERM` and verify that in-flight work completes and resources are freed.
+
+## Run it in production
+
+The image from `10xgraph build` already sets the shutdown behavior this guide describes: the Compose file uses `stop_grace_period: 600s` and the Kubernetes manifest adds a `preStop` delay so the load balancer stops sending new requests first. Match your orchestrator's grace period to your longest run. See [Deploy](/docs/server/deploy) and [Scaling and reliability](/docs/production/scaling).
 
 ## Related pages
 

@@ -5,7 +5,7 @@ section: "Build agents"
 group: "State, memory and context"
 order: 270
 label: Dependency injection
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Do I need to use dependency injection?"
     a: "No, but it beats passing everything through config. Use it when you want to inject stateful services like databases, clients, or loggers. For simple values, config works fine."
@@ -351,6 +351,10 @@ graph.add_node("query", my_node_using_repository)
 - Use `container.bind_instance(Type, instance)` to register a singleton or `bind_factory(name, callable)` for a function.
 - Pass `StateGraph(container=container)` to use a custom, scoped container for testing.
 - Use `fresh()` to resolve a dependency anew on each call, bypassing the cache.
+
+## Run it in production
+
+Take `user_id`, tenant and role from the authenticated identity the server injects, not from request state or message text. Register shared resources such as database pools once through `injectq` in `10xgraph.json`. See [Configure the server](/docs/server/configure) and the [Security model](/docs/production/security-model).
 
 ## Next steps
 

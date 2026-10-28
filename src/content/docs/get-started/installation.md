@@ -4,7 +4,7 @@ seoTitle: Install 10xGraph (Python and TypeScript)
 description: Install 10xGraph and the API server with pip on Python 3.12 or newer, add provider extras and a checkpointer, verify the CLI, and install the TypeScript client.
 section: "Get started"
 order: 30
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Which Python version does 10xGraph need?"
     a: "Python 3.12 or newer. Both the core package and the API package declare requires-python >=3.12, so pip refuses to install them on an older interpreter."
@@ -96,7 +96,7 @@ Beyond model providers, optional extras unlock advanced features:
 | `pg_checkpoint` | asyncpg, redis (production durable state) | Production deployments with durable state |
 | `mcp` | fastmcp, mcp | Tools served by Model Context Protocol servers |
 | `sqlite_checkpoint` | aiosqlite | Single-machine persistence without PostgreSQL or Redis |
-| `qdrant` | qdrant-client | Long-term semantic memory and retrieval |
+| `qdrant` | qdrant-client 1.10 or newer (Qdrant server 1.10 or newer) | Long-term semantic memory and retrieval |
 | `mem0` | mem0ai | Managed vector memory store |
 | `kafka` | aiokafka | Stream execution events to Apache Kafka |
 | `rabbitmq` | aio-pika | Stream execution events to RabbitMQ |
@@ -111,7 +111,7 @@ The `all` extra installs every other extra at once and is useful for local devel
 Version pinning matters: 10xGraph is pre-1.0, so minor version updates may include breaking changes. Example of a safe lock:
 
 ```bash
-pip install "10xgraph==0.10.0" "10xgraph-api==0.7.0"
+pip install "10xgraph==0.10.3" "10xgraph-api==0.9.0"
 ```
 
 Read the `CHANGELOG.md` before upgrading.
@@ -132,9 +132,9 @@ Example output (the exact formatting and versions vary by release):
 ```text
 $ 10xgraph version
 10xgraph-api
-  Version: 0.7.0
+  Version: 0.9.0
 10xgraph (core)
-  Version: 0.10.0
+  Version: 0.10.3
 
 $ python -c "import tenxgraph; print(tenxgraph.__file__)"
 /path/to/.venv/lib/python3.12/site-packages/tenxgraph/__init__.py
@@ -144,7 +144,7 @@ If the `10xgraph` command is not found, make sure your virtual environment is ac
 
 ## How do I set LLM provider API keys?
 
-Each provider reads its API key from an environment variable. You can export the variable in your shell session, or store it in a `.env` file that `10xgraph api` loads at startup.
+Each provider reads its API key from an environment variable. You can export the variable in your shell session, or store it in a `.env` file that `10xgraph dev` loads at startup.
 
 Export the key in your shell:
 
@@ -195,7 +195,7 @@ npm install 10xgraph-client
 
 The main class is `TenxGraphClient`, and the package requires Node.js 18 or newer. See the [client documentation](/docs/client) for usage.
 
-The client talks to a running `10xgraph api` server over HTTP, and you pass a thread ID to keep conversation history across runs. Use `10xgraph-api` 0.7.0 or newer with client 0.6.0 or newer: the client authenticates WebSockets with the `10xgraph-bearer` subprotocol, which older servers do not accept. HTTP calls work with either. See the [Quickstart](/docs/get-started/first-agent) for a complete example.
+The client talks to a running 10xGraph API server (`10xgraph dev` locally) over HTTP, and you pass a thread ID to keep conversation history across runs. Use `10xgraph-api` 0.7.0 or newer with client 0.6.0 or newer: the client authenticates WebSockets with the `10xgraph-bearer` subprotocol, which older servers do not accept. HTTP calls work with either. See the [Quickstart](/docs/get-started/first-agent) for a complete example.
 
 ## What if something goes wrong?
 

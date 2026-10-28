@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Observability and operations"
 order: 400
 label: Logfire & LangSmith tracing
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 [Pydantic Logfire](https://pydantic.dev/logfire) and [LangSmith](https://docs.langchain.com/langsmith/) are production-grade observability platforms for monitoring AI applications. Both implement OpenTelemetry, the industry-standard protocol for distributed tracing. 10xGraph automatically instruments your graphs with spans at every layer, graph execution, node transitions, LLM invocations, token usage, and tool execution, including GenAI semantic conventions (`gen_ai.usage.input_tokens`, `gen_ai.request.model`, `session.id`, and more). The `OtelPublisher` routes these spans through an OpenTelemetry `TracerProvider` to your chosen backend. You need only configure which exporter to use; no vendor-specific instrumentation is required.
@@ -69,6 +69,7 @@ app = graph.compile()
 | `send_to_logfire` | bool | `True` | Set `False` to emit to console only (for local testing). |
 | `console` | bool or ConsoleOptions | None | Control local console output. Pass `False` to silence it. |
 | `level` | ObservabilityLevel | `STANDARD` | Verbosity: `SPANS` (timing only), `STANDARD` (tokens, model, params), or `FULL` (prompt/completion text). See details below. |
+| `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See [Hide the user id in traces](#hide-the-user-id-in-traces). |
 | `additional_span_processors` | list | None | Extra `SpanProcessor`s attached alongside the Logfire one. |
 | `**configure_kwargs` | dict | - | Extra keyword arguments passed to `logfire.configure()` (e.g., `environment="staging"`). |
 
@@ -107,6 +108,7 @@ setup_langsmith(
 | `project` | str | None | LangSmith project name, sent as the `Langsmith-Project` header. |
 | `endpoint` | str | `https://api.smith.langchain.com/otel` | Base OTEL endpoint URL. `/v1/traces` is appended automatically. Override for regional deployments. |
 | `level` | ObservabilityLevel | `STANDARD` | Verbosity: `SPANS`, `STANDARD`, or `FULL`. See details below. |
+| `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See [Hide the user id in traces](#hide-the-user-id-in-traces). |
 | `tracer_provider` | TracerProvider | None | Existing `TracerProvider` to attach to. Creates a new global one if not supplied. |
 
 ## Option 3: Use a publisher object
@@ -164,15 +166,36 @@ The `level` parameter controls how much detail lands on each span and whether se
 
 `FULL` puts your application's prompts and responses on spans. The framework's built-in log redaction (`install_secret_redaction()`) does **not** scrub span content, so treat `FULL` traces as sensitive and restrict who can view them in Logfire or LangSmith. Never use `FULL` in production without understanding the privacy implications.
 
+## Hide the user id in traces
+
+Spans always carry `user_id`, `thread_id` and `run_id`. By default the user id is sent as is. Set `user_id_mode` to change that for every span, including those sent to Logfire and LangSmith:
+
+| Mode | What the span carries |
+|---|---|
+| `raw` (default) | The id, unchanged. |
+| `hash` | First 16 hex characters of SHA-256 of the id. The same id always gives the same value, so one user's spans still group together. |
+| `mask` | Ids of 4 characters or fewer: `***`. 5 to 7 characters: `a***e`. 8 or more: `al***42`. |
+
+Plain SHA-256 of a short id, such as an email or a small integer, can be recovered by guessing. Set the environment variable `TENXGRAPH_TRACE_USER_ID_KEY` and `hash` uses HMAC-SHA256 with that key instead.
+
+```python
+setup_logfire(graph, service_name="my-agent", user_id_mode="hash")
+```
+
+`OtelPublisher(level=..., user_id_mode="hash")`, `setup_tracing(...)`, `setup_langsmith(...)` and `setup_observability(graph, {"user_id_mode": "hash", ...})` take the same option. An invalid value raises `ValueError`.
+
+This changes spans only. Redis, RabbitMQ, Kafka and Console events keep the raw id. Prompts and tool I/O still appear at `FULL`. See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
+
 ## Serve with declarative configuration
 
-When serving a graph through the 10xGraph API server using `10xgraph api`, you do not call setup functions yourself. Instead, add an `observability` block to your `10xgraph.json` config file, and the server wires everything up during startup:
+When serving a graph through the 10xGraph API server using `10xgraph dev`, you do not call setup functions yourself. Instead, add an `observability` block to your `10xgraph.json` config file, and the server wires everything up during startup:
 
 ```json
 {
   "agent": "graph.react:app",
   "observability": {
     "level": "standard",
+    "user_id_mode": "hash",
     "logfire": {
       "enabled": true,
       "service_name": "my-agent",
@@ -189,6 +212,8 @@ When serving a graph through the 10xGraph API server using `10xgraph api`, you d
 ```
 
 Keep `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY` in your `.env` file, never in `10xgraph.json`. If a backend is enabled but its package is missing or its API key is not set, the server logs a warning and continues without that exporter rather than failing to start.
+
+`observability.user_id_mode` is also in the `10xgraph config` editor (Observability section, "User id in traces"). It applies to the server's OTEL publisher both for the `observability` block and for `OTEL_ENABLED`. If the installed core is too old to support it, the server keeps raw ids and logs a warning.
 
 All config keys are optional. You can enable just Logfire, just LangSmith, or both. The default `level` is `"standard"` if not specified.
 
@@ -266,6 +291,10 @@ setup_langsmith(graph, api_key="your-api-key", project="my-agent")
 - Check that `level` is not `SPANS` (which logs structure only, not content).
 - If running locally with `send_to_logfire=False`, traces go to console instead.
 - In the API server, confirm `enabled` is `true` under `observability.logfire` or `observability.langsmith` in `10xgraph.json` and the tokens are in `.env`.
+
+## Run it in production
+
+The server's in-process trace endpoint is disabled when `MODE=production`, so use OTEL or a publisher for traces there. Set `observability.user_id_mode` to `hash` or `mask` if user IDs should not appear in your tracing backend. See [Observability](/docs/server/observability).
 
 ## See also
 

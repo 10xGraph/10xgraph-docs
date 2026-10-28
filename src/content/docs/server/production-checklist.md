@@ -6,7 +6,7 @@ section: "API server"
 group: "Operate"
 order: 170
 label: Production Checklist
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "What is the minimum checklist for production?"
     answer: "Set MODE=production, IS_DEBUG=false, use explicit ORIGINS, configure Postgres+Redis for persistence, enable rate limiting, and run at least two API instances."
@@ -17,6 +17,31 @@ faq:
 ---
 
 Deploying 10xGraph to production requires hardening your API server for security, reliability, and scale. This checklist walks through every critical setting, from runtime mode to persistence topology to horizontal scaling, with verification steps to confirm each piece is working before traffic arrives.
+
+## Already done by the server in production
+
+With `MODE=production`, the server does these for you. You do not configure them; the sections below cover what you still own.
+
+- Validates `MODE` at startup: a typo stops the server instead of running with development defaults.
+- Runs strict production checks (`STRICT_PRODUCTION_CHECKS`, on by default): wildcard `ORIGINS` or `ALLOWED_HOST`, wildcard CORS with credentials and enabled docs paths are refused at boot, and short HMAC JWT secrets are rejected.
+- Turns off the `/docs` and `/redocs` pages unless you set their paths.
+- Does not mount the unauthenticated `/v1/evals` routes.
+- Replaces 5xx error text, including streamed error chunks, with a generic message. Raise `ClientInputError` for 422 messages that must reach the client.
+- Cancels a graph run after 300 seconds unless you set `runs.timeout`.
+- Scopes graph introspection (`GET /v1/graph`, `/v1/graph/tools`, `/v1/graph:StateSchema`) to callers with the `graph:read` scope, unless you set `graph_introspection` to `"open"`.
+- Defaults authorization to ownership, so each user reaches only their own threads.
+- Forces `IS_DEBUG` off, even if the environment sets it to true.
+- Ships a hardened image when you use `10xgraph build`: non-root user, Gunicorn with long graceful timeouts, health check on `/ping`.
+
+For why these matter, see the [security model](/docs/production/security-model) and [scaling and reliability](/docs/production/scaling).
+
+## What you still own
+
+- **Configure auth.** Nothing refuses `"auth": null` in production; the server starts open and every route except `/ping` accepts any caller. Set `"auth": "jwt"` or a custom backend (section 2).
+- Strong secrets, explicit `ORIGINS`, and secret storage (sections 2 and 3).
+- A shared, durable checkpointer passed to `compile()`, plus Postgres and Redis operations and backups (section 5).
+- Rate limits, worker count and replica count for your traffic (sections 6 and 7).
+- Proxy, media storage, monitoring and the verification steps at the end.
 
 ## Prerequisites
 
@@ -38,7 +63,9 @@ IS_DEBUG=false
 LOG_LEVEL=INFO
 ```
 
-`MODE=production` enforces stricter validation at startup: wildcard CORS origins combined with credentials fail the server boot, and HMAC JWT secrets shorter than 32 bytes are rejected. It also turns off the `/docs` and `/redocs` pages unless you set their paths explicitly, and it does not mount the eval report routes. Leave `IS_DEBUG=false`; debug mode in production logs a security warning.
+`MODE` accepts `production` (or `prod`) and `development` (or `dev`, `local`), trimmed and case-insensitive. Unset means `development`. Any other value, such as a typo, stops the server at startup, so a misspelling cannot run with the development defaults.
+
+`MODE=production` enforces stricter validation at startup: wildcard CORS origins combined with credentials fail the server boot, and HMAC JWT secrets shorter than 32 bytes are rejected. `STRICT_PRODUCTION_CHECKS` is on by default in production and also stops startup on a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST`, or enabled `DOCS_PATH` and `REDOCS_PATH`. Set `STRICT_PRODUCTION_CHECKS=false` to start with warnings only. It also turns off the `/docs` and `/redocs` pages unless you set their paths explicitly, and it does not mount the eval report routes. Leave `IS_DEBUG=false`. In production the server forces `IS_DEBUG` off and logs a warning if it was set to true.
 
 ## 2. Secrets and authentication
 
@@ -95,11 +122,12 @@ ORIGINS=https://app.example.com,https://admin.example.com
 ALLOWED_HOST=app.example.com
 ```
 
-The server refuses to start with `ORIGINS="*"` and `CORS_ALLOW_CREDENTIALS=true` (the default) in production mode. If you need cross-origin requests without credentials, set:
+The server refuses to start with a wildcard `ORIGINS` or a wildcard `ALLOWED_HOST` in production mode, because `STRICT_PRODUCTION_CHECKS` is on by default. If you need cross-origin requests from any origin without credentials, opt out of the strict checks and turn credentials off:
 
 ```bash
 ORIGINS=*
 CORS_ALLOW_CREDENTIALS=false
+STRICT_PRODUCTION_CHECKS=false
 ```
 
 Security headers are enabled by default (`SECURITY_HEADERS_ENABLED`). `Strict-Transport-Security` is only sent on HTTPS requests, so check through your TLS endpoint:
@@ -175,6 +203,10 @@ redis-cli -u redis://redis.internal:6379/0 ping
 # Should respond PONG
 ```
 
+### One run per thread
+
+The server runs one graph run at a time on a thread. With Redis configured, the lock is shared across all instances, so two replicas cannot run the same thread at once. Without Redis, the lock is per process and does not stop two replicas from running one thread together. A second run waits up to 30 seconds, then gets `409` (`thread is busy`). The lock expires on its own if a worker dies. If Redis is unreachable, runs proceed without the lock and the error is logged. See [Invoke and stream](/docs/server/invoke-and-stream#one-run-per-thread).
+
 ### Topology diagram
 
 ```
@@ -243,6 +275,10 @@ In a second instance:
 SNOWFLAKE_NODE_ID=1
 SNOWFLAKE_WORKER_ID=2
 ```
+
+### Error text and request limits
+
+With `MODE=production`, error chunks on stream, WebSocket and AG-UI carry a generic message instead of the raw exception text, the same as invoke. Requests are also limited to 500 messages, 100 content blocks per message and 1,000,000 characters of text; over a limit gets `422` naming the limit. Neither needs configuration.
 
 ## 7. Rate limiting
 
@@ -370,6 +406,8 @@ SENTRY_TRACES_SAMPLE_RATE=0.1
 
 Sampling 10% of traces is typical for production.
 
+The API reports only server faults: 4xx responses are logged at WARNING and never become events, and request bodies are never sent to Sentry. If an alert matches ERROR logs for client errors, match WARNING instead.
+
 ### OpenTelemetry tracing
 
 For distributed tracing across your infrastructure:
@@ -379,6 +417,18 @@ OTEL_ENABLED=true
 OTEL_SERVICE_NAME=10xgraph-api
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
+
+Set the endpoint. With `MODE=production` and no endpoint, the server does not print spans to the console (they could carry request URLs and, at `OTEL_LEVEL=full`, message content); it exports nothing and logs a warning at startup.
+
+### Traces and event publishers
+
+Traces at the `full` level and the Redis, RabbitMQ and Kafka publishers carry message and tool content, and spans carry the user id. 10xGraph never forces TLS on these connections; it is your call:
+
+- We recommend TLS in production whenever you can (`rediss://`, `amqps://`, Kafka `security_protocol="SSL"` or `"SASL_SSL"`, an `https://` OTLP endpoint), and always on a network you do not control.
+- A broker or collector reachable only inside a network you secure yourself (a private subnet or VPC, or a service mesh that already encrypts traffic) can run without it.
+- To keep real user ids out of traces, set `"observability": {"user_id_mode": "hash"}` (or `"mask"`) in `10xgraph.json`.
+
+See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
 
 ## Verification checklist
 
@@ -397,18 +447,19 @@ curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
 ### 2. Thread persistence survives restart
 
 ```bash
-# First invoke
+# First invoke. Omit thread_id: the server starts a new thread and returns its id
+# in data.meta.thread_id. Use that id below.
 curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "Remember: my name is Alice"}]}], "config": {"thread_id": "test-123"}}'
+  -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "Remember: my name is Alice"}]}]}'
 
-# Verify it's stored
-curl http://127.0.0.1:8000/v1/threads/test-123/messages
+# Verify it's stored (replace THREAD_ID with the returned id)
+curl http://127.0.0.1:8000/v1/threads/THREAD_ID/messages
 
 # Stop the API server and restart it
 
 # Verify state persists
-curl http://127.0.0.1:8000/v1/threads/test-123/messages
+curl http://127.0.0.1:8000/v1/threads/THREAD_ID/messages
 # Should still contain the previous message
 ```
 
@@ -444,7 +495,8 @@ curl http://127.0.0.1:8000/ping
 | Requests are denied on a thread | User does not own the thread | Check authorization backend and thread ownership |
 | Thread state disappears after restart | Using `InMemoryCheckpointer` | Switch to `PgCheckpointer` with Postgres DSN |
 | One worker sees state, another does not | Workers are not sharing the same backend | Point all instances at the same Postgres and Redis |
-| CORS requests are blocked | `ORIGINS` does not include the client domain | Add the domain to `ORIGINS` or set `ORIGINS=*` with `CORS_ALLOW_CREDENTIALS=false` |
+| CORS requests are blocked | `ORIGINS` does not include the client domain | Add the domain to `ORIGINS`. A public API can set `ORIGINS=*` with `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false` |
+| `409 thread is busy` on a thread | Another run is still active, and the 30 s wait ran out | Wait for the run to end, use `on_busy: "cancel"`, or use one thread per conversation |
 | Rate limiting not working | No `rate_limit` block, or Redis is down (with `fail_open` true, requests pass) | Verify `rate_limit.redis.url` and Redis connectivity |
 
 ## Related pages
@@ -456,3 +508,8 @@ curl http://127.0.0.1:8000/ping
 - [Set up checkpointing](/docs/guides/set-up-checkpointing)
 - [Observability](/docs/server/observability)
 - [Deploy](/docs/server/deploy)
+- [Production readiness](/docs/production)
+- [Security model](/docs/production/security-model)
+- [Scaling and reliability](/docs/production/scaling)
+- [Authorization scopes](/docs/guides/authorization-scopes)
+- [Graceful shutdown](/docs/guides/graceful-shutdown)
