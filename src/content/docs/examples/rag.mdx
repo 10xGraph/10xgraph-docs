@@ -1,0 +1,277 @@
+---
+title: "RAG Agent with Qdrant and Reranking in 10xGraph (Python)"
+seoTitle: "RAG agent with Qdrant in Python"
+description: "Build a retrieval-augmented generation agent in Python with 10xGraph RAGAgent, a local Qdrant store, Gemini embeddings and optional Cohere or cross-encoder reranking."
+section: Examples
+group: "Memory and patterns"
+order: 28
+label: "RAG"
+updated: "2026-10-28"
+faq:
+  - q: "Why does the example index with system_user_id(\"knowledge_base\")?"
+    a: "The store requires an owner for every record. RAGAgent searches as system_user_id(\"knowledge_base\") by default, so shared documents indexed under that id are visible to every user and never mix with per-user memory."
+  - q: "What do top_k and top_n do?"
+    a: "top_k is how many candidates the store returns. With a reranker, top_n is how many of those are passed to the model. Without a reranker all top_k documents are used and top_n is ignored."
+  - q: "Are retrieved documents saved in the thread?"
+    a: "No. They are held in a per-run cache and added to the outgoing request only, so the saved thread keeps the user's original message."
+---
+
+This example builds a retrieval-augmented generation agent. It indexes ten support-policy chunks into a local Qdrant store, then answers questions with `RAGAgent`. Google `gemini-2.5-flash` writes the answers and `gemini-embedding-001` embeds the documents. You can add Cohere or a local cross-encoder to rerank results.
+
+## What you will build
+
+A support agent that answers questions from a small policy knowledge base. The script ingests ten text chunks into a local Qdrant store, then runs `RAGAgent` three ways: plain vector search, with Cohere reranking, and with a local cross-encoder reranker. Gemini writes the answers and also embeds the documents.
+
+## Key concepts
+
+- `RAGAgent(store, agent, reranker, top_k, top_n)`: a prebuilt graph, `RETRIEVE` then optional `RERANK` then `SYNTHESIZE`.
+- `create_local_qdrant_store`: file-based Qdrant for the knowledge base.
+- `GoogleEmbedding`: embeds chunks and queries with `gemini-embedding-001`.
+- `system_user_id("knowledge_base")`: the reserved owner of shared documents. `RAGAgent` searches as this owner unless you set `store_config` or `store_config_builder`.
+- `CohereReranker` and `CrossEncoderReranker`: rerankers that reorder `top_k` candidates and keep `top_n`.
+- `store_config_builder`: builds the search config from the run config, for per-user or per-tenant knowledge bases.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+```
+
+```bash
+pip install "10xgraph[google-genai,qdrant]"
+export GEMINI_API_KEY=...
+# optional rerankers
+pip install cohere && export COHERE_API_KEY=...
+pip install sentence-transformers
+```
+
+No Docker services are required.
+
+```bash
+python examples/rag/rag_example.py
+```
+
+The Cohere and cross-encoder runs are skipped when their requirements are missing.
+
+## How the code works
+
+### The knowledge base
+
+```python
+QDRANT_PATH = tempfile.mkdtemp(prefix="10xgraph-rag-")
+store = create_local_qdrant_store(
+    path=QDRANT_PATH,
+    embedding=GoogleEmbedding(model="gemini-embedding-001"),
+    collection="support_kb",
+)
+```
+
+The store is a file-based Qdrant database. `GoogleEmbedding` turns each chunk into a vector. If you switch to another embedding model, re-index, because vector sizes differ.
+
+```python
+async def ingest() -> None:
+    """Index the chunks once. The shared knowledge base is owned by a reserved id."""
+    await store.asetup()
+    owner = {"user_id": system_user_id("knowledge_base")}
+    for chunk in DOCUMENTS:
+        await store.astore(owner, chunk, category="support-policy")
+```
+
+Ingest once. Every chunk is written under the shared knowledge-base owner. The store requires an owner for every record, and `RAGAgent` searches as `system_user_id("knowledge_base")` by default, so these documents are visible to every user and never mix with per-user memory.
+
+### The agent
+
+```python
+def build_agent() -> Agent:
+    # RAGAgent calls agent.execute(...) itself and injects the retrieved documents,
+    # so this is a plain Agent with no tools.
+    return Agent(model="gemini-2.5-flash", system_prompt=SYSTEM_PROMPT)
+```
+
+`RAGAgent` calls the agent itself and injects the retrieved documents into the request, so this is a plain `Agent` with no tools. The system prompt tells it to answer only from the retrieved documents. The documents are fenced in a block marked as not-instructions and are never written to `state.context`, so the saved thread keeps the user's original message.
+
+### The three runs
+
+```python
+async def ask(title: str, rag: RAGAgent, question: str) -> None:
+    app = rag.compile()
+    result = await app.ainvoke({"messages": [Message.text_message(question)]}, {"thread_id": title})
+    print(f"--- {title}\nQ: {question}\nA: {result['messages'][-1].text()}\n")
+    await app.aclose()
+```
+
+```python
+        RAGAgent(store=store, agent=build_agent(), top_k=4),
+```
+
+With no reranker, all `top_k` hits go to the model.
+
+```python
+        reranker = CohereReranker(api_key=os.environ["COHERE_API_KEY"])
+        await ask(
+            "cohere",
+            RAGAgent(store=store, agent=build_agent(), reranker=reranker, top_k=8, top_n=3),
+            "Can I return a damaged item?",
+        )
+```
+
+With a reranker, retrieve more candidates than the model needs. `top_k=8` pulls eight chunks from the store, and `top_n=3` keeps the three the reranker scores highest. The script runs this only when `COHERE_API_KEY` is set.
+
+```python
+        reranker = CrossEncoderReranker("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        await ask(
+            "cross-encoder",
+            RAGAgent(store=store, agent=build_agent(), reranker=reranker, top_k=8, top_n=3),
+            "Are sale items refundable?",
+        )
+```
+
+The cross-encoder is a local model, so it needs no API call. It runs only when `sentence-transformers` is installed. To scope search per user instead of one shared base, pass `store_config_builder=lambda cfg: \{"user_id": cfg["user_id"]\}` and index with the same ids.
+
+## Full code
+
+```python
+"""RAGAgent over a local Qdrant knowledge base, with optional rerankers.
+
+Ingests a few support-policy chunks, then answers questions in three setups:
+plain vector search, Cohere rerank (needs COHERE_API_KEY) and a local cross-encoder
+(needs sentence-transformers). Gemini writes the answers and embeds the documents.
+
+Run:  python examples/rag/rag_example.py
+"""
+
+import asyncio
+import os
+import shutil
+import tempfile
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.graph import Agent
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent.rag import CohereReranker, CrossEncoderReranker, RAGAgent
+from tenxgraph.storage.store import GoogleEmbedding, create_local_qdrant_store, system_user_id
+
+
+load_dotenv()
+
+DOCUMENTS = [
+    "Returns are accepted within 30 days of purchase with a receipt.",
+    "Items must be in original packaging to qualify for a full refund.",
+    "Digital downloads are non-refundable once accessed.",
+    "Shipping costs are refunded only when the return is due to our error.",
+    "To start a return, email support@example.com with your order number.",
+    "Exchanges can be done in store or by mail within 60 days.",
+    "Sale items are final sale and cannot be returned or exchanged.",
+    "Gift cards and store credit are non-refundable.",
+    "Damaged or defective items are replaced free of charge at any time.",
+    "International orders may carry extra return shipping fees.",
+]
+
+SYSTEM_PROMPT = [
+    {
+        "role": "system",
+        "content": (
+            "You are a customer-support agent. Answer only from the retrieved "
+            "documents. If they do not contain the answer, say so."
+        ),
+    }
+]
+
+QDRANT_PATH = tempfile.mkdtemp(prefix="10xgraph-rag-")
+store = create_local_qdrant_store(
+    path=QDRANT_PATH,
+    embedding=GoogleEmbedding(model="gemini-embedding-001"),
+    collection="support_kb",
+)
+
+
+async def ingest() -> None:
+    """Index the chunks once. The shared knowledge base is owned by a reserved id."""
+    await store.asetup()
+    owner = {"user_id": system_user_id("knowledge_base")}
+    for chunk in DOCUMENTS:
+        await store.astore(owner, chunk, category="support-policy")
+
+
+def build_agent() -> Agent:
+    # RAGAgent calls agent.execute(...) itself and injects the retrieved documents,
+    # so this is a plain Agent with no tools.
+    return Agent(model="gemini-2.5-flash", system_prompt=SYSTEM_PROMPT)
+
+
+async def ask(title: str, rag: RAGAgent, question: str) -> None:
+    app = rag.compile()
+    result = await app.ainvoke({"messages": [Message.text_message(question)]}, {"thread_id": title})
+    print(f"--- {title}\nQ: {question}\nA: {result['messages'][-1].text()}\n")
+    await app.aclose()
+
+
+async def main() -> None:
+    await ingest()
+
+    # 1. Plain RAG. With no reranker, all top_k hits go to the model.
+    await ask(
+        "plain",
+        RAGAgent(store=store, agent=build_agent(), top_k=4),
+        "Can I return a digital download?",
+    )
+
+    # 2. Retrieve many candidates, let Cohere pick the best few.
+    if os.getenv("COHERE_API_KEY"):
+        reranker = CohereReranker(api_key=os.environ["COHERE_API_KEY"])
+        await ask(
+            "cohere",
+            RAGAgent(store=store, agent=build_agent(), reranker=reranker, top_k=8, top_n=3),
+            "Can I return a damaged item?",
+        )
+    else:
+        print("Skipping Cohere: set COHERE_API_KEY.\n")
+
+    # 3. Same idea with a local model, no API call.
+    try:
+        import sentence_transformers  # noqa: F401
+    except ImportError:
+        print("Skipping cross-encoder: pip install sentence-transformers.\n")
+    else:
+        reranker = CrossEncoderReranker("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        await ask(
+            "cross-encoder",
+            RAGAgent(store=store, agent=build_agent(), reranker=reranker, top_k=8, top_n=3),
+            "Are sale items refundable?",
+        )
+
+    shutil.rmtree(QDRANT_PATH, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Source on GitHub: [examples/rag](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/rag)
+
+## Expected output
+
+Illustrative output.
+
+```text
+--- plain
+Q: Can I return a digital download?
+A: No. Digital downloads are non-refundable once accessed.
+
+--- cohere
+Q: Can I return a damaged item?
+A: Yes. Damaged or defective items are replaced free of charge at any time.
+```
+
+## Using a different model
+
+Change the `model` string in `build_agent()`, for example `"claude-sonnet-5-5"` with `pip install "10xgraph[anthropic]"`, or `"gpt-5-mini"` with the `openai` extra. Embeddings are separate: swap `GoogleEmbedding` for `OpenAIEmbedding` if you prefer, and re-ingest, since vector sizes differ.
+
+## Next steps
+
+- [Long-term memory](/docs/examples/long-term-memory)
+- [Prebuilt ReAct agent](/docs/examples/quickstart)
+- [Evaluation](/docs/examples/evaluation)
+- [RAG assistant](/docs/examples/rag-assistant)

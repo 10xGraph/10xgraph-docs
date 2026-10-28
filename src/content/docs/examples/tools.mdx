@@ -1,0 +1,537 @@
+---
+title: "Tools in 10xGraph - @tool Decorator, Injected Params, ToolResult and Remote Tools"
+seoTitle: "Agent tools in 10xGraph: @tool and ToolResult"
+description: "Define Python agent tools in 10xGraph: the @tool decorator with tags, injected state and config, ToolResult state updates, prebuilt tools and client-side tools."
+section: Examples
+group: "Tools and integrations"
+order: 14
+label: "Tools"
+updated: "2026-10-28"
+faq:
+  - q: "How does the model learn what my tool does?"
+    a: "ToolNode builds an OpenAI-style function schema from the function name, type hints and docstring. The @tool decorator lets you set the description and tags explicitly."
+  - q: "Which parameters are injected instead of chosen by the model?"
+    a: "Parameters named state, config, tool_call_id and emit, plus dependencies injected through InjectQ. They are removed from the schema the model sees."
+  - q: "How do I let the model call a function that runs in the browser?"
+    a: "Register it as a remote tool with attach_remote_tools or config[\"remote_tools\"]. The graph pauses after the tool node and hands the call to the client, which resumes the thread with a ToolResultBlock."
+---
+
+Tools are how an agent acts. In 10xGraph a tool is a plain Python function, and `ToolNode` turns it into a schema the model can call. This page has five short scripts, one per feature: the `@tool` decorator, injected parameters, state updates with `ToolResult`, prebuilt tools, and tools that run on the client. They all use DeepSeek (`deepseek-chat`) through its OpenAI-compatible endpoint.
+
+## What you will build
+
+Five short scripts, one per tool feature. They use DeepSeek (`deepseek-chat`) through its OpenAI-compatible endpoint, which shows that any such model works by passing `base_url` and `api_key`.
+
+## Key concepts
+
+- `@tool(name, description, tags)`: attaches metadata to a function.
+- `Agent(tools_tags=...)` / `ReactAgent(tools_tags=...)`: show the model only tools matching a tag. Untagged tools are always shown.
+- Injected parameters: `state`, `config`, `tool_call_id` are filled by `ToolNode`.
+- `ToolResult(message, state)`: returns text to the model and writes fields into state.
+- `safe_calculator`, `fetch_url`, `create_file_tools(root)`: prebuilt tools in `tenxgraph.prebuilt.tools`.
+- `attach_remote_tools` / `config["remote_tools"]`: tools the client executes.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[openai]" python-dotenv
+export DEEPSEEK_API_KEY=...
+
+python examples/tools/tool_decorator.py
+python examples/tools/injected_params.py
+python examples/tools/tool_result_state.py
+python examples/tools/prebuilt_tools.py
+python examples/tools/remote_tools.py
+```
+
+`tool_decorator.py` prints its tag-filtering demo before any API call, so that part works without a key.
+
+## How the code works
+
+The agents in this folder are built the same way. `ReactAgent` forwards extra keyword arguments to its `Agent`, which uses the OpenAI client for unknown model names:
+
+```python
+agent = ReactAgent(
+    model="deepseek-chat",
+    base_url="https://api.deepseek.com",
+    api_key=os.environ["DEEPSEEK_API_KEY"],
+    tools=[get_order, cancel_order, current_time],
+)
+```
+
+### tool_decorator.py
+
+`@tool` attaches a name, a description and tags to a function.
+
+```python
+# Keep name equal to the function name: ToolNode dispatches calls by function name.
+@tool(name="get_order", description="Look up an order by id.", tags=["orders", "read"])
+def get_order(order_id: str) -> dict:
+    return {"order_id": order_id, "status": "shipped", "total": 59.0}
+```
+
+The bare form `@tool` takes the name and description from the function and its docstring.
+
+The first half of the script needs no LLM. `ToolNode.all_tools(tags=...)` returns the schemas the model would see for each filter:
+
+```python
+node = ToolNode([get_order, cancel_order, current_time])
+print("metadata:", get_tool_metadata(cancel_order))
+for tags in (None, {"read"}, {"write"}):
+    schemas = await node.all_tools(tags=tags)
+    print(f"tags={tags}: {[s['function']['name'] for s in schemas]}")
+```
+
+A tool with no tags (`current_time`) appears under every filter. The second half gives the agent `tools_tags={"read"}`, so it only sees `get_order` and `current_time`. A call to a hidden tool such as `cancel_order` is refused at dispatch. That makes tags a simple way to keep write tools away from a read-only agent.
+
+### injected_params.py
+
+Parameters with reserved names are filled in by `ToolNode` and hidden from the schema:
+
+```python
+def whoami(
+    topic: str,
+    state: AgentState,  # the live graph state, including state.context
+    config: dict[str, Any],  # the run config: thread_id, user_id, run_id, your own keys
+    tool_call_id: str,  # id of this specific tool call
+) -> str:
+```
+
+Only `topic` is in the schema, so the model supplies just that. Inside the tool, `config.get("plan", "free")` reads a custom key that the caller put in the run config (`"plan": "pro"`), and `len(state.context)` reads the live conversation. This is how a tool learns who is calling without trusting the model to say so.
+
+### tool_result_state.py
+
+A tool normally returns text. Returning `ToolResult` also writes fields into the graph state:
+
+```python
+return ToolResult(
+    message=f"Added {item}. Cart has {len(cart)} items, total {total}.",
+    state={"cart": cart, "total": total},
+)
+```
+
+`message` goes back to the model. The keys in `state` must be fields on your `AgentState` subclass, here `CartState`, passed as `ReactAgent(state=CartState())`. The tool reads the current state through its `state: CartState` parameter, then returns only the fields that change. The script asks for `ResponseGranularity.FULL` so it can read `result["state"].cart` afterwards.
+
+### prebuilt_tools.py
+
+Prebuilt tools are passed to an agent like your own functions:
+
+```python
+tools=[
+    safe_calculator,  # AST-based arithmetic, no eval()
+    fetch_url,  # public http(s) only; private hosts are blocked, output truncated
+    # read/write/search limited to `workspace`; write=False makes it read-only.
+    *create_file_tools(workspace, write=False),
+],
+```
+
+`safe_calculator(expression, precision)` evaluates arithmetic through an AST. `fetch_url(url)` fetches public pages and blocks private hosts. `create_file_tools(root, read=, write=, search=)` returns `file_read`, `file_write` and `file_search` fixed to `root`. Files such as `.env` and `*.pem` are hidden by default. The script makes a temporary workspace with a `notes.txt` and gives the agent read-only access to it.
+
+### remote_tools.py
+
+A remote tool is described to the model but executed by the client, for example in a browser. Attach it to the compiled graph:
+
+```python
+app.attach_remote_tools([{**CLIENT_TOOL, "node": "TOOL"}])
+```
+
+When the model calls `read_clipboard`, the tool node does not run it. The graph pauses and returns, and the call is in the last assistant message's `tools_calls`. The client runs it, then resumes the same thread with a tool message:
+
+```python
+result_msg = Message(
+    role="tool", content=[ToolResultBlock(call_id=call["id"], output=output)]
+)
+final = await app.ainvoke({"messages": [result_msg]}, config)
+```
+
+The result is matched to the call by `call_id`. A checkpointer is required so the paused thread is stored, which is why the app is compiled with `InMemoryCheckpointer()`. `ReactAgent` also needs at least one server tool (`server_time`) to create its `TOOL` node. To offer tools for a single run instead, put the same schemas in `config["remote_tools"]`. That leaves the shared graph unchanged, which suits per-user frontend tools.
+
+### Using a different model
+
+Replace the model string and drop `base_url` and `api_key`. For example `model="gpt-5-mini"` with `10xgraph[openai]` and `OPENAI_API_KEY`, or `model="claude-sonnet-5-5"` with `10xgraph[anthropic]`.
+
+## Full code
+
+<Tabs>
+<TabItem label="tool_decorator.py">
+
+```python
+"""The @tool decorator: description, tags, and filtering tools with tools_tags.
+
+The first half runs without an LLM and prints which tools each tag filter exposes.
+The second half runs a DeepSeek agent that can only see the "read" tools.
+
+Run: python examples/tools/tool_decorator.py   (agent half needs DEEPSEEK_API_KEY)
+"""
+
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.graph import ToolNode
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.utils import get_tool_metadata, tool
+
+
+load_dotenv()
+
+
+# Keep name equal to the function name: ToolNode dispatches calls by function name.
+@tool(name="get_order", description="Look up an order by id.", tags=["orders", "read"])
+def get_order(order_id: str) -> dict:
+    return {"order_id": order_id, "status": "shipped", "total": 59.0}
+
+
+@tool(name="cancel_order", description="Cancel an order by id.", tags=["orders", "write"])
+def cancel_order(order_id: str) -> str:
+    return f"Order {order_id} cancelled."
+
+
+@tool  # bare form: name and description come from the function and its docstring
+def current_time() -> str:
+    """Return the current server time."""
+    return "2026-10-28T12:00:00Z"
+
+
+async def show_tag_filtering() -> None:
+    node = ToolNode([get_order, cancel_order, current_time])
+    print("metadata:", get_tool_metadata(cancel_order))
+    for tags in (None, {"read"}, {"write"}):
+        schemas = await node.all_tools(tags=tags)
+        print(f"tags={tags}: {[s['function']['name'] for s in schemas]}")
+    # A tool with no tags (current_time) is shown under every filter.
+
+
+async def run_agent() -> None:
+    agent = ReactAgent(
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com",
+        api_key=os.environ["DEEPSEEK_API_KEY"],
+        tools=[get_order, cancel_order, current_time],
+        # The model is only shown tools tagged "read" (plus untagged ones). A call to a
+        # hidden tool, such as cancel_order, is refused at dispatch.
+        tools_tags={"read"},
+    )
+    async with agent.compile() as app:
+        result = await app.ainvoke(
+            {"messages": [Message.text_message("Cancel order A-17, then tell me its status.")]},
+            config={"thread_id": "tags-1"},
+        )
+        print("assistant:", result["messages"][-1].text())
+
+
+async def main() -> None:
+    await show_tag_filtering()
+    await run_agent()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="injected_params.py">
+
+```python
+"""Tools that receive framework values: state, config and tool_call_id.
+
+Parameters with these reserved names are filled in by ToolNode and are hidden from
+the schema the model sees, so the model never has to supply them.
+
+Run: python examples/tools/injected_params.py   (needs DEEPSEEK_API_KEY)
+"""
+
+import asyncio
+import os
+from typing import Any
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import AgentState, Message
+from tenxgraph.prebuilt.agent import ReactAgent
+
+
+load_dotenv()
+
+
+def whoami(
+    topic: str,
+    state: AgentState,  # the live graph state, including state.context
+    config: dict[str, Any],  # the run config: thread_id, user_id, run_id, your own keys
+    tool_call_id: str,  # id of this specific tool call
+) -> str:
+    """Describe the caller and the current conversation for a topic."""
+    user = config.get("user_id")
+    plan = config.get("plan", "free")  # custom config keys pass straight through
+    return (
+        f"topic={topic} user={user} plan={plan} thread={config.get('thread_id')} "
+        f"messages_so_far={len(state.context)} call_id={tool_call_id}"
+    )
+
+
+agent = ReactAgent(
+    model="deepseek-chat",
+    base_url="https://api.deepseek.com",
+    api_key=os.environ["DEEPSEEK_API_KEY"],
+    system_prompt=[{"role": "system", "content": "Call whoami once, then report its output."}],
+    tools=[whoami],
+)
+
+
+async def main() -> None:
+    async with agent.compile() as app:
+        result = await app.ainvoke(
+            {"messages": [Message.text_message("Who am I? Topic: billing.")]},
+            config={"thread_id": "inject-1", "user_id": "u-42", "plan": "pro"},
+        )
+        for message in result["messages"]:
+            if message.role == "tool":
+                print("tool result:", message.text())
+        print("assistant:", result["messages"][-1].text())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="tool_result_state.py">
+
+```python
+"""A tool that updates a custom state field by returning ToolResult.
+
+ToolResult(message=..., state={...}) sends `message` back to the model and writes the
+listed fields into the graph state. Fields must already exist on your AgentState subclass.
+
+Run: python examples/tools/tool_result_state.py   (needs DEEPSEEK_API_KEY)
+"""
+
+import asyncio
+import os
+
+from dotenv import load_dotenv
+from pydantic import Field
+
+from tenxgraph.core.state import AgentState, Message, ToolResult
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.utils.constants import ResponseGranularity
+
+
+load_dotenv()
+
+
+class CartState(AgentState):
+    cart: list[str] = Field(default_factory=list)
+    total: float = 0.0
+
+
+def add_to_cart(item: str, price: float, state: CartState) -> ToolResult:
+    """Add an item with a price to the shopping cart."""
+    # Read the current state, then return only the fields that change.
+    cart = [*state.cart, item]
+    total = round(state.total + price, 2)
+    return ToolResult(
+        message=f"Added {item}. Cart has {len(cart)} items, total {total}.",
+        state={"cart": cart, "total": total},
+    )
+
+
+agent = ReactAgent(
+    model="deepseek-chat",
+    base_url="https://api.deepseek.com",
+    api_key=os.environ["DEEPSEEK_API_KEY"],
+    state=CartState(),
+    system_prompt=[{"role": "system", "content": "Use add_to_cart for every item the user lists."}],
+    tools=[add_to_cart],
+)
+
+
+async def main() -> None:
+    async with agent.compile() as app:
+        result = await app.ainvoke(
+            {"messages": [Message.text_message("Add a keyboard at 49.90 and a mouse at 19.50.")]},
+            config={"thread_id": "cart-1"},
+            # FULL returns the final state, where the tool's updates are visible.
+            response_granularity=ResponseGranularity.FULL,
+        )
+        state = result["state"]
+        print("cart:", state.cart, "total:", state.total)
+        print("assistant:", result["messages"][-1].text())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="prebuilt_tools.py">
+
+```python
+"""Ready-made tools: safe_calculator, fetch_url and sandboxed file tools.
+
+Pass them to an agent like your own functions. create_file_tools() fixes the
+directory the file tools can touch, and hides secret files such as .env.
+
+Run: python examples/tools/prebuilt_tools.py   (needs DEEPSEEK_API_KEY and network)
+"""
+
+import asyncio
+import os
+import tempfile
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.prebuilt.tools import create_file_tools, fetch_url, safe_calculator
+
+
+load_dotenv()
+
+
+async def main() -> None:
+    workspace = Path(tempfile.mkdtemp(prefix="tools-demo-"))
+    (workspace / "notes.txt").write_text("Budget: 1200 EUR\nTravel: 340 EUR\n")
+
+    agent = ReactAgent(
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com",
+        api_key=os.environ["DEEPSEEK_API_KEY"],
+        system_prompt=[{"role": "system", "content": "Use tools. Be brief."}],
+        tools=[
+            safe_calculator,  # AST-based arithmetic, no eval()
+            fetch_url,  # public http(s) only; private hosts are blocked, output truncated
+            # read/write/search limited to `workspace`; write=False makes it read-only.
+            *create_file_tools(workspace, write=False),
+        ],
+    )
+    async with agent.compile() as app:
+        prompt = "Read notes.txt, subtract the travel cost from the budget, and give the result."
+        result = await app.ainvoke(
+            {"messages": [Message.text_message(prompt)]},
+            config={"thread_id": "prebuilt-1"},
+        )
+        print("assistant:", result["messages"][-1].text())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="remote_tools.py">
+
+```python
+"""Client-side tools: the model calls a tool that the client executes, not the server.
+
+The graph pauses after the tool node and hands back the call. The client runs it
+(here a stand-in for a browser or app function) and resumes the same thread with a
+ToolResultBlock. A checkpointer is required so the paused thread is saved.
+
+Run: python examples/tools/remote_tools.py   (needs DEEPSEEK_API_KEY)
+"""
+
+import asyncio
+import json
+import os
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message, ToolResultBlock
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+
+
+load_dotenv()
+
+
+def server_time() -> str:
+    """Return the server time."""
+    return "2026-10-28T12:00:00Z"
+
+
+# ReactAgent needs at least one server tool to create its TOOL node.
+agent = ReactAgent(
+    model="deepseek-chat",
+    base_url="https://api.deepseek.com",
+    api_key=os.environ["DEEPSEEK_API_KEY"],
+    tools=[server_time],
+)
+app = agent.compile(checkpointer=InMemoryCheckpointer())
+
+CLIENT_TOOL = {
+    "name": "read_clipboard",
+    "description": "Read the text currently in the user's clipboard.",
+    "parameters": {"type": "object", "properties": {}},
+}
+
+# Option 1: attach to the compiled graph for every run. "node" is the ToolNode name.
+app.attach_remote_tools([{**CLIENT_TOOL, "node": "TOOL"}])
+
+# Option 2: offer tools for one run only, through the run config:
+#   config = {"thread_id": "...", "remote_tools": [CLIENT_TOOL]}
+# This leaves the shared graph unchanged, which suits per-user frontend tools.
+
+
+def run_on_client(name: str, args: dict) -> str:
+    # In a real app this is JavaScript in the browser or code in a desktop app.
+    return "Meeting moved to 15:00"
+
+
+async def main() -> None:
+    config = {"thread_id": "remote-1"}
+    async with app:
+        first = await app.ainvoke(
+            {"messages": [Message.text_message("Summarise what is in my clipboard.")]}, config
+        )
+
+        # The run stopped before answering. The assistant message holds the tool call.
+        call = next(
+            m.tools_calls[0]
+            for m in reversed(first["messages"])
+            if m.role == "assistant" and m.tools_calls
+        )
+        name, args = call["function"]["name"], json.loads(call["function"]["arguments"] or "{}")
+        print(f"paused: model wants the client to run {name}({args})")
+
+        output = run_on_client(name, args)
+
+        # Resume the same thread with the result keyed by the tool call id.
+        result_msg = Message(
+            role="tool", content=[ToolResultBlock(call_id=call["id"], output=output)]
+        )
+        final = await app.ainvoke({"messages": [result_msg]}, config)
+        print("assistant:", final["messages"][-1].text())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/tools](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/tools)
+
+## Expected output
+
+Illustrative output of `tool_decorator.py`:
+
+```text
+tags=None: ['get_order', 'cancel_order', 'current_time']
+tags={'read'}: ['get_order', 'current_time']
+tags={'write'}: ['cancel_order', 'current_time']
+assistant: Order A-17 is shipped. I could not cancel it with the tools available.
+```
+
+## Next steps
+
+- [Quickstart](/docs/examples/quickstart): the smallest agent with one tool.
+- [Streaming](/docs/examples/streaming): stream tool progress with `StreamEmitter`.
+- [Graph basics](/docs/examples/graph-basics): how `ToolNode` fits into a graph.
+- [Dependency injection](/docs/examples/dependency-injection): pass your own services to tools.

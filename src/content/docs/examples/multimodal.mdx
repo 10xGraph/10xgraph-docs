@@ -1,0 +1,489 @@
+---
+title: Multimodal Agents in 10xGraph - Image, Document, Audio and Video Input
+seoTitle: Multimodal agent input in Python
+description: Send images, PDFs, audio and video to a 10xGraph Python agent by URL, base64 or media-store reference, with gpt-5-mini and Gemini, MultimodalConfig and MediaFetchPolicy.
+section: Examples
+group: "Multimodal and quality"
+order: 32
+label: Multimodal input
+updated: "2026-10-28"
+faq:
+  - q: "Which provider should I use for which media type?"
+    a: "In these examples, gpt-5-mini handles images and PDFs, and gemini-2.5-flash handles audio and video as well as images. The converters send audio as inline base64 only, and video only reaches Gemini."
+  - q: "Why does a video URL get refused?"
+    a: "For Gemini the server downloads external URLs itself, under MediaFetchPolicy. The default policy allows images and PDFs only, so set allowed_content_types to include video types and, ideally, allowed_hosts."
+  - q: "When should I use a media store?"
+    a: "When you do not want large base64 payloads in messages and checkpoints. Store the bytes once, keep a graph://media/<key> reference in the message, and pass media_store to compile()."
+---
+
+Agents often need to look at a picture, read a PDF or listen to a recording. In 10xGraph a message holds a list of content blocks, and media blocks point at a `MediaRef` that says where the bytes live. This example sends images and a PDF to OpenAI `gpt-5-mini`, and audio, video and stored images to Google `gemini-2.5-flash`.
+
+## What you will build
+
+Three small scripts that send media to an agent. Each uses message content blocks (`ImageBlock`, `DocumentBlock`, `AudioBlock`, `VideoBlock`) that point at a `MediaRef`. A `MediaRef` can be an external URL, inline base64, or a reference into a media store.
+
+The samples are generated in `sample_media.py` (a small PNG and a one second WAV tone), so the scripts need no asset files.
+
+## Key concepts
+
+- `MediaRef(kind="url" | "data" | "file_id")`: where the bytes live.
+- `ImageBlock`, `DocumentBlock`, `AudioBlock`, `VideoBlock`: content blocks inside a `Message`, next to `TextBlock`.
+- `MultimodalConfig`: per-agent limits such as `max_image_size_mb`, `max_image_dimension` and `ImageHandling`.
+- `InMemoryMediaStore` and `LocalFileMediaStore`: store bytes and return a key. Reference it as `graph://media/<key>`.
+- `compile(media_store=..., media_policy=...)`: wires the store in, and sets which external URLs the server may download.
+- `MediaFetchPolicy`: allowed hosts, content types, size cap and timeout for downloads.
+
+## Which provider takes which media
+
+| Media | gpt-5-mini (OpenAI) | gemini-2.5-flash (Google) |
+|---|---|---|
+| Image by URL | Yes, OpenAI fetches it | Yes, the server downloads it under `MediaFetchPolicy` |
+| Image by base64 | Yes | Yes |
+| PDF by URL | Yes, with `api_style="responses"` | Yes, downloaded under the policy |
+| Audio | Not covered here | Yes, inline base64 |
+| Video | No | Yes, inline base64, or URL under a policy that allows video |
+| Media-store reference (`graph://media/...`) | Not supported for `gpt-5-mini` (see below) | Yes |
+
+<Callout type="warning" title="Known limits in the current library">
+The capability table behind media-store resolution has no entry for `gpt-5-mini`, so a `graph://media/...` reference sent to it raises `UnsupportedMediaInputError`. Use URL or base64 with OpenAI, and the media store with Gemini. Audio references into a media store are not resolved either, so send audio as base64.
+</Callout>
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[openai,google-genai]"
+export OPENAI_API_KEY=...    # image_and_document.py
+export GEMINI_API_KEY=...    # audio_and_video.py, media_store.py
+
+python examples/multimodal/image_and_document.py
+python examples/multimodal/audio_and_video.py                 # generated tone
+python examples/multimodal/audio_and_video.py talk.wav clip.mp4
+python examples/multimodal/media_store.py
+```
+
+## How the code works
+
+### sample_media.py
+
+This file builds media in memory so nothing needs downloading. `make_png` writes a gradient PNG by hand (signature, `IHDR`, `IDAT`, `IEND` chunks), `make_wav` writes a mono 16-bit sine tone with the `wave` module, and `b64` base64-encodes bytes for a `MediaRef`.
+
+```python
+def b64(data: bytes) -> str:
+    return base64.b64encode(data).decode()
+```
+
+### image_and_document.py
+
+`MultimodalConfig` applies to images before they reach the provider:
+
+```python
+multimodal = MultimodalConfig(
+    image_handling=ImageHandling.BASE64,
+    max_image_size_mb=5,
+    max_image_dimension=1024,
+)
+```
+
+It caps size, resizes large images and decides how images are passed on. Oversized input is handled here instead of failing at the provider.
+
+Chat Completions has no PDF input, so the document agent switches to the Responses API:
+
+```python
+document_agent = ReactAgent(
+    model="gpt-5-mini",
+    api_style="responses",
+    system_prompt=[{"role": "system", "content": "Summarise documents in three bullet points."}],
+)
+```
+
+An image by URL and an image by base64 differ only in the `MediaRef`:
+
+```python
+ref = MediaRef(kind="url", url=IMAGE_URL, mime_type="image/png")
+```
+
+```python
+ref = MediaRef(kind="data", data_base64=b64(make_png()), mime_type="image/png")
+```
+
+A PDF is the same pattern with a `DocumentBlock`:
+
+```python
+ref = MediaRef(kind="url", url=PDF_URL, mime_type="application/pdf")
+return Message(
+    role="user", content=[TextBlock(text="Summarise this paper."), DocumentBlock(media=ref)]
+)
+```
+
+OpenAI fetches URLs itself, so the server downloads nothing in this script.
+
+### audio_and_video.py
+
+Gemini does not fetch URLs here. The server downloads them first, and `MediaFetchPolicy` says what is allowed:
+
+```python
+policy = MediaFetchPolicy(
+    allowed_hosts=("storage.googleapis.com",),
+    allowed_content_types=("video/*",),
+    max_bytes=50 * 1024 * 1024,
+    timeout=30.0,
+)
+```
+
+The default policy only allows images and PDFs, so a hosted video is refused unless you widen it. Local files go in as inline base64, which is fine for short clips:
+
+```python
+ref = MediaRef(kind="data", data_base64=b64(data), mime_type=mime)
+return Message(
+    role="user", content=[TextBlock(text="Transcribe this audio."), AudioBlock(media=ref)]
+)
+```
+
+The policy is passed at compile time with `agent.compile(media_policy=policy)`.
+
+### media_store.py
+
+Base64 in every message bloats state and checkpoints. A media store keeps the bytes once and messages carry a short reference:
+
+```python
+key = await media_store.store(data=make_png(), mime_type="image/png")
+ref = MediaRef(kind="url", url=f"{MEDIA_SCHEME}{key}", mime_type="image/png")
+```
+
+The reference is turned back into bytes at call time because the store is wired in at compile:
+
+```python
+app = agent.compile(
+    checkpointer=InMemoryCheckpointer(),
+    media_store=media_store,
+    # Governs external URLs only. Store references never go through it.
+    media_policy=MediaFetchPolicy(allowed_hosts=("upload.wikimedia.org",)),
+)
+```
+
+The script runs the same message against `InMemoryMediaStore` (lost on exit, good for tests) and `LocalFileMediaStore` (files in a directory you choose).
+
+## Full code
+
+<Tabs>
+<TabItem label="sample_media.py">
+
+```python
+"""Tiny generated media so the examples run without any asset files."""
+
+import base64
+import io
+import math
+import struct
+import wave
+import zlib
+
+
+def make_png(size: int = 64) -> bytes:
+    """A size x size PNG with a red-to-blue gradient."""
+    rows = b""
+    for y in range(size):
+        rows += b"\x00" + b"".join(
+            bytes((255 - x * 255 // size, y * 255 // size // 4, x * 255 // size))
+            for x in range(size)
+        )
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    header = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
+
+
+def make_wav(seconds: float = 1.0, freq: float = 440.0, rate: int = 16000) -> bytes:
+    """A mono 16-bit sine tone."""
+    frames = b"".join(
+        struct.pack("<h", int(12000 * math.sin(2 * math.pi * freq * i / rate)))
+        for i in range(int(seconds * rate))
+    )
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(frames)
+    return buf.getvalue()
+
+
+def b64(data: bytes) -> str:
+    return base64.b64encode(data).decode()
+```
+
+</TabItem>
+<TabItem label="image_and_document.py">
+
+```python
+"""Image and document input to OpenAI gpt-5-mini.
+
+Shows the same image sent as an external URL and as inline base64, then a PDF sent by
+URL. OpenAI fetches URLs itself, so the server downloads nothing. PDFs need the Responses
+API, which is why the second agent sets api_style="responses".
+
+Run:  python examples/multimodal/image_and_document.py
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+from sample_media import b64, make_png
+
+from tenxgraph.core.state import DocumentBlock, ImageBlock, MediaRef, Message, TextBlock
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.media import ImageHandling, MultimodalConfig
+
+
+load_dotenv()
+
+IMAGE_URL = (
+    "https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png"
+)
+PDF_URL = "https://arxiv.org/pdf/1706.03762"
+
+# Applies to images before they reach the provider: size cap, resize, accepted types.
+multimodal = MultimodalConfig(
+    image_handling=ImageHandling.BASE64,
+    max_image_size_mb=5,
+    max_image_dimension=1024,
+)
+
+vision_agent = ReactAgent(
+    model="gpt-5-mini",
+    system_prompt=[{"role": "system", "content": "Describe what you see in two sentences."}],
+    multimodal_config=multimodal,
+)
+
+# Chat Completions has no PDF input. The Responses API takes a PDF as input_file.
+document_agent = ReactAgent(
+    model="gpt-5-mini",
+    api_style="responses",
+    system_prompt=[{"role": "system", "content": "Summarise documents in three bullet points."}],
+)
+
+
+def image_by_url() -> Message:
+    ref = MediaRef(kind="url", url=IMAGE_URL, mime_type="image/png")
+    return Message(
+        role="user", content=[TextBlock(text="What is in this image?"), ImageBlock(media=ref)]
+    )
+
+
+def image_by_base64() -> Message:
+    ref = MediaRef(kind="data", data_base64=b64(make_png()), mime_type="image/png")
+    return Message(
+        role="user", content=[TextBlock(text="Which colours do you see?"), ImageBlock(media=ref)]
+    )
+
+
+def document_by_url() -> Message:
+    ref = MediaRef(kind="url", url=PDF_URL, mime_type="application/pdf")
+    return Message(
+        role="user", content=[TextBlock(text="Summarise this paper."), DocumentBlock(media=ref)]
+    )
+
+
+async def run(label: str, agent: ReactAgent, message: Message) -> None:
+    app = agent.compile()
+    result = await app.ainvoke({"messages": [message]}, {"thread_id": label})
+    print(f"[{label}] {result['messages'][-1].text()}\n")
+    await app.aclose()
+
+
+async def main() -> None:
+    await run("image-url", vision_agent, image_by_url())
+    await run("image-base64", vision_agent, image_by_base64())
+    await run("pdf-url", document_agent, document_by_url())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="audio_and_video.py">
+
+```python
+"""Audio and video input to Gemini gemini-2.5-flash.
+
+Audio goes in as inline base64 (a generated tone, or your own WAV/MP3). Video is read from
+a local file you pass. Gemini does not fetch URLs itself here: the server downloads them
+first, so a hosted video needs a MediaFetchPolicy that allows video types.
+
+Run:  python examples/multimodal/audio_and_video.py [speech.wav] [clip.mp4]
+"""
+
+import asyncio
+import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
+from sample_media import b64, make_wav
+
+from tenxgraph.core.state import AudioBlock, MediaRef, Message, TextBlock, VideoBlock
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.media import MediaFetchPolicy
+
+
+load_dotenv()
+
+agent = ReactAgent(
+    model="gemini-2.5-flash",
+    system_prompt=[{"role": "system", "content": "Transcribe audio and describe video concisely."}],
+)
+
+# The default policy only allows images and PDFs. Be explicit about what the server may
+# download, and from where.
+policy = MediaFetchPolicy(
+    allowed_hosts=("storage.googleapis.com",),
+    allowed_content_types=("video/*",),
+    max_bytes=50 * 1024 * 1024,
+    timeout=30.0,
+)
+
+
+def audio_message(path: str | None) -> Message:
+    data = Path(path).read_bytes() if path else make_wav()
+    mime = "audio/mp3" if path and path.endswith(".mp3") else "audio/wav"
+    ref = MediaRef(kind="data", data_base64=b64(data), mime_type=mime)
+    return Message(
+        role="user", content=[TextBlock(text="Transcribe this audio."), AudioBlock(media=ref)]
+    )
+
+
+def video_message(path: str) -> Message:
+    # Inline base64 is fine for short clips. For a hosted file use
+    # MediaRef(kind="url", url="https://storage.googleapis.com/...") and the policy above.
+    ref = MediaRef(kind="data", data_base64=b64(Path(path).read_bytes()), mime_type="video/mp4")
+    return Message(
+        role="user", content=[TextBlock(text="Describe this video."), VideoBlock(media=ref)]
+    )
+
+
+async def main() -> None:
+    audio_path = sys.argv[1] if len(sys.argv) > 1 else None
+    video_path = sys.argv[2] if len(sys.argv) > 2 else None
+
+    messages = {"audio": audio_message(audio_path)}
+    if video_path:
+        messages["video"] = video_message(video_path)
+    else:
+        print("No video path given, skipping the video example.\n")
+
+    app = agent.compile(media_policy=policy)
+    for label, message in messages.items():
+        result = await app.ainvoke({"messages": [message]}, {"thread_id": label})
+        print(f"[{label}] {result['messages'][-1].text()}\n")
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="media_store.py">
+
+```python
+"""Reference media by key with a media store (Gemini gemini-2.5-flash).
+
+Upload bytes once, keep only a small `graph://media/<key>` reference in messages and
+checkpoints, and let the library turn it back into bytes at call time. Swap
+InMemoryMediaStore for LocalFileMediaStore to keep files on disk between runs.
+
+Run:  python examples/multimodal/media_store.py
+"""
+
+import asyncio
+import tempfile
+
+from dotenv import load_dotenv
+from sample_media import make_png
+
+from tenxgraph.core.state import ImageBlock, MediaRef, Message, TextBlock
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+from tenxgraph.storage.media import (
+    InMemoryMediaStore,
+    LocalFileMediaStore,
+    MediaFetchPolicy,
+    MultimodalConfig,
+)
+from tenxgraph.utils.media_scheme import MEDIA_SCHEME
+
+
+load_dotenv()
+
+agent = ReactAgent(
+    model="gemini-2.5-flash",
+    system_prompt=[{"role": "system", "content": "Describe images briefly."}],
+    multimodal_config=MultimodalConfig(max_image_size_mb=5),
+)
+
+
+async def main() -> None:
+    # In-memory: lost on exit, good for tests. Local files: a directory you control.
+    stores = {
+        "memory": InMemoryMediaStore(),
+        "local": LocalFileMediaStore(base_dir=tempfile.mkdtemp(prefix="10xgraph-media-")),
+    }
+
+    for name, media_store in stores.items():
+        # store() returns the key. The reference below is what lives in message state.
+        key = await media_store.store(data=make_png(), mime_type="image/png")
+        ref = MediaRef(kind="url", url=f"{MEDIA_SCHEME}{key}", mime_type="image/png")
+        message = Message(
+            role="user", content=[TextBlock(text="What is in this picture?"), ImageBlock(media=ref)]
+        )
+
+        app = agent.compile(
+            checkpointer=InMemoryCheckpointer(),
+            media_store=media_store,
+            # Governs external URLs only. Store references never go through it.
+            media_policy=MediaFetchPolicy(allowed_hosts=("upload.wikimedia.org",)),
+        )
+        result = await app.ainvoke({"messages": [message]}, {"thread_id": f"store-{name}"})
+        print(f"[{name}] {result['messages'][-1].text()}\n")
+        await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/multimodal](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/multimodal)
+
+## Expected output
+
+Illustrative output.
+
+```text
+[image-url] A transparent PNG test image: a figure on a checkerboard background.
+[image-base64] A smooth gradient from red on the left to blue on the right.
+[audio] A steady tone with no speech.
+[memory] A gradient that shifts from red to blue.
+```
+
+<Callout type="tip" title="Using a different model">
+Change the model string and install the matching extra, for example `"claude-sonnet-5-5"` with `anthropic` for image and PDF input. Check what the new provider accepts before sending audio or video.
+</Callout>
+
+## Next steps
+
+- [Realtime audio](/docs/examples/realtime-audio)
+- [RAG](/docs/examples/rag)
+- [Quickstart: prebuilt ReAct agent](/docs/examples/quickstart)

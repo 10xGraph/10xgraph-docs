@@ -1,0 +1,533 @@
+---
+title: Agent Skills in 10xGraph - On-Demand and Per-Tenant Session Mode
+seoTitle: Agent skills in Python with SKILL.md files
+description: Load SKILL.md instructions into a 10xGraph Python agent on demand with activate_skill, or preload a per-tenant persona with session mode, with bundled resources.
+section: Examples
+group: "Memory and patterns"
+order: 31
+label: Skills
+updated: "2026-10-28"
+faq:
+  - q: "What is the difference between on-demand and session mode?"
+    a: "In on-demand mode the system prompt lists each skill's name and description and the model calls activate_skill when a request matches. In session mode the framework preloads one skill named by a state field before every call, with no catalog and no extra tool round trip."
+  - q: "How does the agent read files bundled with a skill?"
+    a: "When a skill folder contains extra files such as references/ or scripts/, the agent gets a read_skill_resource tool. The SKILL.md body tells the model which file to open, and reads are capped by max_resource_bytes."
+  - q: "How do I check that a skill follows the spec?"
+    a: "Call validate_skill(path) from tenxgraph.core.skills, which returns diagnostics, or run 10xgraph skills --validate. The format follows the Agent Skills specification at agentskills.io."
+---
+
+Skills are folders of instructions (a `SKILL.md` file, plus optional reference files) that an agent loads only when it needs them. This keeps the system prompt short while still giving the agent deep guidance for specific jobs. This example uses Anthropic `claude-sonnet-5-5` and shows both ways to load skills: the model picks one on demand, or your code picks one per tenant.
+
+## What you will build
+
+Two small agents that use skills. `on_demand.py` has three general skills (code review, data analysis, writing help) and lets the model decide when to load one. `session_mode.py` serves two tenants from one agent, where each tenant's support persona is a skill chosen by a state field.
+
+## Key concepts
+
+- `SkillConfig(skills_dir=...)`: discovers `<dir>/<name>/SKILL.md`. The folder name must match the `name` in the frontmatter.
+- On-demand mode (default): an `<available_skills>` catalog goes into the system prompt and the model calls `activate_skill`.
+- `read_skill_resource`: registered when a skill bundles files. The `code-review` skill ships `references/severity-guide.md`.
+- `mode="session"` with `preload_from`: reads the named `AgentState` field on every call and injects that skill.
+- `hot_reload`: re-reads a SKILL.md when it changes on disk.
+- `validate_skill(path)` and `10xgraph skills --validate`: check skills against the Agent Skills spec.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[anthropic]"
+export ANTHROPIC_API_KEY=...
+
+python examples/skills/on_demand.py          # two scripted questions
+python examples/skills/on_demand.py --chat   # interactive prompt, type quit to stop
+python examples/skills/session_mode.py
+```
+
+## How the code works
+
+The folder layout matters, because the loader finds skills by directory name:
+
+```text
+skills/
+  code-review/SKILL.md
+  code-review/references/severity-guide.md
+  data-analysis/SKILL.md
+  writing-assistant/SKILL.md
+personas/
+  acme-support/SKILL.md
+  globex-support/SKILL.md
+```
+
+### on_demand.py
+
+The agent is a normal `ReactAgent`. The `skills` argument adds the skill catalog and the skill tools next to your own tools.
+
+```python
+agent = ReactAgent(
+    model="claude-sonnet-5-5",
+    system_prompt=[{"role": "system", "content": "You are a helpful multi-skilled assistant."}],
+    tools=[get_weather],  # ordinary tools sit next to the skill tools
+    skills=SkillConfig(
+        skills_dir=str(SKILLS_DIR),
+        hot_reload=True,  # re-read a SKILL.md when it changes on disk
+    ),
+)
+```
+
+Only each skill's name and description go into the prompt. The full body is pulled in when the model calls `activate_skill`. `hot_reload=True` means you can edit a `SKILL.md` while the process runs and the next activation sees the change.
+
+The script reports which skills the model actually loaded. An `activate_skill` result comes back as a tool message that starts with `<skill_content name="...">`:
+
+```python
+SKILL_LOADED = re.compile(r'<skill_content name="([^"]+)">')
+```
+
+```python
+for msg in result["messages"]:
+    if msg.role == "tool" and (match := SKILL_LOADED.match(msg.text() or "")):
+        print(f"  skill loaded: {match.group(1)}")
+```
+
+A weather question loads nothing, because no skill matches it. The code review question loads `code-review`, and that skill tells the model to read its severity guide with `read_skill_resource`.
+
+Before running, the script checks each skill folder against the Agent Skills spec:
+
+```python
+for skill_dir in sorted(SKILLS_DIR.iterdir()):
+    problems = [d for d in validate_skill(skill_dir) if d.level == "error"]
+    print(f"{skill_dir.name}: {problems or 'ok'}")
+```
+
+This is the same check as `10xgraph skills --validate`. Run it in CI so a broken `SKILL.md` never ships.
+
+### session_mode.py
+
+On-demand mode costs a tool round trip and lets the model choose. For a fixed persona per tenant you want neither. Session mode reads a state field and injects that skill before every model call.
+
+```python
+class TenantState(AgentState):
+    # Name of the skill to preload. Set it from the authenticated tenant, never from
+    # client input, or users could switch to another tenant's persona.
+    persona: str = ""
+```
+
+```python
+skills=SkillConfig(
+    skills_dir=str(Path(__file__).parent / "personas"),
+    mode="session",
+    preload_from="persona",  # reads state.persona on every call
+),
+```
+
+Each request sets the field through the partial `state` input:
+
+```python
+result = await app.ainvoke(
+    {"messages": [Message.text_message(text)], "state": {"persona": persona}},
+    {"thread_id": f"{tenant}-1"},
+)
+```
+
+The same question, "I want my money back", gets a formal 30-day answer for Acme and a casual in-app answer for Globex. Set `persona` from the authenticated tenant on the server, not from client input.
+
+### The SKILL.md files
+
+Each `SKILL.md` has YAML frontmatter (`name`, `description`, optional `metadata`) and a Markdown body. The `description` is what the model sees in the catalog, so it should say when to use the skill. The `code-review` body ends with an instruction to call `read_skill_resource` for `references/severity-guide.md`. That is how bundled files get used: the skill text points at them by path.
+
+## Full code
+
+<Tabs>
+<TabItem label="on_demand.py">
+
+```python
+"""On-demand skills: the model decides when to load a skill.
+
+`SkillConfig(skills_dir=...)` discovers `skills/<name>/SKILL.md` folders and adds an
+<available_skills> catalog (name + description) to the system prompt. The model calls
+`activate_skill` when a request matches, and `read_skill_resource` to open bundled files.
+
+Run:  python examples/skills/on_demand.py
+      python examples/skills/on_demand.py --chat     # small REPL
+"""
+
+import asyncio
+import re
+import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.skills import SkillConfig, validate_skill
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+
+
+load_dotenv()
+
+SKILLS_DIR = Path(__file__).parent / "skills"
+SKILL_LOADED = re.compile(r'<skill_content name="([^"]+)">')
+
+
+def get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    return f"{city}: 18 C, light rain"
+
+
+agent = ReactAgent(
+    model="claude-sonnet-5-5",
+    system_prompt=[{"role": "system", "content": "You are a helpful multi-skilled assistant."}],
+    tools=[get_weather],  # ordinary tools sit next to the skill tools
+    skills=SkillConfig(
+        skills_dir=str(SKILLS_DIR),
+        hot_reload=True,  # re-read a SKILL.md when it changes on disk
+    ),
+)
+
+
+async def ask(app, text: str, thread_id: str) -> None:
+    result = await app.ainvoke(
+        {"messages": [Message.text_message(text)]},
+        {"thread_id": thread_id, "recursion_limit": 15},
+    )
+    # activate_skill results come back as tool messages wrapped in <skill_content>.
+    for msg in result["messages"]:
+        if msg.role == "tool" and (match := SKILL_LOADED.match(msg.text() or "")):
+            print(f"  skill loaded: {match.group(1)}")
+    print("assistant:", result["messages"][-1].text(), "\n")
+
+
+async def main() -> None:
+    # Check skills against the Agent Skills spec before shipping them.
+    # The CLI equivalent is `10xgraph skills --validate`.
+    for skill_dir in sorted(SKILLS_DIR.iterdir()):
+        problems = [d for d in validate_skill(skill_dir) if d.level == "error"]
+        print(f"{skill_dir.name}: {problems or 'ok'}")
+
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+
+    if "--chat" in sys.argv:
+        while (line := input("you: ").strip()) not in {"", "quit", "exit"}:
+            await ask(app, line, "skills-chat")
+    else:
+        await ask(app, "Review this: def avg(xs): return sum(xs) / len(xs)", "t1")
+        await ask(app, "What is the weather in Paris?", "t2")  # no skill needed
+
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="session_mode.py">
+
+```python
+"""Session-mode skills: a fixed persona per tenant, no activate_skill round trip.
+
+With `mode="session"` the framework reads a state field (`preload_from`) before every
+model call and injects that skill's instructions. The same agent serves two tenants,
+each with its own persona from `personas/<name>/SKILL.md`.
+
+Run:  python examples/skills/session_mode.py
+"""
+
+import asyncio
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.skills import SkillConfig
+from tenxgraph.core.state import AgentState, Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+
+
+load_dotenv()
+
+
+class TenantState(AgentState):
+    # Name of the skill to preload. Set it from the authenticated tenant, never from
+    # client input, or users could switch to another tenant's persona.
+    persona: str = ""
+
+
+agent = ReactAgent(
+    model="claude-sonnet-5-5",
+    state=TenantState(),
+    system_prompt=[{"role": "system", "content": "You answer customer questions."}],
+    skills=SkillConfig(
+        skills_dir=str(Path(__file__).parent / "personas"),
+        mode="session",
+        preload_from="persona",  # reads state.persona on every call
+    ),
+)
+
+
+async def ask(app, tenant: str, persona: str, text: str) -> None:
+    result = await app.ainvoke(
+        {"messages": [Message.text_message(text)], "state": {"persona": persona}},
+        {"thread_id": f"{tenant}-1"},
+    )
+    print(f"[{tenant}] user: {text}")
+    print("assistant:", result["messages"][-1].text(), "\n")
+
+
+async def main() -> None:
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+    question = "I want my money back. How do I do that?"
+    await ask(app, "acme", "acme-support", question)
+    await ask(app, "globex", "globex-support", question)
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="skills/code-review/SKILL.md">
+
+```markdown
+---
+name: code-review
+description: "Perform thorough code reviews, identify bugs, suggest improvements, and explain code quality issues. Use when the user shares code and asks for a review, bug hunt, or quality feedback."
+metadata:
+  triggers: "review my code; check this code; what's wrong with this code; code review; is this code good; improve this code; find bugs"
+  tags: "engineering, development"
+  priority: "10"
+---
+
+You are now in **CODE REVIEW** mode.
+
+Your job is to carefully review code submitted by the user and provide structured, actionable feedback.
+
+## Review Checklist
+
+For every piece of code, evaluate these areas:
+
+### 1. Correctness
+- Are there logical errors or off-by-one mistakes?
+- Are edge cases handled (empty inputs, None, zero, negatives)?
+- Are exceptions handled appropriately?
+
+### 2. Code Quality
+- Is the code readable and self-documenting?
+- Are variable/function names descriptive?
+- Is there unnecessary complexity (can this be simplified)?
+
+### 3. Performance
+- Are there obvious inefficiencies (eg. O(n²) where O(n) works)?
+- Are there unnecessary loops, repeated DB calls, or memory issues?
+
+### 4. Security
+- Is user input validated/sanitised?
+- Are there injection risks (SQL, command, etc.)?
+- Are secrets hardcoded?
+
+### 5. Best Practices
+- Does the code follow the language's idiomatic style?
+- Is error handling consistent?
+- Are there missing tests for critical paths?
+
+## Output Format
+
+Always respond with:
+1. **Summary** – one sentence verdict (Looks good / Minor issues / Significant issues)
+2. **Issues** – numbered list with severity: critical, warning or suggestion (see references/severity-guide.md for how to pick)
+3. **Improved Version** – rewrite the code with your fixes applied (if changes needed)
+
+Before assigning severities, call read_skill_resource for `references/severity-guide.md`.
+
+Be direct and specific. Reference exact line numbers or variable names.
+```
+
+</TabItem>
+<TabItem label="skills/code-review/references/severity-guide.md">
+
+```markdown
+# Severity guide
+
+- **critical**: wrong results, data loss, security holes, crashes on normal input.
+- **warning**: fails on edge cases (empty input, None, zero), poor error handling, hidden performance traps.
+- **suggestion**: naming, structure, idioms, missing tests. Safe to ignore without breaking anything.
+
+When unsure between two levels, pick the lower one and say why in one sentence.
+```
+
+</TabItem>
+<TabItem label="skills/data-analysis/SKILL.md">
+
+```markdown
+---
+name: data-analysis
+description: "Help users analyse data, interpret statistics, explain trends, and answer data-related questions. Use when the user shares numbers or datasets, or asks about averages, trends, or statistical results."
+metadata:
+  triggers: "analyse this data; what does this data mean; explain these numbers; calculate statistics; data analysis; interpret results; find trends; what's the average"
+  tags: "analytics, data"
+  priority: "8"
+---
+
+You are now in **DATA ANALYSIS** mode.
+
+Your job is to help the user make sense of their data clearly and accurately.
+
+## Analysis Approach
+
+### 1. Understand the data
+- Identify what each column/field represents
+- Note the data type (categorical, numerical, time-series, etc.)
+- Check for obvious quality issues (missing values, outliers)
+
+### 2. Descriptive statistics
+When relevant, compute or describe:
+- Count, mean, median, mode
+- Min, max, range, standard deviation
+- Distributions and skew
+
+### 3. Patterns and trends
+- Identify correlations or relationships between variables
+- Note anomalies or surprising values
+- Spot seasonality in time-series data
+
+### 4. Interpretation
+- Translate numbers into plain-language insights
+- State what the data **suggests** vs. what it **proves**
+- Flag when sample size or data quality limits conclusions
+
+## Output Format
+
+Structure your response as:
+1. **Data Overview** – what you see at a glance
+2. **Key Findings** – bullet list of the most important insights
+3. **Deeper Analysis** – detailed explanation with numbers
+4. **Caveats** – limitations or things to watch out for
+5. **Recommended Next Steps** – what to investigate further
+
+Always show your working when doing calculations.
+```
+
+</TabItem>
+<TabItem label="skills/writing-assistant/SKILL.md">
+
+```markdown
+---
+name: writing-assistant
+description: "Help users write, edit, proofread, and improve any type of written content. Use when the user asks to draft, rewrite, proofread, or polish emails, messages, or documents."
+metadata:
+  triggers: "help me write; proofread this; improve my writing; edit this; make this sound better; write an email; draft a message; fix my grammar"
+  tags: "writing, communication"
+  priority: "6"
+---
+
+You are now in **WRITING ASSISTANT** mode.
+
+Your job is to help the user produce clear, polished, well-structured written content.
+
+## Writing Principles
+
+### Clarity
+- Use plain, direct language — avoid jargon unless appropriate for the audience
+- One idea per sentence; one theme per paragraph
+- Active voice is usually stronger than passive
+
+### Structure
+- Strong opening that states the purpose immediately
+- Logical flow: each paragraph builds on the previous
+- Clear conclusion or call to action
+
+### Tone
+- Match the tone to the context: professional for business, conversational for casual
+- Be warm but concise — avoid filler phrases ("I hope this email finds you well")
+
+## What I Can Help With
+
+- **Emails** – professional, cold outreach, follow-ups, apologies
+- **Reports & Docs** – executive summaries, technical docs, proposals
+- **Creative Writing** – stories, descriptions, dialogue
+- **Social Media** – posts, captions, bios
+- **Proofreading** – grammar, spelling, punctuation, style
+
+## Output Format
+
+For **editing tasks**:
+1. **Revised Version** – the improved text, ready to use
+2. **Changes Made** – brief bullet list of what was changed and why
+
+For **new writing tasks**:
+1. **Draft** – the complete written piece
+2. **Notes** – any assumptions made about tone, audience, or length
+
+Always ask for clarification on audience and purpose if not specified.
+```
+
+</TabItem>
+<TabItem label="personas/acme-support/SKILL.md">
+
+```markdown
+---
+name: acme-support
+description: Support persona for Acme Corp, a hardware retailer. Formal tone, 30-day returns, escalates to support@acme.example.
+---
+
+You are the support assistant for **Acme Corp**, a hardware retailer.
+
+- Tone: formal and precise. Address customers as "you", never use slang.
+- Returns: 30 days with receipt. Opened power tools are not returnable.
+- Escalate anything about safety or injuries to support@acme.example.
+- Keep answers under four sentences.
+```
+
+</TabItem>
+<TabItem label="personas/globex-support/SKILL.md">
+
+```markdown
+---
+name: globex-support
+description: Support persona for Globex, a consumer app. Casual tone, in-app refunds, mentions the help center.
+---
+
+You are the support assistant for **Globex**, a consumer mobile app.
+
+- Tone: friendly and casual. Short sentences, plain words.
+- Refunds: handled in the app under Settings > Billing, within 14 days.
+- Point people to the help center at help.globex.example for how-to questions.
+- Keep answers under three sentences.
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/skills](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/skills)
+
+## Expected output
+
+Illustrative output.
+
+```text
+code-review: ok
+...
+  skill loaded: code-review
+assistant: Summary: Significant issues. avg() raises ZeroDivisionError on an empty list...
+
+assistant: Paris: 18 C, light rain.
+```
+
+Session mode:
+
+```text
+[acme] assistant: To request a refund, please return the item within 30 days with your receipt.
+[globex] assistant: Easy. Open Settings > Billing in the app and ask for a refund within 14 days.
+```
+
+<Callout type="tip" title="Using a different model">
+Change `model="claude-sonnet-5-5"` to `"gpt-5-mini"` (extra `openai`) or `"gemini-2.5-flash"` (extra `google-genai`). Skills are plain prompt text and tools, so they work with any provider.
+</Callout>
+
+## Next steps
+
+- [Long-term memory](/docs/examples/long-term-memory)
+- [Tools](/docs/examples/tools)
+- [Quickstart: prebuilt ReAct agent](/docs/examples/quickstart)

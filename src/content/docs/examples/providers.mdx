@@ -1,0 +1,416 @@
+---
+title: "LLM Providers in 10xGraph - OpenAI, Gemini, Claude, DeepSeek, Ollama"
+seoTitle: "LLM providers in 10xGraph"
+description: "Run one 10xGraph ReactAgent on OpenAI, Google Gemini and Vertex AI, Anthropic Claude (direct, Vertex, Bedrock), DeepSeek and Ollama by changing the model string."
+section: Examples
+group: "Tools and integrations"
+order: 15
+label: "Providers"
+updated: "2026-10-28"
+faq:
+  - q: "How does 10xGraph know which provider to use?"
+    a: "It detects the provider from the model string. gpt-* goes to OpenAI, gemini-* to Google, claude-* and anthropic.* to Anthropic. An unknown model name uses the OpenAI client, which is how DeepSeek and Ollama work with base_url."
+  - q: "How do I use Claude on Vertex AI or Amazon Bedrock?"
+    a: "Set anthropic_backend=\"vertex\" or anthropic_backend=\"bedrock\" on the agent. Bedrock model ids keep the anthropic. prefix, for example anthropic.claude-sonnet-5-5. Region, project and AWS credentials come from the environment."
+  - q: "How do I use Gemini through Vertex AI?"
+    a: "Pass use_vertex_ai=True and set GOOGLE_CLOUD_PROJECT, and optionally GOOGLE_CLOUD_LOCATION. Authentication uses application default credentials instead of an API key."
+  - q: "Do reasoning options work the same on every provider?"
+    a: "reasoning_config is a single dict. effort applies to OpenAI, Google and Anthropic, summary is OpenAI only, and thinking_budget is Google only and overrides effort."
+---
+
+In 10xGraph the model is a string. The same `ReactAgent` and the same tool run on OpenAI, Google Gemini, Anthropic Claude, DeepSeek or a local Ollama model, and you switch by changing the model string and a few options. This example keeps one weather-tool agent and selects the provider from a command-line argument. It also shows reasoning options and a node that calls a provider SDK directly.
+
+## What you will build
+
+The same weather-tool ReactAgent running on nine provider setups, chosen by a command-line argument. You also get a reasoning example and a node that calls a provider SDK directly.
+
+## Key concepts
+
+- Model string: `gpt-5-mini`, `gemini-2.5-flash`, `claude-sonnet-5-5`. The provider is detected from it; do not pass `provider=`.
+- `api_style="responses"`: use the OpenAI Responses API instead of Chat Completions.
+- `use_vertex_ai=True`: Gemini on Vertex AI.
+- `anthropic_backend="vertex"` or `"bedrock"`: Claude on Vertex AI or Amazon Bedrock.
+- `base_url` and `api_key`: any OpenAI-compatible server, such as DeepSeek or Ollama.
+- `reasoning_config`: `effort`, `summary` (OpenAI), `thinking_budget` (Google).
+- `GoogleGenAIConverter`, `OpenAIConverter`: turn raw SDK responses into a `Message`.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+```
+
+Install only the extras you need:
+
+```bash
+pip install "10xgraph[openai]"            # OpenAI, DeepSeek, Ollama
+pip install "10xgraph[google-genai]"      # Gemini and Vertex AI
+pip install "10xgraph[anthropic]"         # Claude (also anthropic-vertex, anthropic-bedrock)
+```
+
+Each config needs its own environment:
+
+| Config | Model | Environment |
+|---|---|---|
+| `openai`, `openai-responses` | `gpt-5-mini` | `OPENAI_API_KEY` |
+| `gemini` | `gemini-2.5-flash` | `GEMINI_API_KEY` |
+| `gemini-vertex` | `gemini-2.5-flash` | `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, Google credentials |
+| `claude` | `claude-sonnet-5-5` | `ANTHROPIC_API_KEY` |
+| `claude-vertex` | `claude-sonnet-5-5` | Google credentials, `ANTHROPIC_VERTEX_PROJECT_ID`, `CLOUD_ML_REGION` |
+| `claude-bedrock` | `anthropic.claude-sonnet-5-5` | AWS credentials and region |
+| `deepseek` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| `ollama` | `llama3.1` | Ollama running on `localhost:11434` |
+
+Then run:
+
+```bash
+python examples/providers/providers.py gemini
+python examples/providers/providers.py claude
+python examples/providers/reasoning.py openai
+python examples/providers/custom_converter.py gemini
+```
+
+## How the code works
+
+### providers.py
+
+One dict holds the `ReactAgent` arguments for each provider, with the model visible in each entry:
+
+```python
+CONFIGS: dict[str, dict] = {
+    # --- OpenAI: pip install "10xgraph[openai]", OPENAI_API_KEY ---
+    "openai": {"model": "gpt-5-mini"},  # Chat Completions
+    "openai-responses": {"model": "gpt-5-mini", "api_style": "responses"},  # Responses API
+    # --- Google: pip install "10xgraph[google-genai]", GEMINI_API_KEY ---
+    "gemini": {"model": "gemini-2.5-flash"},
+    "gemini-vertex": {"model": "gemini-2.5-flash", "use_vertex_ai": True},
+    # --- Anthropic: pip install "10xgraph[anthropic]", ANTHROPIC_API_KEY ---
+    "claude": {"model": "claude-sonnet-5-5"},
+    "claude-vertex": {"model": "claude-sonnet-5-5", "anthropic_backend": "vertex"},
+    "claude-bedrock": {"model": "anthropic.claude-sonnet-5-5", "anthropic_backend": "bedrock"},
+```
+
+Nothing is created until you pick one, so you only need the SDK and key for the provider you run. The provider comes from the model string, so there is no `provider=` argument. Everything else is an ordinary keyword argument for `ReactAgent`.
+
+DeepSeek and Ollama are OpenAI-compatible servers. An unknown model name uses the OpenAI client together with `base_url`:
+
+```python
+"deepseek": {
+    "model": "deepseek-chat",
+    "base_url": "https://api.deepseek.com",
+    "api_key": os.getenv("DEEPSEEK_API_KEY"),
+    "reasoning_config": None,
+},
+```
+
+`reasoning_config` is `None` because those models do not accept OpenAI reasoning options. The Ollama entry is the same shape with `base_url` set to `http://localhost:11434/v1` and a placeholder key that is ignored but required.
+
+The selected entry is unpacked into the agent:
+
+```python
+agent = ReactAgent(
+    **CONFIGS[name],
+    system_prompt=[{"role": "system", "content": "You are a helpful assistant."}],
+    tools=[get_weather],
+)
+app = agent.compile()
+```
+
+### reasoning.py
+
+`reasoning_config` is one dict for all providers. Each provider uses the keys it understands:
+
+```python
+"openai": {
+    "model": "gpt-5-mini",
+    "api_style": "responses",  # reasoning summaries come from the Responses API
+    "reasoning_config": {"effort": "low", "summary": "auto"},
+},
+"gemini": {
+    "model": "gemini-2.5-flash",
+    "reasoning_config": {"thinking_budget": 2048},
+},
+"claude": {
+    "model": "claude-sonnet-5-5",
+    "reasoning_config": {"effort": "medium"},
+},
+```
+
+For Google, `effort` maps to a thinking budget (low 512, medium 8192, high 24576), and `thinking_budget` sets it directly and overrides `effort`. For current Claude models, `effort` selects thinking depth and a token budget is ignored with a warning. Reasoning comes back as `ReasoningBlock` entries next to the text:
+
+```python
+for block in reply.content:
+    if isinstance(block, ReasoningBlock):
+        print("reasoning:", block.summary[:300])
+```
+
+### custom_converter.py
+
+Use this when you need an SDK feature the `Agent` class does not expose. A graph node calls the SDK itself, then hands the raw response to a converter:
+
+```python
+response = await client.aio.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+return await GoogleGenAIConverter().convert_response(response)
+```
+
+The converter turns text, tool calls and token usage into the same `Message` shape that `Agent` produces, so the rest of the graph does not care how the message was made. The OpenAI node does the same with `OpenAIConverter`. The graph is just `START` to `MAIN` to `END`.
+
+## Full code
+
+<Tabs>
+<TabItem label="providers.py">
+
+```python
+"""Run the same ReactAgent on every supported model provider.
+
+CONFIGS maps a name to the ReactAgent arguments that select a model and backend. Nothing is
+created until you pick one, so you only need the SDK and key for the provider you run.
+
+Run: python examples/providers/providers.py [name]   (default: openai; see CONFIGS)
+"""
+
+import asyncio
+import os
+import sys
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+
+
+load_dotenv()
+
+
+def get_weather(location: str) -> str:
+    """Get the current weather for a location."""
+    return f"The weather in {location} is sunny, 22C."
+
+
+# The provider is detected from the model string, so no provider= argument is needed.
+# Anything else is an ordinary keyword argument for ReactAgent / Agent.
+CONFIGS: dict[str, dict] = {
+    # --- OpenAI: pip install "10xgraph[openai]", OPENAI_API_KEY ---
+    "openai": {"model": "gpt-5-mini"},  # Chat Completions
+    "openai-responses": {"model": "gpt-5-mini", "api_style": "responses"},  # Responses API
+    # --- Google: pip install "10xgraph[google-genai]", GEMINI_API_KEY ---
+    "gemini": {"model": "gemini-2.5-flash"},
+    # Same model on Vertex AI. Needs GOOGLE_CLOUD_PROJECT (+ optional GOOGLE_CLOUD_LOCATION)
+    # and application default credentials instead of an API key.
+    "gemini-vertex": {"model": "gemini-2.5-flash", "use_vertex_ai": True},
+    # --- Anthropic: pip install "10xgraph[anthropic]", ANTHROPIC_API_KEY ---
+    "claude": {"model": "claude-sonnet-5-5"},
+    # Claude through Google Vertex AI: "10xgraph[anthropic-vertex]". The SDK reads the
+    # project and region from its own env vars (ANTHROPIC_VERTEX_PROJECT_ID, CLOUD_ML_REGION).
+    "claude-vertex": {"model": "claude-sonnet-5-5", "anthropic_backend": "vertex"},
+    # Claude through Amazon Bedrock: "10xgraph[anthropic-bedrock]", AWS credentials/region
+    # from the environment. The Bedrock model id keeps its "anthropic." prefix.
+    "claude-bedrock": {"model": "anthropic.claude-sonnet-5-5", "anthropic_backend": "bedrock"},
+    # --- OpenAI-compatible servers: unknown model names use the OpenAI client + base_url ---
+    # reasoning_config=None because these models do not take OpenAI reasoning options.
+    "deepseek": {
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com",
+        "api_key": os.getenv("DEEPSEEK_API_KEY"),
+        "reasoning_config": None,
+    },
+    # Local model served by Ollama (`ollama pull llama3.1`); the key is ignored but required.
+    "ollama": {
+        "model": "llama3.1",
+        "base_url": "http://localhost:11434/v1",
+        "api_key": "ollama",
+        "reasoning_config": None,
+    },
+}
+
+
+async def main() -> None:
+    name = sys.argv[1] if len(sys.argv) > 1 else "openai"
+    if name not in CONFIGS:
+        raise SystemExit(f"Unknown provider '{name}'. Choose from: {', '.join(CONFIGS)}")
+
+    agent = ReactAgent(
+        **CONFIGS[name],
+        system_prompt=[{"role": "system", "content": "You are a helpful assistant."}],
+        tools=[get_weather],
+    )
+    app = agent.compile()
+
+    print(f"provider config: {name} -> model {CONFIGS[name]['model']}")
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("What is the weather in Paris?")]},
+        config={"thread_id": f"providers-{name}"},
+    )
+    print("assistant:", result["messages"][-1].text())
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="reasoning.py">
+
+```python
+"""Turn on model reasoning per provider and read the reasoning back from the reply.
+
+reasoning_config is one dict for all providers; each provider uses the keys it understands.
+Run: python examples/providers/reasoning.py [openai|gemini|claude]
+"""
+
+import asyncio
+import sys
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.core.state.message_block import ReasoningBlock
+from tenxgraph.prebuilt.agent import ReactAgent
+
+
+load_dotenv()
+
+REASONING: dict[str, dict] = {
+    # effort goes to the model; summary asks OpenAI for a readable reasoning summary.
+    "openai": {
+        "model": "gpt-5-mini",
+        "api_style": "responses",  # reasoning summaries come from the Responses API
+        "reasoning_config": {"effort": "low", "summary": "auto"},
+    },
+    # thinking_budget is an exact token budget and overrides effort. Without it, effort maps
+    # to a budget: low=512, medium=8192, high=24576. include_thoughts is set for you.
+    "gemini": {
+        "model": "gemini-2.5-flash",
+        "reasoning_config": {"thinking_budget": 2048},
+    },
+    # For current Claude models effort selects adaptive thinking depth. A token budget is
+    # not supported and is ignored with a warning.
+    "claude": {
+        "model": "claude-sonnet-5-5",
+        "reasoning_config": {"effort": "medium"},
+    },
+}
+
+
+async def main() -> None:
+    name = sys.argv[1] if len(sys.argv) > 1 else "gemini"
+    agent = ReactAgent(**REASONING[name])
+    app = agent.compile()
+
+    question = "A bat and a ball cost 1.10. The bat costs 1.00 more than the ball. Ball price?"
+    result = await app.ainvoke(
+        {"messages": [Message.text_message(question)]},
+        config={"thread_id": f"reasoning-{name}"},
+    )
+    reply = result["messages"][-1]
+
+    # Reasoning arrives as ReasoningBlock entries next to the TextBlock in reply.content.
+    for block in reply.content:
+        if isinstance(block, ReasoningBlock):
+            print("reasoning:", block.summary[:300])
+    print("answer:", reply.text())
+    print("reasoning tokens:", reply.usages.reasoning_tokens if reply.usages else 0)
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="custom_converter.py">
+
+```python
+"""Call a provider SDK yourself inside a node and return a Message through a converter.
+
+Use this when you need an SDK feature the Agent class does not expose. The converter turns
+the raw SDK response (text, tool calls, usage) into the Message the graph expects.
+Run: python examples/providers/custom_converter.py [gemini|openai]
+"""
+
+import asyncio
+import os
+import sys
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.graph import StateGraph
+from tenxgraph.core.state import AgentState, Message
+from tenxgraph.runtime.adapters.llm import GoogleGenAIConverter, OpenAIConverter
+from tenxgraph.utils.constants import END, START
+
+
+load_dotenv()
+
+
+async def gemini_node(state: AgentState, config: dict) -> Message:
+    from google import genai
+
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+    prompt = state.context[-1].text()
+    response = await client.aio.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+    return await GoogleGenAIConverter().convert_response(response)
+
+
+async def openai_node(state: AgentState, config: dict) -> Message:
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI()
+    response = await client.chat.completions.create(
+        model="gpt-5-mini",
+        messages=[{"role": "user", "content": state.context[-1].text()}],
+    )
+    return await OpenAIConverter().convert_response(response)
+
+
+NODES = {"gemini": gemini_node, "openai": openai_node}
+
+
+async def main() -> None:
+    name = sys.argv[1] if len(sys.argv) > 1 else "gemini"
+
+    graph = StateGraph()
+    graph.add_node("MAIN", NODES[name])
+    graph.add_edge(START, "MAIN")
+    graph.add_edge("MAIN", END)
+    app = graph.compile()
+
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("Write a haiku about Python.")]},
+        config={"thread_id": "custom-converter"},
+    )
+    reply = result["messages"][-1]
+    print("assistant:", reply.text())
+    print("usage:", reply.usages)
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/providers](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/providers)
+
+## Expected output
+
+Illustrative:
+
+```text
+provider config: gemini -> model gemini-2.5-flash
+assistant: It is sunny and 22C in Paris.
+```
+
+## Using a different model
+
+Every entry is just a model string plus options. To try another company, run another config name and install its extra.
+
+## Next steps
+
+- [MCP](/docs/examples/mcp): tools served over MCP.
+- [Dependency injection](/docs/examples/dependency-injection): pass your own services to tools.
+- [Quickstart](/docs/examples/quickstart): the ReAct loop itself.

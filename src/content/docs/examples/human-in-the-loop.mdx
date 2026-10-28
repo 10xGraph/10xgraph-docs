@@ -1,0 +1,341 @@
+---
+title: Human-in-the-Loop Approval with interrupt() in a Python AI Agent (10xGraph)
+seoTitle: Human-in-the-loop approval in Python
+description: Pause a 10xGraph agent mid-run to ask a person for approval, validate the answer with a JSON schema, and resume the same thread in Python.
+section: Examples
+group: "Production"
+order: 22
+label: Human in the loop
+updated: "2026-10-28"
+faq:
+  - q: "Does interrupt() need a checkpointer?"
+    a: "Yes. The paused thread is saved by the checkpointer so it can be resumed later, even from another process. interrupt_before and interrupt_after need one too."
+  - q: "How do I resume a paused run?"
+    a: "Call invoke or ainvoke on the same thread_id with a dict holding a resume key. Add resume_interrupt_id with the pending interrupt's id so a stale or repeated answer cannot approve a later prompt."
+  - q: "Why does my tool code run twice?"
+    a: "On resume the interrupted tool or node runs again from the start, and interrupt() returns the resume value instead of pausing. Put side effects such as payments after the interrupt() call."
+  - q: "What is the difference between interrupt() and interrupt_before?"
+    a: "interrupt() pauses from inside code you write and carries a payload, message and optional response schema. interrupt_before pauses the graph before a named node runs, with no code change in that node."
+---
+
+Some actions should not run until a person says yes. This example shows two ways to pause a 10xGraph agent and resume it: calling `interrupt()` inside a tool, and compiling the graph with `interrupt_before`. Both use OpenAI `gpt-5-mini` through the prebuilt `ReactAgent`.
+
+## What you will build
+
+Two ways to put a person in charge of an agent. In `approval_interrupt.py`, a refund tool calls `interrupt()` with a JSON schema. The run pauses, the script reads the pending interrupt, and resumes once with an approval and once with a rejection. In `interrupt_before.py`, the graph is compiled to stop before the tool node, so a reviewer can inspect the tool calls and then continue.
+
+Both need a checkpointer.
+
+## Key concepts
+
+- `interrupt(value, message=, reason=, response_schema=)`: pauses the graph from a node or tool and returns the resume value when the thread is resumed.
+- `pending_interrupt(state)`: returns the `Interrupt` a paused thread is waiting on (`id`, `node`, `value`, `message`, `response_schema`, `tool_call_id`), or `None`.
+- `ResponseGranularity.FULL`: makes `ainvoke` return the whole `state`, which you pass to `pending_interrupt`.
+- `{"resume": value, "resume_interrupt_id": id}`: the input that resumes a paused thread.
+- `ResumeValidationError` / `InterruptMismatchError`: raised when the answer breaks the schema or names the wrong interrupt. Nothing is recorded and the thread stays paused.
+- `compile(interrupt_before=[...])`: pauses before the named nodes. `ReactAgent` names its tool node `"TOOL"`.
+- `InMemoryCheckpointer`: stores the paused thread. Use a database checkpointer when the approver is a different process.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[openai]" python-dotenv
+export OPENAI_API_KEY="..."
+
+python examples/human_in_the_loop/approval_interrupt.py
+python examples/human_in_the_loop/interrupt_before.py
+```
+
+## How the code works
+
+### `approval_interrupt.py`
+
+**A tool that asks for approval.**
+
+```python
+DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {"approved": {"type": "boolean"}, "note": {"type": "string"}},
+    "required": ["approved"],
+}
+```
+
+The schema describes what a valid answer looks like. It supports `type`, `enum`, `properties`, `required` and `items`.
+
+```python
+    decision: dict[str, Any] | None = interrupt(
+        {"order_id": order_id, "amount": amount},
+        message=f"Approve a ${amount:.2f} refund for order {order_id}?",
+        reason="tool_approval",
+        response_schema=DECISION_SCHEMA,
+    )
+    if not decision or not decision.get("approved"):  # None means the client cancelled
+        return f"Refund rejected. Reviewer note: {(decision or {}).get('note', 'none')}"
+    return f"Refund of ${amount:.2f} issued for order {order_id}."
+```
+
+`interrupt()` raises `GraphInterrupt`, a `BaseException`, so the tool error handling does not turn the pause into a failed tool result. The graph saves the thread and `ainvoke` returns without an assistant answer. On resume the function runs again from the top and `interrupt()` returns the decision, so keep side effects after the call. If the client cancels, the tool receives `None`, which the code treats as a rejection.
+
+**Read the pending interrupt.**
+
+```python
+    result = await graph.ainvoke(
+        {"messages": [Message.text_message("Refund $42.50 for order A-1001, it arrived broken.")]},
+        config,
+        response_granularity=ResponseGranularity.FULL,
+    )
+    request = pending_interrupt(result["state"])
+    if request is None:
+        print("no approval needed:", result["messages"][-1].text())
+        return
+```
+
+`FULL` granularity returns the whole state, which holds the pending interrupt. `request.value` is the payload for your UI, `request.message` is the prompt, and `request.id` identifies this pause. With streaming, the same data arrives as an update event with `status="interrupted"`.
+
+**Resume: approve or reject.**
+
+```python
+    try:
+        await graph.ainvoke({"resume": {"approved": "yes"}}, config)
+    except ResumeValidationError as exc:
+        print(f"[{thread_id}] bad resume refused:", exc.context["errors"])
+```
+
+A wrong shape is rejected before anything is recorded, and the thread stays paused.
+
+```python
+    final = await graph.ainvoke(
+        {"resume": decision, "resume_interrupt_id": request.id},
+        config,
+    )
+    print(f"[{thread_id}] assistant:", final["messages"][-1].text())
+```
+
+Naming the interrupt id stops a stale or duplicated click from answering a later prompt. `decision` is `{"approved": True, ...}` on one thread and `{"approved": False, ...}` on the other. The tool runs again, `interrupt()` returns the decision, and the agent writes the final message.
+
+**Wiring.**
+
+```python
+    graph = agent.compile(checkpointer=InMemoryCheckpointer())
+    async with graph:
+        await run_case(graph, "refund-approve", {"approved": True, "note": "photo received"})
+        await run_case(graph, "refund-reject", {"approved": False, "note": "outside return window"})
+```
+
+`interrupt()` needs a checkpointer because the paused thread is stored there. `async with graph` closes the graph at the end.
+
+### `interrupt_before.py`
+
+```python
+    graph = agent.compile(checkpointer=InMemoryCheckpointer(), interrupt_before=["TOOL"])
+```
+
+`"TOOL"` is the name `ReactAgent` gives its tool node. The tools need no change.
+
+```python
+        state = paused["state"]
+        print("paused before node:", state.execution_meta.interrupted_node)
+        for call in state.context[-1].tools_calls or []:
+            fn = call["function"]
+            print("  wants to call:", fn["name"], json.loads(fn["arguments"]))
+```
+
+The model has decided to call `delete_account`, but the tool has not run. The last message in `state.context` holds the proposed calls in OpenAI format.
+
+```python
+        final = await graph.ainvoke({"messages": []}, config)
+        print("assistant:", final["messages"][-1].text())
+```
+
+Invoking the same thread with an empty message list continues from the saved node. This form approves or inspects. To reject with a reason, use `interrupt()` inside the tool as in the first file.
+
+## Full code
+
+<Tabs>
+<TabItem label="approval_interrupt.py">
+
+```python
+"""Ask a person to approve a refund from inside a tool, then resume the same thread.
+
+issue_refund() calls interrupt() with a response_schema. The run pauses and is saved
+by the checkpointer. We read the pending interrupt, then resume once with an
+approval and once with a rejection. Run: python examples/human_in_the_loop/approval_interrupt.py
+"""
+
+import asyncio
+from typing import Any
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.exceptions import ResumeValidationError
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+from tenxgraph.utils import ResponseGranularity, interrupt, pending_interrupt
+
+
+load_dotenv()
+
+DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {"approved": {"type": "boolean"}, "note": {"type": "string"}},
+    "required": ["approved"],
+}
+
+
+def issue_refund(order_id: str, amount: float) -> str:
+    """Refund an order. A human must approve it first."""
+    # On the first run interrupt() raises and the graph pauses here. On resume this
+    # function runs again from the top and interrupt() returns the resume value, so
+    # keep side effects AFTER the call.
+    decision: dict[str, Any] | None = interrupt(
+        {"order_id": order_id, "amount": amount},
+        message=f"Approve a ${amount:.2f} refund for order {order_id}?",
+        reason="tool_approval",
+        response_schema=DECISION_SCHEMA,
+    )
+    if not decision or not decision.get("approved"):  # None means the client cancelled
+        return f"Refund rejected. Reviewer note: {(decision or {}).get('note', 'none')}"
+    return f"Refund of ${amount:.2f} issued for order {order_id}."
+
+
+async def run_case(graph, thread_id: str, decision: dict[str, Any]) -> None:
+    config = {"thread_id": thread_id, "user_id": "support-agent-1"}
+    # FULL granularity returns the whole state, which holds the pending interrupt.
+    result = await graph.ainvoke(
+        {"messages": [Message.text_message("Refund $42.50 for order A-1001, it arrived broken.")]},
+        config,
+        response_granularity=ResponseGranularity.FULL,
+    )
+    request = pending_interrupt(result["state"])
+    if request is None:
+        print("no approval needed:", result["messages"][-1].text())
+        return
+    print(f"[{thread_id}] paused:", request.message)
+    print(f"[{thread_id}] payload:", request.value, "| interrupt id:", request.id)
+
+    # A wrong shape is rejected before anything is recorded; the thread stays paused.
+    try:
+        await graph.ainvoke({"resume": {"approved": "yes"}}, config)
+    except ResumeValidationError as exc:
+        print(f"[{thread_id}] bad resume refused:", exc.context["errors"])
+
+    # Naming the interrupt id stops a stale or duplicated click from answering a later prompt.
+    final = await graph.ainvoke(
+        {"resume": decision, "resume_interrupt_id": request.id},
+        config,
+    )
+    print(f"[{thread_id}] assistant:", final["messages"][-1].text())
+
+
+async def main() -> None:
+    agent = ReactAgent(
+        model="gpt-5-mini",
+        system_prompt=[
+            {"role": "system", "content": "You handle refund requests. Use issue_refund."}
+        ],
+        tools=[issue_refund],
+    )
+    # interrupt() needs a checkpointer: the paused thread is stored there.
+    graph = agent.compile(checkpointer=InMemoryCheckpointer())
+    async with graph:
+        await run_case(graph, "refund-approve", {"approved": True, "note": "photo received"})
+        await run_case(graph, "refund-reject", {"approved": False, "note": "outside return window"})
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="interrupt_before.py">
+
+```python
+"""Review the tool calls an agent wants to make before any of them run.
+
+compile(interrupt_before=["TOOL"]) pauses the graph just before the tool node. We print
+the pending calls, then continue the same thread. No code change is needed in the
+tools. Run: python examples/human_in_the_loop/interrupt_before.py
+"""
+
+import asyncio
+import json
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+from tenxgraph.utils import ResponseGranularity
+
+
+load_dotenv()
+
+
+def delete_account(user_id: str) -> str:
+    """Permanently delete a user account."""
+    return f"Account {user_id} deleted."
+
+
+async def main() -> None:
+    agent = ReactAgent(
+        model="gpt-5-mini",
+        system_prompt=[{"role": "system", "content": "You manage user accounts. Use your tools."}],
+        tools=[delete_account],
+    )
+    # "TOOL" is the name ReactAgent gives its tool node. A checkpointer is required so the
+    # paused thread can be loaded again.
+    graph = agent.compile(checkpointer=InMemoryCheckpointer(), interrupt_before=["TOOL"])
+    config = {"thread_id": "review-1", "user_id": "ops-1"}
+
+    async with graph:
+        paused = await graph.ainvoke(
+            {"messages": [Message.text_message("Please delete the account for user u-381.")]},
+            config,
+            response_granularity=ResponseGranularity.FULL,
+        )
+        state = paused["state"]
+        print("paused before node:", state.execution_meta.interrupted_node)
+        for call in state.context[-1].tools_calls or []:
+            fn = call["function"]
+            print("  wants to call:", fn["name"], json.loads(fn["arguments"]))
+
+        # The reviewer approves by running the thread again. The input carries no new
+        # message: the paused node and its pending tool calls are picked up from the checkpoint.
+        final = await graph.ainvoke({"messages": []}, config)
+        print("assistant:", final["messages"][-1].text())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/human_in_the_loop](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/human_in_the_loop)
+
+## Expected output
+
+Illustrative. Wording from the model and interrupt ids will differ.
+
+```text
+[refund-approve] paused: Approve a $42.50 refund for order A-1001?
+[refund-approve] payload: {'order_id': 'A-1001', 'amount': 42.5} | interrupt id: int_3f9a...
+[refund-approve] bad resume refused: ['$.approved: expected boolean, got str']
+[refund-approve] assistant: The refund of $42.50 for order A-1001 has been issued.
+[refund-reject] paused: Approve a $42.50 refund for order A-1001?
+[refund-reject] assistant: I could not issue the refund. The reviewer noted: outside return window.
+```
+
+## Using a different model
+
+Change `model="gpt-5-mini"` in `ReactAgent(...)` and install the matching extra, for example `model="claude-sonnet-5-5"` with `pip install "10xgraph[anthropic]"` and `ANTHROPIC_API_KEY`, or `model="gemini-2.5-flash"` with `pip install "10xgraph[google-genai]"`.
+
+## Next steps
+
+- [Persistence](/docs/examples/persistence): keep paused threads in SQLite or Postgres so another process can resume them.
+- [Resilience](/docs/examples/resilience): retries, fallbacks and recursion limits.
+- [Graceful shutdown](/docs/examples/graceful-shutdown): flush pending checkpoint writes before the process exits.

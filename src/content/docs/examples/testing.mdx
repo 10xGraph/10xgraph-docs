@@ -1,0 +1,616 @@
+---
+title: Test 10xGraph Agents Without an LLM Using pytest
+seoTitle: Test AI agents without an LLM using pytest
+description: Unit test a 10xGraph Python AI agent offline with TestAgent, QuickTest, MockToolRegistry, MockMCPClient and override_node, with no API keys or network calls.
+section: Examples
+group: "Multimodal and quality"
+order: 34
+label: Testing agents
+updated: "2026-10-28"
+faq:
+  - q: "How do I test a 10xGraph agent without calling an LLM?"
+    a: "Replace the Agent node with TestAgent, which returns the responses you list. You can pass it to add_node, or swap it into an existing graph with override_node. The graph, routing, state and tool nodes all run for real."
+  - q: "Can I check which tools an agent called?"
+    a: "Yes. MockToolRegistry wraps each function and records its calls, so you can use assert_called_with and assert_call_count. QuickTest.with_tools returns a TestResult with assert_tool_called."
+  - q: "Why does pytest warn about TestAgent being collected?"
+    a: "Pytest collects classes named Test*. Import it under another name, for example 'from tenxgraph.qa.testing import TestAgent as CannedAgent', as these files do."
+  - q: "Does MockMCPClient work end to end inside ToolNode?"
+    a: "ToolNode accepts it, but ToolNode drives a real fastmcp client (async context manager, ping and tool objects). MockMCPClient only provides list_tools and call_tool, so use it to test the code around your MCP client rather than ToolNode's MCP execution."
+---
+
+Agent tests that call a real model are slow, cost money and give different answers each run. 10xGraph ships test doubles in `tenxgraph.qa.testing` so you can run the real graph (routing, state, tool nodes) while the model is scripted. This example needs no API key and no network.
+
+## What you will build
+
+A pytest suite for a 10xGraph agent that runs in about two seconds with no API key. The tests script the model's replies, fake the tools, and swap nodes in a production graph, then assert on the result.
+
+Five files cover the five tools in `tenxgraph.qa.testing`. Each file is a normal pytest module you can copy into your own project.
+
+## Key concepts
+
+- `TestAgent`: a stand-in for `Agent` that returns canned `responses` in order and records every call (`call_count`, `get_last_messages()`).
+- `QuickTest`: one-call helpers (`single_turn`, `multi_turn`, `with_tools`, `custom`) that build a graph, run it and return a `TestResult`.
+- `TestResult`: chainable assertions such as `assert_contains`, `assert_tool_called` and `assert_message_count`.
+- `MockToolRegistry`: registers fake tools by name and records their calls.
+- `MockMCPClient`: a fake MCP server with `add_tool`, `list_tools` and `call_tool`.
+- `override_node`: replaces a node in a `StateGraph` before compile, or in a `CompiledGraph` after.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph" pytest pytest-asyncio
+pip install "10xgraph[mcp]"   # only for test_mock_mcp.py, which builds a ToolNode with a client
+
+pytest examples/testing -q -c examples/testing/pytest.ini
+```
+
+No API keys and no Docker. Nothing in this folder makes a network call.
+
+`pytest.ini` turns on `asyncio_mode = auto` so `async def test_...` works without decorators, and it avoids the coverage options the library's own `pyproject.toml` adds. Copy it into your project if you use the same layout.
+
+| File | Shows |
+|---|---|
+| `test_with_test_agent.py` | `TestAgent` responses, call history and assertions |
+| `test_quick_test.py` | `QuickTest` single turn, multi turn, tools and chained assertions |
+| `test_mock_tools.py` | `MockToolRegistry` call recording and `ToolNode` wiring |
+| `test_mock_mcp.py` | `MockMCPClient` protocol methods and call assertions |
+| `test_override_node.py` | `override_node` before and after compile |
+
+## How the code works
+
+### test_with_test_agent.py
+
+`TestAgent` plugs into a graph like the real agent. Only the `MAIN` node is replaced:
+
+```python
+def build_graph(agent: CannedAgent):
+    graph = StateGraph()
+    graph.add_node("MAIN", agent)
+    graph.set_entry_point("MAIN")
+    graph.add_edge("MAIN", END)
+    return graph.compile()
+```
+
+The import alias matters. Pytest collects classes named `Test*`, so the file renames it:
+
+```python
+from tenxgraph.qa.testing import (
+    TestAgent as CannedAgent,  # alias: pytest would try to collect "Test*"
+)
+```
+
+The `responses` list cycles, so one agent can script a whole conversation:
+
+```python
+agent = CannedAgent(responses=["first", "second"])
+```
+
+`call_history` records exactly what would have been sent to the model, so you can check the system prompt and user text:
+
+```python
+sent = agent.get_last_messages()
+assert sent[0]["role"] == "system"
+assert sent[0]["content"] == "You are terse."
+```
+
+### test_quick_test.py
+
+`QuickTest` collapses graph setup, the run and the result into one call. Assertions return the result, so they chain:
+
+```python
+result = await QuickTest.with_tools(
+    query="Weather in NYC?",
+    response="It is sunny in NYC.",
+    tools=["get_weather"],
+    tool_responses={"get_weather": "sunny, 24C"},
+)
+
+result.assert_tool_called("get_weather").assert_contains("sunny")
+result.assert_tool_not_called("send_email")
+```
+
+String tool names become mock tools that record calls and return the canned value. `multi_turn` takes a list of `(user, reply)` pairs, and `custom` takes your own `CannedAgent`.
+
+### test_mock_tools.py
+
+`MockToolRegistry` records calls made through the functions it hands out:
+
+```python
+registry = MockToolRegistry()
+registry.register(
+    "get_weather",
+    lambda city: f"Sunny in {city}",
+    description="Get the weather for a city.",
+)
+```
+
+```python
+tools.assert_called_with("get_weather", city="Paris")
+tools.assert_call_count("get_weather", 2)
+```
+
+`get_tool_list()` returns the tracked functions, ready to give to a real `ToolNode`. `reset()` clears recorded calls but keeps the tools, and `clear()` drops the tools too.
+
+### test_mock_mcp.py
+
+`MockMCPClient` stands in for an MCP server. Handlers can be sync or async, and async ones are awaited:
+
+```python
+client.add_tool(
+    name="search",
+    description="Search the web",
+    parameters={"query": {"type": "string"}},
+    handler=lambda query: f"Results for: {query}",
+)
+```
+
+The tests check `list_tools`, `call_tool`, the unknown-tool error and call assertions. `ToolNode` accepts the mock, but `ToolNode` drives a real fastmcp client, so use the mock to test the code around your MCP client, not `ToolNode`'s MCP execution.
+
+### test_override_node.py
+
+`override_node` is the way to test a graph you do not want to rebuild. `create_graph()` plays the role of your production factory and returns the uncompiled graph. The test keeps its routing and tool node and replaces only the model call:
+
+```python
+graph = create_graph()
+graph.override_node("MAIN", CannedAgent(responses=["stubbed answer"]))
+app = graph.compile()
+```
+
+You can also override after compile with `app.override_node(...)`, and replace the tool node with a `ToolNode` built from a `MockToolRegistry` to assert the tool call reached it. An unknown node name raises `KeyError`.
+
+<Callout type="note" title="TestAgent tool calls use a fixed argument">
+`TestAgent` returns tool calls with the fixed argument `{"query": "test query"}` on its first call when it has `tools`. A tool it triggers must accept a `query` parameter, or the tool node returns an error message instead of a result.
+</Callout>
+
+## Full code
+
+<Tabs>
+<TabItem label="pytest.ini">
+
+```ini
+[pytest]
+# Standalone config so these example tests run without the library's coverage addopts.
+asyncio_mode = auto
+python_files = test_*.py
+filterwarnings =
+    ignore::DeprecationWarning
+```
+
+</TabItem>
+<TabItem label="test_with_test_agent.py">
+
+```python
+"""TestAgent: a drop-in replacement for Agent that returns canned responses.
+
+Shows how to run a real StateGraph with no LLM call, then assert on what the
+agent returned and on what it was sent.
+Run: pytest examples/testing/test_with_test_agent.py -q
+"""
+
+import pytest
+
+from tenxgraph.core.graph import StateGraph
+from tenxgraph.core.state import Message
+from tenxgraph.qa.testing import (
+    TestAgent as CannedAgent,  # alias: pytest would try to collect "Test*"
+)
+from tenxgraph.utils.constants import END
+
+
+def build_graph(agent: CannedAgent):
+    graph = StateGraph()
+    graph.add_node("MAIN", agent)
+    graph.set_entry_point("MAIN")
+    graph.add_edge("MAIN", END)
+    return graph.compile()
+
+
+def last_text(result: dict) -> str:
+    # Message.text() joins the text blocks of a message.
+    return result["messages"][-1].text()
+
+
+async def test_returns_canned_response():
+    agent = CannedAgent(responses=["Paris is the capital of France."])
+    app = build_graph(agent)
+
+    result = await app.ainvoke({"messages": [Message.text_message("Capital of France?")]})
+
+    assert last_text(result) == "Paris is the capital of France."
+    agent.assert_called_times(1)
+
+
+async def test_responses_cycle_across_calls():
+    # The list is reused in order, so one agent can script a whole conversation.
+    agent = CannedAgent(responses=["first", "second"])
+    app = build_graph(agent)
+
+    first = await app.ainvoke({"messages": [Message.text_message("a")]})
+    second = await app.ainvoke({"messages": [Message.text_message("b")]})
+
+    assert last_text(first) == "first"
+    assert last_text(second) == "second"
+    assert agent.call_count == 2
+
+
+async def test_agent_receives_system_prompt_and_user_message():
+    agent = CannedAgent(
+        system_prompt=[{"role": "system", "content": "You are terse."}],
+        responses=["ok"],
+    )
+    app = build_graph(agent)
+
+    await app.ainvoke({"messages": [Message.text_message("Hello there")]})
+
+    # call_history records exactly what would have been sent to the model.
+    sent = agent.get_last_messages()
+    assert sent[0]["role"] == "system"
+    assert sent[0]["content"] == "You are terse."
+    assert any(m["role"] == "user" and "Hello there" in str(m["content"]) for m in sent)
+
+
+async def test_reset_clears_history():
+    agent = CannedAgent(responses=["ok"])
+    agent.assert_not_called()
+
+    await build_graph(agent).ainvoke({"messages": [Message.text_message("hi")]})
+    agent.assert_called()
+
+    agent.reset()
+    agent.assert_not_called()
+    assert agent.call_history == []
+
+
+def test_assertion_helpers_fail_loudly():
+    agent = CannedAgent()
+    with pytest.raises(AssertionError):
+        agent.assert_called()
+```
+
+</TabItem>
+<TabItem label="test_quick_test.py">
+
+```python
+"""QuickTest: one-call tests for common agent scenarios.
+
+QuickTest builds the graph, runs it with a canned agent, and hands back a
+TestResult with chainable assertions.
+Run: pytest examples/testing/test_quick_test.py -q
+"""
+
+import pytest
+
+from tenxgraph.qa.testing import QuickTest
+from tenxgraph.qa.testing import TestAgent as CannedAgent
+
+
+async def test_single_turn():
+    result = await QuickTest.single_turn(
+        agent_response="Hello! How can I help?",
+        user_message="Hi",
+    )
+
+    # Assertions return the result, so they chain.
+    result.assert_contains("Hello").assert_not_contains("goodbye").assert_no_errors()
+    assert result.final_response == "Hello! How can I help?"
+
+
+async def test_multi_turn():
+    result = await QuickTest.multi_turn(
+        [
+            ("Hello", "Hi! How can I help?"),
+            ("What is 2 + 2?", "4"),
+            ("Thanks", "You're welcome!"),
+        ]
+    )
+
+    result.assert_contains("welcome")
+    # 3 user messages + 3 assistant replies
+    result.assert_message_count(6)
+
+
+async def test_with_tools():
+    # Strings become mock tools that record their calls and return a canned value.
+    result = await QuickTest.with_tools(
+        query="Weather in NYC?",
+        response="It is sunny in NYC.",
+        tools=["get_weather"],
+        tool_responses={"get_weather": "sunny, 24C"},
+    )
+
+    result.assert_tool_called("get_weather").assert_contains("sunny")
+    result.assert_tool_not_called("send_email")
+
+
+async def test_custom_agent():
+    agent = CannedAgent(responses=["custom reply"])
+    result = await QuickTest.custom(agent=agent, user_message="anything")
+
+    result.assert_equals("custom reply")
+    agent.assert_called_times(1)
+
+
+async def test_failed_assertion_message():
+    result = await QuickTest.single_turn(agent_response="abc", user_message="x")
+    with pytest.raises(AssertionError, match="Expected response to contain"):
+        result.assert_contains("missing")
+```
+
+</TabItem>
+<TabItem label="test_mock_tools.py">
+
+```python
+"""MockToolRegistry: fake tools that record every call.
+
+Register plain functions by name, hand them to a ToolNode, and assert on how
+they were called afterwards. No network, no LLM.
+Run: pytest examples/testing/test_mock_tools.py -q
+"""
+
+import pytest
+
+from tenxgraph.core.graph import ToolNode
+from tenxgraph.qa.testing import MockToolRegistry
+
+
+@pytest.fixture
+def tools() -> MockToolRegistry:
+    registry = MockToolRegistry()
+    registry.register(
+        "get_weather",
+        lambda city: f"Sunny in {city}",
+        description="Get the weather for a city.",
+    )
+    registry.register("send_email", lambda to, body: "sent")
+
+    async def lookup(order_id: str) -> str:
+        return f"order {order_id}: shipped"
+
+    registry.register_async("lookup_order", lookup)
+    return registry
+
+
+def test_calls_are_recorded(tools: MockToolRegistry):
+    fn = tools.functions["get_weather"]
+
+    assert fn(city="NYC") == "Sunny in NYC"
+    fn(city="Paris")
+
+    assert tools.was_called("get_weather")
+    assert not tools.was_called("send_email")
+    assert tools.call_count("get_weather") == 2
+    assert tools.get_last_call("get_weather")["kwargs"] == {"city": "Paris"}
+    tools.assert_called("get_weather")
+    tools.assert_called_with("get_weather", city="Paris")
+    tools.assert_call_count("get_weather", 2)
+
+
+async def test_async_tool(tools: MockToolRegistry):
+    result = await tools.functions["lookup_order"](order_id="A1")
+
+    assert result == "order A1: shipped"
+    tools.assert_called_with("lookup_order", order_id="A1")
+
+
+def test_reset_keeps_tools_but_clears_calls(tools: MockToolRegistry):
+    tools.functions["send_email"](to="a@b.c", body="hi")
+    tools.reset()
+
+    assert tools.call_count("send_email") == 0
+    assert "send_email" in tools.functions  # reset() keeps registrations
+
+    tools.clear()
+    assert tools.functions == {}  # clear() drops them too
+
+
+def test_assertion_failures(tools: MockToolRegistry):
+    with pytest.raises(AssertionError):
+        tools.assert_called("send_email")
+
+
+async def test_plugs_into_tool_node(tools: MockToolRegistry):
+    # get_tool_list() returns the tracked functions, ready for ToolNode.
+    node = ToolNode(tools.get_tool_list())
+
+    schemas = await node.all_tools()
+    names = {s["function"]["name"] for s in schemas}
+    assert {"get_weather", "send_email", "lookup_order"} <= names
+```
+
+</TabItem>
+<TabItem label="test_mock_mcp.py">
+
+```python
+"""MockMCPClient: a stand-in for an MCP server.
+
+Register tools with handlers, check the MCP protocol surface (list_tools and
+call_tool), and assert on recorded calls. It also shows what ToolNode accepts.
+Run: pytest examples/testing/test_mock_mcp.py -q
+"""
+
+import pytest
+
+from tenxgraph.core.graph import ToolNode
+from tenxgraph.qa.testing import MockMCPClient
+
+
+@pytest.fixture
+def mcp() -> MockMCPClient:
+    client = MockMCPClient()
+    client.add_tool(
+        name="search",
+        description="Search the web",
+        parameters={"query": {"type": "string"}},
+        handler=lambda query: f"Results for: {query}",
+    )
+
+    async def add(a: int, b: int) -> int:
+        return a + b
+
+    client.add_tool(
+        name="add",
+        description="Add two numbers",
+        parameters={"a": {"type": "integer"}, "b": {"type": "integer"}},
+        handler=add,
+    )
+    return client
+
+
+async def test_list_tools(mcp: MockMCPClient):
+    tools = await mcp.list_tools()
+
+    assert [t["name"] for t in tools] == ["search", "add"]
+    assert tools[0]["inputSchema"]["properties"] == {"query": {"type": "string"}}
+
+
+async def test_call_tool_sync_and_async_handlers(mcp: MockMCPClient):
+    assert await mcp.call_tool("search", {"query": "10xGraph"}) == "Results for: 10xGraph"
+    assert await mcp.call_tool("add", {"a": 2, "b": 3}) == 5  # async handlers are awaited
+
+
+async def test_unknown_tool_raises(mcp: MockMCPClient):
+    with pytest.raises(ValueError, match="Unknown MCP tool"):
+        await mcp.call_tool("nope", {})
+
+
+async def test_call_assertions(mcp: MockMCPClient):
+    await mcp.call_tool("search", {"query": "a"})
+    await mcp.call_tool("search", {"query": "b"})
+
+    assert mcp.was_called("search")
+    assert not mcp.was_called("add")
+    assert mcp.call_count("search") == 2
+    assert mcp.get_last_call("search") == {"arguments": {"query": "b"}}
+    mcp.assert_called("search")
+    mcp.assert_called_with("search", query="b")
+
+    mcp.reset()
+    assert mcp.call_count("search") == 0
+
+
+def test_tool_node_accepts_the_mock(mcp: MockMCPClient):
+    # ToolNode takes the mock wherever it takes an MCP client (needs the `mcp` extra).
+    # Note: ToolNode talks to a real fastmcp client (async context manager, ping(),
+    # tool objects with .name). MockMCPClient only mirrors list_tools/call_tool, so
+    # use it to test your own code around the client, not ToolNode's MCP execution.
+    node = ToolNode([], client=mcp)
+    assert node._client is mcp
+```
+
+</TabItem>
+<TabItem label="test_override_node.py">
+
+```python
+"""override_node: swap a production node for a test double.
+
+The graph factory below is the "production" code. In a test we override its
+LLM node with a TestAgent, keeping the real tool node and routing.
+Run: pytest examples/testing/test_override_node.py -q
+"""
+
+import pytest
+
+from tenxgraph.core.graph import StateGraph, ToolNode
+from tenxgraph.core.state import AgentState, Message
+from tenxgraph.qa.testing import MockToolRegistry
+from tenxgraph.qa.testing import TestAgent as CannedAgent
+from tenxgraph.utils.constants import END
+
+
+async def production_llm(state: AgentState) -> list[Message]:
+    # Stands in for a real Agent; calling it in a test would need network access.
+    raise RuntimeError("tests must not reach the real model")
+
+
+def get_weather(city: str) -> str:
+    """Get the weather for a city."""
+    return f"Sunny in {city}"
+
+
+def route(state: AgentState) -> str:
+    last = state.context[-1] if state.context else None
+    if last and getattr(last, "tools_calls", None) and last.role == "assistant":
+        return "TOOL"
+    return END
+
+
+def create_graph() -> StateGraph:
+    """Production factory: returns the uncompiled graph so callers can override nodes."""
+    graph = StateGraph()
+    graph.add_node("MAIN", production_llm)
+    graph.add_node("TOOL", ToolNode([get_weather]))
+    graph.set_entry_point("MAIN")
+    graph.add_conditional_edges("MAIN", route, {"TOOL": "TOOL", END: END})
+    graph.add_edge("TOOL", "MAIN")
+    return graph
+
+
+async def test_override_before_compile():
+    graph = create_graph()
+    graph.override_node("MAIN", CannedAgent(responses=["stubbed answer"]))
+    app = graph.compile()
+
+    result = await app.ainvoke({"messages": [Message.text_message("hi")]})
+
+    assert result["messages"][-1].text() == "stubbed answer"
+
+
+async def test_override_after_compile():
+    app = create_graph().compile()
+    app.override_node("MAIN", CannedAgent(responses=["post-compile stub"]))
+
+    result = await app.ainvoke({"messages": [Message.text_message("hi")]})
+
+    assert result["messages"][-1].text() == "post-compile stub"
+
+
+async def test_override_with_mock_tool_node():
+    # Replace the tool node too, so we can assert the agent's tool call reached it.
+    registry = MockToolRegistry().register("get_weather", lambda **kw: "mock sunny")
+    graph = create_graph()
+    graph.override_node(
+        "MAIN",
+        CannedAgent(responses=["It is sunny."], tools=["get_weather"]),
+    )
+    graph.override_node("TOOL", ToolNode(registry.get_tool_list()))
+    app = graph.compile()
+
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("Weather?")]},
+        config={"recursion_limit": 10},
+    )
+
+    assert result["messages"][-1].text() == "It is sunny."
+    registry.assert_called("get_weather")
+
+
+def test_unknown_node_raises():
+    with pytest.raises(KeyError):
+        create_graph().override_node("MISSING", CannedAgent())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/testing](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/testing)
+
+## Expected output
+
+Illustrative:
+
+```text
+$ pytest examples/testing -q -c examples/testing/pytest.ini
+........................                                                 [100%]
+24 passed in 1.7s
+```
+
+<Callout type="tip" title="Which model name to use">
+These tests never call a model, so the model name does not matter. `TestAgent(model=...)` defaults to `"test-model"`. Your production `Agent` can use any provider (`gpt-5-mini`, `gemini-2.5-flash`, `claude-sonnet-5-5`) and the tests stay the same.
+</Callout>
+
+## Next steps
+
+- [Evaluation](/docs/examples/evaluation) scores a real model with trajectory and LLM-judge criteria.
+- [Serving](/docs/examples/serving) exposes a graph over HTTP so you can test it end to end.

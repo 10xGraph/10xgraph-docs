@@ -26,6 +26,10 @@ You build the agent. Served with `10xgraph-api`, it gets authentication, per-use
 4. [Production checklist](/docs/server/production-checklist): the settings to confirm before you deploy.
 5. [Build a production agent end to end](/build/production-react-agent): a support agent served with JWT auth, rate limits, Postgres memory, tests and Docker files.
 
+<Callout type="note" title="Why 10xGraph: you build the agent, we ship the server">
+Most frameworks stop at the graph. 10xGraph gives you the production API server too: secure by default, horizontally scalable and ready to deploy, with every part (authentication, authorization, rate limits, storage) replaceable. [See what the server does for you and how to customize it](/docs/get-started/why-10xgraph).
+</Callout>
+
 ## The three packages
 
 They work together or standalone.
@@ -42,12 +46,16 @@ The fastest path depends on what you want to build.
 Start with [Get Started](/docs/get-started) for installation, a quickstart agent, and what the production template generates. Then move to [Concepts](/docs/concepts) to understand state, checkpointing, and the runtime model.
 </Callout>
 
+<Callout type="tip" title="Learn directly from examples">
+Prefer reading code? Every feature has a runnable example: clone the repository, add one API key, run one file. Start with the [quickstart](/docs/examples/quickstart), try a production feature like [human-in-the-loop approval](/docs/examples/human-in-the-loop), or open a full app like the [RAG assistant](/docs/examples/rag-assistant). [Browse all examples](/docs/examples).
+</Callout>
+
 <Callout type="tip" title="Coming from LangGraph?">
 10xGraph is inspired by LangGraph but simpler. Read [10xGraph vs LangGraph](/docs/compare/10xgraph-vs-langgraph) for a side-by-side comparison. Then follow the [quickstart](/docs/get-started/first-agent) and read [Concepts](/docs/concepts) to see how `StateGraph` and streaming map across.
 </Callout>
 
 <Callout type="tip" title="Ready to deploy to production?">
-Begin with [Server](/docs/server) to understand the API server and CLI. Then tackle [authentication](/docs/server/auth), [durable checkpointing](/docs/guides/set-up-checkpointing), and [deployment](/docs/server/deploy). Read [Replay-safe tools](/docs/concepts/replay-safe-tools) before giving your agent tools that move money or send email.
+Read [Why 10xGraph](/docs/get-started/why-10xgraph) for what the server gives you and where its limits are. Then go to [Server](/docs/server) to understand the API server and CLI. Then tackle [authentication](/docs/server/auth), [durable checkpointing](/docs/guides/set-up-checkpointing), and [deployment](/docs/server/deploy). Read [Replay-safe tools](/docs/concepts/replay-safe-tools) before giving your agent tools that move money or send email.
 </Callout>
 
 ## What the docs cover

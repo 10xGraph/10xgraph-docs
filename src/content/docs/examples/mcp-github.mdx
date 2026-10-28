@@ -1,0 +1,264 @@
+---
+title: GitHub MCP Server with a 10xGraph Agent
+seoTitle: GitHub MCP server with a Python agent
+description: Use GitHub's remote MCP server from a 10xGraph ReactAgent to list commits and download a README, authenticated with a GitHub token in Python.
+section: Examples
+group: "Tools and integrations"
+order: 18
+label: GitHub MCP
+updated: "2026-10-28"
+faq:
+  - q: "Where does the GitHub token go?"
+    a: "In the headers of the server entry in the mcpServers config, as an Authorization bearer token read from GITHUB_TOKEN. It is never part of the prompt."
+  - q: "Do I write the GitHub tools myself?"
+    a: "No. ReactAgent(client=...) discovers the tools the GitHub MCP server exposes, such as list_commits, at run time."
+---
+
+GitHub hosts an MCP server, so an agent can read repositories without custom API code. These two community-contributed scripts point a 10xGraph `ReactAgent` at that server and ask it questions about a repository. The agent uses OpenAI `gpt-5-mini`. For the basics of MCP clients, see the [MCP overview](/docs/examples/mcp).
+
+## What you will build
+
+Two small scripts that point a ReactAgent at GitHub's hosted MCP server. `git_mcp.py` asks for the commits of a repository and `mcp_file_download.py` reads its `README.md`.
+
+## Key concepts
+
+- `fastmcp.Client` with a remote `streamable-http` server and an `Authorization` header.
+- `ReactAgent(client=...)` to expose the server's tools to the model.
+- `InMemoryCheckpointer` to keep the thread state between steps.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[mcp,openai]" python-dotenv
+export OPENAI_API_KEY=...
+export GITHUB_TOKEN=...   # a personal access token
+python examples/mcp/github/git_mcp.py
+python examples/mcp/github/mcp_file_download.py
+```
+
+## How the code works
+
+### `git_mcp.py`
+
+```python
+mcp_config = {
+    "mcpServers": {
+        "github": {
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": {"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}"},
+            "transport": "streamable-http",
+        },
+    }
+}
+```
+
+The token goes in an `Authorization` header, so it never appears in the prompt or the message history.
+
+```python
+agent = ReactAgent(
+    model="gpt-5-mini",
+    system_prompt=[
+        {
+            "role": "system",
+            "content": "You are a helpful assistant. Use the GitHub tools to answer questions.",
+        }
+    ],
+    client=Client(mcp_config),  # tools are discovered from the server at run time
+    trim_context=True,
+)
+```
+
+No tool is written by hand. `trim_context=True` keeps long tool results, like a full commit list, from filling the context window.
+
+```python
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+    question = (
+        "Call the list_commits tool for the repo 'portfolio' owned by 'suchith83' "
+        "and give me all commits in that repo."
+    )
+    result = await app.ainvoke(
+        {"messages": [Message.text_message(question)]},
+        config={"thread_id": "github-commits", "recursion_limit": 10},
+    )
+    for message in result["messages"]:
+        print(f"[{message.role}]", message.text()[:500])
+```
+
+The model decides to call `list_commits`, `ReactAgent` runs it through the MCP client, and the loop ends when the model answers in text. The script prints every message, cut to 500 characters, so you can see the tool result.
+
+### `mcp_file_download.py`
+
+It builds the same agent. Only the question and thread id change.
+
+```python
+    question = "Get the README.md file from the repo 'portfolio' owned by 'suchith83'."
+    result = await app.ainvoke(
+        {"messages": [Message.text_message(question)]},
+        config={"thread_id": "github-readme", "recursion_limit": 10},
+    )
+    print("assistant:", result["messages"][-1].text())
+```
+
+The agent picks the right GitHub tool on its own. It prints only the final answer.
+
+## Full code
+
+<Tabs>
+<TabItem label="git_mcp.py">
+
+```python
+"""List commits from a GitHub repository through GitHub's remote MCP server.
+
+A ReactAgent gets its tools from the MCP server, so no tool is written by hand.
+Contributed example, modernised to use ReactAgent(client=...).
+
+Run: GITHUB_TOKEN=... OPENAI_API_KEY=... python examples/mcp/github/git_mcp.py
+"""
+
+import asyncio
+import os
+
+from dotenv import load_dotenv
+from fastmcp import Client
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+
+
+load_dotenv()
+
+# GitHub hosts an MCP server over streamable HTTP. The token goes in an
+# Authorization header, so it never appears in the prompt.
+mcp_config = {
+    "mcpServers": {
+        "github": {
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": {"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}"},
+            "transport": "streamable-http",
+        },
+    }
+}
+
+agent = ReactAgent(
+    model="gpt-5-mini",
+    system_prompt=[
+        {
+            "role": "system",
+            "content": "You are a helpful assistant. Use the GitHub tools to answer questions.",
+        }
+    ],
+    client=Client(mcp_config),  # tools are discovered from the server at run time
+    trim_context=True,
+)
+
+
+async def main() -> None:
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+    question = (
+        "Call the list_commits tool for the repo 'portfolio' owned by 'suchith83' "
+        "and give me all commits in that repo."
+    )
+    result = await app.ainvoke(
+        {"messages": [Message.text_message(question)]},
+        config={"thread_id": "github-commits", "recursion_limit": 10},
+    )
+    for message in result["messages"]:
+        print(f"[{message.role}]", message.text()[:500])
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="mcp_file_download.py">
+
+```python
+"""Fetch a file (a repository README) through GitHub's remote MCP server.
+
+Same setup as git_mcp.py with a different question: the agent picks the right
+MCP tool on its own.
+
+Run: GITHUB_TOKEN=... OPENAI_API_KEY=... python examples/mcp/github/mcp_file_download.py
+"""
+
+import asyncio
+import os
+
+from dotenv import load_dotenv
+from fastmcp import Client
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+
+
+load_dotenv()
+
+mcp_config = {
+    "mcpServers": {
+        "github": {
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": {"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}"},
+            "transport": "streamable-http",
+        },
+    }
+}
+
+agent = ReactAgent(
+    model="gpt-5-mini",
+    system_prompt=[
+        {
+            "role": "system",
+            "content": "You are a helpful assistant. Use the GitHub tools to answer questions.",
+        }
+    ],
+    client=Client(mcp_config),
+    trim_context=True,
+)
+
+
+async def main() -> None:
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+    question = "Get the README.md file from the repo 'portfolio' owned by 'suchith83'."
+    result = await app.ainvoke(
+        {"messages": [Message.text_message(question)]},
+        config={"thread_id": "github-readme", "recursion_limit": 10},
+    )
+    print("assistant:", result["messages"][-1].text())
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/mcp/github](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/mcp/github)
+
+## Expected output
+
+Illustrative:
+
+```text
+[user] Call the list_commits tool for the repo 'portfolio' ...
+[assistant]
+[tool] [{"sha": "3f2a...", "commit": {"message": "Add contact form"}}, ...]
+[assistant] The repo has 12 commits. The latest is "Add contact form".
+```
+
+## Using a different model
+
+Change `gpt-5-mini` to `gemini-2.5-flash` (`pip install "10xgraph[mcp,google-genai]"`) or `claude-sonnet-5-5` (`pip install "10xgraph[mcp,anthropic]"`) and set that provider's key.
+
+## Next steps
+
+- [MCP overview](/docs/examples/mcp)
+- [Xquik MCP](/docs/examples/mcp-xquik) for an API key header instead of a bearer token.
+- [Providers](/docs/examples/providers) for other models.

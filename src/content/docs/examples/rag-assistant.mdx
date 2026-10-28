@@ -1,0 +1,1742 @@
+---
+title: Docs Assistant with RAG, Qdrant and a React Chat UI (10xGraph)
+seoTitle: Full-stack RAG docs assistant in Python
+description: "Full-stack RAG docs assistant: a Claude ReAct agent with Qdrant search, Postgres threads, a React chat UI and Docker Compose."
+section: Examples
+group: Apps
+order: 39
+label: RAG docs assistant
+updated: "2026-10-28"
+faq:
+  - q: "Why does this example use three different model providers?"
+    a: "Each job gets the model that suits it. Claude handles the conversation and tool use, OpenAI produces the embeddings stored in Qdrant, and Gemini rewrites the question into a search query. 10xGraph picks the client from the model string, so mixing companies needs no extra wiring."
+  - q: "Who owns the documents in Qdrant?"
+    a: "A reserved system owner created with system_user_id(\"docs_kb\"). Shared knowledge is not tied to any user, so user memory searches never return it, and every end user can search it."
+  - q: "What happens to running requests when the container gets SIGTERM?"
+    a: "The API server drains in-flight runs before it closes the checkpointer and the Qdrant client. The image allows 600 seconds and docker-compose.yml sets stop_grace_period to match."
+  - q: "Do I need a UI component library for the frontend?"
+    a: "No. The UI is a handful of small React files on top of the 10xgraph-client package, which covers streaming, threads and message history."
+---
+
+This is a complete, deployable app: a documentation assistant for a fictional product called Lumen. A ReAct agent built with `ReactAgent` answers questions from a Qdrant knowledge base and cites the source file for each fact. A React chat UI streams the answer and shows the sources. The 10xGraph API server serves the graph, Postgres and Redis keep threads across restarts, and everything starts with `docker compose up`.
+
+It uses three model providers on purpose. The chat agent runs `claude-sonnet-5-5` (Anthropic), the query rewriter runs `gemini-2.5-flash` (Google), and embeddings use `text-embedding-3-small` (OpenAI).
+
+## What you will build
+
+A documentation assistant for Lumen. You ask a question in a React chat UI. A ReAct agent rewrites the question into a search query, searches a Qdrant collection of documentation chunks, and answers with the source file named for each fact. The UI streams the answer and lists the cited sources taken from the tool results.
+
+The stack runs with one `docker compose up`: the 10xGraph API server, an nginx-served frontend, Postgres and Redis for thread persistence, and Qdrant for vectors.
+
+## Architecture
+
+### Components
+
+| Component | Technology | Role |
+|---|---|---|
+| Chat agent | `ReactAgent`, `claude-sonnet-5-5` (Anthropic) | Decides when to call tools, writes the grounded, cited answer |
+| Query rewriter | `call_llm` with `gemini-2.5-flash` (Google) | Turns a chat question into a short keyword search query |
+| Embeddings | `OpenAIEmbedding`, `text-embedding-3-small` (OpenAI) | Vectors for ingest and for every search |
+| Retrieval | `QdrantStore`, collection `docs_kb` | Vector similarity search over doc chunks |
+| API server | 10xGraph API server (`10xgraph-api`), gunicorn with uvicorn workers | Loads `graph.agent:app`, exposes `/v1/graph/stream`, threads and `/ping` |
+| Thread storage | `PgCheckpointer`: Postgres 16 plus Redis 7 | Durable thread state (Postgres) and a fast cache (Redis) |
+| Rate limiting | Redis backend, configured in `10xgraph.json` | 60 requests per 60 seconds per IP |
+| Frontend | React 19, Vite 6, `10xgraph-client`, served by nginx | Chat, thread list, source display |
+| Ingest job | `ingest.py` | Chunks `backend/data/*` and writes the chunks to Qdrant |
+
+### Docker services
+
+`docker-compose.yml` defines six services: `api`, `frontend`, `postgres`, `redis`, `qdrant`, and `ingest`. The `ingest` service sits behind a Compose profile, so it only runs when you ask for it.
+
+### Request flow
+
+```text
+Browser (React, port 3000)
+   |  POST /api/v1/graph/stream   (same origin)
+   v
+nginx (frontend container)         buffering off, strips nothing: /api/ -> http://api:8000/
+   |
+   v
+10xGraph API server (api:8000)
+   |  load thread state            PgCheckpointer: Redis cache -> Postgres
+   v
+ReactAgent  (claude-sonnet-5-5, Anthropic)
+   |  1. tool call: query_rewriter(question)
+   |        `--> call_llm("gemini-2.5-flash")  (Google)  -> short search query
+   |  2. tool call: search_docs(query)
+   |        `--> QdrantStore.asearch(KB_CONFIG, query)
+   |                 `--> embed query with OpenAI text-embedding-3-small
+   |                 `--> Qdrant docs_kb, owner = system_user_id("docs_kb")
+   |                 `--> JSON: [source, title, score, content]
+   |  3. final answer, streamed, names (source: file) for each fact
+   v
+SSE stream back through nginx to the browser
+   |  assistant text chunks -> chat bubble
+   |  tool messages         -> parsed into the "Sources" list
+   v
+PgCheckpointer saves the thread (background write) -> thread list and history
+
+Offline: ingest.py -> chunk files in backend/data -> OpenAI embeddings -> Qdrant docs_kb
+```
+
+## Key concepts
+
+- `ReactAgent`: prebuilt ReAct loop; wires the model node, tool node and routing.
+- `PgCheckpointer`: stores thread state in Postgres with a Redis cache, so threads survive restarts.
+- `QdrantStore` with `OpenAIEmbedding`: vector search over the knowledge base.
+- `system_user_id("docs_kb")`: reserved owner for shared data such as a RAG knowledge base.
+- `call_llm`: single-turn call used by the query rewriter; the provider is chosen from the model name.
+- `10xgraph.json`: tells the API server which graph to load and configures rate limiting and auth.
+- `TenxGraphClient` from `10xgraph-client`: `stream()`, `threads()`, `threadMessages()`, `deleteThread()`.
+- `tenxgraph.qa.testing`: runs graph logic in tests with no LLM.
+
+## Project structure
+
+<FileTree>
+
+- docker-compose.yml API, frontend, Postgres, Redis, Qdrant and the one-shot ingest job
+- .env.example Template for the three API keys and local service addresses
+- backend/ The 10xGraph API server project
+  - 10xgraph.json Server config: graph path, auth, rate limit, test settings
+  - Dockerfile Two-stage image, non-root user, gunicorn, 600 s graceful drain
+  - .dockerignore Keeps `.env` and tests out of the image
+  - requirements.txt `10xgraph` extras and `10xgraph-api`
+  - ingest.py Chunks `data/` and stores the chunks in Qdrant
+  - graph/
+    - agent.py `ReactAgent` and the compiled graph exported as `app`
+    - store.py Shared Qdrant handle and the knowledge-base owner
+    - tools.py `query_rewriter` and `search_docs`
+  - data/ The Lumen docs the assistant answers from
+    - pricing.md
+    - api-limits.md
+    - getting-started.md
+    - security.txt
+  - tests/
+    - conftest.py Makes `graph` and `ingest` importable
+    - test_rag.py Tests with no keys, no database, no network
+- frontend/ React chat UI
+  - Dockerfile Vite build, then nginx
+  - nginx.conf Serves the UI and proxies `/api/` to the API
+  - .dockerignore
+  - package.json
+  - tsconfig.json
+  - vite.config.ts Dev proxy for `/api`
+  - index.html
+  - src/
+    - main.tsx Mounts the app
+    - App.tsx Thread list state and layout
+    - client.ts The `TenxGraphClient` instance
+    - types.ts Shared types
+    - useChat.ts Streaming, history loading, source parsing
+    - styles.css
+    - components/
+      - ChatView.tsx Messages and input form
+      - Sources.tsx Cited files grouped per answer
+      - ThreadList.tsx Sidebar with new and delete
+
+</FileTree>
+
+## Prerequisites
+
+- Docker with Compose v2, to run the full stack.
+- API keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`.
+- Without Docker: Python 3.12+, Node 20+, and Postgres, Redis and Qdrant reachable on localhost.
+
+## Run it
+
+Clone the repo and move into the example:
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow/examples/apps/rag_assistant
+cp .env.example .env            # add the three API keys
+```
+
+### Environment variables
+
+| Variable | Used by | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | api | Chat model `claude-sonnet-5-5` |
+| `OPENAI_API_KEY` | api, ingest | Embeddings `text-embedding-3-small` |
+| `GEMINI_API_KEY` | api | Query rewriter `gemini-2.5-flash` |
+| `POSTGRES_DSN` | api | Checkpointer database. Compose sets `postgresql://docs:docs@postgres:5432/docs` |
+| `REDIS_URL` | api | Checkpointer cache and rate limiter |
+| `QDRANT_HOST`, `QDRANT_PORT` | api, ingest | Qdrant address (default `localhost`, `6333`) |
+| `MODE` | api | `development` or `production`. Compose sets `development` for this demo |
+
+### Option 1: Docker Compose
+
+```bash
+docker compose up --build
+docker compose run --rm ingest  # one time: loads backend/data into Qdrant
+```
+
+Open http://localhost:3000. The API is on http://localhost:8000, bound to localhost only.
+
+`ingest` sits behind a Compose profile, so `docker compose up` does not start it. Run it again after you change files in `backend/data/`. Chunk ids are stable, so it updates chunks instead of duplicating them.
+
+### Option 2: Local with `10xgraph dev`
+
+```bash
+docker compose up -d postgres redis qdrant   # or run your own instances
+
+cd backend
+pip install -r requirements.txt
+python ingest.py
+10xgraph dev --host 0.0.0.0 --port 8000 --no-open
+
+# in a second terminal
+cd frontend
+npm install
+npm run dev                                  # http://localhost:5173, proxies /api to :8000
+```
+
+`10xgraph.json` points `env` at `../.env`, so the API reads the same `.env` file as Docker Compose, including the `${REDIS_URL}` it references and the `POSTGRES_DSN` that `graph/agent.py` reads. Inside the container that file does not exist and is skipped; Compose passes the variables instead.
+
+### Call the API directly
+
+Stream a run with curl. The thread id is any string you pick; reuse it to continue the conversation.
+
+```bash
+curl -N -X POST http://localhost:8000/v1/graph/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": [{"type": "text", "text": "What does the Team plan cost?"}]}],
+    "config": {"thread_id": "demo-1"},
+    "response_granularity": "low"
+  }'
+```
+
+From TypeScript, the frontend does the same through the client:
+
+```ts
+import { TenxGraphClient, Message } from '10xgraph-client';
+
+const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
+const stream = client.stream([Message.text_message('What does the Team plan cost?', 'user')], {
+  config: { thread_id: 'demo-1' },
+  response_granularity: 'low',
+});
+for await (const chunk of stream) console.log(chunk.event, chunk.message);
+```
+
+Health check: `curl http://localhost:8000/ping`.
+
+### Tests
+
+```bash
+cd backend && pytest tests
+```
+
+The tests replace the Qdrant store and the Gemini call with fakes and use `QuickTest` for the graph, so they need no keys and no services.
+
+## How the code works
+
+### Backend
+
+#### `graph/store.py`: one shared Qdrant handle
+
+```python
+COLLECTION = "docs_kb"
+
+# Shared documents are not owned by a person. They belong to a reserved system owner,
+# so a user-scoped memory search can never return them (and vice versa).
+KB_OWNER = system_user_id("docs_kb")
+
+# Search and ingest must agree on both values, so both read them from here.
+KB_CONFIG = {"user_id": KB_OWNER, "collection": COLLECTION}
+```
+
+Qdrant stores each chunk under an owner. A knowledge base belongs to no person, so it gets a reserved system owner from `system_user_id`. That keeps it apart from per-user memories. `KB_CONFIG` is the one place that holds the owner and collection, and both `ingest.py` and `search_docs` import it, so writes and reads can not drift apart.
+
+```python
+@lru_cache(maxsize=1)
+def get_store() -> QdrantStore:
+    """Qdrant over the network, with OpenAI embeddings (a third company from the chat model)."""
+    return QdrantStore(
+        embedding=OpenAIEmbedding(model="text-embedding-3-small"),
+        host=os.getenv("QDRANT_HOST", "localhost"),
+        port=int(os.getenv("QDRANT_PORT", "6333")),
+        collection=COLLECTION,
+    )
+```
+
+`get_store()` builds the store on first use and caches it. Importing the module in tests opens no connection and needs no key. The host and port come from the environment so the same code runs in Compose (`qdrant`) and on your laptop (`localhost`). The embedding model is set here; if you change it, re-ingest into a fresh collection because vector sizes must match.
+
+#### `graph/tools.py`: the two tools
+
+```python
+async def query_rewriter(question: str) -> str:
+    # A cheap, fast model from a different company than the chat model. call_llm picks
+    # the Google client from the model name.
+    text, *_ = await call_llm(
+        "gemini-2.5-flash",
+        question,
+        system_prompt=REWRITER_PROMPT,
+        max_tokens=64,
+        temperature=0.0,
+    )
+    return text.strip() or question
+```
+
+Chat questions are often vague ("how much is it?"). The rewriter asks Gemini for a short keyword query with `temperature=0.0` so the result is stable. `call_llm` chooses the Google client from the model name. If the model returns an empty string, the tool falls back to the original question, so retrieval never runs on an empty query.
+
+```python
+async def search_docs(query: str, limit: int = 4) -> str:
+    results = await get_store().asearch(KB_CONFIG, query, limit=limit)
+    return json.dumps(format_hits(results))
+```
+
+`search_docs` runs the vector search as the knowledge-base owner and returns a JSON string. `format_hits` keeps only `source`, `title`, `score` and `content`, and rounds the score to three decimals. The same JSON serves two readers: the model uses `content` to answer, and the UI parses `source`, `title` and `score` to show citations. The `@tool` description tells the model to cite `source`.
+
+#### `graph/agent.py`: the graph
+
+```python
+SYSTEM_PROMPT = [
+    {
+        "role": "system",
+        "content": (
+            "You are a documentation assistant for the Lumen product. "
+            "For every question about the product: 1) call query_rewriter with the question, "
+            "2) call search_docs with the rewritten query, 3) answer only from the returned "
+            "passages and name the source file for each fact, for example (source: pricing.md). "
+            "If the passages do not contain the answer, say you could not find it."
+        ),
+    }
+]
+```
+
+The prompt fixes the tool order (rewrite, then search), forces answers to come from the returned passages, and asks for a `(source: file)` tag per fact. The last sentence gives the model a safe way out when retrieval finds nothing.
+
+```python
+checkpointer = PgCheckpointer(
+    postgres_dsn=os.environ["POSTGRES_DSN"],
+    redis_url=os.environ["REDIS_URL"],
+)
+
+react_agent = ReactAgent(
+    model="claude-sonnet-5-5",
+    system_prompt=SYSTEM_PROMPT,
+    tools=[query_rewriter, search_docs],
+    trim_context=True,
+)
+
+# `store` is registered so the server's graceful shutdown (compiled.aclose()) also
+# releases the Qdrant client together with the checkpointer.
+app = react_agent.compile(checkpointer=checkpointer, store=get_store())
+```
+
+`PgCheckpointer` writes thread state to Postgres and caches it in Redis. It reads both settings with `os.environ[...]`, so the app fails at import with a clear `KeyError` if one is missing. `ReactAgent` wires the model node, the tool node and the routing loop for you. `trim_context=True` trims long histories. Passing `store=` to `compile()` registers the Qdrant client, so `aclose()` on shutdown releases it together with Postgres and Redis. The module-level name `app` is what `10xgraph.json` points at.
+
+#### `ingest.py`: building the knowledge base
+
+```python
+def chunk_text(text: str, max_chars: int = 1200) -> list[tuple[str, str]]:
+    """Split on markdown headings. Returns (heading, body) pairs, long bodies cut by paragraph."""
+    sections = re.split(r"(?m)^(?=#{1,3} )", text)
+```
+
+Each file is split at headings (levels 1 to 3). A section longer than 1,200 characters is cut at paragraph breaks. Splitting on structure keeps one idea per chunk, which makes retrieval sharper than fixed-size windows. Files without headings, like `security.txt`, become one chunk per section of text.
+
+```python
+            await store.astore(
+                KB_CONFIG,
+                body,
+                category="docs",
+                metadata={"source": path.name, "title": heading, "chunk": i},
+                # A fixed id makes re-ingesting update the chunk instead of duplicating it.
+                memory_id=str(uuid.uuid5(NAMESPACE, f"{path.name}:{i}")),
+            )
+```
+
+Every chunk is stored with `source` and `title` metadata, which `search_docs` later returns for citations. The id is a `uuid5` of file name and chunk index, so re-running the job overwrites chunks instead of piling up duplicates.
+
+#### `10xgraph.json`: server config
+
+```json
+  "agent": "graph.agent:app",
+  "env": "../.env",
+  "auth": null,
+```
+
+`agent` is the import path of the compiled graph. `env` names the dotenv file the server loads. `auth` is `null`, so any caller can use the API; see [Deploy to production](#deploy-to-production).
+
+```json
+    "enabled": true,
+    "backend": "redis",
+    "redis": {
+      "url": "${REDIS_URL}",
+      "prefix": "docs-assistant:rate-limit"
+    },
+    "requests": 60,
+    "window": 60,
+    "by": "ip",
+    "fail_open": true,
+```
+
+Rate limiting is on, counted in Redis so all workers share one counter: 60 requests per 60 seconds per client IP. `fail_open` lets requests through if Redis is down. Health and doc paths are excluded through `exclude_paths`. The `test` block tells `10xgraph test` where the tests live.
+
+#### Tests
+
+`tests/test_rag.py` covers the pieces that do not need a network. `FakeStore` replaces Qdrant and records the config it was called with, so the first test checks both the JSON shape and that the search used `KB_OWNER`. The second test patches `call_llm` to confirm the rewriter uses `gemini-2.5-flash` and falls back to the question on an empty reply. The third checks heading-based chunking. The fourth runs the graph with `QuickTest.single_turn`, which scripts the model reply.
+
+### Frontend
+
+#### `client.ts` and the proxy
+
+```ts
+export const client = new TenxGraphClient({
+  baseUrl: `${window.location.origin}/api`,
+});
+```
+
+The browser only talks to its own origin under `/api`. In Docker, nginx forwards that prefix to the API. In dev, Vite does (`vite.config.ts` rewrites `/api` away and targets `API_URL`, default `http://localhost:8000`). One origin means no CORS setup. With JWT auth, pass `authToken` here.
+
+#### `useChat.ts`: streaming and sources
+
+```ts
+        const stream = client.stream([Message.text_message(text, 'user')], {
+          config: { thread_id: threadId },
+          response_granularity: 'low',
+        });
+```
+
+The `thread_id` in `config` ties the run to a saved thread. `response_granularity: 'low'` asks for messages only. A new random id creates a new thread on the server.
+
+```ts
+          if (msg.role === 'tool') {
+            const found = blocks.filter((b) => b.type === 'tool_result').flatMap((b) => parseSources(b.output));
+            if (found.length) patch((m) => ({ ...m, sources: [...m.sources, ...found] }));
+          } else if (msg.role === 'assistant') {
+            const t = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('');
+            if (!t) continue;
+            // Deltas append. The final non-delta message carries the full text of that turn.
+            patch((m) => ({ ...m, text: msg.delta ? m.text + t : t }));
+          }
+```
+
+Two kinds of messages matter. Tool messages carry the `search_docs` JSON, which `parseSources` turns into citations. Assistant messages carry text: delta chunks are appended, and the final non-delta message replaces the text with the full turn. The `load` function replays saved history through the same parsing, attaching pending tool results to the next assistant message.
+
+#### `App.tsx`, `ThreadList.tsx`, `ChatView.tsx`, `Sources.tsx`
+
+```tsx
+      const res = await client.threads({ limit: 50 });
+      setThreads(res.data.threads.map((t) => ({ id: t.thread_id, name: t.thread_name || t.thread_id.slice(0, 8) })));
+```
+
+`App` owns the thread list and the active thread id, which starts as a new UUID. `ChatView` is keyed by the active id, so switching threads remounts it and reloads history. After each send, `onFinished` refreshes the list because the thread now exists on the server. `ThreadList` is a plain sidebar with select, new and delete. `Sources` groups hits by file name so each cited document appears once, with its section title and score.
+
+#### Build files
+
+`package.json` depends on `10xgraph-client`, React 19 and Vite 6. `npm run build` type-checks with `tsc --noEmit` and then builds. No component library is used; `styles.css` is plain CSS.
+
+### Deployment
+
+#### `backend/Dockerfile`
+
+```dockerfile
+CMD ["gunicorn", "-k", "uvicorn_worker.UvicornWorker", "-b", "0.0.0.0:8000", "--graceful-timeout", "600", "--timeout", "660", "tenxgraph_api.src.app.main:app"]
+```
+
+The image has two stages. The builder installs `requirements.txt` into a virtualenv, adds gunicorn and uvicorn-worker, and strips CLI-only assets. The runtime stage copies only the virtualenv and your code, runs as non-root uid 10001, defaults to `MODE=production` and `WEB_CONCURRENCY=2`, and has a Python-based health check on `/ping`. Gunicorn's graceful timeout is 600 seconds so a long agent run is not cut off during a deploy.
+
+#### `docker-compose.yml`
+
+```yaml
+  api:
+    build: ./backend
+    environment:
+      <<: *api-env
+      # The image defaults to MODE=production, which refuses wildcard CORS origins and
+      # hosts. The browser only talks to nginx (same origin), so development mode keeps
+      # this demo to one command. See the README for the production settings.
+      MODE: development
+    # Matches the --graceful-timeout in the image: on SIGTERM the server stops accepting
+    # runs and lets in-flight ones finish before closing Postgres, Redis and Qdrant.
+    stop_grace_period: 600s
+```
+
+A shared `x-api-env` block feeds the same variables to `api` and `ingest`. The `${VAR:?set it in .env}` form makes Compose stop with a message if a key is missing. `api` waits for healthy Postgres and Redis. `frontend` waits for a healthy `api`. Ports for `api`, `frontend` and `qdrant` bind to `127.0.0.1` only. `pgdata` and `qdrantdata` volumes keep data across restarts.
+
+#### `frontend/nginx.conf`
+
+```nginx
+  location /api/ {
+    proxy_pass http://api:8000/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_buffering off;
+    proxy_read_timeout 600s;
+  }
+```
+
+`proxy_buffering off` is what lets streamed tokens reach the browser as they arrive. The 600 second read timeout matches the long-run allowance in the API image. Everything else falls back to `index.html`.
+
+## Full code
+
+### Backend
+
+<Tabs>
+<TabItem label="backend/graph/agent.py">
+
+```python
+"""The docs assistant graph, loaded by the server through 10xgraph.json ("agent").
+
+Three companies, one graph:
+  chat model       Anthropic  claude-sonnet-5-5   (the ReAct agent below)
+  query rewriter   Google     gemini-2.5-flash    (graph/tools.py)
+  embeddings       OpenAI     text-embedding-3-small (graph/store.py)
+"""
+
+from __future__ import annotations
+
+import os
+
+from dotenv import load_dotenv
+
+from graph.store import get_store
+from graph.tools import query_rewriter, search_docs
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import PgCheckpointer
+
+
+load_dotenv()
+
+SYSTEM_PROMPT = [
+    {
+        "role": "system",
+        "content": (
+            "You are a documentation assistant for the Lumen product. "
+            "For every question about the product: 1) call query_rewriter with the question, "
+            "2) call search_docs with the rewritten query, 3) answer only from the returned "
+            "passages and name the source file for each fact, for example (source: pricing.md). "
+            "If the passages do not contain the answer, say you could not find it."
+        ),
+    }
+]
+
+# Postgres holds durable thread state; Redis caches it for fast reads while streaming.
+checkpointer = PgCheckpointer(
+    postgres_dsn=os.environ["POSTGRES_DSN"],
+    redis_url=os.environ["REDIS_URL"],
+)
+
+react_agent = ReactAgent(
+    model="claude-sonnet-5-5",
+    system_prompt=SYSTEM_PROMPT,
+    tools=[query_rewriter, search_docs],
+    trim_context=True,
+)
+
+# `store` is registered so the server's graceful shutdown (compiled.aclose()) also
+# releases the Qdrant client together with the checkpointer.
+app = react_agent.compile(checkpointer=checkpointer, store=get_store())
+```
+
+</TabItem>
+<TabItem label="backend/graph/store.py">
+
+```python
+"""Shared Qdrant knowledge-base handle used by the agent tools and by ingest.py.
+
+The store is built lazily so importing this module (for example in unit tests)
+needs no API key and opens no connection.
+"""
+
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+
+from tenxgraph.storage import system_user_id
+from tenxgraph.storage.store import QdrantStore
+from tenxgraph.storage.store.embedding import OpenAIEmbedding
+
+
+COLLECTION = "docs_kb"
+
+# Shared documents are not owned by a person. They belong to a reserved system owner,
+# so a user-scoped memory search can never return them (and vice versa).
+KB_OWNER = system_user_id("docs_kb")
+
+# Search and ingest must agree on both values, so both read them from here.
+KB_CONFIG = {"user_id": KB_OWNER, "collection": COLLECTION}
+
+
+@lru_cache(maxsize=1)
+def get_store() -> QdrantStore:
+    """Qdrant over the network, with OpenAI embeddings (a third company from the chat model)."""
+    return QdrantStore(
+        embedding=OpenAIEmbedding(model="text-embedding-3-small"),
+        host=os.getenv("QDRANT_HOST", "localhost"),
+        port=int(os.getenv("QDRANT_PORT", "6333")),
+        collection=COLLECTION,
+    )
+```
+
+</TabItem>
+<TabItem label="backend/graph/tools.py">
+
+```python
+"""Tools the docs assistant can call: a Gemini query rewriter and a Qdrant search."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from graph.store import KB_CONFIG, get_store
+from tenxgraph.core.llm import call_llm
+from tenxgraph.utils import tool
+
+
+REWRITER_PROMPT = (
+    "Rewrite the user's question as a short keyword-style search query for a product "
+    "documentation index. Resolve pronouns, drop filler words, keep product names and "
+    "numbers. Reply with the query only."
+)
+
+
+@tool(
+    name="query_rewriter",
+    description=(
+        "Rewrite a user question into a concise search query. Call this first, then pass "
+        "its result to search_docs."
+    ),
+    tags=["rag"],
+)
+async def query_rewriter(question: str) -> str:
+    # A cheap, fast model from a different company than the chat model. call_llm picks
+    # the Google client from the model name.
+    text, *_ = await call_llm(
+        "gemini-2.5-flash",
+        question,
+        system_prompt=REWRITER_PROMPT,
+        max_tokens=64,
+        temperature=0.0,
+    )
+    return text.strip() or question
+
+
+def format_hits(results: list[Any]) -> list[dict[str, Any]]:
+    """Reduce store results to what the model and the UI need. The UI reads `source`."""
+    return [
+        {
+            "source": r.metadata.get("source", "unknown"),
+            "title": r.metadata.get("title", ""),
+            "score": round(float(r.score), 3),
+            "content": r.content,
+        }
+        for r in results
+    ]
+
+
+@tool(
+    name="search_docs",
+    description=(
+        "Search the product documentation. Returns a JSON list of passages with `source` "
+        "(file name), `title`, `score` and `content`. Cite the `source` in your answer."
+    ),
+    tags=["rag"],
+)
+async def search_docs(query: str, limit: int = 4) -> str:
+    results = await get_store().asearch(KB_CONFIG, query, limit=limit)
+    return json.dumps(format_hits(results))
+```
+
+</TabItem>
+<TabItem label="backend/ingest.py">
+
+```python
+# ruff: noqa: INP001, T201
+"""Load the markdown/txt files in data/ into Qdrant as the shared knowledge base.
+
+Splits each file into sections at markdown headings, embeds them with OpenAI and
+stores them under the knowledge-base owner. Safe to re-run: chunk ids are stable.
+
+Run: python ingest.py            (needs OPENAI_API_KEY and a reachable Qdrant)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+import uuid
+from pathlib import Path
+
+from dotenv import load_dotenv
+from graph.store import KB_CONFIG, get_store
+
+
+DATA_DIR = Path(__file__).parent / "data"
+NAMESPACE = uuid.UUID("6f1d2c1e-0b8e-4b53-9a52-3c1a7a0e5d11")
+
+
+def chunk_text(text: str, max_chars: int = 1200) -> list[tuple[str, str]]:
+    """Split on markdown headings. Returns (heading, body) pairs, long bodies cut by paragraph."""
+    sections = re.split(r"(?m)^(?=#{1,3} )", text)
+    chunks: list[tuple[str, str]] = []
+    for section in filter(str.strip, sections):
+        first, _, _ = section.partition("\n")
+        heading = first.lstrip("# ").strip() if first.startswith("#") else ""
+        body = section.strip()
+        if len(body) <= max_chars:
+            chunks.append((heading, body))
+            continue
+        current = ""
+        for para in re.split(r"\n\s*\n", body):
+            if current and len(current) + len(para) > max_chars:
+                chunks.append((heading, current.strip()))
+                current = ""
+            current += para + "\n\n"
+        if current.strip():
+            chunks.append((heading, current.strip()))
+    return chunks
+
+
+async def main() -> None:
+    load_dotenv()
+    store = get_store()
+    await store.asetup()
+
+    total = 0
+    for path in sorted(DATA_DIR.iterdir()):
+        if path.suffix not in {".md", ".txt"}:
+            continue
+        for i, (heading, body) in enumerate(chunk_text(path.read_text(encoding="utf-8"))):
+            await store.astore(
+                KB_CONFIG,
+                body,
+                category="docs",
+                metadata={"source": path.name, "title": heading, "chunk": i},
+                # A fixed id makes re-ingesting update the chunk instead of duplicating it.
+                memory_id=str(uuid.uuid5(NAMESPACE, f"{path.name}:{i}")),
+            )
+            total += 1
+        print(f"ingested {path.name}")
+    print(f"done: {total} chunks")
+    await store.arelease()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="backend/10xgraph.json">
+
+```json
+{
+  "agent": "graph.agent:app",
+  "env": "../.env",
+  "auth": null,
+  "remote_tools": [],
+  "ag_ui": {
+    "enabled": false
+  },
+  "rate_limit": {
+    "enabled": true,
+    "backend": "redis",
+    "redis": {
+      "url": "${REDIS_URL}",
+      "prefix": "docs-assistant:rate-limit"
+    },
+    "requests": 60,
+    "window": 60,
+    "by": "ip",
+    "fail_open": true,
+    "exclude_paths": ["/ping", "/docs", "/redoc", "/openapi.json"]
+  },
+  "test": {
+    "path": "tests",
+    "coverage": false
+  }
+}
+```
+
+</TabItem>
+<TabItem label="backend/requirements.txt">
+
+```text
+10xgraph[anthropic,openai,google-genai,qdrant,pg_checkpoint]
+10xgraph-api
+python-dotenv
+```
+
+</TabItem>
+<TabItem label="backend/tests/conftest.py">
+
+```python
+# ruff: noqa: INP001
+import sys
+from pathlib import Path
+
+
+# Make `graph` and `ingest` importable when pytest runs from backend/ or from the repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+```
+
+</TabItem>
+<TabItem label="backend/tests/test_rag.py">
+
+```python
+# ruff: noqa: INP001
+"""Backend tests that need no API key, no database and no network."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+
+from graph import tools
+from graph.store import KB_OWNER
+from ingest import chunk_text
+
+from tenxgraph.qa.testing import QuickTest
+from tenxgraph.storage.store.store_schema import MemorySearchResult
+
+
+class FakeStore:
+    """Stands in for QdrantStore and records how it was called."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[dict, str, int]] = []
+
+    async def asearch(self, config, query, limit=10, **kwargs):
+        self.calls.append((config, query, limit))
+        return [
+            MemorySearchResult(
+                content="Team costs $29 per seat per month.",
+                score=0.91234,
+                metadata={"source": "pricing.md", "title": "Plans"},
+            )
+        ]
+
+
+def test_search_docs_returns_sources_and_uses_kb_owner(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(tools, "get_store", lambda: store)
+
+    raw = asyncio.run(tools.search_docs("team plan price", limit=2))
+
+    hits = json.loads(raw)
+    assert hits == [
+        {
+            "source": "pricing.md",
+            "title": "Plans",
+            "score": 0.912,
+            "content": "Team costs $29 per seat per month.",
+        }
+    ]
+    config, query, limit = store.calls[0]
+    assert config["user_id"] == KB_OWNER and KB_OWNER.startswith("__system__:")
+    assert (query, limit) == ("team plan price", 2)
+
+
+def test_query_rewriter_uses_gemini_and_falls_back_on_empty(monkeypatch):
+    seen = {}
+
+    async def fake_call_llm(model, prompt, **kwargs):
+        seen["model"] = model
+        return "  ", 0, 0, 0
+
+    monkeypatch.setattr(tools, "call_llm", fake_call_llm)
+
+    assert asyncio.run(tools.query_rewriter("how much is it?")) == "how much is it?"
+    assert seen["model"] == "gemini-2.5-flash"
+
+
+def test_chunk_text_splits_on_headings():
+    text = "# Title\nintro\n\n## One\nfirst\n\n## Two\nsecond\n"
+    chunks = chunk_text(text)
+    assert [h for h, _ in chunks] == ["Title", "One", "Two"]
+    assert "second" in chunks[-1][1]
+
+
+def test_agent_answer_with_scripted_model():
+    # TestAgent replaces the LLM, so this checks graph wiring without any provider.
+    result = asyncio.run(
+        QuickTest.single_turn(agent_response="Team is $29 per seat.", user_message="Price?")
+    )
+    result.assert_contains("$29")
+    result.assert_no_errors()
+```
+
+</TabItem>
+</Tabs>
+
+### Knowledge base documents
+
+<Tabs>
+<TabItem label="backend/data/pricing.md">
+
+```markdown
+# Lumen pricing
+
+## Plans
+
+- **Free**: 1 workspace, 3 dashboards, 10,000 events per month, 7 days of retention.
+- **Team**: $29 per seat per month, unlimited dashboards, 5 million events per month,
+  90 days of retention.
+- **Business**: $99 per seat per month, 50 million events per month, 1 year of retention,
+  SSO and audit logs.
+
+## Billing
+
+Invoices are issued on the first of each month. Annual billing gives two months free.
+Events above your plan limit are billed at $0.40 per additional 100,000 events on Team and
+Business. Free workspaces stop collecting events at the limit instead of being billed.
+
+## Cancelling
+
+You can cancel at any time from **Settings > Billing**. Access continues until the end of the
+paid period and data is deleted 30 days after that.
+```
+
+</TabItem>
+<TabItem label="backend/data/api-limits.md">
+
+```markdown
+# Lumen API limits
+
+## Rate limits
+
+The HTTP collector accepts up to 500 requests per second per workspace. Requests over the
+limit return `429 Too Many Requests` with a `Retry-After` header in seconds.
+
+## Batch size
+
+Send up to 1,000 events per request, with a maximum body size of 1 MB. Larger requests fail
+with `413 Payload Too Large`.
+
+## Authentication
+
+Every request needs an `x-lumen-key` header. Keys are created under **Settings > API keys**
+and can be revoked at any time. A revoked key returns `401 Unauthorized` within one minute.
+```
+
+</TabItem>
+<TabItem label="backend/data/getting-started.md">
+
+```markdown
+# Getting started with Lumen
+
+Lumen is a hosted dashboard service that turns event streams into shareable reports.
+
+## Create a workspace
+
+Sign in at app.lumen.example and choose **New workspace**. A workspace holds your data
+sources, dashboards and teammates. Workspace names must be unique within your organisation.
+
+## Connect a data source
+
+Open **Sources** and pick Postgres, BigQuery or the Lumen HTTP collector. The HTTP collector
+accepts JSON events at `https://collect.lumen.example/v1/events` with an `x-lumen-key` header.
+The first events appear in the live view within about 10 seconds.
+
+## Build your first dashboard
+
+Press **New dashboard**, select a source, and drag a metric onto the canvas. Dashboards save
+automatically. Use **Share** to create a read-only link.
+```
+
+</TabItem>
+<TabItem label="backend/data/security.txt">
+
+```text
+Lumen security overview
+
+Data is encrypted in transit with TLS 1.2 or newer and at rest with AES-256.
+
+Single sign-on (SAML 2.0 and OIDC) is available on the Business plan. Audit logs record
+sign-ins, dashboard sharing and API key changes, and are kept for one year.
+
+Lumen stores customer data in the EU (Frankfurt) or the US (Virginia). The region is chosen
+when the workspace is created and cannot be changed later.
+
+To report a vulnerability, email security@lumen.example. We acknowledge reports within two
+business days.
+```
+
+</TabItem>
+</Tabs>
+
+### Frontend
+
+<Tabs>
+<TabItem label="frontend/package.json">
+
+```json
+{
+  "name": "docs-assistant-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "10xgraph-client": "^0.6.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  }
+}
+```
+
+</TabItem>
+<TabItem label="frontend/tsconfig.json">
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true
+  },
+  "include": ["src", "vite.config.ts"]
+}
+```
+
+</TabItem>
+<TabItem label="frontend/vite.config.ts">
+
+```ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+// In dev, /api is proxied to the API server so the browser stays on one origin,
+// the same shape nginx gives us in the container.
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.API_URL ?? 'http://localhost:8000',
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
+  },
+});
+```
+
+</TabItem>
+<TabItem label="frontend/index.html">
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lumen docs assistant</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+</TabItem>
+<TabItem label="frontend/src/main.tsx">
+
+```tsx
+import { createRoot } from 'react-dom/client';
+import { App } from './App';
+import './styles.css';
+
+createRoot(document.getElementById('root')!).render(<App />);
+```
+
+</TabItem>
+<TabItem label="frontend/src/client.ts">
+
+```ts
+import { TenxGraphClient } from '10xgraph-client';
+
+// Same-origin /api is proxied to the API server (nginx in Docker, Vite in dev).
+// If you enable JWT auth in 10xgraph.json, pass `authToken` here.
+export const client = new TenxGraphClient({
+  baseUrl: `${window.location.origin}/api`,
+});
+```
+
+</TabItem>
+<TabItem label="frontend/src/types.ts">
+
+```ts
+export interface Source {
+  source: string;
+  title: string;
+  score: number;
+  content: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  sources: Source[];
+}
+
+export interface ThreadSummary {
+  id: string;
+  name: string;
+}
+```
+
+</TabItem>
+<TabItem label="frontend/src/useChat.ts">
+
+```ts
+import { useCallback, useRef, useState } from 'react';
+import { Message, StreamEventType } from '10xgraph-client';
+import { client } from './client';
+import type { ChatMessage, Source } from './types';
+
+// The search_docs tool returns a JSON string: [{ source, title, score, content }].
+function parseSources(output: unknown): Source[] {
+  try {
+    const data = typeof output === 'string' ? JSON.parse(output) : output;
+    return Array.isArray(data) ? (data as Source[]).filter((s) => s && s.source) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function useChat(threadId: string) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const abort = useRef(false);
+
+  // Load the saved history of an existing thread (tool results carry the sources).
+  const load = useCallback(async () => {
+    setMessages([]);
+    setError(null);
+    try {
+      const res = await client.threadMessages({ threadId });
+      const out: ChatMessage[] = [];
+      let pending: Source[] = [];
+      for (const m of res.data.messages) {
+        const blocks = (m.content ?? []) as any[];
+        if (m.role === 'tool') {
+          for (const b of blocks) if (b.type === 'tool_result') pending.push(...parseSources(b.output));
+        } else if (m.role === 'user' || m.role === 'assistant') {
+          const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('');
+          if (!text) continue;
+          out.push({ id: m.message_id ?? crypto.randomUUID(), role: m.role, text, sources: m.role === 'assistant' ? pending : [] });
+          if (m.role === 'assistant') pending = [];
+        }
+      }
+      setMessages(out);
+    } catch {
+      // A brand new thread has no history yet.
+    }
+  }, [threadId]);
+
+  const send = useCallback(
+    async (text: string) => {
+      setError(null);
+      setBusy(true);
+      abort.current = false;
+      const assistantId = crypto.randomUUID();
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: 'user', text, sources: [] },
+        { id: assistantId, role: 'assistant', text: '', sources: [] },
+      ]);
+      const patch = (fn: (m: ChatMessage) => ChatMessage) =>
+        setMessages((prev) => prev.map((m) => (m.id === assistantId ? fn(m) : m)));
+
+      try {
+        const stream = client.stream([Message.text_message(text, 'user')], {
+          config: { thread_id: threadId },
+          response_granularity: 'low',
+        });
+        for await (const chunk of stream) {
+          if (abort.current) break;
+          if (chunk.event === StreamEventType.ERROR) {
+            setError(String(chunk.data?.message ?? 'The run failed'));
+            continue;
+          }
+          const msg = chunk.message;
+          if (chunk.event !== StreamEventType.MESSAGE || !msg) continue;
+          const blocks = (msg.content ?? []) as any[];
+
+          if (msg.role === 'tool') {
+            const found = blocks.filter((b) => b.type === 'tool_result').flatMap((b) => parseSources(b.output));
+            if (found.length) patch((m) => ({ ...m, sources: [...m.sources, ...found] }));
+          } else if (msg.role === 'assistant') {
+            const t = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('');
+            if (!t) continue;
+            // Deltas append. The final non-delta message carries the full text of that turn.
+            patch((m) => ({ ...m, text: msg.delta ? m.text + t : t }));
+          }
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [threadId],
+  );
+
+  return { messages, busy, error, send, load };
+}
+```
+
+</TabItem>
+<TabItem label="frontend/src/App.tsx">
+
+```tsx
+import { useEffect, useState } from 'react';
+import { client } from './client';
+import { ChatView } from './components/ChatView';
+import { ThreadList } from './components/ThreadList';
+import type { ThreadSummary } from './types';
+
+const newId = () => crypto.randomUUID();
+
+export function App() {
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
+  const [active, setActive] = useState<string>(newId);
+
+  const refresh = async () => {
+    try {
+      const res = await client.threads({ limit: 50 });
+      setThreads(res.data.threads.map((t) => ({ id: t.thread_id, name: t.thread_name || t.thread_id.slice(0, 8) })));
+    } catch {
+      setThreads([]);
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const remove = async (id: string) => {
+    await client.deleteThread(id);
+    if (id === active) setActive(newId());
+    await refresh();
+  };
+
+  return (
+    <div className="layout">
+      <ThreadList threads={threads} active={active} onSelect={setActive} onNew={() => setActive(newId())} onDelete={remove} />
+      <ChatView key={active} threadId={active} onFinished={refresh} />
+    </div>
+  );
+}
+```
+
+</TabItem>
+<TabItem label="frontend/src/components/ChatView.tsx">
+
+```tsx
+import { useEffect, useRef, useState } from 'react';
+import { useChat } from '../useChat';
+import { Sources } from './Sources';
+
+interface Props {
+  threadId: string;
+  onFinished: () => void;
+}
+
+export function ChatView({ threadId, onFinished }: Props) {
+  const { messages, busy, error, send, load } = useChat(threadId);
+  const [input, setInput] = useState('');
+  const bottom = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput('');
+    await send(text);
+    onFinished(); // the new thread now exists on the server, so refresh the list
+  };
+
+  return (
+    <main className="chat">
+      <div className="messages">
+        {messages.length === 0 && <p className="hint">Ask something about the Lumen docs, for example: what does the Team plan cost?</p>}
+        {messages.map((m) => (
+          <div key={m.id} className={`bubble ${m.role}`}>
+            <p>{m.text || (busy ? '...' : '')}</p>
+            {m.role === 'assistant' && <Sources sources={m.sources} />}
+          </div>
+        ))}
+        {error && <p className="error">{error}</p>}
+        <div ref={bottom} />
+      </div>
+      <form onSubmit={submit}>
+        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask the docs..." disabled={busy} />
+        <button className="primary" disabled={busy || !input.trim()}>
+          Send
+        </button>
+      </form>
+    </main>
+  );
+}
+```
+
+</TabItem>
+<TabItem label="frontend/src/components/Sources.tsx">
+
+```tsx
+import type { Source } from '../types';
+
+// Group passages by file so each cited document shows once.
+export function Sources({ sources }: { sources: Source[] }) {
+  if (sources.length === 0) return null;
+  const byFile = new Map<string, Source[]>();
+  for (const s of sources) byFile.set(s.source, [...(byFile.get(s.source) ?? []), s]);
+
+  return (
+    <details className="sources">
+      <summary>Sources ({byFile.size})</summary>
+      <ul>
+        {[...byFile.entries()].map(([file, hits]) => (
+          <li key={file}>
+            <strong>{file}</strong>
+            {hits.map((h, i) => (
+              <p key={i} title={h.content}>
+                {h.title || 'section'} (score {h.score})
+              </p>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+```
+
+</TabItem>
+<TabItem label="frontend/src/components/ThreadList.tsx">
+
+```tsx
+import type { ThreadSummary } from '../types';
+
+interface Props {
+  threads: ThreadSummary[];
+  active: string;
+  onSelect: (id: string) => void;
+  onNew: () => void;
+  onDelete: (id: string) => void;
+}
+
+export function ThreadList({ threads, active, onSelect, onNew, onDelete }: Props) {
+  return (
+    <aside className="sidebar">
+      <button className="primary" onClick={onNew}>
+        New thread
+      </button>
+      <ul>
+        {threads.map((t) => (
+          <li key={t.id} className={t.id === active ? 'active' : ''}>
+            <button className="link" onClick={() => onSelect(t.id)}>
+              {t.name}
+            </button>
+            <button className="icon" aria-label="Delete thread" onClick={() => onDelete(t.id)}>
+              x
+            </button>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  );
+}
+```
+
+</TabItem>
+<TabItem label="frontend/src/styles.css">
+
+```css
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; color: #1c1e21; background: #f6f7f9; }
+.layout { display: flex; height: 100vh; }
+.sidebar { width: 240px; padding: 12px; background: #fff; border-right: 1px solid #e3e5e8; overflow-y: auto; }
+.sidebar ul { list-style: none; padding: 0; margin: 12px 0 0; }
+.sidebar li { display: flex; align-items: center; border-radius: 6px; }
+.sidebar li.active { background: #e8f0fe; }
+button { font: inherit; cursor: pointer; }
+button.primary { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; }
+button.primary:disabled { opacity: 0.5; cursor: default; }
+button.link { flex: 1; text-align: left; background: none; border: 0; padding: 8px; overflow: hidden; text-overflow: ellipsis; }
+button.icon { background: none; border: 0; color: #888; }
+.chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+.bubble { max-width: 720px; padding: 10px 14px; border-radius: 10px; background: #fff; border: 1px solid #e3e5e8; }
+.bubble.user { align-self: flex-end; background: #2563eb; color: #fff; border-color: #2563eb; }
+.bubble p { margin: 0; white-space: pre-wrap; }
+.sources { margin-top: 8px; font-size: 13px; color: #555; }
+.sources ul { margin: 6px 0 0; padding-left: 18px; }
+.sources p { margin: 2px 0; }
+.hint { color: #777; }
+.error { color: #b00020; }
+form { display: flex; gap: 8px; padding: 16px 24px; border-top: 1px solid #e3e5e8; background: #fff; }
+form input { flex: 1; padding: 10px; border: 1px solid #ccd0d5; border-radius: 6px; font: inherit; }
+```
+
+</TabItem>
+</Tabs>
+
+### Deployment
+
+<Tabs>
+<TabItem label="docker-compose.yml">
+
+```yaml
+# Docs assistant: API + web UI + Postgres + Redis + Qdrant.
+#   cp .env.example .env   (add the three API keys)
+#   docker compose up --build
+#   docker compose run --rm ingest        (once, loads backend/data into Qdrant)
+x-api-env: &api-env
+  POSTGRES_DSN: postgresql://docs:docs@postgres:5432/docs
+  REDIS_URL: redis://redis:6379/0
+  QDRANT_HOST: qdrant
+  QDRANT_PORT: "6333"
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set it in .env}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:?set it in .env}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:?set it in .env}
+
+services:
+  api:
+    build: ./backend
+    environment:
+      <<: *api-env
+      # The image defaults to MODE=production, which refuses wildcard CORS origins and
+      # hosts. The browser only talks to nginx (same origin), so development mode keeps
+      # this demo to one command. See the README for the production settings.
+      MODE: development
+    # Matches the --graceful-timeout in the image: on SIGTERM the server stops accepting
+    # runs and lets in-flight ones finish before closing Postgres, Redis and Qdrant.
+    stop_grace_period: 600s
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_started }
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ping', timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      api: { condition: service_healthy }
+    ports:
+      - "127.0.0.1:3000:80"
+
+  ingest:
+    build: ./backend
+    profiles: ["ingest"]
+    command: ["python", "ingest.py"]
+    environment: *api-env
+    depends_on:
+      qdrant: { condition: service_started }
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: docs
+      POSTGRES_PASSWORD: docs
+      POSTGRES_DB: docs
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docs -d docs"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes:
+      - qdrantdata:/qdrant/storage
+    ports:
+      - "127.0.0.1:6333:6333"
+
+volumes:
+  pgdata:
+  qdrantdata:
+```
+
+</TabItem>
+<TabItem label=".env.example">
+
+```bash
+# Copy to .env and fill in the three keys. One key per company.
+ANTHROPIC_API_KEY=   # chat model: claude-sonnet-5-5
+OPENAI_API_KEY=      # embeddings: text-embedding-3-small
+GEMINI_API_KEY=      # query rewriter: gemini-2.5-flash
+
+# Used when running the backend outside Docker (docker-compose.yml sets its own).
+POSTGRES_DSN=postgresql://docs:docs@localhost:5432/docs
+REDIS_URL=redis://localhost:6379/0
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+```
+
+</TabItem>
+<TabItem label="backend/Dockerfile">
+
+```dockerfile
+# Backend image for the docs assistant. Same layout `10xgraph build` generates:
+# two stages, non-root user, gunicorn with uvicorn workers, long graceful drain on SIGTERM.
+
+# ---- Stage 1: install dependencies into a virtualenv ----
+# For reproducible production builds, pin both FROM lines by digest
+# (python:3.13-slim@sha256:...) and install from a hash-locked
+# requirements file (pip install --require-hashes -r requirements.txt).
+FROM python:3.13-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /build
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Every 10xGraph dependency ships prebuilt wheels, so no compiler is needed. If one
+# of your own dependencies has to build from source, uncomment this. It only lives
+# in the builder stage and never reaches the final image.
+# RUN apt-get update \
+#     && apt-get install -y --no-install-recommends build-essential \
+#     && rm -rf /var/lib/apt/lists/*
+
+# Install exactly the dependencies listed in your requirements file
+COPY requirements.txt requirements.txt
+RUN pip install -r requirements.txt
+
+# Production process manager: gunicorn supervising uvicorn workers. These are
+# not dependencies of 10xgraph-api, so the image installs them here.
+RUN pip install "gunicorn>=23,<27" "uvicorn-worker>=0.4,<1"
+
+# Strip CLI-only assets the server never loads: project scaffolds, the bundled
+# agent skill, and the local config editor (HTML/JS). Only the server code and
+# its dependencies stay in the image.
+RUN python -I -c "import importlib.util, pathlib, shutil; spec = importlib.util.find_spec('tenxgraph_api'); cli = pathlib.Path(spec.origin).parent / 'cli' if spec and spec.origin else None; [shutil.rmtree(cli / d, ignore_errors=True) for d in ('templates', 'config_editor') if cli]"
+
+# Remove the CLI's own libraries (typer, rich, questionary and what only they pull
+# in). A package that one of your dependencies still needs is kept.
+RUN python -I -c "import importlib.util, runpy; importlib.util.find_spec('tenxgraph_api._slim_image') and runpy.run_module('tenxgraph_api._slim_image', run_name='__main__')"
+
+# The server never runs pip, so drop it from the virtualenv the runtime copies
+# (about 13 MB). The base image keeps its own pip for debugging.
+RUN pip uninstall -y pip
+
+# ---- Stage 2: runtime image ----
+FROM python:3.13-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+ENV PATH="/opt/venv/bin:$PATH"
+# Default to production; overridable via .env or runtime env.
+# In production the local in-memory telemetry store stays disabled
+# (use OTEL / a publisher for observability instead).
+ENV MODE=production
+ENV IS_DEBUG=false
+# Gunicorn worker count. Gunicorn reads WEB_CONCURRENCY natively; a sane default
+# here beats gunicorn's built-in default of 1 worker. Tune to your CPU/memory
+# at deploy time, e.g. `docker run -e WEB_CONCURRENCY=8 ...`.
+ENV WEB_CONCURRENCY=2
+
+# Create a non-root user with a fixed uid that owns the work directory.
+# uploads/ exists up front so a volume mounted there inherits that owner.
+RUN groupadd -r -g 10001 appuser \
+    && useradd -r -u 10001 -g appuser -d /app -s /usr/sbin/nologin appuser \
+    && mkdir -p /app/uploads && chown appuser:appuser /app /app/uploads
+WORKDIR /app
+
+# Only the installed virtualenv comes over from the builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy application code. --chown sets ownership while copying; a separate
+# `chown -R` afterwards would write a second copy of every file into a new layer.
+COPY --chown=appuser:appuser . .
+# Numeric, so Kubernetes runAsNonRoot can verify it
+USER 10001:10001
+
+# Expose port
+EXPOSE 8000
+
+# Health check (Python stdlib, so the image needs no curl)
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ping', timeout=5)" || exit 1
+
+# Run the application (production)
+# Use Gunicorn with Uvicorn workers for better performance and multi-core
+# utilization
+#
+# --graceful-timeout is critical: an agent run can legitimately take
+# minutes (the LLM client alone allows up to 600s). Gunicorn's default
+# graceful timeout is 30s, so on every rolling deploy SIGTERM would
+# hard-kill runs that were still mid-flight, truncating them. Give
+# in-flight runs time to finish draining instead.
+CMD ["gunicorn", "-k", "uvicorn_worker.UvicornWorker", "-b", "0.0.0.0:8000", "--graceful-timeout", "600", "--timeout", "660", "tenxgraph_api.src.app.main:app"]
+```
+
+</TabItem>
+<TabItem label="backend/.dockerignore">
+
+```text
+.env
+.venv
+__pycache__/
+*.pyc
+tests/
+.pytest_cache/
+```
+
+</TabItem>
+<TabItem label="frontend/Dockerfile">
+
+```dockerfile
+# Build the Vite app, then serve the static files with nginx.
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80
+HEALTHCHECK --interval=15s --timeout=3s --retries=3 \
+  CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1
+```
+
+</TabItem>
+<TabItem label="frontend/nginx.conf">
+
+```nginx
+server {
+  listen 80;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # The browser talks to /api on its own origin, so no CORS setup is needed.
+  # Streaming needs buffering off, otherwise tokens arrive in one burst.
+  location /api/ {
+    proxy_pass http://api:8000/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_buffering off;
+    proxy_read_timeout 600s;
+  }
+
+  location / {
+    try_files $uri /index.html;
+  }
+}
+```
+
+</TabItem>
+<TabItem label="frontend/.dockerignore">
+
+```text
+node_modules
+dist
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/apps/rag_assistant](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/apps/rag_assistant)
+
+## Expected output
+
+Illustrative. Ask "What does the Team plan cost and how long is data kept?" after ingesting:
+
+```text
+Team is $29 per seat per month and keeps data for 90 days (source: pricing.md).
+
+Sources (1)
+  pricing.md
+    Plans (score 0.71)
+```
+
+Ingest prints:
+
+```text
+ingested api-limits.md
+ingested getting-started.md
+ingested pricing.md
+ingested security.txt
+done: 9 chunks
+```
+
+## Deploy to production
+
+The demo is set up for one command, not for the open internet. These are the changes the shipped config supports.
+
+- **Auth.** `10xgraph.json` ships with `"auth": null`. For production set `"auth": "jwt"`, set `JWT_SECRET_KEY` and `JWT_ALGORITHM`, and pass `authToken` to `TenxGraphClient` in `frontend/src/client.ts`. Thread ownership is then enforced per user. Use `"auth": {"method": "custom", "path": "module:Class"}` for your own identity provider.
+- **Mode and CORS.** Compose sets `MODE: development`. The image itself defaults to `MODE=production`, which refuses wildcard `ORIGINS` and `ALLOWED_HOST`. Remove the `MODE` override and set both to your real domain.
+- **Redis rate limiting.** Already enabled with the Redis backend, 60 requests per 60 seconds per IP. Switch `"by"` to `"user"` once auth is on, and set `trusted_proxy_headers` when running behind a load balancer.
+- **Postgres and Redis.** Compose runs both with a demo password (`docs`). Replace the password, point `POSTGRES_DSN` and `REDIS_URL` at managed instances if you have them, and do not publish the Postgres, Redis or Qdrant ports.
+- **Graceful shutdown.** The server drains in-flight runs on SIGTERM, then calls `aclose()` on the compiled graph. Keep your orchestrator's grace period at least 600 seconds (`stop_grace_period` here, `terminationGracePeriodSeconds` on Kubernetes).
+- **Workers.** Tune `WEB_CONCURRENCY` (default 2) to your CPU and memory.
+- **Secrets.** `.env` is excluded from the backend image by `.dockerignore`. Inject keys through your platform's secret store.
+- **Images.** The backend Dockerfile comments describe pinning base images by digest and installing from a hash-locked requirements file for reproducible builds.
+
+## Customize it
+
+- **Your own docs.** Replace the files in `backend/data/` with `.md` or `.txt` files and run `docker compose run --rm ingest`. Update the product name in `SYSTEM_PROMPT`.
+- **A different chat model.** Change the model string in `graph/agent.py` and install the matching extra. `model="gpt-5-mini"` needs the `openai` extra; `model="gemini-2.5-flash"` needs `google-genai`. No `provider=` argument is needed.
+- **A different rewriter or embedding model.** The rewriter model is a string in `graph/tools.py`. The embedding model is in `graph/store.py`; re-ingest into a fresh collection after changing it.
+- **More passages.** `search_docs` takes `limit` (default 4).
+- **Different chunking.** Edit `chunk_text` in `ingest.py`, then re-ingest.
+- **Another UI.** The frontend uses only `stream`, `threads`, `threadMessages` and `deleteThread`. Any client that speaks the same API can replace it.
+
+## Next steps
+
+- [Long-term memory](/docs/examples/long-term-memory) for per-user memory next to this shared knowledge base.
+- [RAG](/docs/examples/rag) for the retrieval pattern without the full stack.
+- [Streaming](/docs/examples/streaming) for more on streamed chunks.
+- [Serving](/docs/examples/serving) for the API server on its own.
+- [Graceful shutdown](/docs/examples/graceful-shutdown) for how SIGTERM is handled.
+- [Testing agents without an LLM](/docs/examples/testing) for more on `tenxgraph.qa.testing`.

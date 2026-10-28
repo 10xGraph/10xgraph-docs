@@ -1,0 +1,527 @@
+---
+title: Realtime Voice Agent with Gemini Live in 10xGraph (Python)
+seoTitle: Realtime voice agent with Gemini Live in Python
+description: Build a realtime audio-to-audio voice agent with 10xGraph AudioAgent and Gemini Live. Stream a WAV file or microphone, call tools by voice, or use a WebSocket.
+section: Examples
+group: "Multimodal and quality"
+order: 33
+label: Realtime audio
+updated: "2026-10-28"
+faq:
+  - q: "Which providers support realtime audio in 10xGraph?"
+    a: "Only Gemini Live today. The realtime layer is provider-neutral so more can be added, but gemini is the only client implemented."
+  - q: "What audio format does it use?"
+    a: "Input is PCM16, mono, 16 kHz. Output is PCM16, mono, 24 kHz. Transcripts are saved as messages, and raw audio is never stored."
+  - q: "Why does arealtime exist instead of using invoke?"
+    a: "The provider owns the turn loop in a live session, so a realtime graph is driven by CompiledGraph.arealtime(input_queue, config) rather than the turn-based invoke and stream methods."
+---
+
+A realtime agent hears audio and answers with audio while the conversation is still going, instead of waiting for a full request and reply. This example builds a voice assistant on Google Gemini Live with the prebuilt `AudioAgent`. It can call a tool by voice, and it runs three ways: from a WAV file, from your microphone, or over a WebSocket on the 10xGraph API server.
+
+## What you will build
+
+A voice assistant that listens and talks back in real time, and calls a `get_weather` tool when asked about the weather. There are three ways to run it: a headless WAV file in and out, a live microphone with speaker playback, and over a WebSocket through the 10xGraph API server.
+
+Realtime currently supports Gemini Live only, so these examples have no model choice to make.
+
+## Key concepts
+
+- `AudioAgent`: the prebuilt realtime agent. Tools passed to it are advertised to the model.
+- `RealtimeConfig`: model, voice, system instruction, transcription and VAD settings.
+- `LiveInputQueue`: non-blocking queue you push PCM16 audio into with `send_audio`.
+- `CompiledGraph.arealtime(queue, config)`: async iterator of events (`audio_delta`, `input_transcript`, `output_transcript`, `tool_call`, `turn_complete`, `interrupted`, `error`).
+- `/v1/graph/live`: the WebSocket endpoint the API server exposes for the same agent.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[realtime]"          # pulls in google-genai
+pip install sounddevice                   # microphone example only
+pip install 10xgraph-api                  # API server example only
+export GEMINI_API_KEY=...
+
+# 1. Headless: 16 kHz mono PCM16 WAV in, out.wav out
+python examples/realtime_audio/audio_agent_file.py path/to/input.wav
+
+# 2. Microphone and speakers
+python examples/realtime_audio/audio_agent_mic.py
+
+# 3. API server WebSocket
+cd examples/realtime_audio && 10xgraph dev --no-open
+```
+
+To use Vertex AI instead, set `GOOGLE_GENAI_USE_VERTEXAI=true` (the microphone script reads it). The model string is `gemini-2.5-flash-live`, the name used in the library's tests. Google changes Live model names often, so check the Live API docs for what your key can use and edit `MODEL` in the file.
+
+## How the code works
+
+### audio_agent_file.py
+
+This is the simplest way to check your setup. No microphone or speaker is needed.
+
+The agent is built from a `RealtimeConfig` and one tool:
+
+```python
+config = RealtimeConfig(
+    model=MODEL,
+    voice="Puck",
+    system_instruction="You are a concise voice assistant. Answer in one or two sentences.",
+)
+return AudioAgent(MODEL, realtime_config=config, tools=[get_weather]).compile()
+```
+
+Audio goes in through a `LiveInputQueue`. The feeder sends the file in 100 ms chunks, the size a live microphone would produce:
+
+```python
+chunk = (sample_rate // 10) * 2  # 100 ms * 2 bytes/sample
+for offset in range(0, len(pcm), chunk):
+    queue.send_audio(pcm[offset : offset + chunk], sample_rate=sample_rate)
+    await asyncio.sleep(0.0)  # yield so the pump task can flush to the socket
+```
+
+The `sleep(0.0)` hands control back to the event loop so the audio is flushed to the socket while the file is still being read. Events come out of `arealtime`:
+
+```python
+async for event in app.arealtime(queue, {"thread_id": "audio-file-demo"}):
+    if event.type == "audio_delta":
+        out.writeframes(event.data)
+    elif event.type == "input_transcript" and event.finished:
+        print(f"you:   {event.text}")
+    elif event.type == "output_transcript" and event.finished:
+        print(f"agent: {event.text}")
+    elif event.type == "tool_call":
+        print(f"[tool] {event.name}({event.args})")
+    elif event.type == "turn_complete":
+        queue.close()  # one turn for this demo: end the session
+```
+
+The model's audio (24 kHz) is written to `out.wav`. Automatic voice activity detection finds the end of your speech, so the script never has to signal it. It closes the queue after the first `turn_complete`, which ends the session.
+
+### audio_agent_mic.py
+
+This adds a microphone and speakers. The main problem is echo: without echo cancellation, the speaker output leaks into the mic and the model hears itself. The script mutes the mic while the agent talks.
+
+```python
+def on_mic(indata, _frames, _time, _status) -> None:
+    # PortAudio calls this on its own thread; marshal onto the event loop so the
+    # asyncio-backed queue is touched only from the loop thread.
+    if agent_speaking["on"] and not FULL_DUPLEX:
+        return  # muted while the agent talks (echo guard)
+    loop.call_soon_threadsafe(queue.send_audio, bytes(indata))
+```
+
+The audio callback runs on a PortAudio thread, so it uses `call_soon_threadsafe` to touch the queue from the event loop thread only. The event loop sets the gate and releases it after a short tail so the speaker can drain:
+
+```python
+if event.type == "audio_delta":
+    agent_speaking["on"] = True  # mute the mic for the duration of the reply
+    speaker.write(event.data)  # play the model's voice
+elif event.type == "turn_complete":
+    # Reopen the mic after the speaker has drained the buffered tail.
+    loop.call_later(MUTE_TAIL_SEC, unmute)
+```
+
+With headphones, set `MIC_FULL_DUPLEX=1` to allow barge-in. Then an `interrupted` event flushes the audio already queued for playback:
+
+```python
+elif event.type == "interrupted":
+    # Barge-in (full-duplex only): discard audio already queued for playback.
+    speaker.stop()
+    speaker.start()
+    agent_speaking["on"] = False
+```
+
+The `get_weather` tool here uses a small canned table so different cities give different answers. Replace its body with a real API call and nothing else changes.
+
+### graph.py and 10xgraph.json
+
+For the server, the agent is compiled at module level and exposed as `app`:
+
+```python
+checkpointer = InMemoryCheckpointer()
+
+app = AudioAgent(
+    MODEL,
+    realtime_config=RealtimeConfig(
+        model=MODEL,
+        voice="Puck",
+        system_instruction="You are a concise, friendly voice assistant.",
+    ),
+    tools=[get_weather],
+).compile(checkpointer=checkpointer)
+```
+
+`10xgraph.json` tells the server where to find it:
+
+```json
+{
+  "agent": "graph:app",
+  "checkpointer": "graph:checkpointer",
+  "env": ".env"
+}
+```
+
+The server then offers a WebSocket at `/v1/graph/live`:
+
+- First frame: a JSON control frame such as `{"model": "...", "thread_id": "abc", "voice": "Puck"}`. Fields present override the build-time config for that session.
+- Upstream: a binary frame is PCM16 input audio. A JSON frame is `{"type": "text" | "activity_start" | "activity_end" | "close", ...}`.
+- Downstream: a binary frame is PCM16 model audio. A JSON text frame is any other event.
+
+## Full code
+
+<Tabs>
+<TabItem label="audio_agent_file.py">
+
+```python
+"""Realtime audio-to-audio from a WAV file, using AudioAgent + Gemini Live.
+
+No microphone or speaker required. This streams a 16 kHz mono PCM16 WAV into the live
+session, writes the model's 24 kHz audio reply to ``out.wav``, and prints the input and
+output transcripts plus any tool calls. It is the headless counterpart to
+``audio_agent_mic.py`` and is the easiest way to sanity-check your setup.
+
+Setup:  pip install "10xgraph[realtime]" and set GEMINI_API_KEY
+Run:    python examples/realtime_audio/audio_agent_file.py path/to/input.wav
+
+``input.wav`` must be mono, 16-bit PCM, 16 kHz (the format Gemini Live expects for input).
+"""
+
+import asyncio
+import os
+import sys
+import wave
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.realtime.base import OUTPUT_SAMPLE_RATE, RealtimeConfig
+from tenxgraph.core.realtime.queue import LiveInputQueue
+from tenxgraph.prebuilt.agent import AudioAgent
+
+
+load_dotenv()
+
+# Gemini Live is the only realtime provider today. Check Google's Live API docs for the
+# model names available to your key.
+MODEL = "gemini-2.5-flash-live"
+
+
+def get_weather(location: str) -> str:
+    """Return the current weather for a city. Called by the model during the conversation."""
+    return f"It is 22 degrees Celsius and sunny in {location}."
+
+
+def build_app():
+    """Compile a single realtime audio agent with one tool and a voice."""
+    config = RealtimeConfig(
+        model=MODEL,
+        voice="Puck",
+        system_instruction="You are a concise voice assistant. Answer in one or two sentences.",
+    )
+    return AudioAgent(MODEL, realtime_config=config, tools=[get_weather]).compile()
+
+
+def read_pcm16(path: str) -> tuple[int, bytes]:
+    """Read a mono PCM16 WAV file, returning (sample_rate, raw_pcm_bytes)."""
+    with wave.open(path, "rb") as wf:
+        if wf.getsampwidth() != 2 or wf.getnchannels() != 1:
+            raise ValueError("input must be mono, 16-bit PCM (sampwidth=2, channels=1)")
+        return wf.getframerate(), wf.readframes(wf.getnframes())
+
+
+async def feed_audio(queue: LiveInputQueue, pcm: bytes, sample_rate: int) -> None:
+    """Stream the file into the session in ~100 ms chunks (the audio hot path)."""
+    chunk = (sample_rate // 10) * 2  # 100 ms * 2 bytes/sample
+    for offset in range(0, len(pcm), chunk):
+        queue.send_audio(pcm[offset : offset + chunk], sample_rate=sample_rate)
+        await asyncio.sleep(0.0)  # yield so the pump task can flush to the socket
+    # Automatic VAD detects end-of-speech; we leave the queue open to receive the reply
+    # and close it from the main loop once the model finishes its turn.
+
+
+async def main() -> None:
+    in_path = sys.argv[1] if len(sys.argv) > 1 else "input.wav"
+    if not os.path.exists(in_path):
+        sys.exit(f"Provide a 16 kHz mono PCM16 WAV path. Not found: {in_path}")
+
+    sample_rate, pcm = read_pcm16(in_path)
+    app = build_app()
+    queue = LiveInputQueue()
+
+    out = wave.open("out.wav", "wb")
+    out.setnchannels(1)
+    out.setsampwidth(2)
+    out.setframerate(OUTPUT_SAMPLE_RATE)
+
+    feeder = asyncio.create_task(feed_audio(queue, pcm, sample_rate))
+    try:
+        async for event in app.arealtime(queue, {"thread_id": "audio-file-demo"}):
+            if event.type == "audio_delta":
+                out.writeframes(event.data)
+            elif event.type == "input_transcript" and event.finished:
+                print(f"you:   {event.text}")
+            elif event.type == "output_transcript" and event.finished:
+                print(f"agent: {event.text}")
+            elif event.type == "tool_call":
+                print(f"[tool] {event.name}({event.args})")
+            elif event.type == "turn_complete":
+                queue.close()  # one turn for this demo: end the session
+    finally:
+        feeder.cancel()
+        out.close()
+        await app.aclose()
+
+    print("Wrote model audio reply to out.wav")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="audio_agent_mic.py">
+
+```python
+"""Live voice weather assistant -- AudioAgent + Gemini Live, React-style tool calling.
+
+Talk to it through your microphone and it talks back in real time. Ask "what's the
+weather in Tokyo?" and the model calls the ``get_weather`` tool, then speaks the answer
+it gets back -- the realtime analog of a ReactAgent's reason -> tool -> respond loop.
+
+Features
+    - Voice playback: the model's reply is played out loud on your speakers.
+    - Tool calling: ``get_weather`` is advertised to the model and invoked on demand.
+    - Echo-safe by default: the mic is muted while the agent is speaking, so it doesn't
+      hear (and reply to) its own voice through your speakers.
+
+Echo / feedback
+    Without echo cancellation, your speaker audio leaks into the mic and the model
+    transcribes its own replies as your input. This demo avoids that by muting the mic
+    while the agent talks (half-duplex). Use headphones and set MIC_FULL_DUPLEX=1 for
+    true full duplex with barge-in (speak over the agent to interrupt it).
+
+Setup:  pip install "10xgraph[realtime]" sounddevice, and set GEMINI_API_KEY
+        (or the Vertex AI environment variables, see README)
+Run:    python examples/realtime_audio/audio_agent_mic.py
+        then say e.g. "What's the weather in Paris?" and press Ctrl+C to stop.
+"""
+
+import asyncio
+import contextlib
+import os
+import sys
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.realtime.base import INPUT_SAMPLE_RATE, OUTPUT_SAMPLE_RATE, RealtimeConfig
+from tenxgraph.core.realtime.queue import LiveInputQueue
+from tenxgraph.prebuilt.agent import AudioAgent
+
+
+load_dotenv()
+
+# Use Vertex AI (service account / ADC) when GOOGLE_GENAI_USE_VERTEXAI is set; otherwise
+# use a Gemini API key. Live model names can differ between the two, so check Google's
+# Live API docs for what your project can use.
+USE_VERTEX = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in ("1", "true", "yes")
+MODEL = "gemini-2.5-flash-live"
+MIC_BLOCK = INPUT_SAMPLE_RATE // 10  # 100 ms frames
+# Full duplex (no mic muting) -- only sensible with headphones, enables barge-in.
+FULL_DUPLEX = os.getenv("MIC_FULL_DUPLEX", "").strip().lower() in ("1", "true", "yes")
+# How long to keep the mic muted after the agent's turn ends, to let the speaker drain.
+MUTE_TAIL_SEC = 0.4
+
+# A tiny canned forecast table so different cities give different answers. Swap the body
+# for a real HTTP call to a weather API and nothing else here changes.
+_FORECASTS = {
+    "tokyo": "18 degrees Celsius, light rain",
+    "paris": "24 degrees Celsius and sunny",
+    "london": "15 degrees Celsius, overcast",
+    "new york": "21 degrees Celsius, partly cloudy",
+    "san francisco": "17 degrees Celsius, foggy",
+}
+
+
+def get_weather(location: str) -> str:
+    """Get the current weather for a city. Call this whenever the user asks about weather.
+
+    Args:
+        location: The city name, e.g. "Tokyo" or "Paris".
+    """
+    forecast = _FORECASTS.get(location.strip().lower(), "22 degrees Celsius and clear")
+    print(f"  [tool] get_weather(location={location!r}) -> {forecast}")
+    return f"The weather in {location} is {forecast}."
+
+
+def build_app():
+    config = RealtimeConfig(
+        model=MODEL,
+        voice="Puck",
+        system_instruction=(
+            "You are a friendly, concise voice assistant. When the user asks about the "
+            "weather, always call the get_weather tool and answer using its result. "
+            "Keep replies to one or two sentences."
+        ),
+    )
+    return AudioAgent(
+        MODEL, realtime_config=config, tools=[get_weather], use_vertex_ai=USE_VERTEX
+    ).compile()
+
+
+async def main() -> None:
+    try:
+        import sounddevice as sd
+    except ImportError:
+        sys.exit("This example needs sounddevice:  pip install sounddevice")
+
+    app = build_app()
+    queue = LiveInputQueue()
+    loop = asyncio.get_running_loop()
+
+    # Mic gate: while the agent is speaking we drop mic frames so its own voice (played on
+    # the speaker and picked up by the mic) is never sent back as user input. Disabled in
+    # full-duplex mode (headphones), where barge-in is wanted instead.
+    agent_speaking = {"on": False}
+
+    def on_mic(indata, _frames, _time, _status) -> None:
+        # PortAudio calls this on its own thread; marshal onto the event loop so the
+        # asyncio-backed queue is touched only from the loop thread.
+        if agent_speaking["on"] and not FULL_DUPLEX:
+            return  # muted while the agent talks (echo guard)
+        loop.call_soon_threadsafe(queue.send_audio, bytes(indata))
+
+    def unmute() -> None:
+        agent_speaking["on"] = False
+
+    speaker = sd.RawOutputStream(samplerate=OUTPUT_SAMPLE_RATE, channels=1, dtype="int16")
+    mic = sd.RawInputStream(
+        samplerate=INPUT_SAMPLE_RATE,
+        channels=1,
+        dtype="int16",
+        blocksize=MIC_BLOCK,
+        callback=on_mic,
+    )
+    speaker.start()
+    mic.start()
+    mode = "full-duplex (barge-in)" if FULL_DUPLEX else "echo-safe (mic muted while agent talks)"
+    print(f"Listening [{mode}]. Try: 'What's the weather in Tokyo?'   (Ctrl+C to stop)")
+
+    try:
+        async for event in app.arealtime(queue, {"thread_id": "audio-mic-demo"}):
+            if event.type == "audio_delta":
+                agent_speaking["on"] = True  # mute the mic for the duration of the reply
+                speaker.write(event.data)  # play the model's voice
+            elif event.type == "turn_complete":
+                # Reopen the mic after the speaker has drained the buffered tail.
+                loop.call_later(MUTE_TAIL_SEC, unmute)
+            elif event.type == "interrupted":
+                # Barge-in (full-duplex only): discard audio already queued for playback.
+                speaker.stop()
+                speaker.start()
+                agent_speaking["on"] = False
+            elif event.type == "input_transcript" and event.finished:
+                print(f"you:   {event.text}")
+            elif event.type == "output_transcript" and event.finished:
+                print(f"agent: {event.text}")
+            elif event.type == "tool_call":
+                print(f"  [tool-call requested] {event.name}({event.args})")
+            elif event.type == "error":
+                print(f"  [error] {event.message}")
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print("\nStopping...")
+    finally:
+        queue.close()
+        mic.stop()
+        mic.close()
+        speaker.stop()
+        speaker.close()
+        await app.aclose()
+
+
+if __name__ == "__main__":
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="graph.py">
+
+```python
+"""Realtime AudioAgent exposed through the 10xGraph API server.
+
+`10xgraph.json` points the server at `app` below. The server then offers a WebSocket at
+/v1/graph/live that bridges client audio to this agent: binary PCM16 frames upstream,
+model audio back as binary frames, transcripts and tool calls as JSON.
+
+Run:  cd examples/realtime_audio && 10xgraph dev --no-open
+"""
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.realtime.base import RealtimeConfig
+from tenxgraph.prebuilt.agent import AudioAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+
+
+load_dotenv()
+
+# Gemini Live is the only realtime provider today. Model names change often, so check
+# Google's Live API docs for what your key can use.
+MODEL = "gemini-2.5-flash-live"
+
+
+def get_weather(location: str) -> str:
+    """Return the current weather for a city. Called by the model during the conversation."""
+    return f"It is 22 degrees Celsius and sunny in {location}."
+
+
+checkpointer = InMemoryCheckpointer()
+
+app = AudioAgent(
+    MODEL,
+    realtime_config=RealtimeConfig(
+        model=MODEL,
+        voice="Puck",
+        system_instruction="You are a concise, friendly voice assistant.",
+    ),
+    tools=[get_weather],
+).compile(checkpointer=checkpointer)
+```
+
+</TabItem>
+<TabItem label="10xgraph.json">
+
+```json
+{
+  "agent": "graph:app",
+  "checkpointer": "graph:checkpointer",
+  "env": ".env"
+}
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/realtime_audio](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/realtime_audio)
+
+## Expected output
+
+Illustrative output from the microphone script.
+
+```text
+Listening [echo-safe (mic muted while agent talks)]. Try: 'What's the weather in Tokyo?'
+  [tool-call requested] get_weather({'location': 'Tokyo'})
+  [tool] get_weather(location='Tokyo') -> 18 degrees Celsius, light rain
+you:   What's the weather in Tokyo?
+agent: It's 18 degrees and raining lightly in Tokyo.
+```
+
+<Callout type="note" title="Using a different model">
+Edit `MODEL` and the `model` in `RealtimeConfig` to another Gemini Live model name. Other providers are not available for realtime yet. For a turn-based voice flow with another provider, transcribe, run a `ReactAgent`, and synthesise speech separately.
+</Callout>
+
+## Next steps
+
+- [Multimodal input](/docs/examples/multimodal)
+- [Streaming](/docs/examples/streaming)
+- [Quickstart: prebuilt ReAct agent](/docs/examples/quickstart)

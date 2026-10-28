@@ -1,0 +1,738 @@
+---
+title: "Research Assistant with Plan-Act-Reflect and a Structured Report in 10xGraph"
+seoTitle: "Research assistant agent in Python"
+description: "Build a Python research agent that plans, searches, reflects and writes a Pydantic report, using Claude, GPT-5 mini, Gemini and DeepSeek in one 10xGraph."
+section: Examples
+group: "Use cases"
+order: 38
+label: "Research assistant"
+updated: "2026-10-28"
+faq:
+  - q: "Can PlanActReflectAgent use a different model for the act step?"
+    a: "Not in the current source. It accepts model, plan_model and reflect_model, but ACT is a ToolNode that only runs the tools the planner requested. This example wires the same loop with StateGraph so ACT is its own agent with its own model."
+  - q: "Does google_web_search work when the agent is not a Gemini model?"
+    a: "Yes. The tool makes its own google-genai call with Google Search grounding, so any agent model can call it. It needs GEMINI_API_KEY or GOOGLE_API_KEY in the environment."
+  - q: "Why does the DeepSeek report step not use output_schema?"
+    a: "With an OpenAI-compatible client, output_schema is sent as a JSON Schema response format through the chat completions parse path. DeepSeek documents JSON mode only, so this example puts the schema in the prompt and validates the reply with Pydantic."
+---
+
+This example is a command-line research assistant built as a plan, act, reflect loop with a different company's model in each phase: Anthropic `claude-sonnet-5-5` plans, OpenAI `gpt-5-mini` searches and reads pages, Google `gemini-2.5-flash` reviews, and `deepseek-chat` writes a typed `ResearchReport`. Use it as a template when you want a research workflow with a review loop, streamed progress and a validated, saved result.
+
+## What you will build
+
+You ask a question, and a graph runs a plan, act, reflect loop. The planner writes search steps, the actor searches the web and reads pages, and a reviewer decides whether the question is answered or sends the planner back to fill gaps. A final step turns the notes into a typed `ResearchReport`, which is printed and saved as markdown.
+
+Progress streams to the terminal with `astream`, so you see each phase, its text and each tool call as it happens.
+
+### Models used: one company per phase
+
+| Phase | Model | Company | Why |
+|---|---|---|---|
+| Plan | `claude-sonnet-5-5` | Anthropic | Breaking a vague question into precise search steps benefits from strong reasoning. |
+| Act | `gpt-5-mini` | OpenAI | Many short tool calls (search, fetch, summarise). A small, fast model keeps this loop cheap. |
+| Reflect | `gemini-2.5-flash` | Google | A second opinion from a different model family is less likely to repeat the actor's blind spots. |
+| Report | `deepseek-chat` | DeepSeek | Reformatting notes into JSON is simple, and DeepSeek is inexpensive. It runs through its OpenAI-compatible endpoint. |
+
+## Architecture
+
+The graph is wired by hand with `StateGraph`. It has six nodes and two conditional edges. One conditional edge forms the tool loop inside ACT, and the other forms the outer plan, act, reflect loop.
+
+```text
+ Question
+    |
+    v
+ +--------+      +------------------+  tool calls   +--------+
+ |  PLAN  | ---> |  ACT             | ------------> |  TOOL  |
+ | Claude |      |  gpt-5-mini      | <------------ | search |
+ +--------+      +------------------+   results     | fetch  |
+    ^                    |                           +--------+
+    |                    | no tool calls (notes)
+    |                    v
+    |            +------------------+
+    |            |  REFLECT         |
+    |            |  gemini-2.5-flash|
+    |            +------------------+
+    |              |             |
+    |   gaps and   |             | [DONE] or round limit
+    |  rounds left |             v
+    |              v        +----------------+
+    |       +-------------+ |  REPORT        |
+    +------ | NEXT_ROUND  | |  deepseek-chat |
+            | rounds += 1 | +----------------+
+            +-------------+         |
+                                    v
+                       ResearchReport -> output/report.md
+```
+
+Routing rules:
+
+- `after_act` looks at the last message. If it is an assistant message with tool calls, go to `TOOL`; otherwise go to `REFLECT`.
+- `TOOL` always returns to `ACT`, so the actor can search several times before it writes notes.
+- `after_reflect` goes to `REPORT` if the reply contains `[DONE]` or the round limit is reached. Otherwise it goes to `NEXT_ROUND`, which increments `state.rounds` and returns to `PLAN`.
+- `MAX_ROUNDS = 2`, so the loop runs at most two plan, act, reflect passes.
+
+Model choices: the planner and the reviewer see only text, so they can be any strong model, and using two different families gives the review an independent view. The actor is the only phase with tools and makes the most calls, so it gets the small, fast model. The writer only reformats notes into JSON, so it gets the cheapest option, reached through the OpenAI client with a custom `base_url`.
+
+### Why not PlanActReflectAgent
+
+`PlanActReflectAgent` is the prebuilt version of this loop. Its constructor takes `model`, `plan_model` and `reflect_model`, but the ACT node is a `ToolNode`: it executes the tools the planner asked for and has no model. So the act step cannot run on OpenAI while planning runs on Claude. `graph.py` therefore builds the same shape by hand, with ACT as an `Agent`, a tool loop, and a report node. If you do not need a separate act model, `PlanActReflectAgent(model=..., plan_model=..., reflect_model=..., tools=[...])` is shorter.
+
+## Project structure
+
+<FileTree>
+
+- main.py CLI: runs the graph with astream, prints progress, saves the report
+- graph.py StateGraph wiring, the four agents, routing functions and the stage() helper
+- prompts.py System prompts and per-phase task instructions
+- tools.py web_search and fetch_page, wrapping prebuilt tools
+- models.py Pydantic Finding and ResearchReport
+- report.py Parse the model JSON, render and save markdown
+- README.md Short readme in the repo
+- output/ Created on first run
+  - report.md The saved report
+
+</FileTree>
+
+## Key concepts
+
+- `StateGraph` with a custom `AgentState` subclass: counts reflection rounds.
+- `Agent(model=...)`: each phase is a separate agent; the provider is detected from the model string.
+- `Agent(base_url=..., api_key=...)`: points the OpenAI client at DeepSeek.
+- `ToolNode` and `google_web_search` / `fetch_url` from `tenxgraph.prebuilt.tools`.
+- `add_conditional_edges`: loops ACT with TOOL, and REFLECT back to PLAN until `[DONE]`.
+- `CompiledGraph.astream`: yields `StreamChunk` objects (`updates`, `message`, `error`).
+- Pydantic `ResearchReport`: validates the final JSON.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[anthropic,openai,google-genai]" python-dotenv
+export ANTHROPIC_API_KEY=...
+export OPENAI_API_KEY=...
+export GEMINI_API_KEY=...      # or GOOGLE_API_KEY; also used by google_web_search
+export DEEPSEEK_API_KEY=...
+python examples/use_cases/research_assistant/main.py "How do solid-state batteries work?"
+```
+
+Without an argument it uses a default question. The report is written to `examples/use_cases/research_assistant/output/report.md`.
+
+## How the code works
+
+### models.py
+
+```python
+class Finding(BaseModel):
+    claim: str = Field(description="One specific, checkable statement.")
+    evidence: str = Field(description="What in the sources supports the claim.")
+    source_url: str = Field(description="URL of the page that supports the claim.")
+
+
+class ResearchReport(BaseModel):
+    title: str
+    summary: str = Field(description="Three to five sentences answering the question.")
+    key_findings: list[Finding]
+    open_questions: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list, description="All URLs used.")
+```
+
+The report schema. A `Finding` is one claim with its evidence and a source URL, so every statement can be traced. `ResearchReport` holds a title, a short summary, the findings, open questions and the list of sources. The `Field(description=...)` text matters: it is included in the JSON Schema that is sent to the writer model, so it tells that model what each field should contain.
+
+### tools.py
+
+```python
+async def web_search(query: str) -> str:
+    """Search the web and return a grounded summary with sources as JSON."""
+    return await google_web_search(query, max_chars=5000)
+
+
+async def fetch_page(url: str) -> str:
+    """Download a public web page and return its text (truncated) as JSON."""
+    return await fetch_url(url, max_chars=5000)
+
+
+RESEARCH_TOOLS = [web_search, fetch_page]
+```
+
+Two tools, both thin wrappers over prebuilt tools in `tenxgraph.prebuilt.tools`. They only cap the output at 5,000 characters so a few fetched pages do not fill the context window. `google_web_search` makes its own Gemini call with Google Search grounding, independent of the model that invoked the tool, which is why GPT-5 mini can use it. To use another search service, replace `web_search` with any async function that returns text. `RESEARCH_TOOLS` is the list handed to `ToolNode`.
+
+### prompts.py
+
+```python
+PLAN = _prompt(
+    "You are a research planner. Turn the user's question into 3 to 5 concrete research "
+    "steps. Each step names what to find out and a suggested search query. If an earlier "
+    "evaluation lists gaps, plan only for those gaps. Do not answer the question."
+)
+```
+
+The planner turns the question into three to five concrete steps with suggested queries. If an earlier review listed gaps, it plans only for those, which is how the second round stays focused. It is told not to answer.
+
+The actor and reflector prompts (see the full code) tell the actor to call `web_search` per step, read pages with `fetch_page`, and write notes with a source URL after each fact. The reviewer must end its reply with the exact token `[DONE]` when every part of the question is answered, and otherwise list the gaps.
+
+```python
+# The braces in the JSON schema are doubled because system prompts are formatted
+# with str.format() to fill in state fields.
+_SCHEMA = json.dumps(ResearchReport.model_json_schema()).replace("{", "{{").replace("}", "}}")
+
+REPORT = _prompt(
+    "You write the final research report. Use only facts from the research notes. "
+    "Reply with one JSON object and nothing else (no code fences) that matches this "
+    f"JSON Schema:\n{_SCHEMA}"
+)
+```
+
+The report prompt embeds the JSON Schema of `ResearchReport`. System prompts are filled in with `str.format()`, so the braces in the schema are doubled. The writer is told to reply with one JSON object and nothing else.
+
+```python
+# Added to the end of each phase's view of the conversation (see graph.stage).
+PLAN_TASK = "Write the research plan now, or a revised plan if gaps were reported."
+REFLECT_TASK = "Evaluate the research notes against the original question."
+REPORT_TASK = "Write the final report as a JSON object."
+```
+
+These three strings are the closing instruction added to each phase's view of the conversation by `stage()`, which you will see in `graph.py`.
+
+### report.py
+
+```python
+def parse_report(text: str) -> ResearchReport:
+    """Validate the model's JSON. Raises pydantic.ValidationError if it is malformed."""
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+    return ResearchReport.model_validate_json(cleaned)
+```
+
+`parse_report` strips an optional code fence and validates the text with `ResearchReport.model_validate_json`. Models sometimes wrap JSON in fences even when told not to, and this tolerates that. A malformed reply raises `pydantic.ValidationError` instead of producing a half-filled report.
+
+```python
+def to_markdown(report: ResearchReport) -> str:
+    lines = [f"# {report.title}", "", report.summary, "", "## Key findings", ""]
+    for i, f in enumerate(report.key_findings, 1):
+        lines += [
+            f"{i}. **{f.claim}**",
+            f"   - Evidence: {f.evidence}",
+            f"   - Source: {f.source_url}",
+        ]
+    if report.open_questions:
+        lines += ["", "## Open questions", ""] + [f"- {q}" for q in report.open_questions]
+    if report.sources:
+        lines += ["", "## Sources", ""] + [f"- {s}" for s in report.sources]
+    return "\n".join(lines) + "\n"
+
+
+def save_markdown(report: ResearchReport, path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(to_markdown(report), encoding="utf-8")
+    return path
+```
+
+`to_markdown` renders the title, summary, numbered findings with evidence and source, and optional sections for open questions and sources. `save_markdown` creates the output folder and writes the file.
+
+### graph.py
+
+```python
+MAX_ROUNDS = 2  # plan/act/reflect passes before the report is written anyway
+
+
+class ResearchState(AgentState):
+    rounds: int = 0
+
+```
+
+`ResearchState` extends `AgentState` with one field, `rounds`, the number of completed reflection passes. `MAX_ROUNDS` caps the outer loop so a stubborn reviewer cannot run forever.
+
+```python
+def stage(agent: Agent, task: str):
+    """Run `agent` on a text-only view of the conversation plus a closing instruction.
+
+    Tool calls and tool output are hidden from the view: they are long, and some
+    providers reject a tool result they did not request. The real state is
+    restored afterwards, so later phases still see everything.
+    """
+
+    async def node(state: ResearchState, config: dict):
+        original = state.context
+        visible = [m for m in original if m.role != "tool" and not m.tools_calls]
+        state.context = [*visible, Message.text_message(task)]
+        try:
+            return await agent.execute(state, config)
+        finally:
+            state.context = original
+
+    return node
+```
+
+`stage()` wraps an agent in a node function. It builds a text-only view of the conversation (no tool messages and no assistant tool calls), appends the phase's task as one extra message, runs `agent.execute`, and then restores the real context in a `finally` block. Tool traffic is long, and some providers reject a tool result they did not request, so the planner, reviewer and writer never see it. Because the original state is restored, later phases still see everything. The actor is added without `stage()` because it owns the tool loop.
+
+```python
+def after_act(state: ResearchState) -> str:
+    last = state.context[-1]
+    return "TOOL" if last.role == "assistant" and last.tools_calls else "REFLECT"
+
+
+def after_reflect(state: ResearchState) -> str:
+    done = "[done]" in state.context[-1].text().lower()
+    return "REPORT" if done or state.rounds + 1 >= MAX_ROUNDS else "NEXT_ROUND"
+
+
+def next_round(state: ResearchState) -> list[Message]:
+    state.rounds += 1
+    return []
+```
+
+Three small functions drive the loops. `after_act` returns `"TOOL"` when the last message is an assistant message with tool calls, else `"REFLECT"`. `after_reflect` lowercases the reviewer reply and looks for `[done]`; it returns `"REPORT"` when found or when `state.rounds + 1 >= MAX_ROUNDS`, else `"NEXT_ROUND"`. `next_round` increments the counter and returns an empty message list, so it adds nothing to the conversation.
+
+```python
+    planner = Agent(model="claude-sonnet-5-5", system_prompt=prompts.PLAN)
+    actor = Agent(model="gpt-5-mini", system_prompt=prompts.ACT, tool_node=tool_node)
+    reflector = Agent(model="gemini-2.5-flash", system_prompt=prompts.REFLECT)
+    writer = Agent(
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com",
+        api_key=os.environ["DEEPSEEK_API_KEY"],
+        system_prompt=prompts.REPORT,
+        reasoning_config=None,  # plain chat model; no reasoning parameters
+    )
+```
+
+Four agents, each with a literal model string. The planner, actor and reflector are detected as Anthropic, OpenAI and Google from the names. The writer uses the OpenAI client against `https://api.deepseek.com` with its own key, and `reasoning_config=None` because it is a plain chat model and no reasoning parameters should be sent. Only the actor gets `tool_node`.
+
+```python
+    graph = StateGraph(state=ResearchState())
+    graph.add_node("PLAN", stage(planner, prompts.PLAN_TASK))
+    graph.add_node("ACT", actor)
+    graph.add_node("TOOL", tool_node)
+    graph.add_node("REFLECT", stage(reflector, prompts.REFLECT_TASK))
+    graph.add_node("NEXT_ROUND", next_round)
+    graph.add_node("REPORT", stage(writer, prompts.REPORT_TASK))
+
+    graph.set_entry_point("PLAN")
+    graph.add_edge("PLAN", "ACT")
+    graph.add_conditional_edges("ACT", after_act, {"TOOL": "TOOL", "REFLECT": "REFLECT"})
+    graph.add_edge("TOOL", "ACT")
+    graph.add_conditional_edges(
+        "REFLECT", after_reflect, {"REPORT": "REPORT", "NEXT_ROUND": "NEXT_ROUND"}
+    )
+    graph.add_edge("NEXT_ROUND", "PLAN")
+    graph.add_edge("REPORT", END)
+    return graph.compile()
+```
+
+The wiring. `set_entry_point("PLAN")` starts the run. The two conditional edges take a path map from the routing function's return value to a node name. `TOOL` loops back to `ACT`, `NEXT_ROUND` loops back to `PLAN`, and `REPORT` goes to `END`. `compile()` is called without arguments, so the default `InMemoryCheckpointer` is used.
+
+### main.py
+
+```python
+async def main() -> None:
+    question = " ".join(sys.argv[1:]) or DEFAULT_QUESTION
+    app = build_graph()
+    node = ""
+    deltas: list[str] = []  # REPORT text, collected instead of printed
+    final_report = ""
+
+    async for chunk in app.astream({"messages": [Message.text_message(question)]}):
+        if chunk.event == StreamEvent.UPDATES and chunk.data.get("status") == "node_invoked":
+            node = chunk.data["node"]
+            print(f"\n--- {node} ---")
+        elif chunk.event == StreamEvent.ERROR:
+            print("error:", chunk.data)
+        elif chunk.event == StreamEvent.MESSAGE and chunk.message is not None:
+            msg = chunk.message
+            if node == "REPORT":
+                if msg.delta:
+                    deltas.append(msg.text())
+                elif msg.role == "assistant":
+                    final_report = msg.text()
+            elif msg.delta:
+                print(msg.text(), end="", flush=True)
+            elif msg.tools_calls:
+                names = [c["function"]["name"] for c in msg.tools_calls]
+                print(f"\n[tool calls] {', '.join(names)}")
+
+    report = parse_report(final_report or "".join(deltas))
+    path = save_markdown(report, OUTPUT)
+    print("\n" + to_markdown(report))
+    print(f"saved: {path}")
+    await app.aclose()
+```
+
+`main` reads the question from the command line, builds the graph, and iterates `app.astream(...)`. Chunks are handled by type: an `UPDATES` chunk with status `node_invoked` prints the node name as a header, `ERROR` prints the error, and `MESSAGE` chunks carry text. Deltas (partial text) are printed live, and complete assistant messages with tool calls print the tool names. For the `REPORT` node the text is collected silently, since it is JSON, then parsed with `parse_report`, printed as markdown and saved. `aclose()` releases the graph's resources.
+
+## Full code
+
+<Tabs>
+<TabItem label="main.py">
+
+```python
+"""Research assistant: plan, search, reflect, then write a structured report.
+
+Claude plans, GPT-5 mini searches and reads pages, Gemini reviews, DeepSeek writes
+the JSON report. Progress streams to the terminal and the report is saved as markdown.
+
+Run from the repo root:
+    python examples/use_cases/research_assistant/main.py "How do solid-state batteries work?"
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
+from graph import build_graph
+from report import parse_report, save_markdown, to_markdown
+
+from tenxgraph.core.state import Message
+from tenxgraph.core.state.stream_chunks import StreamEvent
+
+
+load_dotenv()
+
+OUTPUT = Path(__file__).parent / "output" / "report.md"
+DEFAULT_QUESTION = "What are the main trade-offs between solid-state and lithium-ion batteries?"
+
+
+async def main() -> None:
+    question = " ".join(sys.argv[1:]) or DEFAULT_QUESTION
+    app = build_graph()
+    node = ""
+    deltas: list[str] = []  # REPORT text, collected instead of printed
+    final_report = ""
+
+    async for chunk in app.astream({"messages": [Message.text_message(question)]}):
+        if chunk.event == StreamEvent.UPDATES and chunk.data.get("status") == "node_invoked":
+            node = chunk.data["node"]
+            print(f"\n--- {node} ---")
+        elif chunk.event == StreamEvent.ERROR:
+            print("error:", chunk.data)
+        elif chunk.event == StreamEvent.MESSAGE and chunk.message is not None:
+            msg = chunk.message
+            if node == "REPORT":
+                if msg.delta:
+                    deltas.append(msg.text())
+                elif msg.role == "assistant":
+                    final_report = msg.text()
+            elif msg.delta:
+                print(msg.text(), end="", flush=True)
+            elif msg.tools_calls:
+                names = [c["function"]["name"] for c in msg.tools_calls]
+                print(f"\n[tool calls] {', '.join(names)}")
+
+    report = parse_report(final_report or "".join(deltas))
+    path = save_markdown(report, OUTPUT)
+    print("\n" + to_markdown(report))
+    print(f"saved: {path}")
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="graph.py">
+
+```python
+"""Plan -> Act -> Reflect -> Report graph with a different company's model per phase.
+
+`PlanActReflectAgent` runs tools in a plain `ToolNode` and lets you set only the
+plan and reflect models, so its ACT phase has no model of its own. To give ACT
+its own model (OpenAI) and add a report phase (DeepSeek), this file wires the
+same loop by hand with `StateGraph`.
+"""
+
+from __future__ import annotations
+
+import os
+
+import prompts
+from tools import RESEARCH_TOOLS
+
+from tenxgraph.core.graph import Agent, StateGraph, ToolNode
+from tenxgraph.core.state import AgentState, Message
+from tenxgraph.utils import END
+
+
+MAX_ROUNDS = 2  # plan/act/reflect passes before the report is written anyway
+
+
+class ResearchState(AgentState):
+    rounds: int = 0
+
+
+def stage(agent: Agent, task: str):
+    """Run `agent` on a text-only view of the conversation plus a closing instruction.
+
+    Tool calls and tool output are hidden from the view: they are long, and some
+    providers reject a tool result they did not request. The real state is
+    restored afterwards, so later phases still see everything.
+    """
+
+    async def node(state: ResearchState, config: dict):
+        original = state.context
+        visible = [m for m in original if m.role != "tool" and not m.tools_calls]
+        state.context = [*visible, Message.text_message(task)]
+        try:
+            return await agent.execute(state, config)
+        finally:
+            state.context = original
+
+    return node
+
+
+def after_act(state: ResearchState) -> str:
+    last = state.context[-1]
+    return "TOOL" if last.role == "assistant" and last.tools_calls else "REFLECT"
+
+
+def after_reflect(state: ResearchState) -> str:
+    done = "[done]" in state.context[-1].text().lower()
+    return "REPORT" if done or state.rounds + 1 >= MAX_ROUNDS else "NEXT_ROUND"
+
+
+def next_round(state: ResearchState) -> list[Message]:
+    state.rounds += 1
+    return []
+
+
+def build_graph():
+    tool_node = ToolNode(RESEARCH_TOOLS)
+
+    planner = Agent(model="claude-sonnet-5-5", system_prompt=prompts.PLAN)
+    actor = Agent(model="gpt-5-mini", system_prompt=prompts.ACT, tool_node=tool_node)
+    reflector = Agent(model="gemini-2.5-flash", system_prompt=prompts.REFLECT)
+    writer = Agent(
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com",
+        api_key=os.environ["DEEPSEEK_API_KEY"],
+        system_prompt=prompts.REPORT,
+        reasoning_config=None,  # plain chat model; no reasoning parameters
+    )
+
+    graph = StateGraph(state=ResearchState())
+    graph.add_node("PLAN", stage(planner, prompts.PLAN_TASK))
+    graph.add_node("ACT", actor)
+    graph.add_node("TOOL", tool_node)
+    graph.add_node("REFLECT", stage(reflector, prompts.REFLECT_TASK))
+    graph.add_node("NEXT_ROUND", next_round)
+    graph.add_node("REPORT", stage(writer, prompts.REPORT_TASK))
+
+    graph.set_entry_point("PLAN")
+    graph.add_edge("PLAN", "ACT")
+    graph.add_conditional_edges("ACT", after_act, {"TOOL": "TOOL", "REFLECT": "REFLECT"})
+    graph.add_edge("TOOL", "ACT")
+    graph.add_conditional_edges(
+        "REFLECT", after_reflect, {"REPORT": "REPORT", "NEXT_ROUND": "NEXT_ROUND"}
+    )
+    graph.add_edge("NEXT_ROUND", "PLAN")
+    graph.add_edge("REPORT", END)
+    return graph.compile()
+```
+
+</TabItem>
+<TabItem label="prompts.py">
+
+```python
+"""Prompts for the four research phases and the stage instructions."""
+
+from __future__ import annotations
+
+import json
+
+from models import ResearchReport
+
+
+def _prompt(text: str) -> list[dict[str, str]]:
+    return [{"role": "system", "content": text}]
+
+
+PLAN = _prompt(
+    "You are a research planner. Turn the user's question into 3 to 5 concrete research "
+    "steps. Each step names what to find out and a suggested search query. If an earlier "
+    "evaluation lists gaps, plan only for those gaps. Do not answer the question."
+)
+
+ACT = _prompt(
+    "You are a research assistant who executes plans. Carry out the most recent plan: "
+    "call web_search for each step and fetch_page to read promising sources. When you "
+    "have enough, reply with plain-text notes: one short paragraph per step, each fact "
+    "followed by its source URL. Never invent URLs or facts."
+)
+
+REFLECT = _prompt(
+    "You are a strict reviewer. Check the research notes against the original question. "
+    "If every part of the question is answered with sourced facts, end your reply with "
+    "the exact token [DONE]. Otherwise list the specific gaps and do not write [DONE]."
+)
+
+# The braces in the JSON schema are doubled because system prompts are formatted
+# with str.format() to fill in state fields.
+_SCHEMA = json.dumps(ResearchReport.model_json_schema()).replace("{", "{{").replace("}", "}}")
+
+REPORT = _prompt(
+    "You write the final research report. Use only facts from the research notes. "
+    "Reply with one JSON object and nothing else (no code fences) that matches this "
+    f"JSON Schema:\n{_SCHEMA}"
+)
+
+# Added to the end of each phase's view of the conversation (see graph.stage).
+PLAN_TASK = "Write the research plan now, or a revised plan if gaps were reported."
+REFLECT_TASK = "Evaluate the research notes against the original question."
+REPORT_TASK = "Write the final report as a JSON object."
+```
+
+</TabItem>
+<TabItem label="tools.py">
+
+```python
+"""Research tools for the ACT phase.
+
+Both wrap prebuilt tools from `tenxgraph.prebuilt.tools` and only shrink the
+output, so a few fetched pages do not fill the context window.
+
+`google_web_search` calls Gemini with Google Search grounding through its own
+google-genai client. That is independent of the model running the ACT phase, so
+it works with an OpenAI model. It needs GEMINI_API_KEY or GOOGLE_API_KEY.
+To use another search service, replace `web_search` with any async function
+that returns text, for example one that calls the Tavily or Brave API.
+"""
+
+from __future__ import annotations
+
+from tenxgraph.prebuilt.tools import fetch_url, google_web_search
+
+
+async def web_search(query: str) -> str:
+    """Search the web and return a grounded summary with sources as JSON."""
+    return await google_web_search(query, max_chars=5000)
+
+
+async def fetch_page(url: str) -> str:
+    """Download a public web page and return its text (truncated) as JSON."""
+    return await fetch_url(url, max_chars=5000)
+
+
+RESEARCH_TOOLS = [web_search, fetch_page]
+```
+
+</TabItem>
+<TabItem label="models.py">
+
+```python
+"""The structured report the research assistant produces."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+
+class Finding(BaseModel):
+    claim: str = Field(description="One specific, checkable statement.")
+    evidence: str = Field(description="What in the sources supports the claim.")
+    source_url: str = Field(description="URL of the page that supports the claim.")
+
+
+class ResearchReport(BaseModel):
+    title: str
+    summary: str = Field(description="Three to five sentences answering the question.")
+    key_findings: list[Finding]
+    open_questions: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list, description="All URLs used.")
+```
+
+</TabItem>
+<TabItem label="report.py">
+
+```python
+"""Parse the DeepSeek output into a `ResearchReport` and save it as markdown."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from models import ResearchReport
+
+
+def parse_report(text: str) -> ResearchReport:
+    """Validate the model's JSON. Raises pydantic.ValidationError if it is malformed."""
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+    return ResearchReport.model_validate_json(cleaned)
+
+
+def to_markdown(report: ResearchReport) -> str:
+    lines = [f"# {report.title}", "", report.summary, "", "## Key findings", ""]
+    for i, f in enumerate(report.key_findings, 1):
+        lines += [
+            f"{i}. **{f.claim}**",
+            f"   - Evidence: {f.evidence}",
+            f"   - Source: {f.source_url}",
+        ]
+    if report.open_questions:
+        lines += ["", "## Open questions", ""] + [f"- {q}" for q in report.open_questions]
+    if report.sources:
+        lines += ["", "## Sources", ""] + [f"- {s}" for s in report.sources]
+    return "\n".join(lines) + "\n"
+
+
+def save_markdown(report: ResearchReport, path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(to_markdown(report), encoding="utf-8")
+    return path
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/use_cases/research_assistant](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/use_cases/research_assistant)
+
+## Expected output
+
+Illustrative; text varies by run.
+
+```text
+--- PLAN ---
+1. Find how solid-state electrolytes conduct ions ...
+--- ACT ---
+[tool calls] web_search
+[tool calls] fetch_page
+--- REFLECT ---
+All parts of the question are answered with sources. [DONE]
+--- REPORT ---
+# Solid-state vs lithium-ion batteries
+...
+saved: examples/use_cases/research_assistant/output/report.md
+```
+
+## Customize it
+
+**Swap a model.** Change the model string in `graph.py` and install the matching extra, for example `gpt-5-mini` for the planner needs `openai` and `OPENAI_API_KEY`. For another OpenAI-compatible service, keep the `Agent(base_url=..., api_key=...)` form and change the URL and key. To keep one company per phase, move the replaced model to another phase.
+
+**Add a tool.** Write an async or plain function in `tools.py` and add it to `RESEARCH_TOOLS`. Mention it in the `ACT` prompt so the actor knows when to use it. Other examples show database, file and MCP tools.
+
+**Change the search provider.** Replace the body of `web_search` with a call to Tavily, Brave or your own index. The graph does not change.
+
+**Use structured output directly.** If your report provider supports JSON Schema output, pass `output_schema=ResearchReport` to the writer agent and drop the schema from the prompt.
+
+**Persist with Postgres.** Pass a checkpointer to `compile()` in `graph.py`, for example `PgCheckpointer(...)` from `tenxgraph.storage.checkpointer` (needs the `pg_checkpoint` extra), and a `thread_id` in the run config. Long research runs can then be resumed by thread.
+
+**Serve with `10xgraph dev`.** Export the compiled graph as `app` from a module (for example `app = build_graph()` at the bottom of `graph.py`) and point `10xgraph.json` at it:
+
+```json
+{
+  "agent": "graph:app",
+  "env": ".env"
+}
+```
+
+Run `10xgraph dev` to serve it over HTTP and stream the same node updates to a client.
+
+## Next steps
+
+- [Multi-agent graphs](/docs/examples/multi-agent)
+- [Structured output](/docs/examples/structured-output)
+- [Streaming](/docs/examples/streaming)
+- [Persistence](/docs/examples/persistence)
+- [Serving](/docs/examples/serving)

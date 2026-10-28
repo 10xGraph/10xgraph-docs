@@ -1,0 +1,438 @@
+---
+title: "Long-Term Agent Memory with Qdrant and Mem0 in 10xGraph"
+seoTitle: "Long-term agent memory with Qdrant"
+description: "Give a 10xGraph Python agent long-term memory across sessions with MemoryConfig, a local Qdrant vector store or Mem0, user memory and shared agent memory."
+section: Examples
+group: "Memory and patterns"
+order: 27
+label: "Long-term memory"
+updated: "2026-10-28"
+faq:
+  - q: "How does the agent know which user a memory belongs to?"
+    a: "Every store operation uses the user_id in the run config. Memories written for one user_id are never returned for another, and the store raises if user_id is empty."
+  - q: "What is the difference between user memory and agent memory?"
+    a: "User memory is private to a user_id and the model can both search and write it. Agent memory is shared by all users, owned by system_user_id(agent_id), and the model can only search it."
+  - q: "Do memory writes block the response?"
+    a: "No. Writes run as background tasks so streaming is not delayed. Call aclose() on the compiled graph to flush pending writes before the process exits."
+---
+
+This example gives a Claude chat agent long-term memory that survives across conversations. A user tells the agent they are vegetarian and live in Lisbon. On a new thread with the same `user_id`, the agent still knows. The chat model is Anthropic `claude-sonnet-5-5`, and memories are embedded by OpenAI `text-embedding-3-small`.
+
+## What you will build
+
+A Claude chat agent that remembers facts between conversations. In the first session a user says they are vegetarian and live in Lisbon. In a second session, on a new thread with the same `user_id`, the agent recalls both facts. A different user sees none of it.
+
+`qdrant_memory.py` uses a local Qdrant store, so no cloud account is needed. `mem0_memory.py` uses the same agent configuration with `Mem0Store`, where Mem0 extracts and deduplicates the facts.
+
+## Key concepts
+
+- `MemoryConfig`: passed to `ReactAgent(memory=...)` or `Agent(memory=...)`. Registers the memory tools and adds a short memory section to the system prompt.
+- `ReadMode`: `POSTLOAD` (default) gives the model a `user_memory_tool` to search and remember. `PRELOAD` searches on every turn and attaches results to the user message, with no write tool. `NO_RETRIEVAL` turns retrieval off.
+- `UserMemoryConfig`: private per-user memory, keyed by `user_id` in the run config.
+- `AgentMemoryConfig`: shared memory that the model can only search. It is off by default and needs `agent_id` or `app_id`.
+- `system_user_id(name)`: the reserved owner id (`__system__:<name>`) for shared data such as agent memory.
+- `create_local_qdrant_store(path, embedding)`: file-based Qdrant, no server.
+- `OpenAIEmbedding`: embeds memories with `text-embedding-3-small`.
+- `Mem0Store`: a store backed by Mem0, with its own LLM and embedder configuration.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+```
+
+```bash
+pip install "10xgraph[anthropic,openai,qdrant]"      # qdrant_memory.py
+pip install "10xgraph[anthropic,openai,qdrant,mem0]" # mem0_memory.py
+export ANTHROPIC_API_KEY=...   # chat model
+export OPENAI_API_KEY=...      # embeddings (and Mem0's LLM in mem0_memory.py)
+```
+
+No Docker services are required. Both scripts store vectors in a temporary directory and delete it at the end.
+
+```bash
+python examples/long_term_memory/qdrant_memory.py
+python examples/long_term_memory/mem0_memory.py
+```
+
+## How the code works
+
+### qdrant_memory.py
+
+The store is a Qdrant database in a local folder. The embedding model turns each memory into a vector so it can be found by meaning.
+
+```python
+store = create_local_qdrant_store(
+    path=QDRANT_PATH,
+    embedding=OpenAIEmbedding(model="text-embedding-3-small"),
+    collection="assistant_memory",
+)
+```
+
+```python
+QDRANT_PATH = tempfile.mkdtemp(prefix="10xgraph-memory-")
+```
+
+A throwaway directory keeps the demo repeatable. Point `path` at a stable folder, or use `create_remote_qdrant_store`, to keep memories between runs.
+
+```python
+memory = MemoryConfig(
+    store=store,
+    # POSTLOAD (default): the model gets user_memory_tool and decides when to search or
+    #   remember. PRELOAD: relevant memories are searched on every turn and attached to the
+    #   user message, with no write tool. NO_RETRIEVAL: no memory tools or injection.
+    retrieval_mode=ReadMode.POSTLOAD,
+    limit=5,
+    score_threshold=0.0,
+    # User memory is on by default and keyed by the user_id in the run config.
+    user_memory=UserMemoryConfig(),
+    # Agent memory is shared by every user and read-only for the model. It is off by
+    # default and needs an agent_id (or app_id) to name its owner.
+    agent_memory=AgentMemoryConfig(enabled=True, agent_id="support-bot"),
+)
+```
+
+`MemoryConfig` bundles the store with the rules. `ReadMode.POSTLOAD` lets the model decide when to search or remember through `user_memory_tool`. User memory is on by default and keyed by the `user_id` in the run config. Agent memory is shared by every user and read-only for the model. It is off by default and needs an `agent_id` (or `app_id`) to name its owner.
+
+```python
+agent = ReactAgent(
+    model="claude-sonnet-5-5",
+    system_prompt=[
+        {
+            "role": "system",
+            "content": (
+                "You are a personal assistant. Save durable facts and preferences the "
+                "user tells you, and search memory before answering questions about them."
+            ),
+        }
+    ],
+    memory=memory,  # forwarded to the Agent, which registers the memory tools
+)
+```
+
+The agent only needs `memory=memory`. `ReactAgent` forwards it to its inner `Agent`, which registers `user_memory_tool` and `agent_memory_tool`. The system prompt tells the model to save durable facts and to search memory before answering.
+
+```python
+async def seed_agent_memory() -> None:
+    """Write one shared fact. Agent memory is owned by system_user_id(agent_id)."""
+    await store.asetup()
+    await store.astore(
+        {
+            "user_id": system_user_id("support-bot"),
+            "agent_id": "support-bot",
+            "thread_id": "support-bot",
+            "collection": "assistant_memory",
+        },
+        "Company policy: refunds are available within 30 days of purchase.",
+    )
+```
+
+Agent memory is seeded by writing as `system_user_id("support-bot")`, which is the owner the agent memory tool searches.
+
+```python
+async def say(app, text: str, user_id: str, thread_id: str) -> None:
+    config = {"user_id": user_id, "thread_id": thread_id}
+    result = await app.ainvoke({"messages": [Message.text_message(text)]}, config)
+    print(f"[{user_id}/{thread_id}] user: {text}")
+```
+
+Memory is scoped by the run config, not by the thread. Session 2 uses a new `thread_id` but the same `user_id`, so the chat history is empty and the only source of the facts is the store.
+
+```python
+async def main() -> None:
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+    await seed_agent_memory()
+
+    # Session 1: the agent saves facts about alice.
+    await say(app, "I'm vegetarian and I live in Lisbon. Please remember that.", "alice", "s1")
+    await app.aclose()  # memory writes run in the background; aclose() flushes them
+
+    # Session 2: new thread, same user_id. No chat history is shared, only the store.
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+    await say(app, "Suggest a dinner idea for tonight, close to home.", "alice", "s2")
+    await say(app, "What is the refund policy?", "alice", "s2")  # agent memory
+
+    # A different user_id gets a different slice of the store.
+    await say(app, "What do you know about my diet?", "bob", "s3")
+
+    await app.aclose()
+    shutil.rmtree(QDRANT_PATH, ignore_errors=True)
+```
+
+Writes happen in the background, so the script calls `await app.aclose()` between sessions to flush them before session 2 searches. The last call uses `bob`, who gets a different slice of the store.
+
+### mem0_memory.py
+
+Here the store is `Mem0Store`. Mem0 extracts and deduplicates facts itself, using its own LLM and embedder. This config is independent of the Claude chat model.
+
+```python
+MEM0_CONFIG = {
+    "vector_store": {
+        "provider": "qdrant",
+        "config": {
+            "collection_name": "assistant_mem0",
+            "path": QDRANT_PATH,
+            "embedding_model_dims": 1536,  # text-embedding-3-small
+        },
+    },
+    "embedder": {"provider": "openai", "config": {"model": "text-embedding-3-small"}},
+    "llm": {"provider": "openai", "config": {"model": "gpt-5-mini"}},
+}
+```
+
+```python
+store = Mem0Store(config=MEM0_CONFIG, app_id="assistant-demo")
+```
+
+`app_id` scopes memories in Mem0 and defaults to a generic value, so set your own.
+
+```python
+    memory=MemoryConfig(
+        store=store,
+        retrieval_mode=ReadMode.POSTLOAD,  # the model calls user_memory_tool
+        limit=5,
+    ),
+```
+
+The rest of the file matches the Qdrant version: two sessions on separate threads, a flush with `aclose()` in between, and the temporary Qdrant folder removed at the end.
+
+## Full code
+
+<Tabs>
+<TabItem label="qdrant_memory.py">
+
+```python
+"""Long-term memory for a Claude agent on a local Qdrant store.
+
+Session 1 tells the agent some facts about a user. Session 2 is a brand new thread for
+the same user_id and recalls them. A second user sees none of it. The example also shows
+the three retrieval modes and shared agent memory (see the README).
+
+Run:  python examples/long_term_memory/qdrant_memory.py
+"""
+
+import asyncio
+import shutil
+import tempfile
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+from tenxgraph.storage.store import (
+    AgentMemoryConfig,
+    MemoryConfig,
+    OpenAIEmbedding,
+    ReadMode,
+    UserMemoryConfig,
+    create_local_qdrant_store,
+    system_user_id,
+)
+
+
+load_dotenv()
+
+# A throwaway directory keeps the demo repeatable. Point `path` at a stable folder
+# (or use create_remote_qdrant_store) to keep memories between runs.
+QDRANT_PATH = tempfile.mkdtemp(prefix="10xgraph-memory-")
+
+store = create_local_qdrant_store(
+    path=QDRANT_PATH,
+    embedding=OpenAIEmbedding(model="text-embedding-3-small"),
+    collection="assistant_memory",
+)
+
+memory = MemoryConfig(
+    store=store,
+    # POSTLOAD (default): the model gets user_memory_tool and decides when to search or
+    #   remember. PRELOAD: relevant memories are searched on every turn and attached to the
+    #   user message, with no write tool. NO_RETRIEVAL: no memory tools or injection.
+    retrieval_mode=ReadMode.POSTLOAD,
+    limit=5,
+    score_threshold=0.0,
+    # User memory is on by default and keyed by the user_id in the run config.
+    user_memory=UserMemoryConfig(),
+    # Agent memory is shared by every user and read-only for the model. It is off by
+    # default and needs an agent_id (or app_id) to name its owner.
+    agent_memory=AgentMemoryConfig(enabled=True, agent_id="support-bot"),
+)
+
+agent = ReactAgent(
+    model="claude-sonnet-5-5",
+    system_prompt=[
+        {
+            "role": "system",
+            "content": (
+                "You are a personal assistant. Save durable facts and preferences the "
+                "user tells you, and search memory before answering questions about them."
+            ),
+        }
+    ],
+    memory=memory,  # forwarded to the Agent, which registers the memory tools
+)
+
+
+async def seed_agent_memory() -> None:
+    """Write one shared fact. Agent memory is owned by system_user_id(agent_id)."""
+    await store.asetup()
+    await store.astore(
+        {
+            "user_id": system_user_id("support-bot"),
+            "agent_id": "support-bot",
+            "thread_id": "support-bot",
+            "collection": "assistant_memory",
+        },
+        "Company policy: refunds are available within 30 days of purchase.",
+    )
+
+
+async def say(app, text: str, user_id: str, thread_id: str) -> None:
+    config = {"user_id": user_id, "thread_id": thread_id}
+    result = await app.ainvoke({"messages": [Message.text_message(text)]}, config)
+    print(f"[{user_id}/{thread_id}] user: {text}")
+    print("assistant:", result["messages"][-1].text(), "\n")
+
+
+async def main() -> None:
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+    await seed_agent_memory()
+
+    # Session 1: the agent saves facts about alice.
+    await say(app, "I'm vegetarian and I live in Lisbon. Please remember that.", "alice", "s1")
+    await app.aclose()  # memory writes run in the background; aclose() flushes them
+
+    # Session 2: new thread, same user_id. No chat history is shared, only the store.
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+    await say(app, "Suggest a dinner idea for tonight, close to home.", "alice", "s2")
+    await say(app, "What is the refund policy?", "alice", "s2")  # agent memory
+
+    # A different user_id gets a different slice of the store.
+    await say(app, "What do you know about my diet?", "bob", "s3")
+
+    await app.aclose()
+    shutil.rmtree(QDRANT_PATH, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="mem0_memory.py">
+
+```python
+"""Long-term memory for a Claude agent backed by Mem0.
+
+Same agent-level `MemoryConfig` as qdrant_memory.py, but the store is `Mem0Store`.
+Mem0 extracts and deduplicates facts itself, using its own LLM and embedder (set in the
+config dict below, OpenAI here). Mem0 can keep its vectors in Qdrant.
+
+Run:  python examples/long_term_memory/mem0_memory.py
+"""
+
+import asyncio
+import shutil
+import tempfile
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+from tenxgraph.storage.store import Mem0Store, MemoryConfig, ReadMode
+
+
+load_dotenv()
+
+QDRANT_PATH = tempfile.mkdtemp(prefix="10xgraph-mem0-")
+
+# Mem0's own configuration: where it keeps vectors, which LLM extracts facts, which
+# model embeds them. This is independent of the chat model the agent uses.
+MEM0_CONFIG = {
+    "vector_store": {
+        "provider": "qdrant",
+        "config": {
+            "collection_name": "assistant_mem0",
+            "path": QDRANT_PATH,
+            "embedding_model_dims": 1536,  # text-embedding-3-small
+        },
+    },
+    "embedder": {"provider": "openai", "config": {"model": "text-embedding-3-small"}},
+    "llm": {"provider": "openai", "config": {"model": "gpt-5-mini"}},
+}
+
+# app_id scopes memories in Mem0 and defaults to a generic value, so set your own.
+store = Mem0Store(config=MEM0_CONFIG, app_id="assistant-demo")
+
+agent = ReactAgent(
+    model="claude-sonnet-5-5",
+    system_prompt=[
+        {
+            "role": "system",
+            "content": "You are a personal assistant. Remember what users tell you.",
+        }
+    ],
+    memory=MemoryConfig(
+        store=store,
+        retrieval_mode=ReadMode.POSTLOAD,  # the model calls user_memory_tool
+        limit=5,
+    ),
+)
+
+
+async def say(app, text: str, user_id: str, thread_id: str) -> None:
+    config = {"user_id": user_id, "thread_id": thread_id}
+    result = await app.ainvoke({"messages": [Message.text_message(text)]}, config)
+    print(f"[{user_id}/{thread_id}] user: {text}")
+    print("assistant:", result["messages"][-1].text(), "\n")
+
+
+async def main() -> None:
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+    await say(app, "My dog is called Biscuit and I work night shifts.", "alice", "s1")
+    await app.aclose()  # flush background memory writes
+
+    app = agent.compile(checkpointer=InMemoryCheckpointer())
+    await say(app, "What is my dog's name, and when do I work?", "alice", "s2")
+    await app.aclose()
+    shutil.rmtree(QDRANT_PATH, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/long_term_memory](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/long_term_memory)
+
+## Expected output
+
+Illustrative output. Wording varies by run.
+
+```text
+[alice/s1] user: I'm vegetarian and I live in Lisbon. Please remember that.
+assistant: Saved. I'll keep in mind that you're vegetarian and based in Lisbon.
+
+[alice/s2] user: Suggest a dinner idea for tonight, close to home.
+assistant: Since you're vegetarian and in Lisbon, try a bean and chestnut stew...
+
+[alice/s2] user: What is the refund policy?
+assistant: Refunds are available within 30 days of purchase.
+
+[bob/s3] user: What do you know about my diet?
+assistant: I don't have anything saved about your diet yet.
+```
+
+## Using a different model
+
+Change the model string, for example `ReactAgent(model="gpt-5-mini", ...)` with `pip install "10xgraph[openai,qdrant]"`, or `model="gemini-2.5-flash"` with the `google-genai` extra. To embed with Google instead, swap `OpenAIEmbedding` for `GoogleEmbedding`. The memory configuration does not change.
+
+## Next steps
+
+- [RAG over a knowledge base](/docs/examples/rag)
+- [Checkpointers and thread state](/docs/examples/persistence)
+- [Skills](/docs/examples/skills)
