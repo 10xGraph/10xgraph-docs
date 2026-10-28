@@ -42,7 +42,7 @@ Add the `ag_ui` key to your `10xgraph.json` configuration:
 Then start the server:
 
 ```bash
-10xgraph api
+10xgraph dev --no-open
 ```
 
 The endpoint `POST /v1/ag-ui` is now ready and appears in Swagger at `/docs` under the **AG-UI** tag. If you enable AG-UI without installing the extra, the server exits at startup and prints the install command.

@@ -4,7 +4,7 @@ description: Test your agent with the 10xGraph playground, a hosted UI for inter
 section: "API server"
 group: "Tools"
 order: 190
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "Is the playground hosted locally or on the web?"
     answer: "The playground UI is hosted by 10xScale on the web. Your agent runs locally, and the browser communicates with your local API server via the backendUrl parameter. The playground never has access to your code or data; only network requests travel between your browser and your API."
@@ -14,7 +14,7 @@ faq:
     answer: "See the Playground Troubleshooting page for detailed diagnosis steps, including how to verify your API is running, check the backendUrl, and inspect browser and API logs."
 ---
 
-The 10xGraph playground is a hosted web application that lets you test your agent interactively during development. Run `10xgraph play` to start your API and open the playground in one command. The playground connects to your local API over the network, so you can see messages, trace execution, inspect state, and debug tools in real time without writing any client code.
+The 10xGraph playground is a hosted web application that lets you test your agent interactively during development. Run `10xgraph dev` to start your API and open the playground in one command. The playground connects to your local API over the network, so you can see messages, trace execution, inspect state, and debug tools in real time without writing any client code.
 
 ## Prerequisites
 
@@ -27,7 +27,7 @@ The 10xGraph playground is a hosted web application that lets you test your agen
 From the directory containing your `10xgraph.json`, run:
 
 ```bash
-10xgraph play --host 127.0.0.1 --port 8000
+10xgraph dev --host 127.0.0.1 --port 8000
 ```
 
 The command validates `10xgraph.json`, starts the API server with auto-reload on, and opens the hosted playground in your browser once the API responds. The terminal shows a progress timeline and then a line like:
@@ -120,14 +120,14 @@ Build a realtime agent with [Use realtime audio](/docs/guides/use-realtime-audio
 
 **Files** is a placeholder marked "Soon" in the rail; file upload is not wired up in the playground yet. Upload files over the API endpoint `POST /v1/files/upload` or with the TypeScript client (see [Files and multimodal](/docs/client/files-and-multimodal)).
 
-## Customizing the playground command
+## Customizing the dev command
 
 ### Use a different config file
 
 If you have multiple `10xgraph.json` files (e.g., for dev vs staging), specify which one:
 
 ```bash
-10xgraph play --config ./config/staging.json --port 8001
+10xgraph dev --config ./config/staging.json --port 8001
 ```
 
 ### Use a different host or port
@@ -135,7 +135,7 @@ If you have multiple `10xgraph.json` files (e.g., for dev vs staging), specify w
 By default, the playground listens on `127.0.0.1:8000`. To listen on a different address:
 
 ```bash
-10xgraph play --host 0.0.0.0 --port 9000
+10xgraph dev --host 0.0.0.0 --port 9000
 ```
 
 Be aware that `0.0.0.0` exposes the server to your entire network and beyond if port-forwarded.
@@ -150,7 +150,7 @@ Configure secrets one of two ways:
 
 ```bash
 export GOOGLE_API_KEY="..."
-10xgraph play
+10xgraph dev
 ```
 
 The server also loads the `.env` file named by the `env` key in `10xgraph.json`. Your graph module reads the variables when it is imported:
@@ -185,19 +185,11 @@ Your tools and nodes can then inject them as needed.
 
 ## Stopping the playground
 
-Press `Ctrl+C` in the terminal where `10xgraph play` is running to stop both the API server and the playground. The browser tab remains open but shows "Connection failed" since the API is no longer available.
+Press `Ctrl+C` in the terminal where `10xgraph dev` is running to stop both the API server and the playground. The browser tab remains open but shows "Connection failed" since the API is no longer available.
 
-## Comparing play, dev, and api commands
+## One command: dev
 
-The `10xgraph play` command is one of three ways to run your API locally:
-
-| Command | Starts API | Opens playground | Best for |
-|---|---|---|---|
-| `10xgraph play` | Yes | Yes, automatically | Quick interactive testing during development |
-| `10xgraph dev` | Yes | Yes by default; pass `--no-open` to skip | Local development server |
-| `10xgraph api` | Yes | No | Development server without the browser step (CI, programmatic clients) |
-
-All three start the same FastAPI server with Uvicorn. All three auto-reload by default (`--no-reload` turns it off) and run the Uvicorn development server, which the CLI marks as not for production; for production, build an image with `10xgraph build` (it runs Gunicorn).
+`10xgraph dev` is the only command that starts the server. It opens the playground by default; pass `--no-open` to skip the browser step (CI, programmatic clients). It reloads on file changes by default (`--no-reload` turns that off) and runs the Uvicorn development server, which the CLI marks as not for production. For production, build an image with `10xgraph build` (it runs Gunicorn). The commands `10xgraph play` and `10xgraph api` were removed in `10xgraph-api` 0.9.0.
 
 ## Sharing your agent with others
 

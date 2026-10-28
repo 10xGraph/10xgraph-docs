@@ -3,10 +3,10 @@ title: "Evaluation example"
 seoTitle: "Build an agent evaluation suite"
 description: "Walk through the weather-agent evaluation example: eval cases, QuickEval, trajectory criteria, user simulation and CI reports."
 section: "Examples"
-group: "Production"
+group: "Testing and operations"
 order: 210
 label: "Evaluation"
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Why are the example tests skipped?"
     a: "Most test modules call pytest.skip at import time so a root-level pytest run does not call a live model. Remove that call in the module you want to run."
@@ -20,7 +20,7 @@ This example evaluates a small weather agent end to end: it defines eval cases, 
 
 ## What the example contains
 
-The example lives in `agentflow/examples/evaluation`. One shared weather agent graph backs five test folders, each focused on a different part of the evaluation API.
+The example lives in `examples/evaluation`. One shared weather agent graph backs five test folders, each focused on a different part of the evaluation API.
 
 | Path | What it shows |
 |---|---|
@@ -37,7 +37,7 @@ The example lives in `agentflow/examples/evaluation`. One shared weather agent g
 The tests call a live Gemini model, so install the Google extra and set an API key first. Each test module calls `pytest.skip` at import time so a root pytest run stays offline; delete that call in the module you want to run.
 
 ```bash
-# From the agentflow/ directory of the repo
+# From the repository root
 pip install "10xgraph[google-genai]"
 export GEMINI_API_KEY="your-key"   # GOOGLE_API_KEY also works
 
@@ -45,7 +45,7 @@ export GEMINI_API_KEY="your-key"   # GOOGLE_API_KEY also works
 pytest examples/evaluation/test4/ -v -s
 ```
 
-The tests use relative imports (`from ..test_graph import ...`), so run pytest from the `agentflow/` directory rather than from inside the example folder.
+The tests use relative imports (`from ..test_graph import ...`), so run pytest from the repository root rather than from inside the example folder.
 
 ## The weather agent under test
 

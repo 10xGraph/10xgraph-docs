@@ -16,6 +16,8 @@ faq:
 
 Remote tools are trusted tool schemas configured on the server that the model can call but the client executes. This page covers server-side setup: how to declare remote tools in 10xgraph.json, attach them to graph nodes, and verify they are available when the model runs.
 
+Remote tools are trusted by configuration, not by the client; see the [security model](/docs/production/security-model) for the trust boundary.
+
 ## Why remote tools
 
 A remote tool runs client-side code, browser APIs, local databases, user-specific resources, that the server must not execute. The model calls them by name as if they were server tools; the framework routes the call to the client, the client runs the handler, and returns the result to the graph.
@@ -171,7 +173,7 @@ The server validates remote tool configurations at startup. Configuration errors
 - `parameters.type` must be `"object"`, `properties` must be an object and `required` a list of strings.
 - The `node` must exist in the compiled graph and be a `ToolNode`.
 
-If validation or attachment fails, the server fails to start. Run `10xgraph audit` to check the config file before starting, and read the `10xgraph api` output for the message.
+If validation or attachment fails, the server fails to start. Run `10xgraph audit` to check the config file before starting, and read the `10xgraph dev` output for the message.
 
 ## Examples
 

@@ -6,19 +6,19 @@ section: Examples
 group: "Multi-agent"
 order: 160
 label: Handoff
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "What is the difference between a handoff and regular routing?"
-    a: "In regular routing, your graph code decides the next node. With handoff tools, the model decides to transfer to another specialist by calling a transfer_to_<name> tool, and the graph jumps to that node."
+    a: "In regular routing, your graph code decides the next node. With handoff tools, the model decides to transfer to another specialist by calling a handoff tool named transfer_to_<name>, and the graph jumps to that node."
   - q: "Can I use handoffs with prebuilt agents?"
     a: "Yes. SwarmAgent and SupervisorTeamAgent generate handoff tools for you. This example builds the same pattern by hand so you can see each part."
   - q: "Do I need explicit edges from tool nodes back to agents?"
-    a: "No. When a tool node sees a transfer_to_<name> call, it skips running the tool and returns a Command that sends the graph to the node with that name."
+    a: "No. When a tool node sees a call to a registered handoff tool, it skips running the tool and returns a Command that sends the graph to the target node. A transfer_to_<name> call to a tool that was not made with create_handoff_tool and registered on that tool node is an ordinary unknown tool call and is not routed."
 ---
 
 A handoff lets an agent pass control to another agent by calling a tool named `transfer_to_<name>`. This example wires three agents (coordinator, researcher, writer) that delegate to each other with no fixed pipeline. The model chooses who works next, and the graph jumps there.
 
-The source is `agentflow/examples/handoff/handoff_multi_agent.py` in the repository.
+The source is `examples/handoff/handoff_multi_agent.py` in the repository.
 
 ## Run the example
 
@@ -27,18 +27,18 @@ You need the Google GenAI extra and a Gemini key. The example loads a `.env` fil
 ```bash
 pip install "10xgraph[google-genai]" python-dotenv
 export GEMINI_API_KEY=your-key-here   # GOOGLE_API_KEY also works
-python agentflow/examples/handoff/handoff_multi_agent.py
+python examples/handoff/handoff_multi_agent.py
 ```
 
 The script sends "Please research quantum computing and write a brief article about it." and prints the full message history, including every tool call. Model output varies between runs.
 
 ## How the handoff works
 
-A handoff tool is a normal tool whose name starts with `transfer_to_`. Before a tool node runs any tool calls, it checks each name for that prefix. On a match it does not run the tool. It returns a `Command` whose `goto` is the text after the prefix.
+A handoff tool is a tool made by `create_handoff_tool` and registered on the tool node. Its name is `transfer_to_<name>`, and it records its target. Before a tool node runs any tool calls, it checks each name against the handoff tools registered on that node. A name that only starts with `transfer_to_` does not count. On a match it does not run the tool. It returns a `Command` whose `goto` is the target stored on the tool. A `goto` to a node that is not in the graph raises `GraphError` (`GRAPH_007`).
 
 <aside class="callout callout-warning" role="warning"><p class="callout-title">The target must equal the node name</p>
 
-The text after `transfer_to_` is used as the node name as is, with no case conversion. The code below passes the exact node names (`"RESEARCHER"`) to `create_handoff_tool`, so the tool is `transfer_to_RESEARCHER` and the jump lands on the node `RESEARCHER`.
+The target passed to `create_handoff_tool` is used as the node name as is, with no case conversion. The code below passes the exact node names (`"RESEARCHER"`) to `create_handoff_tool`, so the tool is `transfer_to_RESEARCHER` and the jump lands on the node `RESEARCHER`.
 
 </aside>
 

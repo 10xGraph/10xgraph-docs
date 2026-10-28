@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Observability and operations"
 order: 410
 label: Configure ID generators
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 By default, 10xGraph generates UUID v4 strings for threads, runs and messages. UUIDs are collision-resistant and require no coordination, but they are not sortable by time and may not fit your database schema (if you have integer primary keys) or your observability system (if you prefer short, human-readable codes). You can swap the ID generator to match your infrastructure.
@@ -215,3 +215,7 @@ print(gen.generate(), gen.id_type)  # e.g. Xy9aBc3d IDType.STRING
 ```
 
 For more details on the ID generator API, class hierarchy, and all built-in implementations, see the [ID generator reference](/docs/reference/python/id-generator).
+
+## Run it in production
+
+The API server runs several workers, so IDs must stay unique across processes. Pick a generator that does not depend on in-process counters, and configure the matching values in your environment as listed in [Configure the server](/docs/server/configure). See [Scaling and reliability](/docs/production/scaling).

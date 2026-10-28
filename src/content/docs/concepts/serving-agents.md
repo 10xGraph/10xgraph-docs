@@ -8,13 +8,13 @@ order: 160
 updated: "2026-10-27"
 ---
 
-The 10xGraph API server transforms a compiled graph into a production-ready HTTP service. This page explains how the server loads and runs your agent, how authentication and authorization protect it, how publishers stream execution events to external systems, and what configuration controls each piece.
+The 10xGraph API server transforms a compiled graph into a production-ready HTTP service. This page explains how the server loads and runs your agent, how authentication and authorization protect it, how publishers stream execution events to external systems, and what configuration controls each piece. For the summary of what you get when you serve with `10xgraph-api`, see [Production readiness](/docs/production).
 
 ## How the server loads and runs your graph
 
 ```mermaid
 flowchart TB
-  subgraph "10xgraph api process"
+  subgraph "10xgraph server process"
     UV[Uvicorn ASGI]
     FA[FastAPI]
     RATE[RateLimitMiddleware]
@@ -34,7 +34,7 @@ flowchart TB
   GRAPH -->|EventModel| PUB_C & PUB_R & PUB_K & PUB_Q & PUB_O
 ```
 
-The API server is a Uvicorn ASGI process that loads your compiled graph **once at startup** and reuses it for every request. This avoids module-loading overhead. The graph itself is stateless; per-request isolation comes from the `thread_id` in the request. In development, `10xgraph api --reload` auto-restarts on file changes. In production, run multiple workers behind a load balancer and use `PgCheckpointer` to share state across them.
+The API server is a Uvicorn ASGI process that loads your compiled graph **once at startup** and reuses it for every request. This avoids module-loading overhead. The graph itself is stateless; per-request isolation comes from the `thread_id` in the request. In development, `10xgraph dev` auto-restarts on file changes (`--no-reload` turns that off). In production, the image from `10xgraph build` runs Gunicorn with multiple workers; put them behind a load balancer and use `PgCheckpointer` to share state across them.
 
 ## Configuration: `10xgraph.json`
 
@@ -96,10 +96,10 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
 **Starting the server:**
 
 ```bash
-10xgraph api                                    # development, auto-reload
-10xgraph api --config custom.json              # explicit config path (also -c)
-10xgraph api --host 0.0.0.0 --port 8000        # bind address
-10xgraph play                                   # API + playground in browser
+10xgraph dev                                    # development server, auto-reload, opens the hosted playground
+10xgraph dev --no-open                         # server only
+10xgraph dev --config custom.json              # explicit config path (also -c)
+10xgraph dev --host 0.0.0.0 --port 8000        # bind address
 ```
 
 ## REST endpoints and request flow

@@ -147,6 +147,6 @@ These are the status codes the server returns. Routes document their own specifi
 | `413` | Request body over `MAX_REQUEST_SIZE` (default 10 MB), or upload over `MEDIA_MAX_SIZE_MB` (default 25) |
 | `415` | Uploaded content type not allowed |
 | `422` | Request validation error (malformed body or invalid parameter), a request over the [size limits](/docs/reference/rest-api/graph) (500 messages, 100 blocks per message, 1,000,000 characters of text), or a resume answer that fails the interrupt's `response_schema` |
-| `429` | Rate limit exceeded. Body has `error.code` `RATE_LIMIT_EXCEEDED`; the `Retry-After` and `X-RateLimit-*` headers say when to retry |
+| `429` | Rate limit exceeded. Body has `error.code` `RATE_LIMIT_EXCEEDED`; the `Retry-After` and `X-RateLimit-*` headers say when to retry. The same status is returned when a user has more than `runs.max_concurrent_per_user` runs in flight (default 10); that body has code `HTTPException` and no `Retry-After` |
 | `500` | Unexpected server error |
 | `503` | Checkpointer or storage temporarily unavailable |

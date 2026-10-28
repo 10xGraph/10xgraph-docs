@@ -273,6 +273,10 @@ The caller tried to access a thread they don't own, but the ownership check pass
 
 Fix: Ensure your authorization backend (`OwnershipAuthorizationBackend` or a custom one) checks thread ownership. For a custom check, call `await checkpointer.aget_thread_owner(thread_id)` and compare.
 
+## Run it in production
+
+The server resolves the caller from your auth backend and checks these scopes on every route, so the list here is what a deployed API enforces. Configure `auth` and `authorization` in `10xgraph.json` as described in [Server auth](/docs/server/auth), and read how the pieces fit in the [Security model](/docs/production/security-model).
+
 ## Related pages
 
 - `/docs/server/auth`: Configure authentication and authorization on the API server.

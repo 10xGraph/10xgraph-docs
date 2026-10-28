@@ -6,7 +6,7 @@ section: Examples
 group: "Tools and MCP"
 order: 130
 label: GitHub MCP
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Which tools does the agent get from the GitHub MCP server?"
     a: "The ToolNode is created with an empty tool list, so every tool comes from the remote server. The agent sees whatever the endpoint exposes for your token."
@@ -19,7 +19,7 @@ This example connects 10xGraph to the hosted GitHub MCP (Model Context Protocol)
 
 ## Run the example
 
-The code is in `agentflow/examples/github-mcp/`. `git_mcp.py` lists the commits of a repository, and `mcp_file_download.py` downloads a file. Both need a GitHub token with access to the repositories you query and a Google API key for Gemini.
+The code is in `examples/github-mcp/`. `git_mcp.py` lists the commits of a repository, and `mcp_file_download.py` downloads a file. Both need a GitHub token with access to the repositories you query and a Google API key for Gemini.
 
 ```bash
 pip install "10xgraph[google-genai]" fastmcp python-dotenv

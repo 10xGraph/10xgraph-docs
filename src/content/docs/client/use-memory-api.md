@@ -284,6 +284,7 @@ await client.forgetMemories({
 | Problem | Cause | Solution |
 |---------|-------|----------|
 | `TenxGraphError` status 404 on `getMemory()` | Memory ID not found or deleted. | Verify the ID is correct. Use `listMemories()` to check what exists. |
+| `TenxGraphError` status 422 | Empty `query`, a `query` over 8,000 characters, string `content` over 100,000 characters, or `limit` outside 1 to 100 on search. | Shorten or split the text. The server only forwards the `infer` and `replace_metadata` entries of `options`. |
 | `TenxGraphError` status 503 | Store not configured or unreachable. | Check the `store` field in `10xgraph.json` and ensure the store backend is running. |
 | Empty search results | Score threshold too high, or no memories match the type/category. | Lower `score_threshold`, remove the type filter, or store more memories. |
 | Irrelevant search results | Query is too vague, or memories are poorly written. | Use specific queries. Store memories with clear, descriptive content. |

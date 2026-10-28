@@ -5,7 +5,7 @@ section: Examples
 group: "Foundations"
 order: 20
 label: Agent Class Pattern
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: What is the difference between the Agent class and plain nodes?
     answer: The Agent class wraps LLM calls, message conversion, and tool integration. Plain nodes are lower-level functions you write directly. Use Agent for LLM orchestration, plain nodes for deterministic logic.
@@ -23,10 +23,10 @@ This is a foundation pattern you extend for search agents, customer support, dat
 
 ## How to run it
 
-Clone the 10xGraph repository and run the example from the `agentflow/examples/agent-class/` directory:
+Clone the 10xGraph repository and run the example from the `examples/agent-class/` directory:
 
 ```bash
-cd agentflow/examples/agent-class
+cd 10xGraph/examples/agent-class
 pip install "10xgraph[google-genai]"
 export GEMINI_API_KEY="<your_key>"
 python graph.py
@@ -74,7 +74,7 @@ This loop handles multi-turn conversations where the agent calls tools multiple 
 
 A tool is a Python function with type hints. The type hints and docstring become the JSON schema the LLM sees.
 
-```python title="agentflow/examples/agent-class/graph.py"
+```python title="examples/agent-class/graph.py"
 def get_weather(location: str) -> str:
     """Get the current weather for a specific location."""
     return f"The weather in {location} is sunny"
@@ -195,7 +195,7 @@ The messages come back in order: the user message, an assistant message carrying
 
 ## Complete source
 
-```python title="agentflow/examples/agent-class/graph.py"
+```python title="examples/agent-class/graph.py"
 import os
 
 from dotenv import load_dotenv
@@ -307,7 +307,7 @@ if __name__ == "__main__":
 - Add more tools: pass additional functions to `ToolNode([get_weather, get_news, search])`.
 - Add custom state: subclass `AgentState` to track user context, session data, or conversation metadata.
 - Enable memory: use a `Checkpointer` (SQLite or Postgres+Redis) to persist state across runs on the same thread.
-- Serve over HTTP: create a `10xgraph.json` config and run `10xgraph api` to expose the graph as a REST API.
+- Serve over HTTP: create a `10xgraph.json` config and run `10xgraph dev --no-open` to expose the graph as a REST API.
 
 ## See also
 

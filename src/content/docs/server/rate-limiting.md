@@ -4,7 +4,7 @@ description: How to enable and configure the built-in sliding-window rate limite
 section: "API server"
 group: "Security"
 order: 70
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: Do I need rate limiting in development?
     answer: "In development, you can run without limits. In any production environment, rate limiting protects your infrastructure from both accidental overuse and abuse."
@@ -17,6 +17,8 @@ faq:
 Rate limiting protects your API from overuse and abuse by enforcing a ceiling on how many requests a client can make within a time window. Without it, a single user or malicious actor can consume all your infrastructure resources and degrade service for everyone. The 10xGraph API server includes a built-in sliding-window rate limiter that you enable with a few lines of configuration.
 
 By default, the 10xGraph API accepts unlimited requests. This guide shows how to enable the rate limiter, choose a backend suitable for your deployment, and handle edge cases like proxy headers and WebSocket connections.
+
+Rate limits and run caps are part of how the server scales safely; see [scaling and reliability](/docs/production/scaling) and the [security model](/docs/production/security-model).
 
 ## How it works
 
@@ -51,7 +53,7 @@ Each client IP can make up to `100` requests every `60` seconds. Health-check an
 **Verify it works:** Start the server and make requests from the same IP until you exceed the limit.
 
 ```bash
-10xgraph api
+10xgraph dev --no-open
 ```
 
 In another terminal, test the limiter:
@@ -131,7 +133,7 @@ The `${RATE_LIMIT_REDIS_URL}` placeholder is expanded from the environment at st
 redis-server
 
 # Run the server
-10xgraph api
+10xgraph dev --no-open
 
 # In another terminal, hammer it with concurrent requests
 ab -n 2000 -c 50 http://localhost:8000/v1/graph/invoke

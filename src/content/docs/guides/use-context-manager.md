@@ -4,7 +4,7 @@ description: "Keep message history within your LLM's context window using trimmi
 section: "Build agents"
 group: "State, memory and context"
 order: 260
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Do I need a context manager?"
     a: "Only if your agent runs for many turns and messages accumulate beyond the model's context window. For short-lived conversations, it is not necessary. Use one if you see truncation errors or degraded quality after many exchanges."
@@ -258,6 +258,10 @@ Context reduced to 8 messages; cumulative summary length=450 chars
 | Tool results disappear from responses | `remove_tool_msgs=True` is too aggressive for your use case. | Set `remove_tool_msgs=False` (default) or keep tool results in `keep_recent`. |
 | `SummaryContextManager` fails silently | The summarization model or API key is misconfigured. | Check logs with `logging.getLogger("tenxgraph.state.summary")` set to `DEBUG`. Verify your API key and model name. |
 | Summary gets very long over time | Each summarization appends to the previous summary, accumulating length. | Lower `max_messages` to trigger summarization more often, or increase `keep_recent` to retain more recent context. |
+
+## Run it in production
+
+Trimming or summarizing context keeps every thread's stored state and your token cost bounded, which matters once many users share one database. There is no enforced maximum state size. See [Scaling and reliability](/docs/production/scaling) and [Errors and limits](/docs/concepts/errors-and-limits).
 
 ## Next steps
 

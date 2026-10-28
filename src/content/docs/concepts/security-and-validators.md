@@ -4,10 +4,10 @@ description: "How input validators and PromptInjectionValidator work, the author
 section: Concepts
 order: 170
 group: Serving
-updated: "2026-10-26"
+updated: "2026-10-27"
 ---
 
-Validators are checks that run on incoming messages before a graph executes them. A validator subclasses `BaseValidator`, is registered on a `CallbackManager`, and raises `ValidationError` to reject unsafe input. Authorization defines who can call which endpoints and which scopes a caller has inside the graph. Together, they form a two-layer security model. Both reduce risk but do not eliminate it.
+Validators are checks that run on incoming messages before a graph executes them. A validator subclasses `BaseValidator`, is registered on a `CallbackManager`, and raises `ValidationError` to reject unsafe input. Authorization defines who can call which endpoints and which scopes a caller has inside the graph. Together, they form a two-layer security model. Both reduce risk but do not eliminate it. For the full list of what the server enforces and what it leaves to you, see the [Security model](/docs/production/security-model).
 
 ## The two protection layers
 
@@ -133,15 +133,15 @@ This validator detects prompt injection and jailbreak attempts using pattern mat
 - Regex patterns for common instruction-override tricks (e.g., `"ignore all previous instructions"`)
 - Role manipulation attempts (e.g., `"you are now a ..."`, `"pretend as a ..."`)
 - System prompt leakage techniques (e.g., `"Reveal the system prompt"`)
-- Encoding obfuscation (Base64 payloads that decode to suspicious keywords, messages that are mostly non-ASCII)
+- Encoding obfuscation (Base64 payloads that decode to suspicious keywords, hidden Unicode tag characters, emoji variation selectors and bidirectional overrides, and Latin and Cyrillic letters mixed inside one word). Non-English text on its own is not flagged, so messages in any language pass.
 - Delimiter confusion (e.g., `"--- END OF INSTRUCTIONS ---"`, `<system>` tags)
 - Three or more suspicious keywords in a single message (e.g., `"bypass"`, `"override"`, `"reveal"`)
 
 Constructor parameters:
 
 - `strict_mode=True` (default): Raises `ValidationError` on detection.
-- `strict_mode=False`: Logs a warning and allows the message through without raising (useful for auditing without breaking the user experience).
-- `max_length=10000` (default): Rejects messages longer than this.
+- `strict_mode=False`: Logs a warning and allows the message through without raising (useful for auditing without breaking the user experience). Pattern matching then covers only the first `max_length` characters.
+- `max_length=10000` (default): Rejects messages longer than this. The length check runs before any pattern matching.
 - `blocked_patterns=None` (optional): Add custom regex patterns to block.
 - `suspicious_keywords=None` (optional): Add domain-specific suspicious keywords (e.g., `["refund", "cancel", "override"]` for a support agent).
 

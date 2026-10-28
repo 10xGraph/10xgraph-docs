@@ -5,7 +5,7 @@ section: "Build agents"
 group: "State, memory and context"
 order: 230
 label: Set up checkpointing
-updated: "2026-10-26"
+updated: "2026-10-27"
 ---
 
 A checkpointer persists your graph state after every node so that multi-turn conversations can resume across separate requests, and interrupted executions can pick up where they left off. Without a checkpointer, every `invoke()` call starts fresh with an empty state. This guide shows you how to choose the right checkpointer for your deployment and configure it completely.
@@ -287,9 +287,9 @@ export REDIS_URL="redis://localhost:6379/0"
 python app.py
 ```
 
-## Using with 10xgraph api
+## Using with the API server
 
-When serving your graph via `10xgraph api`, the checkpointer is part of your compiled graph, not configured via `10xgraph.json`. Build it in the module that `10xgraph.json`'s `agent` field points to:
+When serving your graph via the API server, the checkpointer is part of your compiled graph, not configured via `10xgraph.json`. Build it in the module that `10xgraph.json`'s `agent` field points to:
 
 ```python
 # graph.py
@@ -346,6 +346,10 @@ result2 = app.invoke(
 # Verify the agent has memory
 assert "Alice" in result2["messages"][-1].content
 ```
+
+## Run it in production
+
+The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The `checkpointer` key in `10xgraph.json` is not read. Use `PgCheckpointer` when you run more than one worker, since workers share state only through it. See [Scaling and reliability](/docs/production/scaling) and [Backup and restore](/docs/server/backup-and-restore).
 
 ## Next steps
 

@@ -4,7 +4,7 @@ description: "Inspect and visualize your compiled graph structure to understand 
 order: 70
 group: "Agents and graphs"
 section: "Build agents"
-updated: "2026-10-08"
+updated: "2026-10-27"
 seoTitle: "Graph Visualization"
 faq:
   - q: "Can I export the graph as a diagram?"
@@ -291,6 +291,10 @@ graph.add_conditional_edges("agent", my_router, {
 ```
 
 Then run the agent and check the logs to see which branch was taken.
+
+## Run it in production
+
+The server exposes the graph structure through a read-only endpoint that needs the `graph:read` permission, so you can limit who sees your node names and edges. See [Server auth](/docs/server/auth) and [Configure the server](/docs/server/configure).
 
 ## Next steps
 

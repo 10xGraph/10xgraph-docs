@@ -6,7 +6,7 @@ section: Examples
 group: "Multi-agent"
 order: 150
 label: Multiagent
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "How does a conditional edge pick the next node?"
     a: "The routing function receives the state and returns a string. The path map passed to add_conditional_edges translates that string into a node name or END."
@@ -18,7 +18,7 @@ This example routes work between specialist nodes in a single graph. A coordinat
 
 ## How to run it
 
-The example lives at `agentflow/examples/multiagent/multiagent.py`.
+The example lives at `examples/multiagent/multiagent.py`.
 
 Install the package. The example needs no provider extra because no model is called (`python-dotenv`, which the script imports, is a dependency of 10xGraph):
 
@@ -29,7 +29,7 @@ pip install 10xgraph
 Run:
 
 ```bash
-python agentflow/examples/multiagent/multiagent.py
+python examples/multiagent/multiagent.py
 ```
 
 The script prints three runs. The last message of each run is "CV Created Successfully", "JD Created Successfully" and "Thank you for contacting me", in that order.
@@ -53,7 +53,7 @@ The `MAIN` node is the coordinator. It generates a message whose text determines
 
 **Import the pieces.** The script needs the graph class, the state and message types, and the `END` constant:
 
-```python title="agentflow/examples/multiagent/multiagent.py"
+```python title="examples/multiagent/multiagent.py"
 from dotenv import load_dotenv
 
 from tenxgraph.core.graph import StateGraph
@@ -65,7 +65,7 @@ load_dotenv()
 
 **Define specialized worker nodes.** Each node is a plain function that takes state and an optional config, and returns a message:
 
-```python title="agentflow/examples/multiagent/multiagent.py"
+```python title="examples/multiagent/multiagent.py"
 def cv_agent(state: AgentState, config: dict | None = None):
     return Message.text_message("CV Created Successfully", role="assistant")
 
@@ -77,7 +77,7 @@ These are stateless nodes. In a real system, they might call APIs or run sub-gra
 
 **Create the coordinator node.** The `main_agent` function examines the `config` dictionary to decide what message to send. This makes the example deterministic and easy to test:
 
-```python title="agentflow/examples/multiagent/multiagent.py"
+```python title="examples/multiagent/multiagent.py"
 def main_agent(state: AgentState, config: dict):
     is_end = config.get("trail", 2)
     if is_end == 0:
@@ -92,7 +92,7 @@ In a real application, you would replace this logic with an LLM call: `Agent(mod
 
 **Write the routing function.** The `should_use_tools` function inspects the last message from the coordinator and returns the name of the next node:
 
-```python title="agentflow/examples/multiagent/multiagent.py"
+```python title="examples/multiagent/multiagent.py"
 def should_use_tools(state: AgentState) -> str:
     """Determine if we should use tools or end the conversation."""
     if not state.context or len(state.context) == 0:
@@ -112,7 +112,7 @@ The function reads the text of the last message. If it contains "cv" or "jd", it
 
 **Build and compile the graph.** Wire up the nodes and edges:
 
-```python title="agentflow/examples/multiagent/multiagent.py"
+```python title="examples/multiagent/multiagent.py"
 graph = StateGraph()
 graph.add_node("MAIN", main_agent)
 graph.add_node("CV", cv_agent)
@@ -137,7 +137,7 @@ The conditional edges dictionary maps routing function outputs to node names. Ea
 
 **Run the graph with different configs.** The example invokes the graph three times with different `trail` values:
 
-```python title="agentflow/examples/multiagent/multiagent.py"
+```python title="examples/multiagent/multiagent.py"
 config = {"thread_id": "12345", "recursion_limit": 10, "trail": 0}
 inp = {"messages": [Message.text_message("HI")]}
 res = app.invoke(inp, config=config)

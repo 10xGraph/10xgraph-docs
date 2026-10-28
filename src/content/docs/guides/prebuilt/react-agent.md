@@ -6,7 +6,7 @@ section: "Build agents"
 group: "Prebuilt agents"
 order: 90
 label: ReactAgent
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "When should I use ReactAgent instead of building a custom graph?"
     a: "ReactAgent is ideal for most agent use cases: tool use, multi-turn conversations, and simple reasoning loops. Use a custom graph when you need specialized routing logic, multiple LLM nodes, or a structure that does not fit the single-LLM-plus-tools pattern."
@@ -388,7 +388,7 @@ OPENAI_API_KEY=sk-...
 **Launch the playground:**
 
 ```bash
-10xgraph play
+10xgraph dev
 ```
 
 This starts the API server on `localhost:8000` and opens an interactive web UI where you can send messages to your agent and inspect the execution in real time.
@@ -484,6 +484,10 @@ You must pass a checkpointer to `compile()` and use the same `thread_id` across 
 Tool schemas are extracted from type hints and docstrings. Ensure all parameters have type hints and the docstring describes what the tool does.
 
 ---
+
+## Run it in production
+
+The server turns this agent into an API with streaming, stop and thread routes, and does not need extra code. Add auth, a durable checkpointer passed to `compile()`, and the [production checklist](/docs/server/production-checklist). See [Production readiness](/docs/production).
 
 ## Next steps
 

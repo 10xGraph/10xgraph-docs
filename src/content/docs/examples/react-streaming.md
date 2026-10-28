@@ -6,7 +6,7 @@ section: Examples
 group: "Streaming"
 order: 80
 label: React Streaming
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: What is the difference between invoke, stream and astream?
     a: "invoke runs the graph and returns the final result. stream is a synchronous generator of StreamChunk objects, and astream is the async equivalent. All three take the same input and config."
@@ -43,7 +43,7 @@ Or add it to a `.env` file in your project root; the example loads it with `load
 From the repo root:
 
 ```bash
-cd agentflow/examples/react_stream
+cd examples/react_stream
 python stream_react_agent.py                    # runs the default async streaming test
 python stream_react_agent.py sync               # runs sync test
 python stream_react_agent.py sync-stream        # runs sync stream test

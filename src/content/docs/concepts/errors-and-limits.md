@@ -104,6 +104,36 @@ result = graph.invoke(
 
 Defaults are in `tenxgraph/utils/constants.py`. Individual tools can also set their own timeouts with libraries that support them (for example, HTTP clients with read timeouts).
 
+### Parallel tool calls
+
+When a model returns several tool calls in one message, the tool node runs them in parallel, at most 10 at a time. Set a different cap with `config["max_parallel_tool_calls"]` or the `TENXGRAPH_MAX_PARALLEL_TOOL_CALLS` environment variable (the config key wins). A value that is not an integer of at least 1 logs a warning and falls back to 10.
+
+### Tool failures and bad tool arguments
+
+- **Unexpected tool errors are hidden from the model.** If a local or MCP tool raises, the model receives `Tool '<name>' failed with an internal error (reference <ref>)`. The full error and the same reference go to the server log, so an operator can match a user report to the failure. A raised `ValueError` is not shown verbatim either. To give the model a message it should act on, return it from the tool as a string. Tool timeouts, "Tool not found" and argument errors still reach the model.
+- **Invalid tool arguments return a retryable error.** If the model's arguments are not a valid JSON object (for example, the response was cut off), the tool does not run. The model gets "Tool call arguments were not valid JSON (they may have been cut off). Call the tool again with a complete JSON object." and can try again.
+- **`tools_tags` is enforced when the tool runs.** If an `Agent` is built with `tools_tags`, the tool node records which tools the model was shown and answers a call to any other tool with "Tool '<name>' not found." Hiding a tool from the model also stops it being executed.
+
+### Checkpointer list paging
+
+`alist_messages` and `alist_threads` return at most 1000 items per call (`MAX_LIST_LIMIT`). A larger `limit` is lowered to 1000, and a negative `limit` or `offset` raises `ValueError`. A `limit` of `None` or `0` means no limit was given, which is how in-process code reads a whole thread. Page through long threads with `offset`.
+
+### Stop requests target a run
+
+A stop request records the run it is meant for. Starting a new run on the same thread no longer clears a stop meant for a run that is still going, so a runaway tool loop in run 1 can still be stopped after run 2 has started. The checkpointer tracks the active run id per thread with `abegin_run`, `aend_run` and `aget_active_run`, and `ais_stop_requested` only reports a request that targets the config's `run_id`. A config with no `run_id` still matches an untargeted flag. This works on every backend with no schema change. See [Streaming](/docs/concepts/streaming).
+
+### Per-turn loop counters
+
+Round, iteration and retry budgets (such as `max_rounds` or `max_attempts` on the prebuilt agents) count one turn, not the whole thread. They are cleared when a new turn starts on a thread whose previous run finished. A resumed (paused) run keeps them. If you write your own multi-agent loop that keeps a counter in `internal_data`, register its key with `register_per_turn_key("my_counter")` from `tenxgraph.core.state.execution_state` at import time so it gets the same reset.
+
+### Owner-only files
+
+`SqliteCheckpointer` creates its database directory with mode 0o700 and the database file with mode 0o600. SQLite gives the `-wal` and `-shm` files the database file's mode, so they are owner-only too. An existing directory or file keeps its mode. The local media store uses the same modes. Cloud object stores are not affected; use their own access controls.
+
+### Thread import scope
+
+When you serve with `10xgraph-api` and an authorization backend, importing thread history (any role) needs the `checkpointer:import` scope (`CHECKPOINT_IMPORT`). It is never implied by an empty scope list, so grant it only to trusted admin identities. See [Authorization scopes](/docs/guides/authorization-scopes).
+
 ### Request size (API server)
 
 The API server limits each request: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. A request over a limit gets 422. On AG-UI the limits apply to the trailing turn, and the full history gets a cap of 10,000 messages. The limits are fixed. See [Graph endpoints](/docs/reference/rest-api/graph).

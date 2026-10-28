@@ -5,7 +5,7 @@ section: "API server"
 group: "Basics"
 order: 40
 label: Initialize a Project
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "What is the difference between Quick Start and Production templates?"
     a: "Quick Start generates a minimal graph with 10xgraph.json and environment template. Production adds tests, evaluations, auth stubs, rate limiting, and a full project structure for team deployment."
@@ -96,7 +96,7 @@ Run with:
 ```bash
 cp .env.example .env
 # Add your provider API key to .env
-10xgraph play
+10xgraph dev
 ```
 
 ### Production template
@@ -297,7 +297,7 @@ If this fails, check that `graph/agent.py` is syntactically correct and imports 
 ### 5. Start the server
 
 ```bash
-10xgraph play
+10xgraph dev
 ```
 
 Starts the API on `localhost:8000` and opens the web playground.

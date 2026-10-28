@@ -5,7 +5,7 @@ description: 10xGraph vs LangGraph compared on the production layer, with source
 section: Compare
 order: 20
 label: vs LangGraph
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Is 10xGraph a fork of LangGraph?
     a: No. 10xGraph is an independent open-source project with its own runtime, state types, and CLI. Both frameworks model agents as graphs of nodes and edges.
@@ -37,10 +37,11 @@ The rows below start with what differs most between the two. The shared basics (
 
 | | 10xGraph | LangGraph |
 |---|---|---|
-| Production server (REST, SSE, WebSocket) in the open-source install | Yes. `10xgraph api` generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | The `langgraph` library is MIT ([PyPI](https://pypi.org/project/langgraph/)). Serving goes through Agent Server: cloud needs Plus or above, self-hosted control plane needs Enterprise, standalone needs a LangSmith license ([deployment options](https://docs.langchain.com/langsmith/deployments), [pricing](https://www.langchain.com/pricing)) |
+| Production server (REST, SSE, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | The `langgraph` library is MIT ([PyPI](https://pypi.org/project/langgraph/)). Serving goes through Agent Server: cloud needs Plus or above, self-hosted control plane needs Enterprise, standalone needs a LangSmith license ([deployment options](https://docs.langchain.com/langsmith/deployments), [pricing](https://www.langchain.com/pricing)) |
 | Auth (JWT or custom) | JWT (`"auth": "jwt"`) or a custom `BaseAuth` subclass | Custom auth via `@auth.authenticate`, supported on all plans ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
 | Authorization | Role scopes (such as `graph:invoke`, `checkpointer:read`) or a custom `AuthorizationBackend` | `@auth.on` handlers per resource and action ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
 | Thread ownership isolation | Built-in `"authorization": "ownership"` backend, with a two-tier cached owner check | Not built in. The docs show a handler pattern you write yourself ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
+| Security and isolation defaults when served | The server refuses to start if any non-public route lacks a permission guard. With auth on or `MODE=production`, threads are owner-only. In production it refuses wildcard `ORIGINS`, and replaces 5xx error messages with a generic text. `auth: null` still starts an open server ([limits](/docs/production/limits)) | See their docs |
 | Rate limiting | Memory or Redis sliding-window limits, set in `10xgraph.json` | Not verified |
 | Replay-safe tool calls after a crash | Tool ledger in the checkpointer: a tool that already ran is not executed again on resume. Needs a checkpointer | Resume replays from a checkpoint. The docs advise wrapping side effects in tasks and making them idempotent ([functional API docs](https://docs.langchain.com/oss/python/langgraph/functional-api)) |
 | Versioned (compare-and-swap) state writes | Optimistic version check on durable writes in `PgCheckpointer` | Not documented |
@@ -48,7 +49,7 @@ The rows below start with what differs most between the two. The shared basics (
 | Docker Compose and Kubernetes manifests | `10xgraph build --docker-compose --k8s` writes `Dockerfile`, `docker-compose.yml`, `k8s.yaml` | `langgraph build` builds an image ([CLI docs](https://docs.langchain.com/langsmith/cli)). Standalone self-hosting documents Helm and a Docker Compose example, and needs a license key ([standalone docs](https://docs.langchain.com/langsmith/deploy-standalone-server)) |
 | License | MIT, including API/CLI and client | MIT for the library. LangSmith plans are commercial ([pricing](https://www.langchain.com/pricing)) |
 | TypeScript client | Typed `10xgraph-client` for the 10xGraph API | `@langchain/langgraph-sdk`, MIT ([npm](https://www.npmjs.com/package/@langchain/langgraph-sdk)) |
-| Visual tooling | Browser playground (`10xgraph play`) | LangSmith Studio, free with a LangSmith account ([Studio docs](https://docs.langchain.com/oss/python/langgraph/studio)) |
+| Visual tooling | Browser playground (`10xgraph dev`) | LangSmith Studio, free with a LangSmith account ([Studio docs](https://docs.langchain.com/oss/python/langgraph/studio)) |
 | Python version | 3.12 or newer | 3.10 or newer ([PyPI](https://pypi.org/project/langgraph/)) |
 | LangChain dependency | None | `langchain-core` is a required dependency ([PyPI](https://pypi.org/project/langgraph/)) |
 | Graph model | `StateGraph` with nodes, conditional edges, sub-graphs | `StateGraph` with state schema and edges ([persistence docs](https://docs.langchain.com/oss/python/langgraph/persistence)) |
@@ -94,7 +95,7 @@ Then scaffold, serve and package it:
 ```bash
 pip install "10xgraph[google-genai,pg_checkpoint]" 10xgraph-api
 10xgraph init --yes --template production --auth jwt --rate-limit redis
-10xgraph api --host 0.0.0.0 --port 8000
+10xgraph dev --host 0.0.0.0 --port 8000 --no-open
 10xgraph build --docker-compose --k8s
 ```
 
@@ -127,7 +128,7 @@ LangChain publishes its own client for the LangGraph API, [`@langchain/langgraph
 2. Replace LangChain message classes with `from tenxgraph.core.state import Message` and `Message.text_message(...)`.
 3. Use `ReactAgent` or `tenxgraph.core.graph.Agent` with a `ToolNode` where you used a prebuilt agent. Pass `model`, `system_prompt` and tools.
 4. Replace `InMemorySaver` / `PostgresSaver` with `InMemoryCheckpointer` / `PgCheckpointer`. Thread IDs move from `config["configurable"]["thread_id"]` to `config["thread_id"]`.
-5. Replace `langgraph.json` with `10xgraph.json` pointing at your compiled graph, and run `10xgraph api`.
+5. Replace `langgraph.json` with `10xgraph.json` pointing at your compiled graph, and run `10xgraph dev`.
 6. Point your frontend at `10xgraph-client`.
 
 For multi-agent handoffs, see [the handoff how-to](/docs/guides/handoff-between-agents).

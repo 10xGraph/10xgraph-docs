@@ -5,7 +5,7 @@ description: "Reference for 10xGraph: the Python library, the REST and WebSocket
 section: Reference
 order: 10
 label: Overview
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The 10xGraph reference documents four surfaces of one system: the Python library, the REST and WebSocket API that the server generates from your graph, the CLI with its `10xgraph.json` configuration, and the TypeScript client. It is for developers who already know what they want to call and need exact signatures, options and error conditions. Pick the surface you are calling from.
@@ -14,7 +14,7 @@ The 10xGraph reference documents four surfaces of one system: the Python library
 
 Python developers should open [Graph](/docs/reference/python/graph) and [Agent](/docs/reference/python/agent) first: they define `StateGraph`, `CompiledGraph`, `invoke`, `stream` and how a model is wired into a node. [Checkpointers](/docs/reference/python/checkpointers) matters for production, because durable threads and replay-safe tool calls depend on one.
 
-If you run the server, the [CLI commands](/docs/reference/api-cli/commands) and [configuration](/docs/reference/api-cli/configuration) pages cover every `10xgraph.json` key, with [auth](/docs/reference/api-cli/auth) and [rate limiting](/docs/reference/api-cli/rate-limiting) for the production settings. Frontend developers should start with the [client](/docs/reference/client/client) and [stream](/docs/reference/client/stream) pages. The REST contract starts at [conventions](/docs/reference/rest-api/conventions) and the [graph endpoints](/docs/reference/rest-api/graph).
+If you run the server, the [CLI commands](/docs/reference/api-cli/commands) and [configuration](/docs/reference/api-cli/configuration) pages cover every `10xgraph.json` key, with [auth](/docs/reference/api-cli/auth) and [rate limiting](/docs/reference/api-cli/rate-limiting) for the production settings. Before launch, read [Production readiness](/docs/production), the [security model](/docs/production/security-model) and [Test before production](/docs/testing/before-production). Frontend developers should start with the [client](/docs/reference/client/client) and [stream](/docs/reference/client/stream) pages. The REST contract starts at [conventions](/docs/reference/rest-api/conventions) and the [graph endpoints](/docs/reference/rest-api/graph).
 
 If you do not yet know which call you need, the [guides](/docs/guides) are organized by task.
 
@@ -87,7 +87,7 @@ The graph engine, agents, tools, state, storage, and the evaluation harness. Eve
 
 ## REST and WebSocket API
 
-What the API server exposes once you run `10xgraph api`.
+What the API server exposes once the server is running (`10xgraph dev` locally, Gunicorn in the image from `10xgraph build`).
 
 The server generates its own OpenAPI schema, so the authoritative contract for your build is always available locally:
 
@@ -117,7 +117,7 @@ Set both `DOCS_PATH` and `REDOCS_PATH` to empty values in production to turn off
 
 | Page | Covers |
 | --- | --- |
-| [Commands](/docs/reference/api-cli/commands) | `init`, `api`, `play`, `dev`, `build`, `config`, `eval`, `test`, `skills`, `audit`, `demo`, `version` |
+| [Commands](/docs/reference/api-cli/commands) | `init`, `dev`, `build`, `config`, `eval`, `test`, `skills`, `audit`, `demo`, `version` |
 | [Configuration](/docs/reference/api-cli/configuration) | Every `10xgraph.json` key and per-environment overrides |
 | [Environment](/docs/reference/api-cli/environment) | Every environment variable the server reads |
 | [Auth](/docs/reference/api-cli/auth) | JWT configuration and custom `BaseAuth` extension |

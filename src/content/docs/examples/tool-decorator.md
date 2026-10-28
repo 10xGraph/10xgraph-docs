@@ -6,12 +6,12 @@ section: Examples
 group: Foundations
 order: 40
 label: Tool Decorator
-updated: '2026-10-08'
+updated: "2026-10-27"
 ---
 
 This example demonstrates how to use the `@tool` decorator to enrich tool functions with runtime-queryable metadata: names, descriptions, tags for filtering, capabilities, and arbitrary application data. You'll build a set of decorated tools, sync, async, stateful, and learn to filter them by tag and introspect their metadata from your graph code.
 
-**Source example:** [`agentflow/examples/tool-decorator/basic_decorator_usage.py`](https://github.com/10xGraph/10xGraph/blob/main/examples/tool-decorator/basic_decorator_usage.py)
+**Source example:** [`examples/tool-decorator/basic_decorator_usage.py`](https://github.com/10xGraph/10xGraph/blob/main/examples/tool-decorator/basic_decorator_usage.py)
 
 ## Prerequisites
 

@@ -4,21 +4,21 @@ description: "Transfer control between agents in a multi-agent graph using hando
 section: "Build agents"
 group: "Multi-agent and control flow"
 order: 280
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "When should I use this instead of SwarmAgent?"
     a: "Use manual handoff when you need full control over graph topology or custom routing logic. Use SwarmAgent when all agents are peers and you want automatic handoff tool injection."
   - q: "Can handoff tools route to agents that do not exist?"
-    a: "The handoff is detected and routed before tool execution, so the target node must exist in the graph. A non-existent target causes a routing error."
+    a: "The handoff is detected and routed before tool execution, so the target node must exist in the graph. A target that is not a node raises a GraphError with code GRAPH_007."
   - q: "How do I prevent routing loops?"
     a: "Ensure at least one agent has a conditional edge that routes to END when no handoff is called, breaking the cycle."
 ---
 
-In a multi-agent graph, agents often need to delegate tasks to specialists. 10xGraph provides two patterns to route control: the **handoff tool** convention, where `transfer_to_<agent>` tools intercept the LLM's tool calls and navigate the graph directly, and the **Command** mechanism, where a node function explicitly routes to another agent. Handoff tools keep the conversation history clean because the tool body never executes; Command routing gives you programmatic control over navigation and state updates.
+In a multi-agent graph, agents often need to delegate tasks to specialists. 10xGraph provides two patterns to route control: the **handoff tool** convention, where handoff tools made with `create_handoff_tool` (named `transfer_to_<agent>`) intercept the LLM's tool calls and navigate the graph directly, and the **Command** mechanism, where a node function explicitly routes to another agent. Handoff tools keep the conversation history clean because the tool body never executes; Command routing gives you programmatic control over navigation and state updates.
 
 ## When to use each pattern
 
-**Handoff tools** (`transfer_to_X`) are best when agents decide where to go next via tool calls. The LLM decides "I need to ask the researcher" and calls the corresponding tool. The framework detects the tool name, intercepts it before execution, and routes to the target node. This is lightweight and requires minimal setup per agent.
+**Handoff tools** (`transfer_to_X`) are best when agents decide where to go next via tool calls. The LLM decides "I need to ask the researcher" and calls the corresponding tool. The tool node checks the call against the handoff tools registered on it, intercepts it before execution, and routes to the target node. This is lightweight and requires minimal setup per agent.
 
 **Command routing** works when a dedicated node (often a router or condition function) makes routing decisions based on message content or logic you define. Return `Command(goto="TARGET_NODE")` from any custom node function to navigate explicitly. This is useful when routing decisions come from parsing outputs, matching patterns, or applying complex rules that the LLM should not see.
 
@@ -26,14 +26,14 @@ If your agents are all peers (equal, collaborative) and you want automatic hando
 
 ## How handoff tools work
 
-When you call `create_handoff_tool("researcher")`, it returns a function named `transfer_to_researcher` with metadata flags that tell the graph this is a handoff. When an agent's tool node receives this tool call, the node handler checks the tool name before executing. If it matches the `transfer_to_*` pattern, the handler extracts the target agent name, updates the routing, and skips the tool function body. The message history stays clean because no tool-result message is added.
+When you call `create_handoff_tool("researcher")`, it returns a function named `transfer_to_researcher` with metadata flags that tell the graph this is a handoff. When an agent's tool node receives this tool call, the node handler checks whether that name is a handoff tool registered on this `ToolNode`. If it is, the handler reads the target agent name stored on the tool, updates the routing, and skips the tool function body. A name that merely starts with `transfer_to_` is not enough: a call to a made-up `transfer_to_*` tool is an ordinary unknown tool call and gets a "Tool not found" result. So a model cannot steer the run to a node by inventing a call. A `Command(goto=...)` that names a node not in the graph raises `GraphError` with code `GRAPH_007`. The message history stays clean because no tool-result message is added.
 
 ```python
 Agent LLM thinks: "I need the researcher to investigate."
     ↓
 Agent calls tool: transfer_to_researcher
     ↓
-Graph handler detects "transfer_to_" prefix
+Graph handler finds the name among the registered handoff tools
     ↓
 Graph routes to the node named "researcher"
     (tool function never runs)
@@ -266,6 +266,10 @@ result = app.invoke({"messages": [Message.text_message("Your request")]})
 ```
 
 The logs show which nodes execute in order, making it easy to confirm the routing is working.
+
+## Run it in production
+
+Handoffs are decided inside the graph, and only a handoff tool registered on the `ToolNode` can move a run to another node, so a prompt-injected `transfer_to_*` call is an ordinary failed tool call. The caller can still start a run at a chosen node with `current_node`; restrict that with `runs.state_keys` if your graph needs an entry guard. See the [Security model](/docs/production/security-model).
 
 ## Related pages
 

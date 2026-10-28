@@ -4,7 +4,7 @@ description: Install the TypeScript client and configure authentication to commu
 section: "TypeScript client"
 group: "Basics"
 order: 20
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "When should I expose tokens in NEXT_PUBLIC?"
     answer: "Never. Tokens should remain on the server or be fetched securely. NEXT_PUBLIC variables are bundled into client JavaScript, making them visible to the browser and any attacker. Use a backend proxy instead."
@@ -19,7 +19,7 @@ The `10xgraph-client` TypeScript package lets you invoke agents and manage threa
 ## Prerequisites
 
 - Node.js 18 or higher, or a modern browser environment with `fetch` support.
-- A 10xGraph API server running locally (`10xgraph api`) or deployed to a remote host.
+- A 10xGraph API server running locally (`10xgraph dev`) or deployed to a remote host.
 - Access to API credentials if the server requires authentication (bearer token, basic auth, or custom API key).
 
 ## Install the package
@@ -255,7 +255,7 @@ const client = new TenxGraphClient({
 
 Any environment variable prefixed with `NEXT_PUBLIC_` is bundled into your JavaScript. Anyone viewing the page source in the browser can read it. An attacker can use your token to invoke agents, modify threads, or access sensitive data.
 
-### The right way: backend proxy or session tokens
+### The right way: backend proxy or runtime session tokens
 
 Instead, either:
 
@@ -280,17 +280,17 @@ Instead, either:
 
    The browser then calls `POST /api/agent` with your message, and the backend handles the token.
 
-2. **Session tokens.** If the 10xGraph server supports custom authentication (via `BaseAuth` in 10xgraph-api), issue a short-lived session token per user after they log in to your app. Pass the session token in `NEXT_PUBLIC_` since it is user-scoped and expires quickly.
+2. **Session tokens.** If the 10xGraph server supports custom authentication (via `BaseAuth` in 10xgraph-api), issue a short-lived session token per user after they log in to your app. Your own login endpoint returns that token at runtime, after the user signs in. Never put it in a `NEXT_PUBLIC_` variable: those are fixed at build time and shared by every visitor, so they cannot hold a per-user value. The proxy in option 1 is the recommended pattern, and the [Next.js and React guide](/docs/client/nextjs-and-react) shows it in full.
 
 ### Token rotation
 
-The token is baked into the built client at build time. If you need to rotate the token:
+With the backend proxy, the token lives in a server-only environment variable such as `AGENT_TOKEN`. To rotate it:
 
-1. Update the environment variable on your build system.
-2. Rebuild and redeploy your application.
-3. The new token takes effect once users load the new version.
+1. Update the environment variable where the proxy runs.
+2. Restart or redeploy the proxy.
+3. The browser needs no change, because it never held the token.
 
-There is no in-app way to rotate the token without rebuilding.
+Session tokens issued per user expire on their own, so users pick up a fresh one the next time they sign in.
 
 ## Sharing the client across your application
 
@@ -332,7 +332,7 @@ export function ChatWidget() {
 
 | Symptom | Likely cause | Solution |
 |---|---|---|
-| `TypeError: Failed to fetch` | Server is not running or the address is wrong. | Start the server with `10xgraph api` and verify the `baseUrl` is correct. |
+| `TypeError: Failed to fetch` | Server is not running or the address is wrong. | Start the server with `10xgraph dev` and verify the `baseUrl` is correct. |
 | `TenxGraphError` with status `401` | Authentication failed (missing, invalid, or expired token). | Check the token passed to `auth` or `authToken`. Verify it matches the server's secret (`JWT_SECRET_KEY` in `.env`). |
 | `TenxGraphError` with status `404` on `/ping` | Trailing slash in `baseUrl` or incorrect path. | Ensure `baseUrl` has no trailing slash. Example: `http://localhost:8000` not `http://localhost:8000/`. |
 | CORS error in a browser | The server's CORS policy blocks your origin. | On the server, set `ORIGINS` to include your app's origin. Or in the client, set `credentials: 'include'` if the server allows credentials. |

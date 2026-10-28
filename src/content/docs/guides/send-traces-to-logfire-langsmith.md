@@ -188,7 +188,7 @@ This changes spans only. Redis, RabbitMQ, Kafka and Console events keep the raw 
 
 ## Serve with declarative configuration
 
-When serving a graph through the 10xGraph API server using `10xgraph api`, you do not call setup functions yourself. Instead, add an `observability` block to your `10xgraph.json` config file, and the server wires everything up during startup:
+When serving a graph through the 10xGraph API server using `10xgraph dev`, you do not call setup functions yourself. Instead, add an `observability` block to your `10xgraph.json` config file, and the server wires everything up during startup:
 
 ```json
 {
@@ -291,6 +291,10 @@ setup_langsmith(graph, api_key="your-api-key", project="my-agent")
 - Check that `level` is not `SPANS` (which logs structure only, not content).
 - If running locally with `send_to_logfire=False`, traces go to console instead.
 - In the API server, confirm `enabled` is `true` under `observability.logfire` or `observability.langsmith` in `10xgraph.json` and the tokens are in `.env`.
+
+## Run it in production
+
+The server's in-process trace endpoint is disabled when `MODE=production`, so use OTEL or a publisher for traces there. Set `observability.user_id_mode` to `hash` or `mask` if user IDs should not appear in your tracing backend. See [Observability](/docs/server/observability).
 
 ## See also
 

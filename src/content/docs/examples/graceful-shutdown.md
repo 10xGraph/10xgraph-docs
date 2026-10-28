@@ -3,7 +3,7 @@ title: Graceful Shutdown
 seoTitle: "Graceful shutdown tutorial for services"
 description: Run a tool-calling 10xGraph agent as a long-running service that handles SIGINT and SIGTERM, protects startup and cleanup, and calls aclose().
 section: Examples
-group: "Production"
+group: "Testing and operations"
 order: 220
 label: Graceful Shutdown
 faq:
@@ -42,7 +42,7 @@ Then run the example:
 python examples/graceful_shutdown/graceful_shutdown_example.py
 ```
 
-The example uses the `google` provider, so set your Google GenAI credentials first, as described in the [Google GenAI example](/docs/examples/google-genai). The source is `agentflow/examples/graceful_shutdown/graceful_shutdown_example.py` in the repository.
+The example uses the `google` provider, so set your Google GenAI credentials first, as described in the [Google GenAI example](/docs/examples/google-genai). The source is `examples/graceful_shutdown/graceful_shutdown_example.py` in the repository.
 
 The process starts working through a fixed list of queries. Press Ctrl+C while it is running. You should see:
 

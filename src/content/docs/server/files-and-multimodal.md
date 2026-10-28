@@ -17,6 +17,8 @@ faq:
 
 The 10xGraph API server accepts file uploads from clients and injects the media into your graph's execution. Upload once, reference by ID, and rely on the server to resolve the reference before model calls. This works the same way across REST (`/v1/graph/invoke`, `POST /v1/graph/stream`) and WebSocket (`WS /v1/graph/ws`), with built-in ownership enforcement so users cannot reference each other's files.
 
+Upload ownership and size limits are part of the [security model](/docs/production/security-model).
+
 ## How it works
 
 The file pipeline flows in four steps:

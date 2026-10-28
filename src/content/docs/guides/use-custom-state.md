@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Agents and graphs"
 order: 40
 label: Custom state
-updated: "2026-10-26"
+updated: "2026-10-27"
 ---
 
 Every 10xGraph agent runs within an `AgentState` instance that persists data across all nodes in the graph. By default, `AgentState` holds the message conversation history and execution metadata. You extend it by subclassing to add typed, persistent application fields, like user IDs, ticket numbers, sentiment scores, or any domain-specific data your agent needs. The graph threads the state through every node and saves it with the checkpointer.
@@ -481,6 +481,10 @@ class MyState(AgentState):
 This ensures each graph instance gets its own dict/list, not a shared one (a common Python pitfall).
 
 ---
+
+## Run it in production
+
+Over the API, callers can set custom state fields on purpose (a frontend picker can send its selection straight into state). To limit which keys clients may write, list them in `runs.state_keys` in `10xgraph.json`. Built-in fields such as `context_summary` and `execution_meta` are never writable through the API, and identity must come from the authenticated user, never from state. See [Configure the server](/docs/server/configure) and [Invoke and stream](/docs/server/invoke-and-stream).
 
 ## Next steps
 

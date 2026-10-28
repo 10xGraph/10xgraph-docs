@@ -31,7 +31,7 @@ The client reads the JSON error body, then matches the error `code` by prefix, t
 | 8 | Code starts with `SERIALIZATION` | `SerializationError` |
 | 9 | Status 400, 401, 403, 404, 409, 422 | `BadRequestError`, `AuthenticationError`, `PermissionError`, `NotFoundError`, `ConflictError`, `ValidationError` |
 | 10 | Status 500, 502, 503, 504 | `ServerError` |
-| 11 | Any other status | `TenxGraphError` with code `UNKNOWN_ERROR` (unless the body gave one) |
+| 11 | Any other status, including 429 | `TenxGraphError` with code `UNKNOWN_ERROR` (unless the body gave one) |
 
 If the body is not JSON or cannot be parsed, the same status mapping applies with `requestId` set to `'unknown'`.
 
@@ -153,6 +153,29 @@ try {
 The same class covers a resume whose `interrupt_id` does not match the open interrupt. Do not retry that one with `on_busy`: read the thread state and send the current id.
 
 The server's body for these errors is the standard envelope, with `error.code` set to `HTTPException`. The client picks `ConflictError` from the 409 status.
+
+### Rate limit and run cap (429)
+
+The server answers 429 in two cases: the `rate_limit` sliding window is exhausted, or one user already has `runs.max_concurrent_per_user` graph runs in flight (default 10). The client has no class for 429, so both arrive as a plain `TenxGraphError` with `statusCode` 429. Check `statusCode`, not `instanceof`.
+
+- Rate limit: the body has `error.code` `RATE_LIMIT_EXCEEDED`, so `errorCode` is `RATE_LIMIT_EXCEEDED`, and the message ends with `Retry after <n>s.` The response also carries a `Retry-After` header (seconds).
+- Run cap: the body is the standard envelope with `error.code` `HTTPException`, so `errorCode` is `HTTPException`. The message says too many runs are in progress for this user. There is no `Retry-After` header; wait for a run to finish.
+
+The error object does not keep response headers, so `Retry-After` is not available on it. Read the seconds from the message, or use your own backoff.
+
+```ts title="rate-limit.ts"
+import { TenxGraphError } from '10xgraph-client';
+
+try {
+  await client.invoke([Message.text_message('Hi')]);
+} catch (err) {
+  if (err instanceof TenxGraphError && err.statusCode === 429) {
+    // Back off, then retry. err.errorCode is RATE_LIMIT_EXCEEDED for the rate limit.
+  } else {
+    throw err;
+  }
+}
+```
 
 ### ServerError
 

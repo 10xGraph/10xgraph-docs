@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 550
 label: Auth
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 `TenxGraphClient` authenticates with a bearer token, HTTP Basic credentials or a custom header, set through the `auth` field of `TenxGraphConfig`. The `authToken` field is a shorthand for bearer tokens. This page lists each option, the header it sends, how HTTP and WebSocket requests resolve credentials, and common failures.
@@ -252,13 +252,13 @@ Only bearer tokens reach a WebSocket in a browser, because browsers cannot attac
 
 ## WebSocket authentication
 
-Browsers cannot set request headers on a WebSocket, so the client sends the bearer token as a WebSocket subprotocol: the socket is opened with `['agentflow-bearer', '<token>']` and the server reads the second entry. The server accepts `agentflow-bearer` as a deprecated alias of `10xgraph-bearer`. The token is never placed in the URL. On Node runtimes whose `WebSocket` constructor accepts an options argument, an `Authorization: Bearer ...` header is passed as well.
+Browsers cannot set request headers on a WebSocket, so the client sends the bearer token as a WebSocket subprotocol: the socket is opened with `['10xgraph-bearer', '<token>']` and the server reads the second entry. WebSocket bearer auth with this client (0.6.0 and later) needs `10xgraph-api` 0.7.0 or later, because the client no longer sends the old `agentflow-bearer` name. HTTP endpoints work with older servers. The token is never placed in the URL. On Node runtimes whose `WebSocket` constructor accepts an options argument, an `Authorization: Bearer ...` header is passed as well.
 
 `wsStream()` and `realtime()` do this for you. The pieces are also exported, for building your own socket against the same server:
 
 | Export | Signature | Description |
 |---|---|---|
-| `WS_BEARER_SUBPROTOCOL` | `'agentflow-bearer'` | The subprotocol token the server recognises for bearer auth. |
+| `WS_BEARER_SUBPROTOCOL` | `'10xgraph-bearer'` | The subprotocol token the server recognises for bearer auth. |
 | `resolveBearerToken` | `(context: { authToken?, auth? }) => string \| null` | Returns `auth.token` when `auth` is bearer, `null` when `auth` is another type, else `authToken`, else `null`. |
 | `buildWsUrl` | `(context: { baseUrl }, path: string) => string` | Converts `http:` to `ws:` and `https:` to `wss:`, strips a trailing slash, and appends `path`. |
 | `openWebSocket` | `(url: string, context: WsAuthContext) => WebSocket` | Opens the socket with the subprotocol pair, adding the `Authorization` header on Node. Throws `No WebSocket implementation available` when there is no global `WebSocket` and no `webSocketImpl`. |
@@ -374,7 +374,7 @@ const client = new TenxGraphClient({
 - Use `auth: { type: 'basic', username, password }` for HTTP Basic auth.
 - Omit `auth` entirely for open/no-auth servers.
 - `credentials` controls cookie handling in browser environments.
-- WebSocket routes authenticate with the `agentflow-bearer` subprotocol, never a URL parameter, and resolve `auth` before `authToken`, the same as HTTP.
+- WebSocket routes authenticate with the `10xgraph-bearer` subprotocol, never a URL parameter, and resolve `auth` before `authToken`, the same as HTTP.
 
 ## Next step
 

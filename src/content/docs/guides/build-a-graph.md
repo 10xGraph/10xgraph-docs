@@ -313,6 +313,10 @@ for msg in result["messages"]:
 
 The output includes the assistant's tool call turn, the tool results (`Weather in Tokyo: 22°C, sunny.` and `5000`) and a final assistant answer. Exact wording depends on the model.
 
+## Run it in production
+
+Serve this graph with `10xgraph dev` while you build, then ship the image from `10xgraph build`. The server loads the compiled `app` once at startup and adds auth, request limits and error handling around it, so you do not write them in the graph. Start at [Production readiness](/docs/production) and [Run the server](/docs/server/run-the-server).
+
 ## Next steps
 
 - [Configure an Agent](/docs/guides/configure-agent): dive into model selection, system prompts, and structured output.

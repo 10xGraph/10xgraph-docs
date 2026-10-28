@@ -43,6 +43,7 @@ import {
 | `NodeError` | 500 | Error in a specific graph node | Review node implementation and inputs |
 | `StorageError` | 500 | Checkpointer or memory store is unavailable | Verify storage backend is online, retry |
 | `TransientStorageError` | 503 | Temporary storage issue | Retry immediately or after brief delay |
+| `TenxGraphError` (base class) | 429 | Rate limit exceeded (`errorCode` `RATE_LIMIT_EXCEEDED`), or the user has too many runs in flight. The client has no dedicated class for 429 | Check `err.statusCode === 429`, wait, then retry. See [Rate limits](#rate-limits-429) |
 
 The client automatically instantiates the appropriate error class based on HTTP status code and error code from the server.
 
@@ -120,6 +121,7 @@ Some errors are temporary and safe to retry. The client itself does not retry au
 - `TransientStorageError` (503): the checkpointer or memory store is momentarily unavailable
 - `ServerError` with status 502/504: a gateway or upstream service is temporarily down
 - Network timeouts or connection resets (a plain `Error`, such as `Request timeout after 300000ms`, not a `TenxGraphError`)
+- A 429 `TenxGraphError`: retry after the `Retry-After` interval, not immediately (see [Rate limits](#rate-limits-429))
 
 **Non-transient errors** should not be retried the same way:
 - `AuthenticationError` (401): fix your token before retrying
@@ -160,6 +162,30 @@ const result = await retryWithBackoff(() =>
   client.invoke([Message.text_message('Query', 'user')])
 );
 ```
+
+## Rate limits (429)
+
+The server returns 429 when the `rate_limit` window is used up, or when one user has more graph runs in flight than `runs.max_concurrent_per_user` allows (default 10). The rate-limit response includes a `Retry-After` header in seconds and ends its message with `Retry after <n>s.` The run-cap response has no `Retry-After` header. The client has no class for 429, so it throws a plain `TenxGraphError` with `statusCode` 429, and it does not keep the response headers.
+
+```ts
+import { TenxGraphError } from '10xgraph-client';
+
+async function withRateLimitBackoff<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const limited = err instanceof TenxGraphError && err.statusCode === 429;
+      if (!limited || attempt === maxAttempts) throw err;
+      // Read the seconds from the message ("Retry after 12s."), or fall back to a fixed backoff.
+      const seconds = Number(/Retry after (\d+)s/.exec(err.message)?.[1] ?? 2 ** attempt);
+      await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+    }
+  }
+}
+```
+
+For server-side setup see [Rate limiting](/docs/reference/api-cli/rate-limiting).
 
 ## Streaming errors
 

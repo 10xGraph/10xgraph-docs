@@ -3,7 +3,7 @@ title: "Your agent charged the card twice: making tool calls replay-safe"
 seoTitle: "Agent charged twice: replay-safe tool calls"
 description: Why a crash mid-node re-runs tools that already fired, why the usual fixes fall short, and how 10xGraph's tool ledger and versioned writes close the gap.
 date: 2026-10-01
-updated: 2026-10-06
+updated: 2026-10-27
 author: Shudipto Trafder
 kind: engineering
 tags: [reliability, tools, checkpointing]
@@ -14,7 +14,7 @@ faq:
   - q: Which checkpointers support the tool ledger?
     a: PgCheckpointer stores it durably in a tool_executions table. InMemoryCheckpointer keeps it in process memory. SqliteCheckpointer does not implement it, so tools there run at least once, as before.
   - q: Does the ledger work for streaming runs?
-    a: Not yet. As of 0.10.0 the ledger, per-step durable checkpoints and node and tool timeouts apply to invoke and ainvoke. Streaming runs persist state at terminal points and run tools without a ledger lookup.
+    a: Not yet. As of 0.10.3 the ledger, per-step durable checkpoints and node and tool timeouts apply to invoke and ainvoke. Streaming runs persist state at terminal points and run tools without a ledger lookup.
   - q: What happens if recording a tool result fails?
     a: The tool result is still returned to the model and the run continues. The failure is logged at error level with an explicit warning that a replay of that node may run the tool again.
 ---
@@ -179,7 +179,11 @@ Most real tool nodes run several calls at once, and 10xGraph runs them in parall
 
 **Each parallel call gets its own copy of the state.** Tools can change injected state in place. If every parallel tool shared one state object, two tools writing different fields could overwrite each other. With more than one call, each branch gets a deep copy, and afterwards only the fields a branch actually changed are merged back against a baseline. A single tool call works on the shared state directly, so the common case has no copying cost.
 
-**One failing tool does not abandon its siblings.** The handler waits for every call to settle (`asyncio.gather` with `return_exceptions=True`) and then turns each failure into a tool error message the model can read and react to. Earlier, a single exception could escape while sibling tasks kept running without being awaited. Now every successful sibling is in the ledger before the node returns.
+**One failing tool does not abandon its siblings.** The handler waits for every call to settle (`asyncio.gather` with `return_exceptions=True`) and then turns each failure into a tool error message the model can read and react to. A tool that raises an unexpected exception reaches the model only as `Tool '<name>' failed with an internal error (reference <ref>)`. The raw exception text, which can carry paths, connection strings or SQL, stays in the server log under the same reference, so an operator can find the failure behind a user report. Earlier, a single exception could escape while sibling tasks kept running without being awaited. Now every successful sibling is in the ledger before the node returns.
+
+**Parallelism is capped.** A single model turn can request many tool calls. The tool node runs at most 10 at once by default; set `max_parallel_tool_calls` in the run config or the `TENXGRAPH_MAX_PARALLEL_TOOL_CALLS` environment variable to change it. When you serve with `10xgraph-api`, clients cannot override this key.
+
+**Ledger reads are owner-scoped.** With `PgCheckpointer`, `aget_tool_result` applies the same owner filter as the message reads when `enforce_user_isolation` is on (the default). A caller who names another user's thread gets no recorded result. This is in the core changelog under the next release after 0.10.3.
 
 **Malformed arguments are reported to the model.** If a model produces invalid JSON for a tool's arguments, the call returns a tool error saying so, rather than failing the whole node with a decode error.
 
@@ -268,7 +272,7 @@ You can turn this off with `"durable_checkpoint_every_step": False` in the run c
 
 ## Current limits
 
-These are the limits we know about as of 0.10.0.
+These are the limits we know about as of 0.10.3.
 
 - **Streaming runs are not covered yet.** The ledger lookup, per-step durable checkpoints and node and tool timeouts are implemented in the `invoke` / `ainvoke` path. The streaming path (`stream` / `astream`) runs tools without a ledger lookup, writes durably only at terminal points, and has no deadlines. If an agent has non-idempotent tools and runs over streaming, the provider idempotency key is your protection until streaming gets the same treatment.
 - **At least once, not exactly once.** The window between a side effect and its ledger record is small but real. See the section above.
@@ -277,7 +281,7 @@ These are the limits we know about as of 0.10.0.
 
 ## Production checklist
 
-- [ ] Use `PgCheckpointer` (`pip install "10xgraph[pg_checkpoint]"`) and point the `checkpointer` key in `10xgraph.json` at it, for example `"checkpointer": "graph.agent:checkpointer"`.
+- [ ] Use `PgCheckpointer` (`pip install "10xgraph[pg_checkpoint]"`) and pass it to `graph.compile(checkpointer=...)`, as in the example below. The `checkpointer` key in `10xgraph.json` is not read by the server; it uses the checkpointer on the compiled graph.
 - [ ] Use `invoke` / `ainvoke` for runs whose tools have side effects you cannot repeat.
 - [ ] Give every money-moving or message-sending tool an idempotency key derived from your domain.
 - [ ] Put side effects after `interrupt()` calls, never before them.

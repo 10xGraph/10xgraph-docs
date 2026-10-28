@@ -11,7 +11,7 @@ faq:
     a: "A node is a function that does work and returns a message or state update. An edge connects two nodes and decides which one runs next, either always (static) or based on the state (conditional)."
 ---
 
-The Concepts section explains how 10xGraph works: the three-layer architecture (library, server, client), how a request flows from client through the server to your graph, the execution model (state, messages, nodes, edges), and advanced patterns for memory, reliability, and production deployments. Read this section to understand the mental model before building.
+The Concepts section explains how 10xGraph works: the three-layer architecture (library, server, client), how a request flows from client through the server to your graph, the execution model (state, messages, nodes, edges), and advanced patterns for memory, reliability, and production deployments. Read this section to understand the mental model before building. To see what the server adds once your agent is built (auth, limits, durability, scaling), go to [Production](/docs/production).
 
 ## Why graphs?
 
@@ -267,7 +267,7 @@ Production patterns: serving agents over HTTP, auth, observability, media handli
 
 1. **First read** (15 min): [StateGraph](/docs/concepts/state-graph) to see how the workflow engine chains nodes.
 2. **Then read** (30 min): [State and messages](/docs/concepts/state-and-messages), [Agents and tools](/docs/concepts/agents-and-tools), and [Streaming](/docs/concepts/streaming) to understand the execution model and granularity.
-3. **Go build** in the [Get started](/docs/get-started) section. Build a graph in Python, serve it with `10xgraph api`, and call it from TypeScript. The tutorial is more hands-on.
+3. **Go build** in the [Get started](/docs/get-started) section. Build a graph in Python, serve it with `10xgraph dev`, and call it from TypeScript. The tutorial is more hands-on.
 4. **Return here** to dive deeper: checkpointing, memory, context management, error handling, auth, observability.
 
 ## Next steps

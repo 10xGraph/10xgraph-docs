@@ -132,7 +132,7 @@ const ws = new WebSocket(
 
 The subprotocol offer must be exactly two entries with the sentinel first. Anything else falls through to the query parameter.
 
-The older sentinel `agentflow-bearer` is still accepted until 2.0, and the server echoes whichever one you send. The TypeScript client still sends `agentflow-bearer`.
+The older sentinel `agentflow-bearer` is still accepted until 2.0, and the server echoes whichever one you send. The TypeScript client sends `10xgraph-bearer` since 0.6.0.
 
 ## Custom authentication backend
 
@@ -237,12 +237,12 @@ Decision table:
 | Thread does not exist | Allow (new session; `invoke`/`stream` will create it owned by the caller) |
 | Thread exists and caller owns it | Allow |
 | Thread exists and someone else owns it | **Deny**, including on `invoke` and `stream` |
-| Checkpointer cannot resolve ownership (`aget_thread_owner` not implemented) | Allow with warning |
+| No checkpointer, or one that cannot resolve ownership (`aget_thread_owner` not implemented) | **Deny** (fails closed). With auth on, the server refuses to start in this setup |
 | Ownership lookup fails | **Deny** (failures never grant access) |
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Ownership requires a checkpointer that tracks owners</p>
 
-Ownership comes from `BaseCheckpointer.aget_thread_owner`. `PgCheckpointer`, SQLite, and the in-memory checkpointer implement it; the base class raises `NotImplementedError`. With no checkpointer configured, requests pass through with a warning. The in-memory checkpointer records owners only when explicitly writing a thread, so ownership is the production default (with Postgres) but development defaults to `DefaultAuthorizationBackend`.
+Ownership comes from `BaseCheckpointer.aget_thread_owner`. `PgCheckpointer`, SQLite, and the in-memory checkpointer implement it; the base class raises `NotImplementedError`. The backend fails closed: with no checkpointer, or one that cannot resolve owners, thread requests are denied, and with ownership active the server refuses to start. The server uses the checkpointer passed to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. The in-memory checkpointer records owners only when explicitly writing a thread, so ownership is the production default (with Postgres) but development defaults to `DefaultAuthorizationBackend`.
 
 </aside>
 
@@ -252,7 +252,7 @@ Ownership is immutable, so it is cached by `ThreadOwnershipResolver` for scalabi
 
 | Tier | Details |
 |---|---|
-| L1 | In-process LRU: 10,000 entries per worker, no expiry |
+| L1 | In-process LRU: 10,000 entries per worker, 30 s TTL |
 | L2 | Optional shared Redis client (owner entries under `af:authz:owner:id:<thread_id>`, kept for 1 hour; a delete removes the entry and leaves a "just deleted" marker under `af:authz:owner:tomb:<thread_id>` for 30 seconds, so the id cannot be claimed while another worker still caches the old owner; Redis errors degrade to database lookup and never fail the request) |
 
 Negative results are not cached (a missing thread could be created by a later request). The L2 tier is wired from `redis` in `10xgraph.json`, falling back to `REDIS_URL`. When neither is set or the `redis` package is not installed, L1 only is used and a warning is logged at startup.

@@ -408,15 +408,14 @@ app = SupervisorTeamAgent(
 {
   "agent": "graph:app",
   "env": ".env",
-  "auth": null,
-  "checkpointer": null
+  "auth": null
 }
 ```
 
 Start the server:
 
 ```bash
-10xgraph api
+10xgraph dev --no-open
 ```
 
 Then invoke it:
@@ -433,7 +432,7 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
 Or start the interactive playground:
 
 ```bash
-10xgraph play
+10xgraph dev
 ```
 
 ---
@@ -459,3 +458,7 @@ For the complete reference of constructor and compile parameters, see `/docs/ref
 - **SupervisorTeamAgent**: Central coordinator routes to specialists. Use when one LLM should make all routing decisions.
 
 See `/docs/concepts/choosing-a-building-block` for a detailed decision guide.
+
+## Run it in production
+
+`max_rounds` counts one turn and resets on the next, which bounds the model calls one request can trigger. Serve it with a durable checkpointer passed to `compile()` and a rate limit. See [Rate limiting](/docs/server/rate-limiting) and [Scaling and reliability](/docs/production/scaling).

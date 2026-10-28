@@ -429,7 +429,7 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
 | `injectq` | Production | `graph.agent:container` (see the warning below) |
 | `rate_limit` | Production with a rate-limit backend | `enabled`, `backend`, `requests`, `window`, `by`, `trusted_proxy_headers`, `exclude_paths` |
 
-Defaults come from the prompts or flags: 100 requests per 60 seconds, counted `ip` (interactive mode also offers `global`), with `trusted_proxy_headers` true only if you say you are behind a reverse proxy. Keys such as `test`, `evaluation`, `remote_tools`, `checkpointer` and `store` are not written for production, though you can add them yourself. The quick-start template adds none of these either. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
+Defaults come from the prompts or flags: 100 requests per 60 seconds, counted `ip` (interactive mode also offers `global`), with `trusted_proxy_headers` true only if you say you are behind a reverse proxy. Keys such as `test`, `evaluation`, `remote_tools` and `store` are not written for production, though you can add them yourself. There is no `checkpointer` key to set: the server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The quick-start template adds none of these either. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
 
 ## Fix these before you deploy
 

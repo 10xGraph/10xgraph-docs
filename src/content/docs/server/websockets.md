@@ -9,6 +9,8 @@ updated: "2026-10-27"
 
 10xGraph exposes two WebSocket endpoints: `/v1/graph/ws` for turn-based agent interactions and `/v1/graph/live` for realtime audio conversations. WebSockets keep a persistent connection open so the server can stream responses token-by-token, the client can resume from checkpoints, and (for realtime agents) both sides can exchange audio in near-real-time. Both endpoints support the same authentication, rate limiting, and concurrency controls as REST APIs.
 
+WebSocket auth and connection limits are part of the [security model](/docs/production/security-model).
+
 ## When to use WebSocket
 
 Use WebSocket when the client needs true bidirectional streaming or low-latency two-way communication. For simple invoke-and-wait workflows, REST's `/v1/graph/invoke` is simpler. For streaming where the client reads until done, REST's `/v1/graph/stream` (NDJSON) is also sufficient and works in more environments (proxies, browsers without WebSocket support).
@@ -138,7 +140,7 @@ Every WebSocket handshake and every graph run on the socket counts against the g
 - A handshake over the limit is refused before `accept()` with close code 1013.
 - A run over the limit gets an `error` chunk whose `data` has `reason` and `retry_after_seconds`. The run is skipped and the socket stays open; the check runs again on the next frame.
 
-Connection caps apply at the handshake only: `websocket.max_connections` (per process) and `websocket.max_connections_per_user`. Over either cap, the handshake is refused with close code 1013. Live sessions on `/v1/graph/live` count against `websocket.max_connections_per_user` like any other socket.
+Connection caps apply at the handshake only: `websocket.max_connections` and `websocket.max_connections_per_user`. Over either cap, the handshake is refused with close code 1013. Live sessions on `/v1/graph/live` count against `websocket.max_connections_per_user` like any other socket.
 
 ## Realtime audio: `/v1/graph/live`
 
@@ -202,7 +204,7 @@ WebSocket behavior is controlled by keys in the `websocket` object within `10xgr
 }
 ```
 
-In a multi-worker deployment (Gunicorn + Uvicorn), these limits are **per process**, not global. Size them accordingly: if you run 4 workers with `max_connections: 1000`, the server can hold 4000 concurrent sockets total.
+In a multi-worker deployment (Gunicorn + Uvicorn), these limits are global when `redis` (or `REDIS_URL`) is configured: all workers and replicas count their sockets in Redis, so `max_connections: 1000` means 1000 in total. Slots held by a worker that dies expire on their own, and a Redis error lets the connection through (logged). Without Redis, each process counts its own sockets, so 4 workers with `max_connections: 1000` can hold 4000.
 
 ## Close codes
 

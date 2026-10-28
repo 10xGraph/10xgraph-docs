@@ -4,7 +4,7 @@ description: AI agent streaming sends responses token-by-token to a frontend ove
 section: Glossary
 order: 90
 label: What is agent streaming?
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: What is SSE (Server-Sent Events)?
     a: "Server-Sent Events is a web standard for pushing data from server to client over a persistent HTTP connection. The client opens a GET or POST request with Accept: text/event-stream, and the server sends newline-delimited events as they occur. SSE is simpler than WebSockets for one-directional streaming and reconnects automatically if the connection drops."
@@ -53,7 +53,7 @@ The server sends each chunk the moment it is generated. The client receives and 
 10xGraph's built-in API server exposes streaming with zero configuration:
 
 ```bash
-10xgraph api  # starts REST + streaming + WebSocket server
+10xgraph dev  # starts REST + streaming + WebSocket server
 ```
 
 The streaming endpoint:

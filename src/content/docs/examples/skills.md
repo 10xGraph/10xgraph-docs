@@ -3,10 +3,10 @@ title: Skills
 seoTitle: "Skills example: dynamic SKILL.md loading"
 description: Run an example graph that loads Agent Skills (SKILL.md files) on demand and combines them with normal Python tools.
 section: Examples
-group: "Production"
+group: "Testing and operations"
 order: 190
 label: Skills
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: How does the model know which skill to load?
     a: The agent adds an available_skills catalog (name, description and triggers) to the system prompt. When a request matches a description, the model calls activate_skill with that skill name.
@@ -14,7 +14,7 @@ faq:
     a: Yes. The example registers get_weather in a ToolNode, and the skill tools are added to the same node, so one agent can call both.
 ---
 
-This example builds one assistant that switches into specialized modes at runtime by loading `SKILL.md` files from disk, alongside a normal Python tool. The code lives in `agentflow/examples/skills/` and needs Python 3.12 or newer. Skills follow the Agent Skills format, so the folders are portable between tools.
+This example builds one assistant that switches into specialized modes at runtime by loading `SKILL.md` files from disk, alongside a normal Python tool. The code lives in `examples/skills/` and needs Python 3.12 or newer. Skills follow the Agent Skills format, so the folders are portable between tools.
 
 ## What this example shows
 
@@ -47,7 +47,7 @@ Run the interactive chat:
 python examples/skills/chat.py
 ```
 
-Or run the scripted example with a single query (from `agentflow/`):
+Or run the scripted example with a single query (from the repository root):
 
 ```bash
 cd examples/skills

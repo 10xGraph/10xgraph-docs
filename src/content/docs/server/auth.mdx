@@ -11,10 +11,12 @@ faq:
   - q: "Why do I get 401 with code REVOKED_TOKEN?"
     a: "The request had no Authorization header, or it was not a Bearer credential. Send `Authorization: Bearer <token>` on every HTTP request, or use the `10xgraph-bearer` subprotocol on WebSocket."
   - q: "Does ownership checking work with the in-memory checkpointer?"
-    a: "Yes, but in-memory data disappears on restart. Use PgCheckpointer in production so thread ownership persists across restarts."
+    a: "Yes, the in-memory checkpointer can name thread owners, but in-memory data disappears on restart. Use PgCheckpointer in production so thread ownership persists across restarts."
 ---
 
 Authentication answers "who is calling the API?" Authorization answers "what are they allowed to do?" In production, you need both. This guide covers JWT and custom auth, thread ownership, role-based access control, and the production safety checklist.
+
+For the full picture of what the server enforces and what it leaves to you, see the [security model](/docs/production/security-model). Scope names and custom backends are covered in [Authorization scopes](/docs/guides/authorization-scopes).
 
 ## The big picture
 
@@ -135,17 +137,16 @@ The simplest and most important authorization rule is "a user sees only their ow
 
 A thread is read, continued, stopped, fixed, or deleted **only by the user who created it**. Another user's request on that thread is rejected up front with status 403 before the model runs, for every action including `invoke` and `stream`. Listing threads shows only the caller's.
 
-If you leave `authorization` unset, the default depends on `MODE`: ownership in production (secure by default), allow-all in development (frictionless). Your explicit choice always wins.
+If you leave `authorization` unset, the default depends on `MODE`: ownership whenever auth is configured or `MODE=production` (secure by default), and allow-all only with auth off in development, where requests carry no identity. Your explicit choice always wins.
 
 A custom `AuthorizationBackend` also isolates users by default: its `isolation_scope()` returns `"owner"`, so each user sees only their own threads and memories. A backend that wants shared data returns `"none"`. The built-in `allow_all` shares data, and `ownership` and `rbac` isolate it.
 
-Ownership is looked up through the checkpointer's `aget_thread_owner` method. Use a durable checkpointer such as `PgCheckpointer` so owners survive restarts. For high-concurrency workloads, set `redis` in `10xgraph.json` (or `REDIS_URL` in your environment) to cache ownership lookups across workers:
+Ownership is looked up through the checkpointer's `aget_thread_owner` method. The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. That checkpointer must be able to name thread owners: `PgCheckpointer`, `InMemoryCheckpointer` and the SQLite checkpointer do, and a custom `BaseCheckpointer` must implement `aget_thread_owner`. With auth on, the server refuses to boot if there is no checkpointer or its `aget_thread_owner` is not implemented, and at request time ownership fails closed (thread requests are denied). Use a durable checkpointer such as `PgCheckpointer` so owners survive restarts. For high-concurrency workloads, set `redis` in `10xgraph.json` (or `REDIS_URL` in your environment) to cache ownership lookups across workers:
 
 ```jsonc title="10xgraph.json"
 {
   "auth": "jwt",
   "authorization": "ownership",
-  "checkpointer": "graph.checkpointing:pg_checkpointer",
   "redis": "redis://localhost:6379"
 }
 ```

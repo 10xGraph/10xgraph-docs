@@ -1,0 +1,245 @@
+---
+title: Ship an agent to Kubernetes with the files 10xgraph generates
+description: Generate the Dockerfile, Compose file and Kubernetes manifest with 10xgraph build, add Postgres, Redis and secrets, and see what the probes and shutdown settings do.
+minutes: 30
+level: Intermediate
+outcome:
+  - A Dockerfile that runs Gunicorn as a non-root user, built and started for real
+  - A Kubernetes Deployment and Service with readiness, liveness and graceful shutdown set
+  - Postgres and Redis wired in, with every secret coming from a Kubernetes Secret
+  - A clear list of what was checked locally and what needs your cluster
+versions: 10xGraph 0.10.3, API and CLI 0.9.0 (the generated files come from the build after that, see the note at the end)
+order: 40
+updated: "2026-10-27"
+faq:
+  - q: Why not run 10xgraph build --docker-compose --k8s in one go?
+    a: With --docker-compose the Dockerfile has no CMD, because Compose supplies the command. The k8s.yaml has no command either, so a pod built from that image has nothing to start. Generate the Kubernetes files last, and use a separate run for Compose.
+  - q: Does the manifest include Postgres, Redis, an Ingress or autoscaling?
+    a: No. It has one Deployment with two replicas and one Service. Postgres and Redis should be managed services or separate charts, and TLS comes from your Ingress or Gateway. The scaling page explains why CPU is a weak autoscaling signal for agents.
+  - q: Did you deploy this to a cluster?
+    a: No. The image was built and run in Docker, and the YAML was parsed. kubectl and a cluster were not available, so the apply, rollout and rolling-restart steps are described from the generated files and are not verified.
+---
+
+Your agent runs on your laptop with `10xgraph dev`. Production needs an image, a process manager, health probes that do not kill a long run, a shutdown that waits for work in flight, and secrets that stay out of the image. `10xgraph build` writes all of that from your `10xgraph.json`. This guide generates the files, runs the image, and goes through the manifest line by line.
+
+Python 3.12 or later, Docker, and for the last step a Kubernetes cluster you can reach with `kubectl`. The scaling model behind these settings is on the [scaling and reliability](/docs/production/scaling) page.
+
+```mermaid
+flowchart LR
+    I[Ingress with TLS] --> S[Service :80]
+    S --> P1[Pod: Gunicorn + 2 workers]
+    S --> P2[Pod: Gunicorn + 2 workers]
+    P1 --> R[(Redis)]
+    P2 --> R
+    P1 --> D[(Postgres)]
+    P2 --> D
+```
+
+## 1. Start from the production template
+
+```bash
+mkdir shop-support && cd shop-support
+python -m venv .venv && source .venv/bin/activate
+pip install "10xgraph[google-genai,pg_checkpoint]" "10xgraph-api[jwt,redis]"
+10xgraph init --yes --template production --auth jwt --rate-limit redis --name shop-support
+```
+
+That writes `10xgraph.json` (JWT auth, `ownership` authorization, a Redis rate limit at 100 requests per 60 seconds per IP, `${REDIS_URL}` read from the environment), a `graph/` package with a sample weather agent, tests and evals. Build the Docker image only after two edits.
+
+First, the generated Dockerfile installs exactly the `dependencies` in `pyproject.toml`, so list the Postgres extra there:
+
+```toml title="pyproject.toml"
+dependencies = [
+    "10xgraph[google-genai,pg_checkpoint]",
+    "10xgraph-api[jwt,redis]",
+]
+```
+
+Second, the template compiles with `InMemoryCheckpointer`, which forgets every thread when a pod restarts and gives each replica its own history. Swap in `PgCheckpointer` as in step 2 of the [multi-tenant guide](/build/multi-tenant-support-agent):
+
+```python title="graph/agent.py (the end of the file)"
+async def build_app():
+    checkpointer = PgCheckpointer(
+        postgres_dsn=os.environ["DATABASE_URL"],
+        redis_url=os.environ["REDIS_URL"],
+    )
+    await checkpointer.asetup()  # creates the tables
+    return react_agent.compile(checkpointer=checkpointer, callback_manager=callback_manager)
+```
+
+Point `10xgraph.json` at it with `"agent": "graph.agent:build_app"`. Replace the sample weather tool with your own tools. The server uses the checkpointer you pass to `compile()`; the `checkpointer` key in `10xgraph.json` is not read.
+
+With several pods behind a load balancer, set the rate limit to `"by": "user"`. Behind a proxy, every request can arrive from the same address, which would put all your customers into one bucket.
+
+## 2. Generate the files
+
+```bash
+10xgraph build --docker-compose --service-name shop-support
+10xgraph build --k8s --service-name shop-support --force
+```
+
+Two runs on purpose. With `--docker-compose` the Dockerfile omits its `CMD`, because Compose supplies the command. A run with both flags writes a `k8s.yaml` without a command and an image with nothing to start; I generated both ways to check, and ran the two commands in this order to confirm the Compose file is left alone. The second run rewrites the Dockerfile with its `CMD` and writes `k8s.yaml`. Keep the Compose file for local use and run the Kubernetes command last.
+
+The folder now has four new files. Here is what is in them.
+
+### Dockerfile
+
+- **Two stages.** The builder installs your dependencies into a virtualenv. It then removes the CLI-only parts of the API package (project templates, the config editor, typer, rich and questionary where nothing else needs them) and uninstalls `pip`. The runtime stage copies the virtualenv and your code onto `python:3.13-slim`.
+- **Gunicorn with Uvicorn workers**, started as `CMD ["gunicorn", "-k", "uvicorn_worker.UvicornWorker", "-b", "0.0.0.0:8000", "--graceful-timeout", "600", "--timeout", "660", "tenxgraph_api.src.app.main:app"]`. The image sets `WEB_CONCURRENCY=2` workers; override it with an environment variable.
+- **A graceful timeout of 600 seconds**, because an agent run can last minutes and Gunicorn's default of 30 seconds would cut runs off at every deploy.
+- **A non-root user**, `USER 10001:10001`, and `MODE=production`, `IS_DEBUG=false` as defaults.
+- **A health check** that calls `GET /ping` from Python's standard library, so the image needs no curl.
+- **`.dockerignore`** excludes `.env`, `.env.*`, keys, certificates and cloud credential files, so `COPY . .` cannot ship a secret.
+
+### docker-compose.yml
+
+One service, `shop-support`, with `env_file: .env`, the port published on `127.0.0.1:8000` only, `stop_grace_period: 600s`, a read-only filesystem with a tmpfs at `/tmp` and a volume at `/app/uploads`, `cap_drop: ALL` and `no-new-privileges`. It does not start Postgres or Redis. Add them, and pass a database password through the environment instead of writing it in the file:
+
+```yaml title="docker-compose.yml"
+services:
+  shop-support:
+    # ...the generated lines stay as they are, plus:
+    environment:
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  redis:
+    image: redis:7
+volumes:
+  uploads:
+  pgdata:
+```
+
+The generated file reads `ORIGINS` and `ALLOWED_HOST` from `.env`. Production refuses to start when either is missing or `*`.
+
+### k8s.yaml
+
+A Deployment and a Service named after `--service-name`. The values that matter:
+
+| Setting | Value in the file | Why |
+|---|---|---|
+| `replicas` | 2 | Redundancy. The manifest has no autoscaler. |
+| `terminationGracePeriodSeconds` | 660 | Longer than the 600-second graceful timeout, so Kubernetes does not send SIGKILL while runs drain. |
+| `preStop` | `sleep 15` | Gives the load balancer time to stop sending new requests before the app starts shutting down. |
+| `readinessProbe` | `GET /health/ready`, every 10 s, first check after 5 s | Takes a pod out of rotation when its checkpointer, Redis or store cannot be reached. |
+| `livenessProbe` | `GET /ping`, every 30 s, first check after 30 s, 5 failures | Deliberately slack. A worker busy with a long run must not be mistaken for a hung one. |
+| Security | non-root uid 10001, `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, `capabilities.drop: ALL`, `seccompProfile: RuntimeDefault`, `automountServiceAccountToken: false` | The server never calls the Kubernetes API and writes only to `/tmp` and `/app/uploads`, both `emptyDir`. |
+| Secrets | `envFrom: secretRef: shop-support-secrets` | Every key of that Secret becomes an environment variable. The pod does not start until it exists. |
+| Resources | requests 500m CPU and 512Mi; limits 2 CPU and 2Gi | Defaults. Tune them for your agent. |
+| Service | port 80 to container port 8000 | Put an Ingress or Gateway with TLS in front. |
+
+Three placeholders must change before you apply: `image` (`registry.example.com/shop-support:1.0.0`, pin your own tag or digest, never `latest`), `ORIGINS` (`https://your-frontend.example.com`) and `ALLOWED_HOST` (`your-app.example.com`). The comment at the top of the file lists these. The page [Deploy on Kubernetes](/docs/server/kubernetes) has the long version, including how to test a rolling restart.
+
+One more line to read: uploaded files go to an `emptyDir` that is per pod and lost on restart. With two replicas, a file uploaded to one pod is missing on the other. Set `MEDIA_STORAGE_TYPE=cloud` for real uploads.
+
+## 3. Check the image before the cluster
+
+Build the image from the Kubernetes run and start it with the same restrictions the manifest applies. The values below are placeholders, and the Redis address is deliberately unreachable, to see what the probes say:
+
+```bash
+docker build -t shop-support:test .
+docker run -d --name shop --read-only --tmpfs /tmp --tmpfs /app/uploads:uid=10001 \
+  --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:8000:8000 \
+  -e ORIGINS=http://localhost:3000 -e ALLOWED_HOST=localhost,127.0.0.1 \
+  -e JWT_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" -e JWT_ALGORITHM=HS256 \
+  -e REDIS_URL=redis://127.0.0.1:1/0 -e GOOGLE_API_KEY=dummy shop-support:test
+```
+
+What happened when this ran (the sample weather template with `InMemoryCheckpointer`, the image installed `10xgraph-api` 0.9.0 and `10xgraph` 0.10.3 from PyPI):
+
+```text
+$ docker exec shop id
+uid=10001(appuser) gid=10001(appuser) groups=10001(appuser)
+$ curl -s localhost:8000/ping
+{"data":"pong", ...}                                 HTTP 200
+$ curl -s localhost:8000/health/ready
+{"status":"not_ready","checks":{"checkpointer":"ok","redis":"fail"}}   HTTP 503
+$ curl -s -o /dev/null -w '%{http_code}' localhost:8000/v1/threads
+401
+$ docker inspect shop --format '{{.State.Health.Status}}'
+healthy
+```
+
+The image builds, runs as uid 10001 on a read-only root, and starts with all capabilities dropped. `/ping` stays 200 while `/health/ready` is 503 because Redis cannot be reached. That split is what the manifest relies on. Readiness fails, so the pod is taken out of the Service and receives no new requests. Liveness still passes, so Kubernetes does not restart a pod that is merely waiting for a dependency. The unauthenticated request got 401, because every route except `/ping` and `/health/ready` needs a token. Stop and remove the container with `docker rm -f shop`.
+
+The full Compose file with Postgres and Redis passed `docker compose config`. I did not start it, and I did not run the app against a real Postgres.
+
+## 4. Secrets and dependencies
+
+The pod reads one Secret named `<service>-secrets`. Create it from literals. `--from-env-file=.env` keeps quotes from the file as part of each value:
+
+```bash
+kubectl create secret generic shop-support-secrets \
+  --from-literal=JWT_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
+  --from-literal=JWT_ALGORITHM="HS256" \
+  --from-literal=DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DBNAME" \
+  --from-literal=REDIS_URL="redis://HOST:6379/0" \
+  --from-literal=GOOGLE_API_KEY="..."
+```
+
+The server reads `JWT_SECRET_KEY`, `JWT_ALGORITHM` and `REDIS_URL` itself. `DATABASE_URL` is whatever name your `build_app` reads. In production the JWT secret must be at least 32 bytes. Use a managed Postgres and Redis, or run your own with backups: see [Backup and restore](/docs/server/backup-and-restore).
+
+## 5. Apply and scale
+
+These commands were not run for this guide, because no cluster was available:
+
+```bash
+kubectl apply -f k8s.yaml
+kubectl rollout status deployment/shop-support
+kubectl port-forward svc/shop-support 8000:80
+curl http://127.0.0.1:8000/ping
+```
+
+To scale, change the replica count. Threads are not sticky: their state lives in Postgres and Redis, so any pod can take any request, and you should not use session affinity.
+
+```bash
+kubectl scale deployment shop-support --replicas=5
+```
+
+Three things change when you go past one process:
+
+- **Use the Redis rate limiter.** The memory backend counts per process, so the real limit is the limit times the number of workers, and the server prints a warning at startup to say so.
+- **Set load balancer idle timeouts above your longest streaming run.** The pod's grace period is 660 seconds, but a proxy that cuts idle connections at 60 seconds will still break a stream.
+- **One run per thread.** A second request to a thread that is busy waits up to 30 seconds and then gets 409. With Redis configured, that lock is shared by all replicas.
+
+For autoscaling, CPU is a poor signal for agents, which wait on a model provider. Scale on concurrent requests per pod where your ingress can export it. [Scaling and reliability](/docs/production/scaling) has the details.
+
+## What was checked and what was not
+
+| Checked here | Not checked here |
+|---|---|
+| `10xgraph init` and both `build` runs, and the content of every generated file | Applying `k8s.yaml` to a cluster (no `kubectl`, no cluster) |
+| The image builds, runs as uid 10001 with a read-only root and no capabilities | A rolling restart with a run in flight |
+| `/ping` 200, `/health/ready` 503 with Redis down, 401 without a token | The app against a real Postgres, or Redis reachable |
+| The Compose file with Postgres and Redis parses (`docker compose config`) | `docker compose up` with real keys |
+| `k8s.yaml` parses as two documents: a Deployment and a Service | Ingress, TLS, autoscaling, pod disruption budgets (the file has none) |
+
+<Callout type="note" title="Next release">
+
+The image above installed the released packages (API 0.9.0, core 0.10.3), but the Dockerfile, Compose file and `k8s.yaml` were generated by the repository source of `10xgraph build`, which is newer than 0.9.0. The non-root user, read-only filesystem, restricted `securityContext`, `envFrom` Secret, pinned placeholder image, loopback-only Compose port and `ORIGINS` and `ALLOWED_HOST` placeholders arrive in the next API release. The `/health/ready` endpoint is in 0.9.0, but I did not check older generated manifests for the other values. If your generated files look different, run `10xgraph build --force` after upgrading.
+
+</Callout>
+
+## Where to next
+
+<CardGrid>
+
+<LinkCard title="Deploy on Kubernetes" href="/docs/server/kubernetes" description="Rolling restarts, autoscaling and troubleshooting a deployment." eyebrow="How-to" />
+<LinkCard title="Scaling and reliability" href="/docs/production/scaling" description="Workers, locks, Redis and failure behaviour across replicas." eyebrow="Production" />
+<LinkCard title="Production checklist" href="/docs/server/production-checklist" description="Everything you still own before real traffic." eyebrow="How-to" />
+<LinkCard title="Graceful shutdown" href="/docs/guides/graceful-shutdown" description="Drain runs when a pod is told to stop." eyebrow="How-to" />
+</CardGrid>

@@ -65,6 +65,15 @@ console.log(await client.ping());
 
 If the API runs behind a proxy, `baseUrl` must point at the proxy address that browsers and services actually use.
 
+## Fix 429 responses
+
+A `TenxGraphError` with `statusCode` 429 means the server refused the call to limit load. There are two causes:
+
+- **Rate limit.** `errorCode` is `RATE_LIMIT_EXCEEDED` and the message ends with `Retry after <n>s.` The server also sent a `Retry-After` header, but the client does not keep response headers on the error, so read the seconds from the message.
+- **Per-user run cap.** One user has `runs.max_concurrent_per_user` runs in flight (default 10). `errorCode` is `HTTPException` and there is no `Retry-After`. Wait for a run to finish, for example close streams you no longer read.
+
+The client does not retry 429 on its own. Back off in your app (see [Error handling](/docs/client/error-handling#rate-limits-429)). If every user hits the limit at once from behind a proxy, the server is counting the proxy's IP: set `trusted_proxies` on the server ([API server troubleshooting](/docs/troubleshooting/api-server)).
+
 ## Fix browser requests that fail while curl works
 
 When the browser console shows "CORS error", "net::ERR_FAILED" or "Failed to fetch" but curl succeeds, the browser is blocking the response. Browsers enforce CORS, curl does not.
@@ -229,7 +238,7 @@ When a socket closes right after opening, the numeric close code tells you why. 
 
 ### Send the token through the subprotocol
 
-The bearer token never goes in the URL. In browsers it travels in the `Sec-WebSocket-Protocol` header as a subprotocol pair, and on Node the client also sets an `Authorization` header. The server accepts the `10xgraph-bearer` subprotocol, and the older `agentflow-bearer` name (which this client version sends) keeps working as a deprecated alias.
+The bearer token never goes in the URL. In browsers it travels in the `Sec-WebSocket-Protocol` header as a subprotocol pair, and on Node the client also sets an `Authorization` header. This client version (0.6.0 and later) sends the `10xgraph-bearer` subprotocol, which needs `10xgraph-api` 0.7.0 or later. A server older than 0.7.0 only knows `agentflow-bearer` and rejects the WebSocket handshake; upgrade the server.
 
 If a reverse proxy strips `Sec-WebSocket-Protocol`, the browser handshake arrives without a token and is rejected. Configure the proxy to forward upgrade headers, including `Sec-WebSocket-Protocol`.
 
@@ -272,6 +281,7 @@ These codes appear in error responses the client surfaces as typed errors. The f
 | `STORAGE_NOT_FOUND_000` | The thread or stored resource does not exist. | Check the `thread_id` and that a checkpointer is enabled. |
 | `STORAGE_TRANSIENT_000` | A temporary storage failure, such as an unreachable database. | Retry after a short delay. |
 | `VALIDATION_ERROR` | The request body failed validation (HTTP 422). | Check the message format and `config` shape against [Invoke and stream](/docs/client/invoke-agent). |
+| `RATE_LIMIT_EXCEEDED` | The server's rate limit is used up (HTTP 429). Arrives as a plain `TenxGraphError`, not a typed subclass. | Wait for the `Retry-After` interval, which the message also states, then retry. See [Fix 429 responses](#fix-429-responses). |
 
 ## Related pages
 

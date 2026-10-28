@@ -6,7 +6,7 @@ section: Examples
 group: Tools and MCP
 order: 100
 label: MCP Server
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 This example turns a Python function into a remotely callable tool with FastMCP, a Python library for building Model Context Protocol servers. The server exposes the tool over HTTP, so 10xGraph graphs and other MCP clients can discover it and call it by name.
@@ -32,7 +32,7 @@ pip install fastmcp
 The `fastmcp` package is the only requirement for the server; it does not need 10xGraph installed. Then run the server:
 
 ```bash
-cd agentflow/examples/react-mcp
+cd examples/react-mcp
 python server.py
 ```
 

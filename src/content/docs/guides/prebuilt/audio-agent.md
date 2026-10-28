@@ -407,3 +407,7 @@ The `arealtime()` generator yields events as they occur during the session. List
 - **Realtime API reference:** [`realtime` reference](/docs/reference/python/realtime) covers `RealtimeConfig`, `VADConfig`, `ReconnectConfig`, `LiveInputQueue`, event types, and `RealtimeClient`.
 - **Step-by-step guide:** [Use realtime audio](/docs/guides/use-realtime-audio) shows how to wire AudioAgent into a microphone or WAV file pipeline, build a WebSocket bridge for the API server, and set up resilient reconnect.
 - **Testing:** See [Testing](/docs/testing/unit-tests) for how to mock a realtime client in unit tests.
+
+## Run it in production
+
+Audio runs over a long-lived connection, so authenticate the socket and rate limit it. See [WebSockets](/docs/server/websockets) and [Server auth](/docs/server/auth).

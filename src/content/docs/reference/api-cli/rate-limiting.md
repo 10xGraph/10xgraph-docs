@@ -5,7 +5,7 @@ description: "Complete reference for the rate_limit block in 10xgraph.json: the 
 section: Reference
 group: "CLI and configuration"
 order: 450
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The `rate_limit` block in `10xgraph.json` turns on a sliding-window limiter for the API server. It counts REST requests, WebSocket handshakes and WebSocket graph runs against one bucket per client. The limiter is off unless the block exists; this page lists every option, header and error.
@@ -98,7 +98,7 @@ WebSocket handshakes bypass HTTP middleware, so the server re-applies the same c
 
 Each graph run sent over an open `/v1/graph/ws` connection also counts against the bucket. When the bucket is full, the connection stays open, the run is skipped, and the server sends an `error` stream event whose data holds `reason` (`Rate limit exceeded. Retry after <n>s.`) and `retry_after_seconds`.
 
-The separate `websocket.max_connections` and `websocket.max_connections_per_user` caps (in the `websocket` block of `10xgraph.json`) are enforced by the same handshake guard and also reject with close code `1013`. They are per process.
+The separate `websocket.max_connections` and `websocket.max_connections_per_user` caps (in the `websocket` block of `10xgraph.json`) are enforced by the same handshake guard and also reject with close code `1013`. They are shared by all workers when Redis is configured and per process otherwise.
 
 ## Backend comparison
 

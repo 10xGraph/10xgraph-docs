@@ -412,3 +412,7 @@ agent = StructuredOutputAgent(
 - [Use StructuredOutputAgent](/docs/guides/prebuilt/structured-output-agent): Full parameter reference for the prebuilt agent
 - [Configure Agent](/docs/guides/configure-agent): Provider and model configuration options
 - [Use dependency injection](/docs/guides/use-dependency-injection): Inject config and services into nodes
+
+## Run it in production
+
+The server returns your schema-validated result as part of the normal response, and a request that fails validation inside the graph surfaces as an error response rather than a crash. See [Invoke and stream](/docs/server/invoke-and-stream) and [Errors and limits](/docs/concepts/errors-and-limits).

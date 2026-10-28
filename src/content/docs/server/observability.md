@@ -227,7 +227,7 @@ SENTRY_TRACES_SAMPLE_RATE=0.1
 SENTRY_PROFILES_SAMPLE_RATE=0.01
 ```
 
-Sentry is only initialized when `MODE` (default `development`) is `production`, `staging` or `development`, case-insensitive. When the API starts, Sentry initialization is best-effort: if the SDK is not installed or DSN is invalid, a warning is logged and the server continues. Only HTTP 5xx status codes are reported to Sentry; client errors (4xx) are not, preventing floods of validation error events.
+Sentry is only initialized when `MODE` (default `development`) is `production`, `staging` or `development`, case-insensitive. When the API starts, Sentry initialization is best-effort: if the SDK is not installed or DSN is invalid, a warning is logged and the server continues. Only HTTP 5xx status codes are reported to Sentry; client errors (4xx) are not, preventing floods of validation error events. The error handlers log a 4xx as one WARNING line (method, path, status, error code) without a traceback, and a 5xx as ERROR with the traceback. Only ERROR logs become Sentry events; warnings and info lines stay breadcrumbs. Request bodies are never sent to Sentry (`max_request_body_size="never"`), nor are local variables or default PII.
 
 ## The observability API endpoint
 
