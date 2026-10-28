@@ -1,0 +1,320 @@
+---
+title: MCP Tools in a Python AI Agent with 10xGraph
+seoTitle: MCP tools in a Python AI agent
+description: Connect a 10xGraph ReactAgent to local and remote MCP servers over streamable HTTP, use several servers at once, and send auth headers in Python.
+section: Examples
+group: "Tools and integrations"
+order: 17
+label: MCP
+updated: "2026-10-28"
+faq:
+  - q: "How do I give a 10xGraph agent tools from an MCP server?"
+    a: "Build a fastmcp Client from an mcpServers config and pass it as ReactAgent(client=...). The agent discovers the server's tools at run time, so you do not write tool functions."
+  - q: "What happens to tool names when I connect more than one MCP server?"
+    a: "fastmcp prefixes each tool with its server key, for example us_get_weather and eu_get_weather. A config with a single server keeps the original tool name."
+  - q: "How do I authenticate to a remote MCP server?"
+    a: "Add a headers entry to that server in the mcpServers config, such as an Authorization bearer token read from an environment variable."
+  - q: "How does the MCP server know which user made the call?"
+    a: "Set pass_user_info_to_mcp=True on ReactAgent or ToolNode. The ToolNode adds config[\"user\"], or a user_id dict when only user_id is set, as a user argument on each MCP tool call."
+---
+
+MCP (Model Context Protocol) servers expose tools over a network, so an agent can use them without you writing Python tool functions. This example runs a small FastMCP weather server on your machine and points a 10xGraph `ReactAgent` at two copies of it. The agent uses Google `gemini-2.5-flash`. Two more pages cover hosted servers that need a token: [GitHub MCP](/docs/examples/mcp-github) and [Xquik MCP](/docs/examples/mcp-xquik).
+
+## What you will build
+
+A ReactAgent whose tools come from MCP servers instead of Python functions. `local/` runs a FastMCP weather server and shows an agent that uses two of them at once. The GitHub and Xquik examples connect to hosted servers that need a token.
+
+All of them share one pattern: describe the servers in an `mcpServers` dict, wrap it in a fastmcp `Client`, and pass the client to `ReactAgent`.
+
+## Key concepts
+
+- `fastmcp.Client(config)`: the MCP client. The config lists servers by name with `url`, `transport` and optional `headers`.
+- `ReactAgent(client=...)`: builds a `ToolNode` around the client and wires the model and tool loop.
+- `ToolNode.all_tools()`: lists the tool schemas the client discovered.
+- `pass_user_info_to_mcp`: forwards the caller identity to the server as a `user` argument.
+- Tool name prefixes: with several servers, each tool is named `<server>_<tool>`.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[mcp,google-genai]" python-dotenv
+export GEMINI_API_KEY=...
+```
+
+Start the weather server in one terminal, then the check script in another:
+
+```bash
+python examples/mcp/local/server.py
+python examples/mcp/local/raw_client.py   # check the server, no LLM
+```
+
+For the two-server agent:
+
+```bash
+python examples/mcp/local/server.py --name us --port 8000
+python examples/mcp/local/server.py --name eu --port 8001
+python examples/mcp/local/agent.py
+```
+
+## How the code works
+
+### `local/server.py`
+
+The server builds a FastMCP instance and registers tools with a decorator.
+
+```python
+    @mcp.tool(
+        description="Get the current weather for a location",
+        tags={"weather", "information"},
+        exclude_args=["user"],
+    )
+    def get_weather(location: str, user: dict | None = None) -> dict:
+        print(f"[{name}] weather for {location}, caller: {user}")
+        return {"location": location, "temperature": "22C", "description": f"Sunny ({name})"}
+```
+
+`exclude_args=["user"]` hides `user` from the schema the model sees. The `ToolNode` fills it in when `pass_user_info_to_mcp=True`, so the server can log who called without the model inventing a value.
+
+```python
+    build_server(args.name).run(transport="streamable-http", host="127.0.0.1", port=args.port)
+```
+
+`--name` and `--port` let you start several copies. Each one has its own port, which the agent needs.
+
+### `local/raw_client.py`
+
+This script talks to the server with no LLM. Run it first when a server misbehaves.
+
+```python
+    async with Client(config) as client:
+        for tool in await client.list_tools():
+            tags = (tool.meta or {}).get("_fastmcp", {}).get("tags", [])
+            print(f"tool: {tool.name} tags={tags}")
+            print("  schema:", tool.inputSchema)
+
+        result = await client.call_tool("get_weather", {"location": "New York"})
+        print("data:", result.data)
+```
+
+`list_tools()` shows what the model would see. `call_tool()` runs one tool directly. The config also carries an example `Authorization` header, which remote servers usually want.
+
+### `local/agent.py`
+
+The agent config lists two servers under different keys and URLs.
+
+```python
+mcp_config = {
+    "mcpServers": {
+        "us": {"url": "http://127.0.0.1:8000/mcp", "transport": "streamable-http"},
+        "eu": {"url": "http://127.0.0.1:8001/mcp", "transport": "streamable-http"},
+    }
+}
+```
+
+With more than one server, fastmcp prefixes every tool with its key. The model sees `us_get_weather` and `eu_get_weather`. Each server needs its own URL, or you only duplicate tools.
+
+```python
+agent = ReactAgent(
+    model="gemini-2.5-flash",
+    system_prompt=[
+        {"role": "system", "content": "Answer weather questions with the available tools."}
+    ],
+    client=Client(mcp_config),
+    # Adds config["user"] (or {"user_id": ...}) to every MCP call as the `user` argument.
+    pass_user_info_to_mcp=True,
+)
+```
+
+`client=Client(mcp_config)` replaces the `tools=[...]` list. `ReactAgent` wraps the client in a `ToolNode` and discovers the tools when it first runs.
+
+```python
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("Compare the weather in New York and Berlin.")]},
+        config={"thread_id": "mcp-local", "user_id": "alice", "recursion_limit": 10},
+    )
+```
+
+The `user_id` in the run config is what reaches the server as `user`. `recursion_limit` caps the tool loop at 10 steps.
+
+### Remote servers with authentication
+
+For a hosted server, put the credential in `headers`. The [GitHub](/docs/examples/mcp-github) and [Xquik](/docs/examples/mcp-xquik) pages show two real cases.
+
+## Full code
+
+<Tabs>
+<TabItem label="local/server.py">
+
+```python
+"""A small FastMCP weather server over streamable HTTP.
+
+Run it in its own terminal first:
+    python examples/mcp/local/server.py                      # port 8000
+    python examples/mcp/local/server.py --port 8001 --name eu  # a second server
+"""
+
+import argparse
+
+from fastmcp import FastMCP
+
+
+def build_server(name: str) -> FastMCP:
+    mcp = FastMCP(f"{name} weather server")
+
+    # exclude_args hides `user` from the tool schema the LLM sees. The ToolNode fills it in
+    # when pass_user_info_to_mcp=True (see agent.py).
+    @mcp.tool(
+        description="Get the current weather for a location",
+        tags={"weather", "information"},
+        exclude_args=["user"],
+    )
+    def get_weather(location: str, user: dict | None = None) -> dict:
+        print(f"[{name}] weather for {location}, caller: {user}")
+        return {"location": location, "temperature": "22C", "description": f"Sunny ({name})"}
+
+    @mcp.tool(description="Get a 3-day forecast for a location")
+    def get_forecast(location: str) -> list[dict]:
+        return [{"day": d, "temperature": f"{20 + d}C", "description": "Clear"} for d in range(3)]
+
+    return mcp
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--name", default="us")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    build_server(args.name).run(transport="streamable-http", host="127.0.0.1", port=args.port)
+```
+
+</TabItem>
+<TabItem label="local/raw_client.py">
+
+```python
+"""Talk to an MCP server directly: list its tools and call one, with no LLM involved.
+
+Useful to check a server before giving it to an agent.
+Start `python examples/mcp/local/server.py` first, then run this file.
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+from fastmcp import Client
+
+
+load_dotenv()
+
+config = {
+    "mcpServers": {
+        "weather": {
+            "url": "http://127.0.0.1:8000/mcp",
+            "transport": "streamable-http",
+            # Remote servers usually want a header like this one.
+            "headers": {"Authorization": "Bearer TEST_WEATHER_API_KEY"},
+        },
+    },
+}
+
+
+async def main() -> None:
+    async with Client(config) as client:
+        for tool in await client.list_tools():
+            tags = (tool.meta or {}).get("_fastmcp", {}).get("tags", [])
+            print(f"tool: {tool.name} tags={tags}")
+            print("  schema:", tool.inputSchema)
+
+        result = await client.call_tool("get_weather", {"location": "New York"})
+        print("data:", result.data)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="local/agent.py">
+
+```python
+"""A ReactAgent that uses tools from two local MCP servers.
+
+Start two servers first (separate terminals):
+    python examples/mcp/local/server.py --name us --port 8000
+    python examples/mcp/local/server.py --name eu --port 8001
+Then: GEMINI_API_KEY=... python examples/mcp/local/agent.py
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+from fastmcp import Client
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+
+
+load_dotenv()
+
+# Each server needs its own URL. With more than one server, fastmcp prefixes every tool
+# with the server key, so the agent sees `us_get_weather` and `eu_get_weather`
+# (a single-server config keeps the plain name).
+mcp_config = {
+    "mcpServers": {
+        "us": {"url": "http://127.0.0.1:8000/mcp", "transport": "streamable-http"},
+        "eu": {"url": "http://127.0.0.1:8001/mcp", "transport": "streamable-http"},
+    }
+}
+
+agent = ReactAgent(
+    model="gemini-2.5-flash",
+    system_prompt=[
+        {"role": "system", "content": "Answer weather questions with the available tools."}
+    ],
+    client=Client(mcp_config),
+    # Adds config["user"] (or {"user_id": ...}) to every MCP call as the `user` argument.
+    pass_user_info_to_mcp=True,
+)
+
+
+async def main() -> None:
+    app = agent.compile()
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("Compare the weather in New York and Berlin.")]},
+        config={"thread_id": "mcp-local", "user_id": "alice", "recursion_limit": 10},
+    )
+    print("assistant:", result["messages"][-1].text())
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/mcp](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/mcp)
+
+## Expected output
+
+Illustrative, from `agent.py`:
+
+```text
+[us] weather for New York, caller: {'user_id': 'alice'}
+[eu] weather for Berlin, caller: {'user_id': 'alice'}
+assistant: New York is 22C and sunny. Berlin is 22C and sunny.
+```
+
+## Using a different model
+
+The model is a string in the code. Change `gemini-2.5-flash` to `gpt-5-mini` (`pip install "10xgraph[mcp,openai]"`) or `claude-sonnet-5-5` (`pip install "10xgraph[mcp,anthropic]"`) and set the matching API key. The MCP setup does not change.
+
+## Next steps
+
+- [GitHub MCP](/docs/examples/mcp-github): a hosted server with a bearer token.
+- [Xquik MCP](/docs/examples/mcp-xquik): a hosted server with an API key header.
+- [Tools](/docs/examples/tools) for tools written as Python functions.
+- [Providers](/docs/examples/providers) for the model options.
+- [Dependency injection](/docs/examples/dependency-injection) for passing your own services to tools.

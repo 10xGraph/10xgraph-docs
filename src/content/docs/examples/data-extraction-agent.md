@@ -213,11 +213,11 @@ The graph shape stays the same and only the schema, tool name and prompt change.
 
 Use it when the output goes into a database or downstream code and you need to know it is valid. The loop gives you a hard guarantee that stored records passed validation, and a bounded cost when the model cannot comply.
 
-Do not use it when a person will only read the result (summarize instead), or when a single call with a schema is enough. For one-shot typed output without retries, see [structured output](/docs/guides/structured-output). If the agent must also look things up, use a [ReAct agent](/docs/examples/react-agent) or a [RAG agent](/docs/guides/prebuilt/rag-agent).
+Do not use it when a person will only read the result (summarize instead), or when a single call with a schema is enough. For one-shot typed output without retries, see [structured output](/docs/guides/structured-output). If the agent must also look things up, use a [ReAct agent](/docs/examples/quickstart) or a [RAG agent](/docs/guides/prebuilt/rag-agent).
 
 ## See also
 
-- [ReAct agent with validation](/docs/examples/react-agent-validation): input validators and callbacks on a tool-using agent
-- [Custom state](/docs/examples/custom-state): extend `AgentState` for richer workflows
+- [ReAct agent with validation](/docs/examples/callbacks): input validators and callbacks on a tool-using agent
+- [Custom state](/docs/examples/graph-basics): extend `AgentState` for richer workflows
 - [Structured output](/docs/guides/structured-output): typed output from a single model call
 - [Get started](/docs/get-started): build your first agent

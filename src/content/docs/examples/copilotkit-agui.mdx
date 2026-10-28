@@ -1,0 +1,1077 @@
+---
+title: CopilotKit Frontend for a 10xGraph Agent over AG-UI
+seoTitle: CopilotKit frontend for a Python agent
+description: Build a task board with a Next.js CopilotKit UI and a Python 10xGraph agent served over AG-UI, with shared state, approvals and Docker.
+section: Examples
+group: Apps
+order: 40
+label: CopilotKit over AG-UI
+updated: "2026-10-28"
+faq:
+  - q: "How do I enable the AG-UI endpoint in 10xGraph?"
+    a: "Install `10xgraph-api[ag-ui]` and set `\"ag_ui\": {\"enabled\": true}` in `10xgraph.json`. The server then mounts `POST /v1/ag-ui`, which uses the same auth as `/v1/graph/stream`."
+  - q: "Does the browser talk to the 10xGraph server directly?"
+    a: "No. The browser calls the CopilotKit runtime in the Next.js route handler, and that handler calls `/v1/ag-ui` with an `HttpAgent`. Any API token stays on the server."
+  - q: "Which AG-UI features does 10xGraph support?"
+    a: "Streaming text, tool calls and results, reasoning, state snapshots, browser (frontend) tools and interrupt() approvals. It does not send MESSAGES_SNAPSHOT or state deltas."
+---
+
+This is a full-stack app: a Python 10xGraph agent served over the AG-UI protocol, and a Next.js frontend built with CopilotKit that shows a task board next to a chat. The main assistant runs on OpenAI `gpt-5-mini`. A second, separate planner graph runs on DeepSeek `deepseek-chat`. Both services ship with Dockerfiles and a Compose file, so you can run the whole app with one command.
+
+## What you will build
+
+A task board with a chat assistant. You type a goal such as "plan a product launch". The assistant adds tasks to a board that is shown next to the chat, moves them between columns, and asks you to approve before it deletes finished tasks.
+
+The backend is a 10xGraph `ReactAgent` served by the 10xGraph API server on `POST /v1/ag-ui`. The frontend is Next.js with CopilotKit, which speaks AG-UI natively.
+
+## Architecture
+
+### Backend agents
+
+| Agent | Model | Company | Role |
+|---|---|---|---|
+| Task assistant (`backend/graph/agent.py`) | `gpt-5-mini` | OpenAI | Talks to the user, calls the board tools |
+| Task planner (`backend/graph/planner.py`) | `deepseek-chat` | DeepSeek | Splits a goal into 3 to 5 steps, called from the `plan_goal` tool |
+
+Both are 10xGraph graphs. The planner uses the OpenAI-compatible client with `base_url="https://api.deepseek.com"`, so no extra package is needed beyond the `openai` extra. Using a model from another company shows that agents in one app do not have to share a provider.
+
+### The AG-UI bridge
+
+AG-UI is an event protocol between an agent backend and a UI. The 10xGraph API server implements it in `routers/ag_ui/` (router, service, event mapper). When `ag_ui.enabled` is true in `10xgraph.json`, the server mounts `POST /v1/ag-ui`. A request carries a `RunAgentInput` (messages, state, frontend tools). The response is a server-sent event stream. The server runs your graph and maps what it does to AG-UI events. It uses the same auth as `/v1/graph/stream`.
+
+### CopilotKit runtime and frontend
+
+The browser never calls the 10xGraph server. It calls the CopilotKit runtime, which lives in a Next.js route handler (`app/api/copilotkit/[[...slug]]/route.ts`). That handler holds an `HttpAgent` from `@ag-ui/client` pointed at `GRAPH_API_URL/v1/ag-ui`. If you set `GRAPH_API_TOKEN`, the handler adds it as a bearer token, so the token stays on the server.
+
+### Docker services
+
+`docker-compose.yml` defines two services. `backend` is built from `./backend`, reads keys from `.env` and publishes port 8000. `frontend` is built from `./frontend`, gets `GRAPH_API_URL=http://backend:8000` and publishes port 3000. The frontend starts after the backend.
+
+### Event flow from a message to rendered UI
+
+```text
+Browser (CopilotChat + Board + Approval)
+   |  1. user types a message
+   v
+CopilotKit runtime  (Next.js route handler, /api/copilotkit)
+   |  2. HttpAgent -> POST GRAPH_API_URL/v1/ag-ui
+   |     body: RunAgentInput (messages, state, frontend tools such as focus_task)
+   v
+10xGraph API server  (/v1/ag-ui, ag_ui.enabled = true)
+   |  3. runs the graph: MAIN (gpt-5-mini) <-> TOOL
+   |        plan_goal tool --> planner graph (deepseek-chat)
+   |  4. maps graph activity to AG-UI events over SSE
+   v
+CopilotKit runtime  --- events streamed back --->  Browser
+        TEXT_MESSAGE_START/CONTENT/END   -> chat bubbles
+        TOOL_CALL_START/ARGS/END, RESULT -> tool calls in the chat
+        STATE_SNAPSHOT (tasks, ...)      -> useAgent().agent.state -> Board
+        tool call focus_task (no result) -> run ends, browser handler runs,
+                                            CopilotKit starts a new run with the result
+        RUN_FINISHED outcome=interrupt   -> useInterrupt -> Approval card
+                                            resolve(...) resumes the graph
+```
+
+## Key concepts
+
+- `ag_ui.enabled` in `10xgraph.json`: mounts `POST /v1/ag-ui` on the API server.
+- `AgentState` subclass (`BoardState`): the custom fields are the shared state.
+- Tools that take `state`: they change the board in place; the server sends the new fields as a snapshot.
+- `interrupt()` in `clear_done_tasks`: pauses for approval.
+- `HttpAgent` from `@ag-ui/client` in the Next.js route: the CopilotKit runtime's link to the server.
+- `useAgent`, `useFrontendTool`, `useInterrupt`: CopilotKit hooks for the board, the browser tool and the approval.
+
+### AG-UI feature support
+
+Checked against the API server source under `routers/ag_ui/` and the integration guide.
+
+| Feature | Supported | Used here | How |
+|---|---|---|---|
+| Streaming text | Yes | Yes | `TEXT_MESSAGE_START/CONTENT/END` |
+| Tool calls and results | Yes | Yes | `TOOL_CALL_START/ARGS/END`, `TOOL_CALL_RESULT` |
+| Reasoning | Yes | No | `REASONING_START` to `REASONING_END` |
+| Shared state to the UI | Yes | Yes | `STATE_SNAPSHOT` with the fields you add to `AgentState` (not messages) |
+| State from the UI to the graph | Yes | No | `RunAgentInput.state` becomes the run's start state; `context`, `context_summary`, `execution_meta` are ignored |
+| Frontend (browser) tools | Yes | Yes | Sent in `RunAgentInput.tools`, offered for that run only; the run finishes with the call unanswered and CopilotKit starts a new run with the result. Disable with `ag_ui.allow_client_tools: false` |
+| Human-in-the-loop | Yes | Yes | `interrupt()` becomes `RUN_FINISHED` with `outcome: {type: "interrupt"}`; CopilotKit `useInterrupt` resumes it |
+| `STATE_DELTA` patches | No | No | Only full snapshots are sent |
+| `MESSAGES_SNAPSHOT` | No | No | A reloaded browser starts with an empty chat unless CopilotKit stores messages |
+
+## Project structure
+
+<FileTree>
+
+- .env.example Template for API keys and the frontend's server-side settings
+- docker-compose.yml Runs backend and frontend together
+- backend/ Python 10xGraph API server
+  - 10xgraph.json Points at the graph and enables the AG-UI endpoint
+  - Dockerfile Python 3.13 image, runs uvicorn on port 8000
+  - .dockerignore Keeps .env and caches out of the image
+  - requirements.txt 10xgraph with the openai extra, 10xgraph-api with the ag-ui extra, python-dotenv
+  - graph/
+    - agent.py Main assistant, board tools, exports the compiled graph as `app`
+    - planner.py DeepSeek planner graph used by the plan_goal tool
+    - state.py BoardState, the shared state sent to the browser
+- frontend/ Next.js app with CopilotKit
+  - Dockerfile Multi-stage build, runs the standalone Next.js server on port 3000
+  - .dockerignore
+  - package.json
+  - tsconfig.json
+  - next.config.mjs Sets output to standalone
+  - app/
+    - layout.tsx
+    - page.tsx CopilotKit provider, chat, focus_task browser tool
+    - api/copilotkit/[[...slug]]/route.ts CopilotKit runtime with the HttpAgent
+
+</FileTree>
+
+## Prerequisites
+
+- Python 3.12 or newer, Node.js 20 or newer (or Docker).
+- Keys: `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`.
+- Backend install: `pip install "10xgraph[openai]" "10xgraph-api[ag-ui]" python-dotenv` (see `backend/requirements.txt`).
+- Frontend package versions in `frontend/package.json` use caret ranges (`@copilotkit/*` ^1.50.0, `@ag-ui/client` ^0.0.40). `frontend/package-lock.json` pins them (CopilotKit 1.82.0 and `@ag-ui/client` 0.0.40 at the time of writing), which ship the `@copilotkit/*/v2` import paths the app uses. The Dockerfile installs with `npm ci`, so Docker builds use exactly those versions.
+- The frontend uses the `@copilotkit/react-core/v2` chat components, so `@copilotkit/react-ui` is not installed.
+
+## Run it
+
+Clone the repo and go to the example:
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow/examples/apps/copilotkit_agui
+```
+
+### Environment variables
+
+| Variable | Read by | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | Backend | Used by the `gpt-5-mini` assistant |
+| `DEEPSEEK_API_KEY` | Backend | Used by the DeepSeek planner (`planner.py` reads it with `os.getenv`) |
+| `GRAPH_API_URL` | Frontend (server side) | Where the route handler finds the API server. Defaults to `http://localhost:8000`. Compose sets it to `http://backend:8000` |
+| `GRAPH_API_TOKEN` | Frontend (server side) | Sent as a bearer token. Only needed if you enable auth in `10xgraph.json` |
+
+### With Docker
+
+```bash
+cp .env.example .env      # add OPENAI_API_KEY and DEEPSEEK_API_KEY
+docker compose up --build
+```
+
+Open http://localhost:3000. The API server is on http://localhost:8000.
+
+### Without Docker
+
+Use two terminals.
+
+```bash
+# 1. backend
+cd backend
+pip install -r requirements.txt
+cp ../.env.example .env   # add your keys
+10xgraph dev --config 10xgraph.json --port 8000 --no-open
+
+# 2. frontend
+cd frontend
+npm install
+GRAPH_API_URL=http://localhost:8000 npm run dev
+```
+
+## How the code works
+
+### Backend configuration: `backend/10xgraph.json`
+
+```json
+{
+  "agent": "graph.agent:app",
+  "env": ".env",
+  "auth": null,
+  "remote_tools": [],
+  "ag_ui": {
+    "enabled": true,
+    "allow_client_tools": true
+  },
+  "thread_name_generator": null
+}
+```
+
+`agent` is the import path of the compiled graph: the `app` variable in `graph/agent.py`. `env` names the file the server loads. `auth` is `null`, so the demo has no authentication. The `ag_ui` block is what makes this app work. `enabled` mounts `POST /v1/ag-ui`. `allow_client_tools` lets the server offer browser tools (here `focus_task`) to the model. Set it to `false` to ignore tools sent by the browser.
+
+### Shared state: `backend/graph/state.py`
+
+```python
+class BoardState(AgentState):
+    """Task board. CopilotKit reads these fields with useAgent(...).state."""
+
+    board_title: str = "My task board"
+    # Each task: {"id": int, "title": str, "status": "todo" | "doing" | "done", "priority": str}
+    tasks: list[dict[str, Any]] = Field(default_factory=list)
+    next_id: int = 1
+```
+
+`BoardState` extends `AgentState` with three fields. The AG-UI endpoint sends custom fields to the browser as `STATE_SNAPSHOT` events (messages are not part of the snapshot). So the board is just this state. `next_id` gives each task a stable id.
+
+### Board tools: `backend/graph/agent.py`
+
+```python
+def _new_task(state: BoardState, title: str, priority: str) -> dict:
+    task = {"id": state.next_id, "title": title, "status": "todo", "priority": priority}
+    state.next_id += 1
+    state.tasks.append(task)
+    return task
+```
+
+A small helper used by `add_task` and `plan_goal`. It changes the state in place.
+
+```python
+def add_task(title: str, priority: str = "medium", state: BoardState | None = None) -> str:
+    """Add one task to the board. priority is low, medium or high."""
+    if state is None:
+        return "No board state available."
+    task = _new_task(state, title, priority)
+    return f"Added task #{task['id']}: {title}"
+```
+
+Every tool has a `state: BoardState | None = None` parameter. 10xGraph injects the current state into it, and the model never sees it in the tool schema. The tool changes `state` and the server sends the new fields to the UI. The docstring becomes the tool description the model reads. `set_task_status` follows the same pattern and validates the status against `_STATUSES`.
+
+```python
+async def plan_goal(goal: str, state: BoardState | None = None) -> str:
+    """Ask the planner agent to split a goal into steps and add them as tasks."""
+    ...
+    steps = await plan_steps(goal)
+    for step in steps:
+        _new_task(state, step, "medium")
+    return f"Planner added {len(steps)} tasks: " + "; ".join(steps)
+```
+
+`plan_goal` is async because it awaits another graph. It calls the DeepSeek planner and adds one task per step.
+
+```python
+decision = interrupt(
+    value={"count": len(done), "titles": [t["title"] for t in done]},
+    message=f"Delete {len(done)} finished task(s)?",
+    reason="clear_done_approval",
+    response_schema={
+        "type": "object",
+        "properties": {"approved": {"type": "boolean"}},
+        "required": ["approved"],
+    },
+)
+if not decision or not decision.get("approved"):
+    return "The user declined. No tasks were deleted."
+state.tasks = [t for t in state.tasks if t["status"] != "done"]
+```
+
+`clear_done_tasks` is the human-in-the-loop step. `interrupt()` pauses the run. The AG-UI endpoint ends the stream with `RUN_FINISHED` and an interrupt outcome, and CopilotKit's `useInterrupt` shows the approval card. When the user answers, the graph resumes and the tool runs again from the top, with `interrupt()` returning the answer. That is why the code comment says nothing with side effects may come before the call. The deletion happens only after approval. If the user cancels, `decision` is `None` and the tasks stay.
+
+```python
+react_agent = ReactAgent(
+    model="gpt-5-mini",
+    state=BoardState(),
+    system_prompt=[...],
+    tools=[add_task, set_task_status, plan_goal, clear_done_tasks],
+)
+
+app = react_agent.compile(checkpointer=InMemoryCheckpointer())
+```
+
+`ReactAgent` wires the MAIN and TOOL nodes and the routing between them. The system prompt tells the model which tool to use for which request, and to call the browser tool `focus_task` after it changes a task. `app` is the name `10xgraph.json` points at. The `InMemoryCheckpointer` keeps thread state in process memory, which matters for deployment (see below).
+
+### Planner graph: `backend/graph/planner.py`
+
+```python
+_planner = ReactAgent(
+    model="deepseek-chat",
+    base_url="https://api.deepseek.com",
+    api_key=os.environ["DEEPSEEK_API_KEY"],
+    system_prompt=[...],
+).compile()
+```
+
+A second graph with no tools, so `ReactAgent` builds a single MAIN node. `base_url` and `api_key` go to the agent, and an unknown model name uses the OpenAI-compatible client, which is how DeepSeek is reached. The prompt asks for one step per line, no numbering.
+
+```python
+async def plan_steps(goal: str) -> list[str]:
+    """Ask the DeepSeek planner for steps. Each call uses a fresh thread."""
+    result = await _planner.ainvoke(
+        {"messages": [Message.text_message(goal)]},
+        {"thread_id": f"planner-{uuid.uuid4()}"},
+    )
+    text = result["messages"][-1].text() if result.get("messages") else ""
+    steps = [line.strip(" -*\t") for line in text.splitlines()]
+    return [s for s in steps if s][:5]
+```
+
+`plan_steps` calls the graph with `ainvoke` and a new thread id each time, so planner calls never share history. It splits the reply into lines, strips bullets, and keeps at most five steps.
+
+### CopilotKit runtime: `frontend/app/api/copilotkit/[[...slug]]/route.ts`
+
+```ts
+const runtime = new CopilotRuntime({
+  agents: {
+    // The key ("graph") is the agentId the React side refers to.
+    graph: new HttpAgent({
+      url: `${GRAPH_URL}/v1/ag-ui`,
+      headers: process.env.GRAPH_API_TOKEN
+        ? { authorization: `Bearer ${process.env.GRAPH_API_TOKEN}` }
+        : {},
+    }),
+  },
+  runner: new InMemoryAgentRunner(),
+});
+```
+
+This is the AG-UI wiring. `HttpAgent` posts to `/v1/ag-ui` and reads the SSE stream. The key `graph` is the `agentId` that `page.tsx` and `Board.tsx` use. The route file runs on the Next.js server, so the optional token never reaches the browser.
+
+```ts
+const handler = createCopilotRuntimeHandler({
+  runtime,
+  basePath: "/api/copilotkit",
+});
+
+export const GET = handler;
+export const POST = handler;
+export const PATCH = handler;
+export const DELETE = handler;
+```
+
+One handler serves every method. The catch-all folder name `[[...slug]]` lets it answer all paths under `/api/copilotkit`.
+
+### Page and browser tool: `frontend/app/page.tsx`
+
+```tsx
+function FocusTool({ onFocus }: { onFocus: (id: number) => void }) {
+  useFrontendTool({
+    name: "focus_task",
+    description: "Highlight a task on the board in the user's browser.",
+    parameters: z.object({ task_id: z.number().describe("The task id to highlight") }),
+    handler: async ({ task_id }) => {
+      onFocus(task_id);
+      return `Highlighted task ${task_id}`;
+    },
+  });
+  return null;
+}
+```
+
+`focus_task` exists only in the browser. CopilotKit sends its schema in `RunAgentInput.tools`, so the model can call it. The server ends the run with the call unanswered, the handler runs in the browser, and CopilotKit starts a new run with the returned string as the result. The component renders nothing; it only registers the tool.
+
+```tsx
+<CopilotKitProvider runtimeUrl="/api/copilotkit" agentId="graph">
+  <FocusTool onFocus={setFocusedId} />
+  <Approval />
+  <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", height: "100vh" }}>
+    <aside style={{ borderRight: "1px solid #eee", overflow: "auto" }}>
+      <Board focusedId={focusedId} />
+    </aside>
+    <CopilotChat agentId="graph" labels={{ title: "Task assistant" }} />
+  </div>
+</CopilotKitProvider>
+```
+
+The provider points at the route handler and the `graph` agent. The layout is a two-column grid: board on the left, chat on the right. `focusedId` is local React state that links the browser tool to the board highlight.
+
+### Board: `frontend/components/Board.tsx`
+
+```tsx
+const { agent } = useAgent({ agentId: "graph" });
+const state = (agent.state ?? {}) as BoardState;
+const tasks = state.tasks ?? [];
+```
+
+`useAgent` returns the agent object. Each `STATE_SNAPSHOT` from the server updates `agent.state`, and React re-renders. The component filters tasks into the `todo`, `doing` and `done` columns and highlights the task whose id matches `focusedId`. `agent.state` can be empty before the first run, so the code falls back to `{}`.
+
+### Approval: `frontend/components/Approval.tsx`
+
+```tsx
+useInterrupt({
+  render: ({ interrupt, resolve, cancel }) => {
+    if (!interrupt) return null;
+    ...
+    <button onClick={() => resolve({ approved: true })} style={{ flex: 1 }}>
+```
+
+`useInterrupt` renders when the run ended with an interrupt. `interrupt.message` is the text from `interrupt(message=...)`. `resolve(payload)` resumes the graph, and `interrupt()` in Python returns that payload, matching the `response_schema` (`approved: boolean`). `cancel()` resumes with nothing, so Python sees `None`.
+
+### Layout and config: `layout.tsx`, `next.config.mjs`, `package.json`, `tsconfig.json`
+
+`layout.tsx` sets the page title and a base font. `next.config.mjs` sets `output: "standalone"`, which makes `next build` produce a self-contained `server.js` that the Dockerfile runs. `package.json` has the scripts (`dev`, `build`, `start`) and dependencies: `@ag-ui/client`, `@copilotkit/react-core`, `@copilotkit/runtime`, Next 15, React 19 and `zod` for the tool parameter schema. `tsconfig.json` is a strict Next.js setup with an `@/*` path alias, used by imports such as `@/components/Board`.
+
+### Docker files
+
+Backend `Dockerfile`:
+
+```dockerfile
+FROM python:3.13-slim
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app GRAPH_PATH=/app/10xgraph.json
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+```
+
+It installs the requirements first, so Docker caches that layer until `requirements.txt` changes. `PYTHONPATH=/app` lets `graph.agent:app` import, and `GRAPH_PATH` points the server at the config file.
+
+```dockerfile
+CMD ["uvicorn", "tenxgraph_api.src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+The container starts the API server with a single uvicorn process. The comment in the file explains why: threads live in `InMemoryCheckpointer`, so an interrupt and its resume must reach the same worker. `backend/.dockerignore` keeps `.env` out of the image; keys come in through Compose's `env_file`.
+
+Frontend `Dockerfile`:
+
+```dockerfile
+FROM node:22-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:22-slim
+WORKDIR /app
+ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+Two stages. The first installs and builds. The second copies only the standalone output and static assets, and runs `server.js`. `GRAPH_API_URL` is read at runtime by the route handler, so Compose can set it without a rebuild.
+
+`docker-compose.yml` ties them together: the backend takes `.env`, the frontend gets `GRAPH_API_URL: http://backend:8000` (the Compose service name is the hostname), and `depends_on` starts the backend first.
+
+## Deploy to production
+
+What the code and config support:
+
+- The two Dockerfiles and `docker-compose.yml` build and run both services. Any host that runs containers can run these images.
+- Set `OPENAI_API_KEY` and `DEEPSEEK_API_KEY` on the backend. Set `GRAPH_API_URL` on the frontend so it can reach the API server.
+- To protect the API server, configure auth in `10xgraph.json` (it is `null` here) and set `GRAPH_API_TOKEN` on the frontend. The route handler then sends it as a bearer token. The AG-UI endpoint uses the same auth as `/v1/graph/stream`.
+- Keep the API server private. Only the frontend needs to reach it, because the browser talks to the Next.js route.
+
+<Callout type="warning" title="Single process, in-memory threads">
+The backend Dockerfile runs one uvicorn process on purpose. The graph is compiled with `InMemoryCheckpointer`, so an `interrupt()` and the request that resumes it must reach the same worker. Threads are also lost when the container restarts. For several workers or restarts that keep threads, compile with `PgCheckpointer` and use the gunicorn image that `10xgraph build` generates. This example does not include that setup.
+</Callout>
+
+Also note that `InMemoryAgentRunner` in the CopilotKit route is in-memory too, so the frontend is not set up for multiple instances either.
+
+## Customize it
+
+- Change a model: edit the `model` string in `backend/graph/agent.py` or `backend/graph/planner.py`. For Anthropic, use `model="claude-sonnet-5-5"`, install `10xgraph[anthropic]` and set `ANTHROPIC_API_KEY`. For Google, use `model="gemini-2.5-flash"`, install `10xgraph[google-genai]` and set `GEMINI_API_KEY`.
+- Add a field to the board: add it to `BoardState` and read it in `Board.tsx` from `agent.state`. It reaches the browser in the next snapshot.
+- Add a tool: write a function with a docstring and a `state: BoardState | None = None` parameter, then add it to the `tools` list and mention it in the system prompt.
+- Add another browser tool: call `useFrontendTool` in a component under the provider, and tell the model about it in the system prompt. Set `allow_client_tools` to `false` if you do not want browser tools at all.
+- Add durable threads: replace `InMemoryCheckpointer()` with `PgCheckpointer`. See [Persistence](/docs/examples/persistence).
+- Add approvals for other tools: call `interrupt()` first in the tool and render the answer in `Approval.tsx`. See [Human-in-the-loop](/docs/examples/human-in-the-loop).
+
+## Full code
+
+### Backend
+
+<Tabs>
+<TabItem label="backend/10xgraph.json">
+
+```json
+{
+  "agent": "graph.agent:app",
+  "env": ".env",
+  "auth": null,
+  "remote_tools": [],
+  "ag_ui": {
+    "enabled": true,
+    "allow_client_tools": true
+  },
+  "thread_name_generator": null
+}
+```
+
+</TabItem>
+<TabItem label="backend/graph/agent.py">
+
+```python
+"""Main assistant (OpenAI gpt-5-mini): a task-board agent served over AG-UI.
+
+Loaded by 10xgraph.json ("agent": "graph.agent:app"). The tools change `state`, and the API
+server sends the changed fields to CopilotKit as STATE_SNAPSHOT events.
+"""
+
+from dotenv import load_dotenv
+
+from graph.planner import plan_steps
+from graph.state import BoardState
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+from tenxgraph.utils import interrupt
+
+
+load_dotenv()
+
+_STATUSES = ("todo", "doing", "done")
+
+
+def _new_task(state: BoardState, title: str, priority: str) -> dict:
+    task = {"id": state.next_id, "title": title, "status": "todo", "priority": priority}
+    state.next_id += 1
+    state.tasks.append(task)
+    return task
+
+
+def add_task(title: str, priority: str = "medium", state: BoardState | None = None) -> str:
+    """Add one task to the board. priority is low, medium or high."""
+    if state is None:
+        return "No board state available."
+    task = _new_task(state, title, priority)
+    return f"Added task #{task['id']}: {title}"
+
+
+def set_task_status(task_id: int, status: str, state: BoardState | None = None) -> str:
+    """Move a task to todo, doing or done."""
+    if state is None:
+        return "No board state available."
+    if status not in _STATUSES:
+        return f"Status must be one of {', '.join(_STATUSES)}."
+    for task in state.tasks:
+        if task["id"] == task_id:
+            task["status"] = status
+            return f"Task #{task_id} is now {status}."
+    return f"No task with id {task_id}."
+
+
+async def plan_goal(goal: str, state: BoardState | None = None) -> str:
+    """Ask the planner agent to split a goal into steps and add them as tasks."""
+    if state is None:
+        return "No board state available."
+    steps = await plan_steps(goal)
+    for step in steps:
+        _new_task(state, step, "medium")
+    return f"Planner added {len(steps)} tasks: " + "; ".join(steps)
+
+
+def clear_done_tasks(state: BoardState | None = None) -> str:
+    """Delete every task marked done. Asks the user for approval first."""
+    if state is None:
+        return "No board state available."
+    done = [t for t in state.tasks if t["status"] == "done"]
+    if not done:
+        return "There are no finished tasks to clear."
+    # interrupt() pauses the run. The AG-UI endpoint ends it with an interrupt outcome, and
+    # CopilotKit's useInterrupt renders the approval. The tool runs again on resume, so nothing
+    # with side effects may come before this call.
+    decision = interrupt(
+        value={"count": len(done), "titles": [t["title"] for t in done]},
+        message=f"Delete {len(done)} finished task(s)?",
+        reason="clear_done_approval",
+        response_schema={
+            "type": "object",
+            "properties": {"approved": {"type": "boolean"}},
+            "required": ["approved"],
+        },
+    )
+    if not decision or not decision.get("approved"):
+        return "The user declined. No tasks were deleted."
+    state.tasks = [t for t in state.tasks if t["status"] != "done"]
+    return f"Deleted {len(done)} finished task(s)."
+
+
+react_agent = ReactAgent(
+    model="gpt-5-mini",
+    state=BoardState(),
+    system_prompt=[
+        {
+            "role": "system",
+            "content": (
+                "You manage a task board shown next to the chat. Use add_task for a single "
+                "task and plan_goal when the user states a larger goal. Use set_task_status "
+                "to move tasks and clear_done_tasks to delete finished ones. After you add or "
+                "change a task, call the browser tool focus_task with its id so the user sees "
+                "it. Keep replies short."
+            ),
+        }
+    ],
+    tools=[add_task, set_task_status, plan_goal, clear_done_tasks],
+)
+
+app = react_agent.compile(checkpointer=InMemoryCheckpointer())
+```
+
+</TabItem>
+<TabItem label="backend/graph/planner.py">
+
+```python
+"""Helper agent: breaks a goal into short task titles, served by DeepSeek.
+
+It is a second, separate 10xGraph graph, called from a tool of the main assistant. Using a
+model from another company shows that agents in one app do not have to share a provider.
+"""
+
+import os
+import uuid
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+
+
+load_dotenv()
+
+# No tools, so ReactAgent wires a single MAIN node. base_url and api_key are forwarded to the
+# Agent; unknown model names use the OpenAI-compatible client.
+_planner = ReactAgent(
+    model="deepseek-chat",
+    base_url="https://api.deepseek.com",
+    api_key=os.environ["DEEPSEEK_API_KEY"],
+    system_prompt=[
+        {
+            "role": "system",
+            "content": (
+                "You are a task planner. Break the user's goal into 3 to 5 concrete steps. "
+                "Reply with one step per line, no numbering, no extra text. "
+                "Keep each step under 8 words."
+            ),
+        }
+    ],
+).compile()
+
+
+async def plan_steps(goal: str) -> list[str]:
+    """Ask the DeepSeek planner for steps. Each call uses a fresh thread."""
+    result = await _planner.ainvoke(
+        {"messages": [Message.text_message(goal)]},
+        {"thread_id": f"planner-{uuid.uuid4()}"},
+    )
+    text = result["messages"][-1].text() if result.get("messages") else ""
+    steps = [line.strip(" -*\t") for line in text.splitlines()]
+    return [s for s in steps if s][:5]
+```
+
+</TabItem>
+<TabItem label="backend/graph/state.py">
+
+```python
+"""Shared board state. Every field here is sent to the browser as an AG-UI STATE_SNAPSHOT."""
+
+from typing import Any
+
+from pydantic import Field
+
+from tenxgraph.core.state import AgentState
+
+
+class BoardState(AgentState):
+    """Task board. CopilotKit reads these fields with useAgent(...).state."""
+
+    board_title: str = "My task board"
+    # Each task: {"id": int, "title": str, "status": "todo" | "doing" | "done", "priority": str}
+    tasks: list[dict[str, Any]] = Field(default_factory=list)
+    next_id: int = 1
+```
+
+</TabItem>
+<TabItem label="backend/requirements.txt">
+
+```text
+10xgraph[openai]
+10xgraph-api[ag-ui]
+python-dotenv
+```
+
+</TabItem>
+</Tabs>
+
+### Frontend
+
+<Tabs>
+<TabItem label="frontend/app/api/copilotkit/[[...slug]]/route.ts">
+
+```ts
+// CopilotKit runtime. It runs on the Next.js server, so the 10xGraph API token (if any)
+// never reaches the browser.
+import { HttpAgent } from "@ag-ui/client";
+import {
+  CopilotRuntime,
+  createCopilotRuntimeHandler,
+  InMemoryAgentRunner,
+} from "@copilotkit/runtime/v2";
+
+const GRAPH_URL = process.env.GRAPH_API_URL || "http://localhost:8000";
+
+const runtime = new CopilotRuntime({
+  agents: {
+    // The key ("graph") is the agentId the React side refers to.
+    graph: new HttpAgent({
+      url: `${GRAPH_URL}/v1/ag-ui`,
+      headers: process.env.GRAPH_API_TOKEN
+        ? { authorization: `Bearer ${process.env.GRAPH_API_TOKEN}` }
+        : {},
+    }),
+  },
+  runner: new InMemoryAgentRunner(),
+});
+
+const handler = createCopilotRuntimeHandler({
+  runtime,
+  basePath: "/api/copilotkit",
+});
+
+export const GET = handler;
+export const POST = handler;
+export const PATCH = handler;
+export const DELETE = handler;
+```
+
+</TabItem>
+<TabItem label="frontend/app/layout.tsx">
+
+```tsx
+import type { ReactNode } from "react";
+
+export const metadata = { title: "10xGraph + CopilotKit task board" };
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <body style={{ margin: 0, fontFamily: "system-ui, sans-serif" }}>{children}</body>
+    </html>
+  );
+}
+```
+
+</TabItem>
+<TabItem label="frontend/app/page.tsx">
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { CopilotChat, CopilotKitProvider, useFrontendTool } from "@copilotkit/react-core/v2";
+import "@copilotkit/react-core/v2/styles.css";
+import { z } from "zod";
+
+import { Approval } from "@/components/Approval";
+import { Board } from "@/components/Board";
+
+// Frontend tool: the model calls it, the run ends with the call unanswered, this handler runs
+// in the browser, and CopilotKit starts a new run with the result.
+function FocusTool({ onFocus }: { onFocus: (id: number) => void }) {
+  useFrontendTool({
+    name: "focus_task",
+    description: "Highlight a task on the board in the user's browser.",
+    parameters: z.object({ task_id: z.number().describe("The task id to highlight") }),
+    handler: async ({ task_id }) => {
+      onFocus(task_id);
+      return `Highlighted task ${task_id}`;
+    },
+  });
+  return null;
+}
+
+export default function Page() {
+  const [focusedId, setFocusedId] = useState<number | null>(null);
+
+  return (
+    <CopilotKitProvider runtimeUrl="/api/copilotkit" agentId="graph">
+      <FocusTool onFocus={setFocusedId} />
+      <Approval />
+      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", height: "100vh" }}>
+        <aside style={{ borderRight: "1px solid #eee", overflow: "auto" }}>
+          <Board focusedId={focusedId} />
+        </aside>
+        <CopilotChat agentId="graph" labels={{ title: "Task assistant" }} />
+      </div>
+    </CopilotKitProvider>
+  );
+}
+```
+
+</TabItem>
+<TabItem label="frontend/components/Approval.tsx">
+
+```tsx
+"use client";
+
+import { useInterrupt } from "@copilotkit/react-core/v2";
+
+// Renders the approval requested by interrupt() in the clear_done_tasks tool.
+// resolve(payload) resumes the graph and interrupt() returns payload; cancel() returns None.
+export function Approval() {
+  useInterrupt({
+    render: ({ interrupt, resolve, cancel }) => {
+      if (!interrupt) return null;
+      return (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 20,
+            left: 20,
+            background: "white",
+            border: "1px solid #ccc",
+            borderRadius: 8,
+            padding: 16,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            maxWidth: 300,
+          }}
+        >
+          <p style={{ marginTop: 0 }}>{interrupt.message}</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => resolve({ approved: true })} style={{ flex: 1 }}>
+              Approve
+            </button>
+            <button onClick={() => resolve({ approved: false })} style={{ flex: 1 }}>
+              Reject
+            </button>
+            <button onClick={() => cancel()}>Cancel</button>
+          </div>
+        </div>
+      );
+    },
+  });
+  return null;
+}
+```
+
+</TabItem>
+<TabItem label="frontend/components/Board.tsx">
+
+```tsx
+"use client";
+
+import { useAgent } from "@copilotkit/react-core/v2";
+
+type Task = { id: number; title: string; status: "todo" | "doing" | "done"; priority: string };
+type BoardState = { board_title?: string; tasks?: Task[] };
+
+const COLUMNS: Task["status"][] = ["todo", "doing", "done"];
+
+// Reads the graph's BoardState. Each STATE_SNAPSHOT from the server updates agent.state.
+export function Board({ focusedId }: { focusedId: number | null }) {
+  const { agent } = useAgent({ agentId: "graph" });
+  const state = (agent.state ?? {}) as BoardState;
+  const tasks = state.tasks ?? [];
+
+  return (
+    <div style={{ padding: 16 }}>
+      <h2 style={{ marginTop: 0 }}>{state.board_title ?? "My task board"}</h2>
+      {COLUMNS.map((status) => (
+        <section key={status} style={{ marginBottom: 16 }}>
+          <h3 style={{ textTransform: "uppercase", fontSize: 12, color: "#666" }}>{status}</h3>
+          {tasks
+            .filter((t) => t.status === status)
+            .map((t) => (
+              <div
+                key={t.id}
+                style={{
+                  padding: 8,
+                  marginBottom: 6,
+                  borderRadius: 6,
+                  border: "1px solid #ddd",
+                  background: t.id === focusedId ? "#fff3b0" : "white",
+                }}
+              >
+                #{t.id} {t.title} <small style={{ color: "#888" }}>({t.priority})</small>
+              </div>
+            ))}
+        </section>
+      ))}
+      {tasks.length === 0 && <p style={{ color: "#888" }}>No tasks yet. Ask the assistant.</p>}
+    </div>
+  );
+}
+```
+
+</TabItem>
+<TabItem label="frontend/next.config.mjs">
+
+```js
+/** @type {import('next').NextConfig} */
+const nextConfig = { output: "standalone" };
+
+export default nextConfig;
+```
+
+</TabItem>
+<TabItem label="frontend/package.json">
+
+```json
+{
+  "name": "copilotkit-agui-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@ag-ui/client": "^0.0.40",
+    "@copilotkit/react-core": "^1.50.0",
+    "@copilotkit/runtime": "^1.50.0",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.6.0"
+  }
+}
+```
+
+</TabItem>
+<TabItem label="frontend/tsconfig.json">
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+```
+
+</TabItem>
+</Tabs>
+
+### Deployment
+
+<Tabs>
+<TabItem label="docker-compose.yml">
+
+```yaml
+services:
+  backend:
+    build: ./backend
+    env_file: .env
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    environment:
+      GRAPH_API_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+```
+
+</TabItem>
+<TabItem label=".env.example">
+
+```bash
+# Backend (read by the 10xGraph API server and the agents)
+OPENAI_API_KEY=
+DEEPSEEK_API_KEY=
+
+# Frontend (Next.js server side only). Docker Compose sets GRAPH_API_URL itself.
+GRAPH_API_URL=http://localhost:8000
+# Only needed if you enable auth in 10xgraph.json
+GRAPH_API_TOKEN=
+```
+
+</TabItem>
+<TabItem label="backend/Dockerfile">
+
+```dockerfile
+FROM python:3.13-slim
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app GRAPH_PATH=/app/10xgraph.json
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+# One process on purpose: the demo keeps threads in InMemoryCheckpointer, so an
+# interrupt and its resume must reach the same worker. For multiple workers, switch
+# to PgCheckpointer and use the gunicorn image `10xgraph build` generates.
+CMD ["uvicorn", "tenxgraph_api.src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+</TabItem>
+<TabItem label="backend/.dockerignore">
+
+```text
+.env
+__pycache__
+```
+
+</TabItem>
+<TabItem label="frontend/Dockerfile">
+
+```dockerfile
+FROM node:22-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:22-slim
+WORKDIR /app
+ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+</TabItem>
+<TabItem label="frontend/.dockerignore">
+
+```text
+node_modules
+.next
+.env*
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/apps/copilotkit_agui](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/apps/copilotkit_agui)
+
+## Expected output
+
+Illustrative session:
+
+```text
+You:        Plan a product launch and mark the first step as doing.
+Assistant:  I asked the planner and added 4 tasks. Task 1 is now doing.
+            (board: TODO 3 tasks, DOING "Define launch goals", task 1 highlighted)
+You:        Clear the finished tasks.
+            (approval card: "Delete 2 finished task(s)?" -> Approve)
+Assistant:  Deleted 2 finished task(s).
+```
+
+## Next steps
+
+- [RAG assistant app](/docs/examples/rag-assistant)
+- [Tools](/docs/examples/tools)
+- [Streaming](/docs/examples/streaming)
+- [Human-in-the-loop](/docs/examples/human-in-the-loop)
+- [Persistence](/docs/examples/persistence)
+- [Serving](/docs/examples/serving)

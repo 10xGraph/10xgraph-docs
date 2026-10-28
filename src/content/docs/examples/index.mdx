@@ -1,0 +1,102 @@
+---
+title: 10xGraph examples
+seoTitle: "Python AI agent examples with full code"
+description: "Runnable Python AI agent examples for 10xGraph with full source code: tools, streaming, MCP, memory, RAG, multi-agent, production features and full-stack apps."
+section: Examples
+order: 10
+label: Overview
+updated: "2026-10-28"
+faq:
+  - q: "Where is the code for these examples?"
+    a: "In the examples folder of the 10xGraph repository. Every page here also shows the complete source of each file, with one tab per file."
+  - q: "Which model providers do the examples use?"
+    a: "They rotate between OpenAI, Google Gemini, Anthropic Claude and DeepSeek, with the model string written in each file. Multi-agent examples put each agent on a different company's model. Swap the model string to use your own provider."
+  - q: "Do I need a server to run the examples?"
+    a: "No. Most examples are single Python scripts. The serving example and the two full-stack apps run the 10xgraph-api server, locally with 10xgraph dev or with Docker Compose."
+---
+
+Every page in this section is a runnable example from the [10xGraph repository](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples). Each page explains what the example builds, walks through the code file by file, and ends with the full source of every file in tabs, so you can read it here or copy it straight into your project.
+
+## Run any example
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[openai,google-genai,anthropic]"
+cp examples/.env.example .env   # add the API key for the provider the example uses
+python examples/quickstart/quickstart.py
+```
+
+Each page lists the extras and the one environment variable its example needs. The model string is written in each file, so changing provider is a one-line edit.
+
+## Getting started
+
+<CardGrid>
+<LinkCard title="Quickstart" href="/docs/examples/quickstart" description="A ReactAgent with one tool in about 30 lines." eyebrow="Start here" />
+<LinkCard title="Graph basics" href="/docs/examples/graph-basics" description="StateGraph, custom state, conditional edges and Command, with no API key." eyebrow="Getting started" />
+<LinkCard title="Streaming" href="/docs/examples/streaming" description="Stream text and tool progress with astream, and stop a run mid-stream." eyebrow="Getting started" />
+</CardGrid>
+
+## Tools and integrations
+
+<CardGrid>
+<LinkCard title="Tools" href="/docs/examples/tools" description="The @tool decorator, injected state, ToolResult updates, prebuilt and remote tools." eyebrow="Tools" />
+<LinkCard title="Providers" href="/docs/examples/providers" description="One agent on OpenAI, Gemini, Claude, DeepSeek and Ollama by changing the model string." eyebrow="Tools" />
+<LinkCard title="Dependency injection" href="/docs/examples/dependency-injection" description="Inject your own services into tools and nodes, and swap them in tests." eyebrow="Tools" />
+<LinkCard title="MCP" href="/docs/examples/mcp" description="Connect an agent to local and remote MCP servers, with auth headers." eyebrow="MCP" />
+<LinkCard title="GitHub MCP" href="/docs/examples/mcp-github" description="Use GitHub's remote MCP server to read commits and files." eyebrow="MCP" />
+<LinkCard title="Xquik MCP" href="/docs/examples/mcp-xquik" description="Connect to the remote Xquik MCP server with an API key." eyebrow="MCP" />
+</CardGrid>
+
+## Production
+
+<CardGrid>
+<LinkCard title="Graceful shutdown" href="/docs/examples/graceful-shutdown" description="Handle SIGINT and SIGTERM, flush writes and close cleanly with aclose()." eyebrow="Production" />
+<LinkCard title="Resilience" href="/docs/examples/resilience" description="Retries, a circuit breaker, cross-company fallback models and recursion limits." eyebrow="Production" />
+<LinkCard title="Human in the loop" href="/docs/examples/human-in-the-loop" description="Pause for approval with interrupt() and resume the same thread." eyebrow="Production" />
+<LinkCard title="Persistence" href="/docs/examples/persistence" description="Save and resume threads with in-memory, SQLite and PostgreSQL checkpointers." eyebrow="Production" />
+<LinkCard title="Context management" href="/docs/examples/context-management" description="Trim or summarize long conversations to stay inside the token limit." eyebrow="Production" />
+<LinkCard title="Callbacks and validators" href="/docs/examples/callbacks" description="Logging, timing, cost tracking, prompt-injection checks and redaction." eyebrow="Production" />
+<LinkCard title="Observability" href="/docs/examples/observability" description="Send run events to OpenTelemetry, Logfire, LangSmith, Redis or Kafka." eyebrow="Production" />
+</CardGrid>
+
+## Memory and patterns
+
+<CardGrid>
+<LinkCard title="Long-term memory" href="/docs/examples/long-term-memory" description="Remember users across sessions with Qdrant or Mem0." eyebrow="Memory" />
+<LinkCard title="RAG" href="/docs/examples/rag" description="Retrieval-augmented generation with RAGAgent and a local Qdrant store." eyebrow="Memory" />
+<LinkCard title="Structured output" href="/docs/examples/structured-output" description="Typed Pydantic output with output_schema or StructuredOutputAgent." eyebrow="Patterns" />
+<LinkCard title="Multi-agent" href="/docs/examples/multi-agent" description="Supervisor, swarm, handoff and plan-act-reflect, each agent on a different company's model." eyebrow="Patterns" />
+<LinkCard title="Skills" href="/docs/examples/skills" description="Load SKILL.md instructions on demand or preload a persona per tenant." eyebrow="Patterns" />
+</CardGrid>
+
+## Multimodal and quality
+
+<CardGrid>
+<LinkCard title="Multimodal input" href="/docs/examples/multimodal" description="Send images, PDFs, audio and video to an agent." eyebrow="Multimodal" />
+<LinkCard title="Realtime audio" href="/docs/examples/realtime-audio" description="An audio-to-audio voice agent with AudioAgent and Gemini Live." eyebrow="Multimodal" />
+<LinkCard title="Testing" href="/docs/examples/testing" description="Unit test an agent offline with TestAgent, mocks and override_node." eyebrow="Quality" />
+<LinkCard title="Evaluation" href="/docs/examples/evaluation" description="Score trajectories, run LLM-as-judge criteria and simulate users." eyebrow="Quality" />
+</CardGrid>
+
+## Deployment
+
+<CardGrid>
+<LinkCard title="Serving an agent" href="/docs/examples/serving" description="Serve a graph with 10xgraph-api and call it over REST, streaming and TypeScript." eyebrow="Deployment" />
+</CardGrid>
+
+## Use cases
+
+<CardGrid>
+<LinkCard title="Customer support swarm" href="/docs/examples/customer-support" description="Gemini, OpenAI and Claude agents with refund approval and persistence." eyebrow="Use case" />
+<LinkCard title="Research assistant" href="/docs/examples/research-assistant" description="Plan, search, reflect and write a typed report across four providers." eyebrow="Use case" />
+<LinkCard title="Coding agent" href="/docs/examples/coding-agent" description="A plan-first coding agent whose file changes a human reviews." eyebrow="Use case" />
+<LinkCard title="Data extraction agent" href="/docs/examples/data-extraction-agent" description="Turn unstructured text into validated Pydantic records." eyebrow="Use case" />
+</CardGrid>
+
+## Full-stack apps
+
+<CardGrid>
+<LinkCard title="RAG docs assistant" href="/docs/examples/rag-assistant" description="A ReAct + RAG agent on the API server, with a React UI, Postgres and Docker Compose." eyebrow="App" />
+<LinkCard title="CopilotKit over AG-UI" href="/docs/examples/copilotkit-agui" description="A Next.js CopilotKit task board driven by a 10xGraph agent over AG-UI." eyebrow="App" />
+</CardGrid>

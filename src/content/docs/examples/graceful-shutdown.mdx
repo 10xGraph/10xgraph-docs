@@ -1,0 +1,325 @@
+---
+title: Graceful Shutdown for a Python AI Agent Service with 10xGraph
+seoTitle: Graceful shutdown for a Python AI agent
+description: Handle SIGINT and SIGTERM in a long-running 10xGraph agent service, flush checkpoint writes, and release resources with graph.aclose() and async with.
+section: Examples
+group: "Production"
+order: 20
+label: Graceful shutdown
+updated: "2026-10-28"
+faq:
+  - q: "What does graph.aclose() do, and in what order?"
+    a: "It waits for background tasks (including fire-and-forget checkpoint writes) up to shutdown_timeout, then releases the checkpointer, then the publisher, then the store. It returns a dict with one stats entry per component and a total_duration. A second call returns a dict with status already_closed."
+  - q: "Do I need GracefulShutdownManager if I use async with graph?"
+    a: "They solve different problems. async with graph guarantees aclose() runs when the block exits. GracefulShutdownManager turns SIGINT and SIGTERM into a flag your loop can check, so the process leaves the block on purpose instead of being killed mid-run."
+  - q: "How does this work in Kubernetes or Docker?"
+    a: "Both send SIGTERM first and SIGKILL after a grace period. Set terminationGracePeriodSeconds (Kubernetes) or stop_grace_period (Docker Compose) to more than your longest job plus shutdown_timeout, and make sure the Python process receives the signal."
+---
+
+A service that runs for hours has to stop cleanly when it is told to. This example shows a job loop that finishes the job it is on, stops taking new ones on Ctrl+C or SIGTERM, and then calls `graph.aclose()` to flush checkpoint writes and release resources. The agent is a `ReactAgent` on Google `gemini-2.5-flash`.
+
+## What you will build
+
+A small support service that takes jobs from a list, answers each with a Gemini-backed `ReactAgent`, and appends the result to a ledger file. When you press Ctrl+C or the container receives SIGTERM, the service finishes the job it is on, stops taking new ones, and calls `graph.aclose()`. The stats dict that `aclose()` returns is printed so you can see what was flushed and released.
+
+A second script shows the short form, `async with graph:`, which calls `aclose()` for you even when the body raises.
+
+## Key concepts
+
+- `GracefulShutdownManager.register_signal_handlers()`: installs asyncio handlers for SIGINT and SIGTERM that set `shutdown_requested`. They do not raise, so your loop chooses where to stop.
+- `manager.wait_for_shutdown()`: awaitable that returns once a signal arrives. Wrap it in `asyncio.wait_for` for an interruptible idle sleep.
+- `delayed_keyboard_interrupt()` / `DelayedKeyboardInterrupt`: a context manager that holds back SIGINT and SIGTERM for a short critical section and re-delivers them on exit.
+- `compile(shutdown_timeout=...)`: the time budget `aclose()` has. The default is 30 seconds.
+- `await graph.aclose()`: releases everything the graph owns and returns a stats dict.
+- `async with graph:`: calls `aclose()` on exit, including after an exception.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[google-genai]" python-dotenv
+export GEMINI_API_KEY="..."
+
+python examples/graceful_shutdown/service_loop.py
+# press Ctrl+C, or from another terminal: kill -TERM <pid>
+
+python examples/graceful_shutdown/async_with.py
+```
+
+## How the code works
+
+### `service_loop.py`
+
+**1. Turn signals into a flag.**
+
+```python
+    manager = GracefulShutdownManager(shutdown_timeout=20.0)
+    # Installs asyncio signal handlers for SIGINT and SIGTERM. They only set
+    # manager.shutdown_requested, so the loop below decides when to stop.
+    manager.register_signal_handlers()
+```
+
+The handler only sets `manager.shutdown_requested = True`. The loop checks it between jobs, so a job that is already running is never cut off. Where the platform lacks `add_signal_handler` (Windows), the manager logs a warning instead of failing.
+
+**2. Protect the critical section.**
+
+```python
+    with delayed_keyboard_interrupt(), LEDGER.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"job": job, "answer": answer}) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+```
+
+Inside the block, SIGINT and SIGTERM are recorded instead of acted on. When the block exits, the original handler runs. The write and fsync either finish or never start, so the ledger never gets a half-written line. Keep these blocks short: a long one makes the service ignore shutdown requests.
+
+**3. Compile with a shutdown budget.**
+
+```python
+    graph = agent.compile(checkpointer=InMemoryCheckpointer(), shutdown_timeout=20.0)
+```
+
+`shutdown_timeout` is the total time `aclose()` may spend flushing and releasing.
+
+**4. The job loop.**
+
+```python
+        for number, job in enumerate(JOBS, start=1):
+            if manager.shutdown_requested:
+                break  # stop taking new jobs; the last one was already committed
+            result = await graph.ainvoke(
+                {"messages": [Message.text_message(job)]},
+                {"thread_id": f"job-{number}", "user_id": "support-bot"},
+            )
+            answer = result["messages"][-1].text()
+            commit_result(job, answer)
+            print(f"[job {number}] {job} -> {answer}")
+
+            # Idle between jobs, but wake up the moment a signal arrives.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(manager.wait_for_shutdown(), timeout=3.0)
+```
+
+The flag is checked before each job. Each job gets its own `thread_id`. The idle wait wakes immediately on a signal and times out quietly after 3 seconds otherwise.
+
+**5. Close the graph in `finally`.**
+
+```python
+    finally:
+        print("Shutting down...")
+        # Flushes background checkpoint writes, then releases checkpointer,
+        # publisher and store. Returns one stats entry per component.
+        stats = await graph.aclose()
+        print(json.dumps(stats, indent=2, default=str))
+        manager.unregister_signal_handlers()
+```
+
+`aclose()` runs in a fixed order:
+
+1. **Background tasks.** The task manager waits for pending work, mainly checkpoint writes, which run in the background so they do not slow streaming. This step gets the full `shutdown_timeout`.
+2. **Checkpointer.** `arelease()` closes its connections. This step gets `shutdown_timeout / 3`.
+3. **Publisher.** `close()` flushes and disconnects the event bus, with `shutdown_timeout / 3`.
+4. **Store.** `arelease()` on the vector store, with `shutdown_timeout / 3`.
+
+The order matters because the checkpointer has to stay open until the background writes that use it are done. A component that was not configured reports a status of `skipped`. A component that exceeds its time reports `timeout` and the next one still runs.
+
+### `async_with.py`
+
+```python
+    async with graph:
+        result = await graph.ainvoke(
+            {"messages": [Message.text_message("Why close a graph before exiting?")]},
+            {"thread_id": "demo", "user_id": "demo-user"},
+        )
+        print("assistant:", result["messages"][-1].text())
+
+    # aclose() is idempotent: a second call returns immediately.
+    print(await graph.aclose())  # {'status': 'already_closed'}
+```
+
+`__aexit__` calls `aclose()` whether the body finishes, raises or is cancelled. Calling it again, by hand or through a nested block, returns `{'status': 'already_closed'}`.
+
+## Kubernetes and Docker
+
+Kubernetes sends SIGTERM when it stops a pod and sends SIGKILL after `terminationGracePeriodSeconds` (30 seconds by default). Docker does the same with `docker stop` and `stop_grace_period`. SIGKILL cannot be caught, so anything not flushed by then is lost.
+
+- Set `terminationGracePeriodSeconds` higher than your longest job plus `shutdown_timeout`.
+- Run the Python process as PID 1 with an exec-form `CMD ["python", "..."]`, or put an init such as `tini` in front. A shell wrapper may not forward SIGTERM.
+- Stop accepting new work as soon as `shutdown_requested` is set, as the loop does here, and fail the readiness probe if you serve traffic.
+
+## Full code
+
+<Tabs>
+<TabItem label="service_loop.py">
+
+```python
+"""A long-running agent service that shuts down cleanly on SIGINT and SIGTERM.
+
+Shows GracefulShutdownManager, a delayed_keyboard_interrupt critical section,
+compile(shutdown_timeout=...) and the stats dict returned by graph.aclose().
+Run: python examples/graceful_shutdown/service_loop.py   (then press Ctrl+C)
+"""
+
+import asyncio
+import contextlib
+import json
+import os
+import tempfile
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+from tenxgraph.utils.shutdown import GracefulShutdownManager, delayed_keyboard_interrupt
+
+
+load_dotenv()
+
+LEDGER = Path(tempfile.gettempdir()) / "10xgraph_shutdown_ledger.jsonl"
+JOBS = [
+    "Where is order A-1001?",
+    "Where is order B-2002?",
+    "Where is order C-3003?",
+    "Where is order D-4004?",
+]
+
+
+def get_order_status(order_id: str) -> str:
+    """Look up the shipping status of an order."""
+    return f"Order {order_id} left the warehouse and arrives in 2 days."
+
+
+def commit_result(job: str, answer: str) -> None:
+    """Append one line to the ledger. A half-written line would corrupt the file."""
+    # delayed_keyboard_interrupt() swaps in handlers that only record the signal.
+    # If Ctrl+C or SIGTERM lands inside this block it is held back until the block
+    # exits, so the write and fsync either finish or never start.
+    with delayed_keyboard_interrupt(), LEDGER.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"job": job, "answer": answer}) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+async def main() -> None:
+    manager = GracefulShutdownManager(shutdown_timeout=20.0)
+    # Installs asyncio signal handlers for SIGINT and SIGTERM. They only set
+    # manager.shutdown_requested, so the loop below decides when to stop.
+    manager.register_signal_handlers()
+
+    agent = ReactAgent(
+        model="gemini-2.5-flash",
+        system_prompt=[{"role": "system", "content": "You are an order-support assistant."}],
+        tools=[get_order_status],
+    )
+    # shutdown_timeout is the total budget aclose() may spend flushing and releasing.
+    graph = agent.compile(checkpointer=InMemoryCheckpointer(), shutdown_timeout=20.0)
+
+    print("Service running. Press Ctrl+C (or send SIGTERM) to stop.")
+    try:
+        for number, job in enumerate(JOBS, start=1):
+            if manager.shutdown_requested:
+                break  # stop taking new jobs; the last one was already committed
+            result = await graph.ainvoke(
+                {"messages": [Message.text_message(job)]},
+                {"thread_id": f"job-{number}", "user_id": "support-bot"},
+            )
+            answer = result["messages"][-1].text()
+            commit_result(job, answer)
+            print(f"[job {number}] {job} -> {answer}")
+
+            # Idle between jobs, but wake up the moment a signal arrives.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(manager.wait_for_shutdown(), timeout=3.0)
+    finally:
+        print("Shutting down...")
+        # Flushes background checkpoint writes, then releases checkpointer,
+        # publisher and store. Returns one stats entry per component.
+        stats = await graph.aclose()
+        print(json.dumps(stats, indent=2, default=str))
+        manager.unregister_signal_handlers()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="async_with.py">
+
+```python
+"""The short form: `async with graph:` calls aclose() for you.
+
+Shows that the context manager releases the checkpointer, publisher and store even
+when the body raises. Run: python examples/graceful_shutdown/async_with.py
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+
+
+load_dotenv()
+
+
+async def main() -> None:
+    agent = ReactAgent(
+        model="gemini-2.5-flash",
+        system_prompt=[{"role": "system", "content": "Answer in one sentence."}],
+    )
+    graph = agent.compile(checkpointer=InMemoryCheckpointer(), shutdown_timeout=10.0)
+
+    # __aexit__ runs aclose() whether the body finishes, raises or is cancelled.
+    async with graph:
+        result = await graph.ainvoke(
+            {"messages": [Message.text_message("Why close a graph before exiting?")]},
+            {"thread_id": "demo", "user_id": "demo-user"},
+        )
+        print("assistant:", result["messages"][-1].text())
+
+    # aclose() is idempotent: a second call returns immediately.
+    print(await graph.aclose())  # {'status': 'already_closed'}
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/graceful_shutdown](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/graceful_shutdown)
+
+## Expected output
+
+Illustrative. Job text, timings and the answers will differ.
+
+```text
+Service running. Press Ctrl+C (or send SIGTERM) to stop.
+[job 1] Where is order A-1001? -> Order A-1001 left the warehouse and arrives in 2 days.
+[job 2] Where is order B-2002? -> Order B-2002 left the warehouse and arrives in 2 days.
+^C
+Shutting down...
+{
+  "background_tasks": {"status": "completed", "initial_tasks": 2, "completed_tasks": 2, "remaining_tasks": 0, "duration_seconds": 0.01},
+  "checkpointer": {"status": "completed", "duration": 0.001},
+  "publisher": {"status": "skipped", "reason": "no publisher"},
+  "store": {"status": "skipped", "reason": "no store"},
+  "total_duration": 0.02
+}
+```
+
+## Using a different model
+
+Change the model string in `ReactAgent(model=...)` and install the matching extra. For example `model="gpt-5-mini"` with `pip install "10xgraph[openai]"` and `OPENAI_API_KEY`, or `model="claude-sonnet-5-5"` with `pip install "10xgraph[anthropic]"` and `ANTHROPIC_API_KEY`.
+
+## Next steps
+
+- [Persistence](/docs/examples/persistence): checkpointers that need `aclose()` to release connections.
+- [Resilience](/docs/examples/resilience): retries, fallbacks and recursion limits for runs that must not fail.
+- [Human in the loop](/docs/examples/human-in-the-loop): pause a run and resume it later, even after a restart.

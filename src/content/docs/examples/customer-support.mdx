@@ -1,0 +1,923 @@
+---
+title: "Customer Support Swarm with Human Approval and Memory in 10xGraph"
+seoTitle: "Customer support agent swarm in Python"
+description: "Build a Python customer support agent swarm on Gemini, OpenAI and Claude with refund approval via interrupt(), SQLite persistence and Qdrant memory."
+section: Examples
+group: "Use cases"
+order: 37
+label: "Customer support swarm"
+updated: "2026-10-28"
+faq:
+  - q: "Can the agents in one SwarmAgent use models from different providers?"
+    a: "Yes. Each member is an ordinary Agent, so every member picks its own model string. Here triage runs on gemini-2.5-flash, billing on gpt-5-mini and technical support on claude-sonnet-5-5, and handoffs pass the shared message history between them."
+  - q: "How does the refund approval pause and resume?"
+    a: "The issue_refund tool calls interrupt() when the amount is over the threshold. The run is saved by the checkpointer and ainvoke returns with a pending interrupt on the state. Calling ainvoke again on the same thread with a resume value re-runs the tool, and interrupt() returns that value."
+  - q: "Does this example need a Qdrant server?"
+    a: "No. QdrantStore(path=...) uses Qdrant's local file mode. You only need the qdrant extra and an OpenAI key for the embeddings."
+---
+
+This example is a command-line support desk for a software company. Three agents share one conversation and hand the customer to each other with `SwarmAgent`: triage runs on Google `gemini-2.5-flash`, billing on OpenAI `gpt-5-mini`, and technical support on Anthropic `claude-sonnet-5-5`. Refunds above $50 pause the run until a person approves them. Use it as a template for any multi-agent desk that mixes providers, needs a human check on risky actions, and remembers returning users.
+
+## What you will build
+
+A triage agent greets the customer and routes the request. A billing agent can look up orders and issue refunds. A technical agent searches a knowledge base and runs diagnostics. The three agents hand the customer to each other with `SwarmAgent`.
+
+Refunds above $50 pause the run and ask a person in the terminal to approve or decline. The conversation is saved in SQLite, and notes about each customer are stored in a local Qdrant collection, so a returning customer is recognised on the next run.
+
+### Models used: one company per agent
+
+| Agent | Model | Company | Why |
+|---|---|---|---|
+| Triage | `gemini-2.5-flash` | Google | Routing is a short classification task, so a fast, low-cost model fits. Thinking is turned off. |
+| Billing | `gpt-5-mini` | OpenAI | Reliable tool calling and argument filling for money-related calls such as `issue_refund`. |
+| Technical support | `claude-sonnet-5-5` | Anthropic | Longer troubleshooting answers with numbered steps from several tool results. |
+
+The model strings are written in `agents.py`. Nothing else changes when you swap one: `SwarmAgent` only sees `Agent` objects. Memory embeddings use OpenAI `text-embedding-3-small`, so `OPENAI_API_KEY` is required even if you change the billing model.
+
+## Architecture
+
+The graph is built by `SwarmAgent`, not by hand. Each member becomes a node. For every handoff listed in `can_handoff_to`, the member's `ToolNode` gets a generated `transfer_to_<name>` tool, and the swarm routes to the target node when the model calls it. There is no central supervisor: the agent that holds the conversation decides who gets it next.
+
+```text
+                      Customer (CLI)
+                           |
+                           v
+                  +-----------------+
+                  |  TRIAGE         |   gemini-2.5-flash
+                  |  lookup_customer|   memory: preload
+                  +-----------------+
+          transfer_to_billing |   | transfer_to_technical
+                              v   v
+        +----------------------+   +--------------------------+
+        |  BILLING             |<->|  TECHNICAL               |
+        |  gpt-5-mini          |   |  claude-sonnet-5-5       |
+        |  lookup_order        |   |  search_knowledge_base   |
+        |  issue_refund        |   |  run_diagnostics         |
+        |  memory: postload    |   |  memory: postload        |
+        +----------------------+   +--------------------------+
+                   |
+                   | amount > 50
+                   v
+        interrupt()  -->  run saved to SQLite  -->  CLI asks a person
+                   ^                                       |
+                   +------- resume with {approved, note} ---+
+
+  Shared by all three: QdrantStore (customer notes), SqliteCheckpointer (threads)
+```
+
+Routing rules:
+
+- `TRIAGE` is the entry node. It can hand off to `BILLING` or `TECHNICAL`, but nothing hands back to it.
+- `BILLING` and `TECHNICAL` can hand off to each other, because a charge question sometimes turns out to be a bug and the reverse.
+- Every new customer message restarts at `TRIAGE`. The earlier messages are still in the thread, so triage sees the history and can route again cheaply.
+
+Model choices follow the work each agent does. Triage only classifies, so it gets the cheapest model with reasoning off. Billing calls a tool that moves money, so it gets the model with the most reliable argument filling. Technical support writes long answers from several tool results, so it gets the model that writes best. Memory uses two modes: triage has `preload` (hits are injected, no tool needed), the specialists have `postload` (they get `user_memory_tool` and can write notes).
+
+## Project structure
+
+<FileTree>
+
+- main.py CLI loop: customer id, send message, approval prompt, shutdown
+- agents.py Builds the Qdrant store and the SwarmAgent with three members
+- tools.py Customer, order, refund (with interrupt), knowledge base and diagnostics tools
+- prompts.py System prompts for triage, billing and technical
+- data.py Fake customers, orders, refunds and knowledge base articles
+- config.py Approval threshold and file locations
+- README.md Short readme in the repo
+- data/ Created on first run
+  - support_checkpoints.db SQLite checkpoints, one thread per customer
+  - qdrant/ Local Qdrant collection with customer notes
+
+</FileTree>
+
+## Key concepts
+
+- `SwarmAgent` and `SwarmMemberConfig`: peer-to-peer handoff. `transfer_to_<name>` tools are generated and routed for you.
+- `interrupt()` (`tenxgraph.utils`): pauses a tool or node and returns the resume value on the next run.
+- `pending_interrupt(state)`: reads the pending request from the state returned by `ainvoke`.
+- `SqliteCheckpointer`: saves threads in one local file, with no external service.
+- `MemoryConfig` with `UserMemoryConfig`: long-term, per-user memory in `QdrantStore`. `retrieval_mode="preload"` injects matches into the request; `"postload"` gives the model `user_memory_tool` to search and remember.
+- Injected `config` argument: tools read `config["user_id"]`, so the model cannot ask for another customer's data.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[google-genai,openai,anthropic,qdrant,sqlite_checkpoint]" python-dotenv
+export GEMINI_API_KEY=...
+export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
+python examples/use_cases/customer_support/main.py
+```
+
+No Docker services are needed. Qdrant and SQLite files are created under `examples/use_cases/customer_support/data/`.
+
+Sample customers are `C-1001` (two orders) and `C-1002`. Type `quit` to exit. Start again with the same id to continue the thread.
+
+## How the code works
+
+The walkthrough follows the order you would read the files: settings and data first, then tools, prompts, the swarm, and finally the CLI.
+
+### config.py
+
+```python
+# Refunds above this amount (USD) pause the run for human approval.
+REFUND_APPROVAL_THRESHOLD = 50.0
+
+# Conversation state is saved here, so closing the CLI and starting it again
+# with the same customer id resumes the same thread.
+CHECKPOINT_DB = HERE / "data" / "support_checkpoints.db"
+
+# Local, file-based Qdrant: no Docker or server needed.
+QDRANT_PATH = HERE / "data" / "qdrant"
+MEMORY_COLLECTION = "support_customer_memory"
+```
+
+Three settings, all in one place. `REFUND_APPROVAL_THRESHOLD` decides which refunds need a person. `CHECKPOINT_DB` is a single SQLite file; because the thread id is derived from the customer id, closing the CLI and starting it again resumes the same thread. `QDRANT_PATH` points Qdrant at a local folder, so there is no server to run. Only API keys come from the environment.
+
+### data.py
+
+```python
+CUSTOMERS: dict[str, dict[str, Any]] = {
+    "C-1001": {"name": "Maya Patel", "email": "maya@example.com", "plan": "Pro"},
+    "C-1002": {"name": "Tomas Reyes", "email": "tomas@example.com", "plan": "Starter"},
+}
+```
+
+Two customers and three orders, held in plain dicts. The file docstring says to replace them with calls to your CRM or order system. The tools only touch these dicts, so that is the only place you change when you connect real systems.
+
+```python
+# Refunds issued during this process: order_id -> amount.
+REFUNDS: dict[str, float] = {}
+
+KNOWLEDGE_BASE: list[dict[str, str]] = [
+    {
+        "title": "Login loops back to the sign-in page",
+        "body": "Clear cookies for the app domain, then sign in again. If SSO is on, "
+        "check that the identity provider session has not expired.",
+    },
+```
+
+`REFUNDS` records refunds issued during this process (order id to amount). It is in memory, so it resets when the process exits. `KNOWLEDGE_BASE` is a list of title and body pairs that `search_knowledge_base` scans.
+
+### tools.py
+
+Tools are plain functions. The model sees the signature and docstring, and a `config` parameter is filled in by 10xGraph with the run config. It is not part of the tool schema the model sees.
+
+```python
+def lookup_customer(config: dict[str, Any]) -> str:
+    """Return the signed-in customer's profile and plan."""
+    customer = CUSTOMERS.get(config.get("user_id", ""))
+    return json.dumps(customer) if customer else json.dumps({"error": "unknown customer"})
+```
+
+`lookup_customer` takes no model arguments at all. It reads `config["user_id"]`, which `main.py` sets from the id typed at the terminal. The model cannot ask for another customer's profile because it never supplies the id.
+
+```python
+def lookup_order(order_id: str, config: dict[str, Any]) -> str:
+    """Look up one order by id, if it belongs to the signed-in customer."""
+    order = ORDERS.get(order_id)
+    if not order or order["customer_id"] != config.get("user_id"):
+        return json.dumps({"error": f"order {order_id} not found"})
+    return json.dumps({"order_id": order_id, **order, "refunded": REFUNDS.get(order_id, 0.0)})
+```
+
+`lookup_order` takes an order id from the model but checks that the order's `customer_id` equals `config["user_id"]`. An order that belongs to someone else returns the same "not found" error as an order that does not exist, so the answer leaks nothing.
+
+```python
+def issue_refund(order_id: str, amount: float, reason: str, config: dict[str, Any]) -> str:
+    """Refund part or all of an order. Large refunds need human approval."""
+    order = ORDERS.get(order_id)
+    if not order or order["customer_id"] != config.get("user_id"):
+        return json.dumps({"error": f"order {order_id} not found"})
+    if amount <= 0 or amount + REFUNDS.get(order_id, 0.0) > order["amount"]:
+        return json.dumps({"error": "refund exceeds the order amount"})
+```
+
+`issue_refund` repeats the ownership check and then validates the amount against what is left on the order, including earlier refunds. Validation runs before the approval step, so a person is never asked to approve a refund that could not succeed.
+
+```python
+    if amount > REFUND_APPROVAL_THRESHOLD:
+        # On the first run this raises and pauses the graph. When the thread is
+        # resumed, this whole function runs again and interrupt() returns the
+        # reviewer's answer. Keep side effects (the refund) below this call.
+        decision = interrupt(
+            {"order_id": order_id, "amount": amount, "reason": reason},
+            message=f"Approve a ${amount:.2f} refund on {order_id}?",
+            reason="refund_approval",
+            response_schema={
+                "type": "object",
+                "properties": {"approved": {"type": "boolean"}, "note": {"type": "string"}},
+                "required": ["approved"],
+            },
+        )
+        # None means the reviewer cancelled instead of answering.
+        if not decision or not decision.get("approved"):
+            note = (decision or {}).get("note", "no reason given")
+            return json.dumps({"status": "declined", "note": note})
+
+    REFUNDS[order_id] = REFUNDS.get(order_id, 0.0) + amount
+    return json.dumps({"status": "refunded", "order_id": order_id, "amount": amount})
+```
+
+This is the human-in-the-loop part. Above the threshold, `interrupt()` stops the run and saves it. The first argument is the payload shown to the reviewer. `message` is the human-readable question, `reason` is a tag, and `response_schema` is a JSON Schema checked when the thread is resumed, so `{"approved": "yes"}` is rejected.
+
+When the thread resumes, the whole function runs again from the top, and `interrupt()` returns the reviewer's answer instead of pausing. That is why the refund is recorded only below the `interrupt()` call: before it, the function has no side effects, so running it twice is safe. A `None` decision means the reviewer cancelled, and it is treated as a decline.
+
+```python
+def search_knowledge_base(query: str) -> str:
+    """Search help articles by keyword and return the best matches."""
+    words = {w.lower() for w in query.split() if len(w) > MIN_WORD}
+    hits = [
+        article
+        for article in KNOWLEDGE_BASE
+        if words & set((article["title"] + " " + article["body"]).lower().split())
+    ]
+    return json.dumps(hits[:MAX_HITS] or [{"title": "No article found", "body": ""}])
+```
+
+`search_knowledge_base` is a keyword match over the fake articles. Words of three characters or fewer are ignored, and at most three hits are returned. Swap it for a vector search or a help-center API without changing anything else.
+
+```python
+def run_diagnostics(service: str, config: dict[str, Any]) -> str:
+    """Run a health check for one of the customer's services (api, webhooks, login)."""
+    # Fake result; a real version would query your monitoring system.
+    status = {"api": "degraded: rate limited", "webhooks": "ok", "login": "ok"}
+    return json.dumps(
+        {
+            "customer": config.get("user_id"),
+            "service": service,
+            "status": status.get(service, "unknown service"),
+        }
+    )
+```
+
+`run_diagnostics` returns a fixed status per service. It takes `config` so the result names the customer. A real version would query your monitoring system. Note that `api` reports `degraded: rate limited`, which matches the 429 article in the knowledge base.
+
+### prompts.py
+
+```python
+def _prompt(text: str) -> list[dict[str, str]]:
+    return [{"role": "system", "content": text}]
+
+
+TRIAGE = _prompt(
+    "You are the front desk of a software company's support team. Greet the customer, "
+    "call lookup_customer once to see their plan, then decide who should handle the "
+    "request. Billing, invoices, charges and refunds go to billing. Bugs, errors, API "
+    "problems and how-to questions go to technical support. Answer simple questions "
+    "yourself. Do not attempt refunds or diagnostics."
+)
+```
+
+Prompts are short on purpose. The handoff tools are added by `SwarmAgent`, so the prompts only say when to use them. Triage is told to call `lookup_customer` once, route billing topics to billing and technical topics to technical, and not attempt refunds or diagnostics itself.
+
+```python
+BILLING = _prompt(
+    "You are the billing specialist. Use lookup_order to check a charge before you act. "
+    "Only call issue_refund for an order the customer owns, with a clear reason. "
+    "Refunds above the approval threshold are reviewed by a human; if the refund tool "
+    "reports it was declined, explain that politely and offer alternatives. "
+    "Use user_memory_tool with action='remember' to save lasting facts, such as a "
+    "preferred contact method or a past billing dispute. If the problem is technical, "
+    "transfer to technical support."
+)
+```
+
+The billing prompt tells the model to look up a charge before acting, to refund only orders the customer owns, and to explain a declined refund politely. It also names `user_memory_tool` with `action='remember'`, because billing has postload memory and can write notes. The technical prompt (see the full code) does the same with `action='search'` to recall earlier problems.
+
+### agents.py
+
+```python
+def build_memory_store() -> QdrantStore:
+    """Local file-based Qdrant. Embeddings come from OpenAI (needs OPENAI_API_KEY)."""
+    QDRANT_PATH.mkdir(parents=True, exist_ok=True)
+    return QdrantStore(
+        embedding=OpenAIEmbedding(model="text-embedding-3-small"),
+        path=str(QDRANT_PATH),
+        collection=MEMORY_COLLECTION,
+    )
+```
+
+`build_memory_store` creates one `QdrantStore` in local file mode, with OpenAI `text-embedding-3-small` embeddings. This is why `OPENAI_API_KEY` is needed whatever model billing uses. One store is shared by every agent and by `compile()`.
+
+```python
+    preload = MemoryConfig(
+        store=store,
+        retrieval_mode="preload",
+        limit=5,
+        user_memory=UserMemoryConfig(),
+        agent_memory=None,
+    )
+    # POSTLOAD: the model gets `user_memory_tool` and decides when to search
+    # or remember. The specialists use this so they can write notes.
+    postload = MemoryConfig(
+        store=store,
+        retrieval_mode="postload",
+        limit=5,
+        user_memory=UserMemoryConfig(),
+        agent_memory=None,
+    )
+```
+
+Two `MemoryConfig` objects over the same store. Memory is keyed by `config["user_id"]`, so each customer sees only their own notes. `preload` searches the store once per run and adds the hits to the request, so the model needs no memory tool. `postload` gives the model `user_memory_tool` so it can decide when to search or remember. `agent_memory=None` turns off memory shared across users.
+
+```python
+    triage = Agent(
+        model="gemini-2.5-flash",
+        system_prompt=prompts.TRIAGE,
+        tool_node=ToolNode([lookup_customer]),
+        memory=preload,
+        reasoning_config=None,  # routing is easy; skip thinking tokens
+    )
+    billing = Agent(
+        model="gpt-5-mini",
+        system_prompt=prompts.BILLING,
+        tool_node=ToolNode([lookup_order, issue_refund]),
+        memory=postload,
+    )
+    technical = Agent(
+        model="claude-sonnet-5-5",
+        system_prompt=prompts.TECHNICAL,
+        tool_node=ToolNode([search_knowledge_base, run_diagnostics]),
+        memory=postload,
+    )
+```
+
+Three ordinary `Agent` objects. Each has its own model string, system prompt, `ToolNode` and memory mode. Triage sets `reasoning_config=None` because routing is easy and thinking tokens would only add cost. The provider is detected from the model string, so nothing else in the code names a company.
+
+```python
+    return SwarmAgent(
+        members={
+            "TRIAGE": SwarmMemberConfig(
+                agent=triage,
+                can_handoff_to=["BILLING", "TECHNICAL"],
+                description="Front desk. Greets customers and routes them.",
+            ),
+            "BILLING": SwarmMemberConfig(
+                agent=billing,
+                can_handoff_to=["TECHNICAL"],
+                description="Billing: charges, invoices and refunds.",
+            ),
+            "TECHNICAL": SwarmMemberConfig(
+                agent=technical,
+                can_handoff_to=["BILLING"],
+                description="Technical support: errors, API problems, how-to questions.",
+            ),
+        },
+        entry="TRIAGE",
+    )
+```
+
+`SwarmAgent` takes the members by node name. `can_handoff_to` lists the allowed targets and `description` is what other agents see when choosing a handoff. `entry="TRIAGE"` makes triage the first node on every run. Calling `.compile()` on the result returns a `CompiledGraph`.
+
+### main.py
+
+```python
+def ask_reviewer(request) -> dict:
+    """Show the pending approval to a person and return the resume value."""
+    print(f"\n[approval needed] {request.message}")
+    print(f"  details: {request.value}")
+    answer = input("  approve? [y/N] ").strip().lower()
+    note = input("  note for the customer (optional): ").strip()
+    return {"approved": answer == "y", "note": note}
+```
+
+`ask_reviewer` is the approval UI. It prints the pending request (`request.message` and `request.value`), asks for y or N and an optional note, and returns the dict the tool's `response_schema` expects. Replace it with a Slack message, a web form or a ticket and nothing else changes.
+
+```python
+async def send(app, text: str, config: dict) -> None:
+    """Send one customer message and keep resuming while the graph asks for approval."""
+    result = await app.ainvoke(
+        {"messages": [Message.text_message(text)]},
+        config,
+        response_granularity=ResponseGranularity.FULL,
+    )
+    # A paused thread has a pending interrupt on its state. Resume the same
+    # thread with the answer; the refund tool re-runs and interrupt() returns it.
+    while (request := pending_interrupt(result["state"])) is not None:
+        result = await app.ainvoke(
+            {"resume": ask_reviewer(request), "resume_interrupt_id": request.id},
+            config,
+            response_granularity=ResponseGranularity.FULL,
+        )
+
+    replies = [m for m in result["messages"] if m.role == "assistant" and m.text()]
+    print("assistant:", replies[-1].text() if replies else "(no reply)")
+```
+
+`send` calls `ainvoke` with `ResponseGranularity.FULL`, which is needed so the result includes the state. While the state has a pending interrupt, it resumes the same thread with `resume` and `resume_interrupt_id`. The id makes a stale answer fail instead of approving the wrong request. When no interrupt is left, it prints the last assistant message that has text.
+
+```python
+async def main() -> None:
+    CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
+    store = build_memory_store()
+    app = build_swarm(store).compile(
+        checkpointer=SqliteCheckpointer(CHECKPOINT_DB),
+        store=store,
+    )
+
+    customer_id = input("Customer id [C-1001]: ").strip() or "C-1001"
+    # The same thread_id on a later run continues this conversation from SQLite.
+    config = {"thread_id": f"support-{customer_id}", "user_id": customer_id}
+    print("Type a message, or 'quit' to exit.")
+
+    try:
+        while (text := input("\nyou: ").strip()) not in {"quit", "exit"}:
+            if text:
+                await send(app, text, config)
+    except (EOFError, KeyboardInterrupt):
+        pass
+    finally:
+        await app.aclose()
+```
+
+`main` builds the store and the swarm, then compiles with `SqliteCheckpointer` and the store. The config carries `thread_id` (`support-<id>`) and `user_id`. `user_id` must be non-empty or memory does nothing. The `finally` block calls `aclose()` so pending background checkpoint writes are flushed before the process exits.
+
+## Full code
+
+<Tabs>
+<TabItem label="main.py">
+
+```python
+"""Customer support swarm with approval for large refunds and saved memory.
+
+Triage (Gemini), billing (OpenAI) and technical support (Anthropic) hand the
+customer off to each other. Refunds above the threshold pause the run and ask
+you to approve in the terminal. State persists in SQLite, memory in local Qdrant.
+
+Run from the repo root: python examples/use_cases/customer_support/main.py
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+from agents import build_memory_store, build_swarm
+from config import CHECKPOINT_DB
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.storage.checkpointer import SqliteCheckpointer
+from tenxgraph.utils import ResponseGranularity, pending_interrupt
+
+
+load_dotenv()
+
+
+def ask_reviewer(request) -> dict:
+    """Show the pending approval to a person and return the resume value."""
+    print(f"\n[approval needed] {request.message}")
+    print(f"  details: {request.value}")
+    answer = input("  approve? [y/N] ").strip().lower()
+    note = input("  note for the customer (optional): ").strip()
+    return {"approved": answer == "y", "note": note}
+
+
+async def send(app, text: str, config: dict) -> None:
+    """Send one customer message and keep resuming while the graph asks for approval."""
+    result = await app.ainvoke(
+        {"messages": [Message.text_message(text)]},
+        config,
+        response_granularity=ResponseGranularity.FULL,
+    )
+    # A paused thread has a pending interrupt on its state. Resume the same
+    # thread with the answer; the refund tool re-runs and interrupt() returns it.
+    while (request := pending_interrupt(result["state"])) is not None:
+        result = await app.ainvoke(
+            {"resume": ask_reviewer(request), "resume_interrupt_id": request.id},
+            config,
+            response_granularity=ResponseGranularity.FULL,
+        )
+
+    replies = [m for m in result["messages"] if m.role == "assistant" and m.text()]
+    print("assistant:", replies[-1].text() if replies else "(no reply)")
+
+
+async def main() -> None:
+    CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
+    store = build_memory_store()
+    app = build_swarm(store).compile(
+        checkpointer=SqliteCheckpointer(CHECKPOINT_DB),
+        store=store,
+    )
+
+    customer_id = input("Customer id [C-1001]: ").strip() or "C-1001"
+    # The same thread_id on a later run continues this conversation from SQLite.
+    config = {"thread_id": f"support-{customer_id}", "user_id": customer_id}
+    print("Type a message, or 'quit' to exit.")
+
+    try:
+        while (text := input("\nyou: ").strip()) not in {"quit", "exit"}:
+            if text:
+                await send(app, text, config)
+    except (EOFError, KeyboardInterrupt):
+        pass
+    finally:
+        await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="agents.py">
+
+```python
+"""Builds the support swarm: three agents, three companies, one shared memory store.
+
+SwarmAgent wires peer-to-peer handoffs. Each member is an ordinary `Agent`
+with its own model, tools and memory settings.
+"""
+
+from __future__ import annotations
+
+import prompts
+from config import MEMORY_COLLECTION, QDRANT_PATH
+from tools import (
+    issue_refund,
+    lookup_customer,
+    lookup_order,
+    run_diagnostics,
+    search_knowledge_base,
+)
+
+from tenxgraph.core.graph import Agent, ToolNode
+from tenxgraph.prebuilt.agent import SwarmAgent
+from tenxgraph.prebuilt.agent.swarm import SwarmMemberConfig
+from tenxgraph.storage.store import (
+    MemoryConfig,
+    OpenAIEmbedding,
+    QdrantStore,
+    UserMemoryConfig,
+)
+
+
+def build_memory_store() -> QdrantStore:
+    """Local file-based Qdrant. Embeddings come from OpenAI (needs OPENAI_API_KEY)."""
+    QDRANT_PATH.mkdir(parents=True, exist_ok=True)
+    return QdrantStore(
+        embedding=OpenAIEmbedding(model="text-embedding-3-small"),
+        path=str(QDRANT_PATH),
+        collection=MEMORY_COLLECTION,
+    )
+
+
+def build_swarm(store: QdrantStore) -> SwarmAgent:
+    # Memory is keyed by config["user_id"], so each customer only sees their own notes.
+    # PRELOAD: the store is searched once per run and the hits are added to the
+    # request, so the model needs no memory tool (good for a cheap triage model).
+    preload = MemoryConfig(
+        store=store,
+        retrieval_mode="preload",
+        limit=5,
+        user_memory=UserMemoryConfig(),
+        agent_memory=None,
+    )
+    # POSTLOAD: the model gets `user_memory_tool` and decides when to search
+    # or remember. The specialists use this so they can write notes.
+    postload = MemoryConfig(
+        store=store,
+        retrieval_mode="postload",
+        limit=5,
+        user_memory=UserMemoryConfig(),
+        agent_memory=None,
+    )
+
+    triage = Agent(
+        model="gemini-2.5-flash",
+        system_prompt=prompts.TRIAGE,
+        tool_node=ToolNode([lookup_customer]),
+        memory=preload,
+        reasoning_config=None,  # routing is easy; skip thinking tokens
+    )
+    billing = Agent(
+        model="gpt-5-mini",
+        system_prompt=prompts.BILLING,
+        tool_node=ToolNode([lookup_order, issue_refund]),
+        memory=postload,
+    )
+    technical = Agent(
+        model="claude-sonnet-5-5",
+        system_prompt=prompts.TECHNICAL,
+        tool_node=ToolNode([search_knowledge_base, run_diagnostics]),
+        memory=postload,
+    )
+
+    return SwarmAgent(
+        members={
+            "TRIAGE": SwarmMemberConfig(
+                agent=triage,
+                can_handoff_to=["BILLING", "TECHNICAL"],
+                description="Front desk. Greets customers and routes them.",
+            ),
+            "BILLING": SwarmMemberConfig(
+                agent=billing,
+                can_handoff_to=["TECHNICAL"],
+                description="Billing: charges, invoices and refunds.",
+            ),
+            "TECHNICAL": SwarmMemberConfig(
+                agent=technical,
+                can_handoff_to=["BILLING"],
+                description="Technical support: errors, API problems, how-to questions.",
+            ),
+        },
+        entry="TRIAGE",
+    )
+```
+
+</TabItem>
+<TabItem label="tools.py">
+
+```python
+"""Support tools: customer lookup, orders, refunds with approval, and diagnostics.
+
+`issue_refund` is the human-in-the-loop part. `interrupt()` stops the run and
+saves it; the CLI shows the request to a person and resumes the same thread
+with their answer.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from config import REFUND_APPROVAL_THRESHOLD
+from data import CUSTOMERS, KNOWLEDGE_BASE, ORDERS, REFUNDS
+
+from tenxgraph.utils import interrupt
+
+
+# The `config` parameter is filled in by 10xGraph with the run config. Reading
+# the customer from `config["user_id"]` (set by the CLI, not by the model) means
+# the model can never look up another customer's data.
+
+MAX_HITS = 3
+MIN_WORD = 3
+
+
+def lookup_customer(config: dict[str, Any]) -> str:
+    """Return the signed-in customer's profile and plan."""
+    customer = CUSTOMERS.get(config.get("user_id", ""))
+    return json.dumps(customer) if customer else json.dumps({"error": "unknown customer"})
+
+
+def lookup_order(order_id: str, config: dict[str, Any]) -> str:
+    """Look up one order by id, if it belongs to the signed-in customer."""
+    order = ORDERS.get(order_id)
+    if not order or order["customer_id"] != config.get("user_id"):
+        return json.dumps({"error": f"order {order_id} not found"})
+    return json.dumps({"order_id": order_id, **order, "refunded": REFUNDS.get(order_id, 0.0)})
+
+
+def issue_refund(order_id: str, amount: float, reason: str, config: dict[str, Any]) -> str:
+    """Refund part or all of an order. Large refunds need human approval."""
+    order = ORDERS.get(order_id)
+    if not order or order["customer_id"] != config.get("user_id"):
+        return json.dumps({"error": f"order {order_id} not found"})
+    if amount <= 0 or amount + REFUNDS.get(order_id, 0.0) > order["amount"]:
+        return json.dumps({"error": "refund exceeds the order amount"})
+
+    if amount > REFUND_APPROVAL_THRESHOLD:
+        # On the first run this raises and pauses the graph. When the thread is
+        # resumed, this whole function runs again and interrupt() returns the
+        # reviewer's answer. Keep side effects (the refund) below this call.
+        decision = interrupt(
+            {"order_id": order_id, "amount": amount, "reason": reason},
+            message=f"Approve a ${amount:.2f} refund on {order_id}?",
+            reason="refund_approval",
+            response_schema={
+                "type": "object",
+                "properties": {"approved": {"type": "boolean"}, "note": {"type": "string"}},
+                "required": ["approved"],
+            },
+        )
+        # None means the reviewer cancelled instead of answering.
+        if not decision or not decision.get("approved"):
+            note = (decision or {}).get("note", "no reason given")
+            return json.dumps({"status": "declined", "note": note})
+
+    REFUNDS[order_id] = REFUNDS.get(order_id, 0.0) + amount
+    return json.dumps({"status": "refunded", "order_id": order_id, "amount": amount})
+
+
+def search_knowledge_base(query: str) -> str:
+    """Search help articles by keyword and return the best matches."""
+    words = {w.lower() for w in query.split() if len(w) > MIN_WORD}
+    hits = [
+        article
+        for article in KNOWLEDGE_BASE
+        if words & set((article["title"] + " " + article["body"]).lower().split())
+    ]
+    return json.dumps(hits[:MAX_HITS] or [{"title": "No article found", "body": ""}])
+
+
+def run_diagnostics(service: str, config: dict[str, Any]) -> str:
+    """Run a health check for one of the customer's services (api, webhooks, login)."""
+    # Fake result; a real version would query your monitoring system.
+    status = {"api": "degraded: rate limited", "webhooks": "ok", "login": "ok"}
+    return json.dumps(
+        {
+            "customer": config.get("user_id"),
+            "service": service,
+            "status": status.get(service, "unknown service"),
+        }
+    )
+```
+
+</TabItem>
+<TabItem label="prompts.py">
+
+```python
+"""System prompts for the three support agents.
+
+Each prompt is short on purpose. The handoff tools (`transfer_to_billing`,
+`transfer_to_technical`, ...) are added by SwarmAgent; the prompts only say
+when to use them.
+"""
+
+from __future__ import annotations
+
+
+def _prompt(text: str) -> list[dict[str, str]]:
+    return [{"role": "system", "content": text}]
+
+
+TRIAGE = _prompt(
+    "You are the front desk of a software company's support team. Greet the customer, "
+    "call lookup_customer once to see their plan, then decide who should handle the "
+    "request. Billing, invoices, charges and refunds go to billing. Bugs, errors, API "
+    "problems and how-to questions go to technical support. Answer simple questions "
+    "yourself. Do not attempt refunds or diagnostics."
+)
+
+BILLING = _prompt(
+    "You are the billing specialist. Use lookup_order to check a charge before you act. "
+    "Only call issue_refund for an order the customer owns, with a clear reason. "
+    "Refunds above the approval threshold are reviewed by a human; if the refund tool "
+    "reports it was declined, explain that politely and offer alternatives. "
+    "Use user_memory_tool with action='remember' to save lasting facts, such as a "
+    "preferred contact method or a past billing dispute. If the problem is technical, "
+    "transfer to technical support."
+)
+
+TECHNICAL = _prompt(
+    "You are the technical support engineer. Search the knowledge base first, run "
+    "diagnostics when the customer reports an error, and give numbered steps. "
+    "Use user_memory_tool with action='search' to recall earlier problems this customer "
+    "had, and action='remember' to save what you resolved. If the problem turns out to "
+    "be about charges or refunds, transfer to billing."
+)
+```
+
+</TabItem>
+<TabItem label="data.py">
+
+```python
+"""Fake customer, order and refund data for the support demo.
+
+Replace these dicts with calls to your CRM or order system. Everything is in
+memory, so refunds issued during a run reset when the process exits.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+CUSTOMERS: dict[str, dict[str, Any]] = {
+    "C-1001": {"name": "Maya Patel", "email": "maya@example.com", "plan": "Pro"},
+    "C-1002": {"name": "Tomas Reyes", "email": "tomas@example.com", "plan": "Starter"},
+}
+
+ORDERS: dict[str, dict[str, Any]] = {
+    "ORD-5001": {
+        "customer_id": "C-1001",
+        "item": "Pro plan, annual",
+        "amount": 240.00,
+        "status": "paid",
+        "charged_on": "2026-10-01",
+    },
+    "ORD-5002": {
+        "customer_id": "C-1001",
+        "item": "Extra seat, monthly",
+        "amount": 12.00,
+        "status": "paid",
+        "charged_on": "2026-10-15",
+    },
+    "ORD-6001": {
+        "customer_id": "C-1002",
+        "item": "Starter plan, monthly",
+        "amount": 19.00,
+        "status": "paid",
+        "charged_on": "2026-10-20",
+    },
+}
+
+# Refunds issued during this process: order_id -> amount.
+REFUNDS: dict[str, float] = {}
+
+KNOWLEDGE_BASE: list[dict[str, str]] = [
+    {
+        "title": "Login loops back to the sign-in page",
+        "body": "Clear cookies for the app domain, then sign in again. If SSO is on, "
+        "check that the identity provider session has not expired.",
+    },
+    {
+        "title": "API returns 429 Too Many Requests",
+        "body": "Starter allows 60 requests/minute, Pro allows 600. Back off with "
+        "exponential delay and honour the Retry-After header.",
+    },
+    {
+        "title": "Webhook deliveries are delayed",
+        "body": "Deliveries retry for 24 hours. Check the endpoint returns 2xx within "
+        "10 seconds and is not blocking on slow work.",
+    },
+]
+```
+
+</TabItem>
+<TabItem label="config.py">
+
+```python
+"""Settings for the support demo. Only API keys come from the environment."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+HERE = Path(__file__).parent
+
+# Refunds above this amount (USD) pause the run for human approval.
+REFUND_APPROVAL_THRESHOLD = 50.0
+
+# Conversation state is saved here, so closing the CLI and starting it again
+# with the same customer id resumes the same thread.
+CHECKPOINT_DB = HERE / "data" / "support_checkpoints.db"
+
+# Local, file-based Qdrant: no Docker or server needed.
+QDRANT_PATH = HERE / "data" / "qdrant"
+MEMORY_COLLECTION = "support_customer_memory"
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/use_cases/customer_support](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/use_cases/customer_support)
+
+## Expected output
+
+Illustrative; actual wording depends on the models.
+
+```text
+Customer id [C-1001]:
+you: I was charged twice for my annual plan, please refund ORD-5001.
+[approval needed] Approve a $240.00 refund on ORD-5001?
+  details: {'order_id': 'ORD-5001', 'amount': 240.0, 'reason': 'duplicate charge'}
+  approve? [y/N] y
+  note for the customer (optional): duplicate confirmed
+assistant: Your $240.00 refund for ORD-5001 has been approved and issued.
+```
+
+## Customize it
+
+**Swap a model.** Change the model string in `agents.py` and install the matching extra. For example, `model="claude-sonnet-5-5"` for billing needs the `anthropic` extra and `ANTHROPIC_API_KEY`; `model="gemini-2.5-flash"` needs `google-genai` and `GEMINI_API_KEY`. Nothing else changes, because `SwarmAgent` only sees `Agent` objects.
+
+**Add a tool.** Write a function in `tools.py` with type hints and a docstring, then add it to the agent's `ToolNode([...])` in `agents.py`. Add a `config` parameter if the tool needs the customer id. Add a line to the matching prompt saying when to use it.
+
+**Add an agent.** Create another `Agent`, add a `SwarmMemberConfig` under a new name, and add that name to the `can_handoff_to` list of the members that may transfer to it.
+
+**Change the approval rule.** Edit `REFUND_APPROVAL_THRESHOLD` in `config.py`, or put any condition in front of `interrupt()` in `issue_refund`.
+
+**Persist with Postgres.** SQLite is fine for one machine. For several server processes, use `PgCheckpointer` (installed with the `pg_checkpoint` extra) in place of `SqliteCheckpointer` in `compile()`:
+
+```python
+from tenxgraph.storage.checkpointer import PgCheckpointer
+
+app = build_swarm(store).compile(
+    checkpointer=PgCheckpointer(...),  # your Postgres and Redis settings
+    store=store,
+)
+```
+
+**Serve with `10xgraph dev`.** The CLI loads a compiled graph from `10xgraph.json`. Move the `compile()` call into a module that exports `app`, for example `graph/agent.py`, and point the config at it:
+
+```json
+{
+  "agent": "graph.agent:app",
+  "env": ".env"
+}
+```
+
+Then run `10xgraph dev` to serve the graph over HTTP. A web client resumes an interrupted thread the same way `main.py` does, by sending the resume value on the same thread id.
+
+## Next steps
+
+- [Human in the loop](/docs/examples/human-in-the-loop)
+- [Multi-agent handoffs](/docs/examples/multi-agent)
+- [Long-term memory](/docs/examples/long-term-memory)
+- [Persistence](/docs/examples/persistence)
+- [Serving](/docs/examples/serving)

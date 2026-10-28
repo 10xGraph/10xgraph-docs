@@ -1,0 +1,226 @@
+---
+title: Xquik MCP Server with a 10xGraph Agent
+seoTitle: Xquik MCP server with a Python agent
+description: Connect a 10xGraph ToolNode or ReactAgent to the remote Xquik MCP server with an API key and list its tools in Python.
+section: Examples
+group: "Tools and integrations"
+order: 19
+label: Xquik MCP
+updated: "2026-10-28"
+faq:
+  - q: "How does the example authenticate?"
+    a: "It sends the XQUIK_API_KEY environment variable in the x-api-key header. Xquik also supports OAuth 2.1 for MCP clients that handle it."
+  - q: "Can I use the tools in an agent?"
+    a: "Yes. Pass the same client to ReactAgent(client=...), as agent.py does with claude-sonnet-5-5."
+---
+
+This example connects 10xGraph's `ToolNode` to the remote Xquik MCP server and loads its tool schemas without changing any framework defaults. A second script gives the same tools to a `ReactAgent` running on Anthropic `claude-sonnet-5-5`. See the [MCP overview](/docs/examples/mcp) for the general pattern.
+
+## What you will build
+
+`client.py` builds a client for the Xquik server, wraps it in a `ToolNode`, and prints the tool names. `agent.py` reuses that client and asks an agent which Xquik tools it can use.
+
+## Key concepts
+
+- `fastmcp.Client` with a `streamable-http` server and an `x-api-key` header.
+- `ToolNode([], client=...)`: a tool node with no local functions, only the remote tools.
+- `ToolNode.all_tools()`: returns the discovered tool schemas.
+- `ReactAgent(client=...)`: the same client used by an agent.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[mcp]"
+export XQUIK_API_KEY="your-api-key"
+python examples/mcp/xquik/client.py
+```
+
+For the agent, install `10xgraph[mcp,anthropic]`, set `ANTHROPIC_API_KEY`, and run:
+
+```bash
+python examples/mcp/xquik/agent.py
+```
+
+See the [Xquik MCP overview](https://docs.xquik.com/mcp/overview) for authentication, tool behavior, and safety requirements. This API-key example sends the `x-api-key` header. Xquik also supports OAuth 2.1 for compatible MCP clients.
+
+<Callout type="note" title="Third-party service">
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
+</Callout>
+
+## How the code works
+
+### `client.py`
+
+```python
+def require_api_key() -> str:
+    """Read the Xquik API key without embedding it in source."""
+    api_key = os.getenv("XQUIK_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Set XQUIK_API_KEY before running this example")
+    return api_key
+```
+
+The key comes from the environment and the script fails early with a clear message if it is missing.
+
+```python
+def build_client(api_key: str) -> Client:
+    """Build a Streamable HTTP client for the remote Xquik MCP server."""
+    return Client(
+        {
+            "mcpServers": {
+                "xquik": {
+                    "url": MCP_URL,
+                    "transport": "streamable-http",
+                    "headers": {"x-api-key": api_key},
+                }
+            }
+        }
+    )
+```
+
+Same `mcpServers` shape as the other examples. The only difference from GitHub is the header name.
+
+```python
+    tool_node = ToolNode([], client=build_client(require_api_key()))
+    tools = await tool_node.all_tools()
+    names = sorted(tool["function"]["name"] for tool in tools)
+    print(f"Available Xquik tools: {', '.join(names)}")
+```
+
+An empty list means no local tools. `all_tools()` asks the server for its tools and returns them in function-call format, so the names live under `["function"]["name"]`. You could pass this `tool_node` to a graph as the tool node.
+
+### `agent.py`
+
+```python
+from client import build_client, require_api_key
+```
+
+It reuses the helpers from `client.py`, which is why the script is run from the repo root with its folder importable.
+
+```python
+    agent = ReactAgent(
+        model="claude-sonnet-5-5",
+        system_prompt=[{"role": "system", "content": "Use the Xquik tools to answer."}],
+        client=build_client(require_api_key()),
+    )
+    app = agent.compile()
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("Which Xquik tools are available to you?")]},
+        config={"thread_id": "xquik-demo", "recursion_limit": 10},
+    )
+    print("assistant:", result["messages"][-1].text())
+    await app.aclose()
+```
+
+`client=` replaces `tools=`. `compile()` with no arguments uses the default in-memory checkpointer. `aclose()` releases the graph when done.
+
+## Full code
+
+<Tabs>
+<TabItem label="client.py">
+
+```python
+"""Discover Xquik tools through the 10xGraph MCP adapter.
+
+Run: XQUIK_API_KEY=... python examples/mcp/xquik/client.py
+"""
+
+import asyncio
+import os
+
+from fastmcp import Client
+
+from tenxgraph.core.graph import ToolNode
+
+
+MCP_URL = "https://xquik.com/mcp"
+
+
+def require_api_key() -> str:
+    """Read the Xquik API key without embedding it in source."""
+    api_key = os.getenv("XQUIK_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Set XQUIK_API_KEY before running this example")
+    return api_key
+
+
+def build_client(api_key: str) -> Client:
+    """Build a Streamable HTTP client for the remote Xquik MCP server."""
+    return Client(
+        {
+            "mcpServers": {
+                "xquik": {
+                    "url": MCP_URL,
+                    "transport": "streamable-http",
+                    "headers": {"x-api-key": api_key},
+                }
+            }
+        }
+    )
+
+
+async def main() -> None:
+    """Load the remote tool schemas through 10xGraph."""
+    tool_node = ToolNode([], client=build_client(require_api_key()))
+    tools = await tool_node.all_tools()
+    names = sorted(tool["function"]["name"] for tool in tools)
+    print(f"Available Xquik tools: {', '.join(names)}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="agent.py">
+
+```python
+"""Give a ReactAgent the Xquik MCP tools.
+
+Reuses build_client() from client.py. Run from the repo root:
+XQUIK_API_KEY=... ANTHROPIC_API_KEY=... python examples/mcp/xquik/agent.py
+"""
+
+import asyncio
+
+from client import build_client, require_api_key
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+
+
+load_dotenv()
+
+
+async def main() -> None:
+    agent = ReactAgent(
+        model="claude-sonnet-5-5",
+        system_prompt=[{"role": "system", "content": "Use the Xquik tools to answer."}],
+        client=build_client(require_api_key()),
+    )
+    app = agent.compile()
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("Which Xquik tools are available to you?")]},
+        config={"thread_id": "xquik-demo", "recursion_limit": 10},
+    )
+    print("assistant:", result["messages"][-1].text())
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/mcp/xquik](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/mcp/xquik)
+
+## Next steps
+
+- [MCP overview](/docs/examples/mcp)
+- [GitHub MCP](/docs/examples/mcp-github) for a bearer token example.
+- [Tools](/docs/examples/tools) for local Python tools.

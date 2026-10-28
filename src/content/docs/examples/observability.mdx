@@ -1,0 +1,615 @@
+---
+title: "Observability and Event Publishers for 10xGraph Agents"
+seoTitle: "Observability and event publishers"
+description: "Stream 10xGraph run events to the console, OpenTelemetry, Logfire, LangSmith, Redis, Kafka or RabbitMQ and combine several publishers in Python."
+section: Examples
+group: "Production"
+order: 26
+label: "Observability"
+updated: "2026-10-28"
+faq:
+  - q: "How do I add a publisher to a ReactAgent?"
+    a: "Pass publisher= to the ReactAgent constructor, either one publisher or a list. ReactAgent forwards it to the StateGraph it builds. With a hand-built graph, use StateGraph(publisher=...)."
+  - q: "Can I use more than one publisher?"
+    a: "Yes. Pass a list, and 10xGraph wraps it in a CompositePublisher. Every publisher receives every event, and a failure in one does not stop the others."
+  - q: "Why call aclose() at the end of a script?"
+    a: "Events are published from background tasks. aclose() waits for them to finish and closes the publisher connections, so short scripts do not exit with events still queued."
+  - q: "Does OtelPublisher send prompts and responses?"
+    a: "Only at ObservabilityLevel.FULL. SPANS sends timing and structure, STANDARD adds token counts and model names, and FULL adds prompts, responses and tool input and output, which may contain personal data."
+---
+
+This example sends the events of a 10xGraph run to different places: your terminal, several sinks at once, OpenTelemetry, a message broker, and Logfire or LangSmith. Every script runs the same kind of ReAct agent on OpenAI `gpt-5-mini` with one small tool, so the only thing that changes is the publisher.
+
+## What you will build
+
+Five scripts that send the events of a 10xGraph run to different places: your terminal, several sinks at once, OpenTelemetry, a message broker, and Logfire or LangSmith. Each script runs the same kind of OpenAI-backed ReAct agent with one small tool, so the only thing that changes is the publisher.
+
+## Key concepts
+
+- `BasePublisher`: base class for event sinks. Implement `publish`, `close` and `sync_close`.
+- `ConsolePublisher`: prints events, or logs them to `tenxgraph.publisher` with `use_logger=True`.
+- `CompositePublisher`: fans one event out to several publishers. A list passed as `publisher=` becomes one.
+- `OtelPublisher` and `ObservabilityLevel`: map events to OpenTelemetry spans at `SPANS`, `STANDARD` or `FULL` detail.
+- `RedisPublisher`, `KafkaPublisher`, `RabbitMQPublisher`: send JSON events to a broker from a config dict.
+- `LogfirePublisher`, `LangsmithPublisher`: `OtelPublisher` subclasses that configure their own exporter.
+- `app.aclose()`: flushes background publish tasks and closes the publishers.
+
+### Event types
+
+Each `EventModel` has an `event` (source), an `event_type` (phase) and a list of `content_type` values.
+
+| Field | Values |
+|---|---|
+| `event` | `graph_execution`, `node_execution`, `llm_call`, `tool_execution`, `streaming`, `realtime` |
+| `event_type` | `start`, `progress`, `result`, `end`, `update`, `error`, `interrupted` |
+| `content_type` | `text`, `message`, `reasoning`, `tool_call`, `tool_result`, `image`, `audio`, `transcript`, `video`, `document`, `data`, `state`, `update`, `error` |
+
+Events also carry `node_name`, `thread_id`, `run_id`, `user_id`, `timestamp`, `data` and `metadata`.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+```
+
+```bash
+pip install "10xgraph[openai]" python-dotenv
+export OPENAI_API_KEY="your-key"
+```
+
+Extras per script:
+
+| Script | Extra | Other requirements |
+|---|---|---|
+| `console_publisher.py`, `composite_publisher.py` | none | none |
+| `otel_tracing.py` | `otel` | none |
+| `brokers.py` | `redis`, `kafka` or `rabbitmq` | a running broker |
+| `logfire_langsmith.py` | `logfire` or `langsmith` | `LOGFIRE_TOKEN` or `LANGSMITH_API_KEY` |
+
+For example: `pip install "10xgraph[openai,otel]"`. The `observability` extra installs OpenTelemetry, Logfire and LangSmith support together, and `all_publishers` installs Redis, Kafka and RabbitMQ.
+
+Local brokers for `brokers.py`:
+
+```yaml
+# docker-compose.yml
+services:
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports: ["5672:5672", "15672:15672"]
+  kafka:
+    image: apache/kafka:3.8.0
+    ports: ["9092:9092"]
+```
+
+Start the one you need, for example `docker compose up redis`.
+
+```bash
+python examples/observability/console_publisher.py
+python examples/observability/composite_publisher.py
+python examples/observability/otel_tracing.py
+BROKER=redis python examples/observability/brokers.py      # or kafka, rabbitmq
+TRACE_BACKEND=logfire python examples/observability/logfire_langsmith.py   # or langsmith
+```
+
+## How the code works
+
+### console_publisher.py
+
+```python
+    agent = ReactAgent(
+        model="gpt-5-mini",
+        tools=[get_time],
+        publisher=ConsolePublisher({"use_logger": True}),
+    )
+```
+
+`ReactAgent` forwards `publisher` to the `StateGraph` it builds. With a hand-built graph you would write `StateGraph(publisher=...)` instead. With `use_logger=True` the events go to the `tenxgraph.publisher` logger, so standard logging configuration decides what you see.
+
+```python
+    await app.aclose()
+```
+
+Events are published from background tasks. `aclose()` waits for them and closes the publisher, so a short script does not exit with events still queued.
+
+### composite_publisher.py
+
+`EventCounter` is a custom `BasePublisher` that tallies `event/event_type` pairs. `publish` is where each event arrives. `close` and `sync_close` mark the publisher as closed.
+
+```python
+class EventCounter(BasePublisher):
+    """Custom publisher that tallies events by source and phase."""
+
+    def __init__(self) -> None:
+        super().__init__({})
+        self.counts: Counter[str] = Counter()
+
+    async def publish(self, event: EventModel) -> None:
+        self.counts[f"{event.event}/{event.event_type}"] += 1
+
+    async def close(self) -> None:
+        self._is_closed = True
+
+    def sync_close(self) -> None:
+        self._is_closed = True
+```
+
+```python
+    publishers: list[BasePublisher] = [ConsolePublisher({"use_logger": True}), counter]
+
+    # A plain list works. CompositePublisher(publishers) is the explicit equivalent, and it
+```
+
+A plain list becomes a `CompositePublisher`. Each publisher receives every event, and one failing publisher does not block the others. `CompositePublisher(publishers)` is the explicit form and adds `add_publisher()` and `remove_publisher()` for changing sinks at runtime.
+
+### otel_tracing.py
+
+```python
+def configure_tracer_provider() -> None:
+    # Swap ConsoleSpanExporter for an OTLP exporter to ship spans to Jaeger, Tempo, Datadog, etc.
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+    trace.set_tracer_provider(provider)
+```
+
+Configure a `TracerProvider` as you would for any OpenTelemetry application. The console exporter prints spans. Swap it for an OTLP exporter to ship spans to Jaeger, Tempo or Datadog.
+
+```python
+    publisher = OtelPublisher(level=ObservabilityLevel.STANDARD)
+```
+
+`ObservabilityLevel.SPANS` sends timing and structure only. `STANDARD` adds token counts, model name and request parameters. `FULL` adds prompts, responses and tool input and output, which may contain personal data.
+
+```python
+    agent = ReactAgent(model="gpt-5-mini", tools=[get_inventory], publisher=publisher)
+```
+
+Pass the publisher when the graph is created. The library also exports `setup_tracing(graph)`, but in the current release it sets the publisher on a `StateGraph` after the graph's dependency container was already built, and no events reach it. Constructor injection works. `OtelPublisher` also accepts `user_id_mode="hash"` or `"mask"` to keep raw user ids off spans.
+
+### brokers.py
+
+```python
+def build_publisher(broker: str) -> BasePublisher:
+    if broker == "redis":
+        # pip install "10xgraph[redis]". mode="stream" uses a Redis Stream instead of pub/sub.
+        return RedisPublisher(
+            {"url": "redis://localhost:6379/0", "mode": "pubsub", "channel": "tenxgraph.events"}
+        )
+    if broker == "kafka":
+        # pip install "10xgraph[kafka]". TLS and SASL options are opt-in config keys.
+        return KafkaPublisher({"bootstrap_servers": "localhost:9092", "topic": "tenxgraph.events"})
+    if broker == "rabbitmq":
+        # pip install "10xgraph[rabbitmq]". Use an amqps:// URL for TLS.
+        return RabbitMQPublisher(
+            {
+                "url": "amqp://guest:guest@localhost/",
+                "exchange": "tenxgraph.events",
+                "routing_key": "tenxgraph.events",
+            }
+        )
+    raise SystemExit(f"Unknown BROKER {broker!r}. Use redis, kafka or rabbitmq.")
+
+
+async def main() -> None:
+```
+
+One publisher is built from a plain config dict, selected with the `BROKER` environment variable. Redis supports `mode` `pubsub` or `stream`, Kafka takes `bootstrap_servers` and `topic`, and RabbitMQ takes `url`, `exchange` and `routing_key`. Connections open on first use, so a missing broker shows up as a publish error in the logs, not at import.
+
+### logfire_langsmith.py
+
+```python
+def build_publisher(backend: str) -> OtelPublisher:
+    # Secrets come from LOGFIRE_TOKEN / LANGSMITH_API_KEY, never from code.
+    if backend == "logfire":
+        # pip install "10xgraph[logfire]"
+        return LogfirePublisher(service_name="support-agent", level=ObservabilityLevel.STANDARD)
+    if backend == "langsmith":
+        # pip install "10xgraph[langsmith]"
+        return LangsmithPublisher(project="support-agent", level=ObservabilityLevel.STANDARD)
+    raise SystemExit("TRACE_BACKEND must be logfire or langsmith")
+```
+
+`LogfirePublisher(service_name=...)` and `LangsmithPublisher(project=...)` call the backend setup in their constructors and then behave like `OtelPublisher`. Secrets come from `LOGFIRE_TOKEN` or `LANGSMITH_API_KEY`, never from code. `setup_observability(graph, config)` builds the same setup from a `10xgraph.json`-style `observability` block.
+
+## Full code
+
+<Tabs>
+<TabItem label="console_publisher.py">
+
+```python
+"""ConsolePublisher: watch the events a 10xGraph run emits, in your terminal.
+
+Every graph, node, LLM and tool step publishes an event. ConsolePublisher prints
+them, which is the quickest way to see what the engine is doing while you develop.
+
+Run: python examples/observability/console_publisher.py   (needs OPENAI_API_KEY)
+"""
+
+import asyncio
+import logging
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.runtime.publisher import ConsolePublisher
+
+
+load_dotenv()
+
+
+def get_time(city: str) -> str:
+    """Return the local time in a city."""
+    return f"It is 14:05 in {city}."
+
+
+async def main() -> None:
+    # use_logger=True sends events to the "tenxgraph.publisher" logger instead of stdout,
+    # so you can route, filter or silence them with normal logging config.
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    logging.getLogger("tenxgraph.publisher").setLevel(logging.INFO)
+
+    # ReactAgent forwards `publisher` to the StateGraph it builds. With a hand-built graph
+    # you would write StateGraph(publisher=ConsolePublisher({"use_logger": True})) instead.
+    agent = ReactAgent(
+        model="gpt-5-mini",
+        tools=[get_time],
+        publisher=ConsolePublisher({"use_logger": True}),
+    )
+    app = agent.compile()
+
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("What time is it in Tokyo?")]},
+        config={"thread_id": "console-1"},
+    )
+    print("assistant:", result["messages"][-1].text())
+
+    # Events are published from background tasks. aclose() waits for them and closes the publisher.
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="composite_publisher.py">
+
+```python
+"""Several publishers at once: print events and also count them with a custom publisher.
+
+Pass a list to `publisher=` and 10xGraph wraps it in a CompositePublisher. Each
+publisher gets every event, and one failing publisher does not block the others.
+BasePublisher is the extension point for your own sink.
+
+Run: python examples/observability/composite_publisher.py   (needs OPENAI_API_KEY)
+"""
+
+import asyncio
+import logging
+from collections import Counter
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.runtime.publisher import (
+    BasePublisher,
+    CompositePublisher,
+    ConsolePublisher,
+    EventModel,
+)
+
+
+load_dotenv()
+
+
+def get_stock_price(symbol: str) -> str:
+    """Return a fake stock price."""
+    return f"{symbol} is trading at 187.20 USD."
+
+
+class EventCounter(BasePublisher):
+    """Custom publisher that tallies events by source and phase."""
+
+    def __init__(self) -> None:
+        super().__init__({})
+        self.counts: Counter[str] = Counter()
+
+    async def publish(self, event: EventModel) -> None:
+        self.counts[f"{event.event}/{event.event_type}"] += 1
+
+    async def close(self) -> None:
+        self._is_closed = True
+
+    def sync_close(self) -> None:
+        self._is_closed = True
+
+
+async def main() -> None:
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    logging.getLogger("tenxgraph.publisher").setLevel(logging.INFO)
+
+    counter = EventCounter()
+    publishers: list[BasePublisher] = [ConsolePublisher({"use_logger": True}), counter]
+
+    # A plain list works. CompositePublisher(publishers) is the explicit equivalent, and it
+    # supports add_publisher() / remove_publisher() if you need to change sinks at runtime.
+    agent = ReactAgent(model="gpt-5-mini", tools=[get_stock_price], publisher=publishers)
+    app = agent.compile()
+
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("What is ACME trading at?")]},
+        config={"thread_id": "composite-1"},
+    )
+    print("assistant:", result["messages"][-1].text())
+    await app.aclose()
+
+    print("\nevents seen by EventCounter:")
+    for key, count in sorted(counter.counts.items()):
+        print(f"  {key:<32} {count}")
+
+    # Same thing, built explicitly:
+    _ = CompositePublisher([ConsolePublisher(), EventCounter()])
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="otel_tracing.py">
+
+```python
+"""OpenTelemetry tracing: turn a 10xGraph run into spans for any OTEL backend.
+
+OtelPublisher rebuilds graph, node, LLM and tool spans from the event stream, with
+token counts and model names as attributes. ObservabilityLevel controls how much data
+goes on each span. This script prints spans to the console with the OTEL SDK.
+
+Run: python examples/observability/otel_tracing.py   (needs OPENAI_API_KEY)
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.runtime.publisher import ObservabilityLevel, OtelPublisher
+
+
+load_dotenv()
+
+
+def get_inventory(sku: str) -> str:
+    """Return stock level for a SKU."""
+    return f"SKU {sku}: 42 units in stock."
+
+
+def configure_tracer_provider() -> None:
+    # Swap ConsoleSpanExporter for an OTLP exporter to ship spans to Jaeger, Tempo, Datadog, etc.
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+    trace.set_tracer_provider(provider)
+
+
+async def main() -> None:
+    configure_tracer_provider()
+
+    # SPANS    -> timing and structure only
+    # STANDARD -> adds token counts, model name and request parameters (default)
+    # FULL     -> adds prompts, responses and tool I/O. May contain personal data.
+    publisher = OtelPublisher(level=ObservabilityLevel.STANDARD)
+
+    # Pass the publisher when the graph is created: StateGraph(publisher=publisher), or
+    # ReactAgent(publisher=publisher) as here. The publisher is bound into the dependency
+    # injection container at that moment. setup_tracing(graph) sets the publisher on an
+    # existing StateGraph afterwards, which does not reach that container in the current
+    # release, so this example avoids it.
+    agent = ReactAgent(model="gpt-5-mini", tools=[get_inventory], publisher=publisher)
+    app = agent.compile()
+
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("How many units of SKU-77 do we have?")]},
+        config={"thread_id": "otel-1", "user_id": "user-123"},
+    )
+    print("assistant:", result["messages"][-1].text())
+
+    # Flushes background publish tasks so the final spans are closed before exit.
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="brokers.py">
+
+```python
+"""Stream run events to Redis, Kafka or RabbitMQ so other services can consume them.
+
+Pick a broker with the BROKER environment variable (redis, kafka or rabbitmq). Each
+publisher takes a plain config dict and connects on first use. A consumer elsewhere
+(a dashboard, an audit service, a billing job) reads the JSON events from the broker.
+
+Run: BROKER=redis python examples/observability/brokers.py   (needs OPENAI_API_KEY and a broker)
+"""
+
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.runtime.publisher import (
+    BasePublisher,
+    KafkaPublisher,
+    RabbitMQPublisher,
+    RedisPublisher,
+)
+
+
+load_dotenv()
+
+
+def get_order_status(order_id: str) -> str:
+    """Return the status of an order."""
+    return f"Order {order_id} is out for delivery."
+
+
+def build_publisher(broker: str) -> BasePublisher:
+    if broker == "redis":
+        # pip install "10xgraph[redis]". mode="stream" uses a Redis Stream instead of pub/sub.
+        return RedisPublisher(
+            {"url": "redis://localhost:6379/0", "mode": "pubsub", "channel": "tenxgraph.events"}
+        )
+    if broker == "kafka":
+        # pip install "10xgraph[kafka]". TLS and SASL options are opt-in config keys.
+        return KafkaPublisher({"bootstrap_servers": "localhost:9092", "topic": "tenxgraph.events"})
+    if broker == "rabbitmq":
+        # pip install "10xgraph[rabbitmq]". Use an amqps:// URL for TLS.
+        return RabbitMQPublisher(
+            {
+                "url": "amqp://guest:guest@localhost/",
+                "exchange": "tenxgraph.events",
+                "routing_key": "tenxgraph.events",
+            }
+        )
+    raise SystemExit(f"Unknown BROKER {broker!r}. Use redis, kafka or rabbitmq.")
+
+
+async def main() -> None:
+    broker = os.getenv("BROKER", "redis").lower()
+    agent = ReactAgent(
+        model="gpt-5-mini",
+        tools=[get_order_status],
+        publisher=build_publisher(broker),
+    )
+    app = agent.compile()
+
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("Where is order 8841?")]},
+        config={"thread_id": f"{broker}-1", "user_id": "user-123"},
+    )
+    print("assistant:", result["messages"][-1].text())
+    print(f"events published to {broker}")
+
+    # Waits for queued publishes and closes the broker connection.
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="logfire_langsmith.py">
+
+```python
+"""Send traces to Logfire or LangSmith by swapping in a pre-configured publisher.
+
+LogfirePublisher and LangsmithPublisher are OtelPublisher subclasses. Creating one
+configures the OTEL exporter, so there is no separate tracer setup. Pick a backend
+with TRACE_BACKEND.
+
+Run: TRACE_BACKEND=logfire python examples/observability/logfire_langsmith.py
+     (needs OPENAI_API_KEY plus LOGFIRE_TOKEN or LANGSMITH_API_KEY)
+"""
+
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.runtime.publisher import (
+    LangsmithPublisher,
+    LogfirePublisher,
+    ObservabilityLevel,
+    OtelPublisher,
+)
+
+
+load_dotenv()
+
+
+def get_ticket(ticket_id: str) -> str:
+    """Return the status of a support ticket."""
+    return f"Ticket {ticket_id} is open and assigned to the billing team."
+
+
+def build_publisher(backend: str) -> OtelPublisher:
+    # Secrets come from LOGFIRE_TOKEN / LANGSMITH_API_KEY, never from code.
+    if backend == "logfire":
+        # pip install "10xgraph[logfire]"
+        return LogfirePublisher(service_name="support-agent", level=ObservabilityLevel.STANDARD)
+    if backend == "langsmith":
+        # pip install "10xgraph[langsmith]"
+        return LangsmithPublisher(project="support-agent", level=ObservabilityLevel.STANDARD)
+    raise SystemExit("TRACE_BACKEND must be logfire or langsmith")
+
+
+async def main() -> None:
+    backend = os.getenv("TRACE_BACKEND", "logfire").lower()
+
+    agent = ReactAgent(
+        model="gpt-5-mini",
+        tools=[get_ticket],
+        publisher=build_publisher(backend),
+    )
+    app = agent.compile()
+
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("What is the status of ticket T-311?")]},
+        config={"thread_id": f"{backend}-1"},
+    )
+    print("assistant:", result["messages"][-1].text())
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/observability](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/observability)
+
+## Expected output
+
+Illustrative output of `composite_publisher.py` (console lines trimmed):
+
+```text
+1730123456.1 -> Source: MAIN.start:-> Payload: {...} -> {...}
+...
+assistant: ACME is trading at 187.20 USD.
+
+events seen by EventCounter:
+  graph_execution/end              1
+  graph_execution/start            1
+  llm_call/end                     2
+  llm_call/start                   2
+  node_execution/end               3
+  tool_execution/progress          1
+```
+
+## Using a different model
+
+Change the model string and install the matching extra. For Gemini use `model="gemini-2.5-flash"` with `pip install "10xgraph[google-genai]"` and `GEMINI_API_KEY`. For Anthropic use `model="claude-sonnet-5-5"` with `pip install "10xgraph[anthropic]"` and `ANTHROPIC_API_KEY`. Publishers do not depend on the model.
+
+## Next steps
+
+- [Callbacks](/docs/examples/callbacks) hooks into individual model and tool calls instead of the event stream.
+- [Graceful shutdown](/docs/examples/graceful-shutdown) covers flushing publishers and checkpointers on SIGTERM.
+- [Streaming](/docs/examples/streaming) streams chunks to the caller of a single run.

@@ -1,0 +1,373 @@
+---
+title: "10xGraph StateGraph Basics - Custom State, Routing and Command"
+seoTitle: "10xGraph StateGraph basics in Python"
+description: "Learn the 10xGraph StateGraph in Python with no API key: custom AgentState fields, function nodes, conditional edges and Command, plus a hand-built ReAct agent."
+section: Examples
+group: "Getting started"
+order: 12
+label: "Graph basics"
+updated: "2026-10-28"
+faq:
+  - q: "Can I run a 10xGraph StateGraph without an LLM?"
+    a: "Yes. A node is any function, so a graph of plain functions runs with no provider SDK or API key. state_graph_no_llm.py does this."
+  - q: "When should I build the ReAct loop by hand instead of using ReactAgent?"
+    a: "Use ReactAgent unless you need a different shape, such as extra nodes between the model and the tools or custom routing. react_by_hand.py shows the exact graph ReactAgent builds, so you can copy and change it."
+  - q: "What does Command do?"
+    a: "A node returns Command(update=..., goto=...) to change state and choose the next node in one step, instead of relying on an edge defined at build time."
+---
+
+This example shows the `StateGraph` engine on its own. The first script routes support tickets with plain functions and a custom state, so it runs with no API key. The second wires the ReAct loop by hand with `Agent` and `ToolNode`, using Google `gemini-2.5-flash`. Read it to see what `ReactAgent` does for you.
+
+## What you will build
+
+Two small graphs. The first routes support tickets with plain functions and a custom state, and runs without any key. The second wires the ReAct loop (model, tools, back to the model) by hand with `Agent` and `ToolNode`, which is what `ReactAgent` does for you.
+
+## Key concepts
+
+- `StateGraph`: collects nodes and edges, then `compile()` produces a `CompiledGraph`.
+- `AgentState` subclass: adds your own fields to `context`; the extra fields are saved with the state.
+- `add_conditional_edges(node, fn, path_map)`: `fn(state)` returns a key, `path_map` maps it to a node.
+- `Command(update=..., goto=...)`: a node updates state and picks the next node itself.
+- `START` / `END`: graph entry and exit markers. `add_edge(START, "X")` sets the entry point.
+- `ResponseGranularity`: `LOW` returns messages, `FULL` also returns the final state.
+- `Agent` and `ToolNode`: the LLM node and the tool executor used in `react_by_hand.py`.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install 10xgraph                                 # state_graph_no_llm.py
+pip install "10xgraph[google-genai]" python-dotenv   # react_by_hand.py
+export GEMINI_API_KEY=...                            # react_by_hand.py only
+
+python examples/graph_basics/state_graph_no_llm.py
+python examples/graph_basics/react_by_hand.py
+```
+
+## How the code works
+
+### state_graph_no_llm.py
+
+The state adds three fields on top of `AgentState`. They are saved and returned like `context`.
+
+```python
+class TicketState(AgentState):
+    """AgentState plus your own fields. They are saved and returned like `context`."""
+
+    intent: str = ""
+    amount: float = 0.0
+    visited: list[str] = Field(default_factory=list)
+```
+
+Nodes receive the current state by parameter name. `intake` sets `intent`, and a condition function turns that into a routing key:
+
+```python
+def route_by_intent(state: TicketState) -> str:
+    # A condition function returns a key; the path_map turns it into a node name.
+    return state.intent
+```
+
+Wiring the graph:
+
+```python
+graph = StateGraph[TicketState](TicketState())
+graph.add_node("INTAKE", intake)
+...
+graph.add_edge(START, "INTAKE")  # also sets the entry point
+graph.add_conditional_edges(
+    "INTAKE",
+    route_by_intent,
+    {"faq": "FAQ", "refund": "REFUND", "other": "FALLBACK"},
+)
+```
+
+`StateGraph[TicketState](TicketState())` tells the graph which state class to use and gives it a starting instance. The `path_map` maps each key the condition can return to a node name.
+
+`REFUND` has no outgoing edge. It returns a `Command`, so the node itself chooses between review and the end:
+
+```python
+if state.amount > 100:
+    state.context.append(Message.text_message("Large refund, sending to review.", "assistant"))
+    return Command(update=state, goto="review")
+state.context.append(Message.text_message("Refund approved automatically.", "assistant"))
+return Command(update=state, goto=END)
+```
+
+A node can also return a `Message`, which is appended to `state.context`, as `faq` and `fallback` do. The `add_messages` reducer on `context` drops duplicates by message id; custom fields are replaced by assignment.
+
+The script runs each ticket twice. The first run uses the default `LOW` granularity and prints messages. The second uses `ResponseGranularity.FULL` so it can read the custom fields:
+
+```python
+full = await app.ainvoke(
+    inp, {"thread_id": f"ticket-full-{i}"}, response_granularity=ResponseGranularity.FULL
+)
+state = full["state"]
+print(f"  path={state.visited} intent={state.intent} amount={state.amount}")
+```
+
+### react_by_hand.py
+
+`Agent` is the LLM node. `tool_node="TOOL"` refers to the graph node registered below it, and is resolved at `compile()`:
+
+```python
+main_agent = Agent(
+    model="gemini-2.5-flash",
+    system_prompt=[{"role": "system", "content": "You are a concise weather assistant."}],
+    tool_node="TOOL",
+)
+```
+
+The routing function decides whether to run tools or stop:
+
+```python
+def route(state: AgentState) -> str:
+    """Go to TOOL when the last assistant message asked for tools, otherwise stop."""
+    last = state.context[-1] if state.context else None
+    if last is not None and last.role == "assistant" and last.tools_calls:
+        return "TOOL"
+    return END
+```
+
+And the graph closes the loop:
+
+```python
+graph = StateGraph()
+graph.add_node("MAIN", main_agent)
+graph.add_node("TOOL", tool_node)
+
+graph.set_entry_point("MAIN")
+graph.add_conditional_edges("MAIN", route, {"TOOL": "TOOL", END: END})
+# The loop: tool results go back to the model, which either calls more tools or answers.
+graph.add_edge("TOOL", "MAIN")
+```
+
+The edge from `TOOL` back to `MAIN` is the loop. The run uses `"recursion_limit": 10` in its config as a safety cap on how many steps the loop may take. `ReactAgent(model=..., tools=[...])` builds this same graph.
+
+### Using a different model
+
+Change `model="gemini-2.5-flash"` to another string, for example `"gpt-5-mini"` with `10xgraph[openai]` and `OPENAI_API_KEY`, or `"claude-sonnet-5-5"` with `10xgraph[anthropic]`.
+
+## Full code
+
+<Tabs>
+<TabItem label="state_graph_no_llm.py">
+
+```python
+"""A StateGraph with no LLM: custom state, plain function nodes, routing and Command.
+
+Shows the engine on its own, so it runs without any API key.
+
+Run: python examples/graph_basics/state_graph_no_llm.py
+"""
+
+import asyncio
+
+from pydantic import Field
+
+from tenxgraph.core.graph import StateGraph
+from tenxgraph.core.state import AgentState, Message
+from tenxgraph.utils import Command
+from tenxgraph.utils.constants import END, START, ResponseGranularity
+
+
+class TicketState(AgentState):
+    """AgentState plus your own fields. They are saved and returned like `context`."""
+
+    intent: str = ""
+    amount: float = 0.0
+    visited: list[str] = Field(default_factory=list)
+
+
+def intake(state: TicketState) -> TicketState:
+    # Nodes receive the current state by parameter name. Mutate it and return it.
+    text = state.context[-1].text().lower()
+    state.visited = [*state.visited, "intake"]
+    if "refund" in text:
+        state.intent = "refund"
+        state.amount = 250.0 if "large" in text else 40.0
+    elif "?" in text:
+        state.intent = "faq"
+    else:
+        state.intent = "other"
+    return state
+
+
+def route_by_intent(state: TicketState) -> str:
+    # A condition function returns a key; the path_map turns it into a node name.
+    return state.intent
+
+
+def faq(state: TicketState) -> Message:
+    # Returning a Message appends it to state.context (the `add_messages` reducer on
+    # AgentState.context drops duplicates by message_id).
+    state.visited = [*state.visited, "faq"]
+    return Message.text_message("See the help center for that one.", role="assistant")
+
+
+def refund(state: TicketState) -> Command:
+    # Command couples a state update with an explicit next node, so the node itself
+    # decides where to go instead of a separate conditional edge.
+    state.visited = [*state.visited, "refund"]
+    if state.amount > 100:
+        state.context.append(Message.text_message("Large refund, sending to review.", "assistant"))
+        return Command(update=state, goto="review")
+    state.context.append(Message.text_message("Refund approved automatically.", "assistant"))
+    return Command(update=state, goto=END)
+
+
+def review(state: TicketState) -> TicketState:
+    state.visited = [*state.visited, "review"]
+    state.context.append(Message.text_message("A person will review it today.", "assistant"))
+    return state
+
+
+def fallback(state: TicketState) -> Message:
+    state.visited = [*state.visited, "fallback"]
+    return Message.text_message("Thanks, we will get back to you.", role="assistant")
+
+
+graph = StateGraph[TicketState](TicketState())
+graph.add_node("INTAKE", intake)
+graph.add_node("FAQ", faq)
+graph.add_node("REFUND", refund)
+graph.add_node("review", review)
+graph.add_node("FALLBACK", fallback)
+
+graph.add_edge(START, "INTAKE")  # also sets the entry point
+graph.add_conditional_edges(
+    "INTAKE",
+    route_by_intent,
+    {"faq": "FAQ", "refund": "REFUND", "other": "FALLBACK"},
+)
+graph.add_edge("FAQ", END)
+graph.add_edge("FALLBACK", END)
+graph.add_edge("review", END)
+# REFUND has no outgoing edge: its Command(goto=...) picks "review" or END at runtime.
+
+app = graph.compile()
+
+
+async def main() -> None:
+    for i, text in enumerate(
+        ["How do I reset my password?", "Refund please", "Large refund please"]
+    ):
+        config = {"thread_id": f"ticket-{i}"}
+        inp = {"messages": [Message.text_message(text)]}
+
+        # LOW (default) returns messages only.
+        low = await app.ainvoke(inp, config)
+        print(f"\nuser: {text}")
+        for msg in low["messages"]:
+            print(f"  {msg.role}: {msg.text()}")
+
+        # FULL also returns the final state, including the custom fields.
+        full = await app.ainvoke(
+            inp, {"thread_id": f"ticket-full-{i}"}, response_granularity=ResponseGranularity.FULL
+        )
+        state = full["state"]
+        print(f"  path={state.visited} intent={state.intent} amount={state.amount}")
+
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="react_by_hand.py">
+
+```python
+"""The ReAct loop wired by hand with Agent + ToolNode + a conditional edge.
+
+ReactAgent builds exactly this graph for you. Read this file to see what is inside,
+or copy it when you need a different shape (extra nodes, custom routing).
+
+Run: python examples/graph_basics/react_by_hand.py   (needs GEMINI_API_KEY)
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.graph import Agent, StateGraph, ToolNode
+from tenxgraph.core.state import AgentState, Message
+from tenxgraph.utils.constants import END
+
+
+load_dotenv()
+
+
+def get_weather(location: str) -> str:
+    """Get the current weather for a city."""
+    return f"The weather in {location} is sunny, 24 C."
+
+
+tool_node = ToolNode([get_weather])
+
+# Agent is the LLM node. tool_node="TOOL" refers to the graph node registered below,
+# resolved at compile(); passing the ToolNode object itself also works.
+main_agent = Agent(
+    model="gemini-2.5-flash",
+    system_prompt=[{"role": "system", "content": "You are a concise weather assistant."}],
+    tool_node="TOOL",
+)
+
+
+def route(state: AgentState) -> str:
+    """Go to TOOL when the last assistant message asked for tools, otherwise stop."""
+    last = state.context[-1] if state.context else None
+    if last is not None and last.role == "assistant" and last.tools_calls:
+        return "TOOL"
+    return END
+
+
+graph = StateGraph()
+graph.add_node("MAIN", main_agent)
+graph.add_node("TOOL", tool_node)
+
+graph.set_entry_point("MAIN")
+graph.add_conditional_edges("MAIN", route, {"TOOL": "TOOL", END: END})
+# The loop: tool results go back to the model, which either calls more tools or answers.
+graph.add_edge("TOOL", "MAIN")
+
+app = graph.compile()
+
+
+async def main() -> None:
+    async with app:
+        result = await app.ainvoke(
+            {"messages": [Message.text_message("What is the weather in Berlin?")]},
+            config={"thread_id": "by-hand-1", "recursion_limit": 10},
+        )
+        for message in result["messages"]:
+            print(f"{message.role}:", message.text() or message.tools_calls)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/graph_basics](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/graph_basics)
+
+## Expected output
+
+Illustrative output of `state_graph_no_llm.py`:
+
+```text
+user: Large refund please
+  user: Large refund please
+  assistant: Large refund, sending to review.
+  assistant: A person will review it today.
+  path=['intake', 'refund', 'review'] intent=refund amount=250.0
+```
+
+## Next steps
+
+- [Quickstart](/docs/examples/quickstart): the same loop with `ReactAgent`.
+- [Streaming](/docs/examples/streaming): stream a graph run chunk by chunk.
+- [Tools](/docs/examples/tools): the tool features available to `ToolNode`.

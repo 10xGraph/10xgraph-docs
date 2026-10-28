@@ -1,0 +1,238 @@
+---
+title: "10xGraph Quickstart - Your First Python AI Agent with Tools"
+seoTitle: "10xGraph quickstart: your first Python agent"
+description: "Build a Python AI agent with 10xGraph in about 30 lines: a ReactAgent with one tool, run with ainvoke or invoke, a thread_id and clean shutdown."
+section: Examples
+group: "Getting started"
+order: 11
+label: "Quickstart"
+updated: "2026-10-28"
+faq:
+  - q: "What is the difference between invoke and ainvoke?"
+    a: "ainvoke is the async method and the one to use inside async code such as a web server. invoke is a blocking wrapper that runs ainvoke with asyncio.run, so it only works when no event loop is running."
+  - q: "Why do I pass a thread_id?"
+    a: "The thread_id names a conversation. The checkpointer stores state per thread, so calling again with the same thread_id continues the earlier chat. If you omit it, a random one is generated and a warning is logged."
+  - q: "Do I have to call aclose()?"
+    a: "Call it, or use async with, when you are done. It flushes background checkpoint writes and releases the checkpointer, store and publisher."
+---
+
+This is the smallest useful 10xGraph agent: a `ReactAgent` with one weather tool. You send a question, the model calls the tool, and you print the final answer. A second file does the same thing with the blocking `invoke()`. Both use the OpenAI model `gpt-5-mini`, written directly in the code.
+
+## What you will build
+
+A `ReactAgent` with one weather tool. It sends a question, lets the model call the tool, and prints the final answer. A second file does the same with the blocking `invoke()`.
+
+The model is `gpt-5-mini` from OpenAI, written directly in the code.
+
+## Key concepts
+
+- `ReactAgent`: prebuilt agent that wires the model node, the tool node and the tool-loop routing.
+- `agent.compile()`: returns a `CompiledGraph`. The default checkpointer is in memory.
+- `ainvoke()` / `invoke()`: run the graph once and return the new messages.
+- `thread_id`: identifies the conversation in the checkpointer.
+- `async with app` / `aclose()`: releases resources on exit.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[openai]" python-dotenv
+export OPENAI_API_KEY=...
+
+python examples/quickstart/quickstart.py
+python examples/quickstart/quickstart_sync.py
+```
+
+## How the code works
+
+### quickstart.py
+
+A tool is a plain function. Its type hints and docstring become the schema the model sees.
+
+```python
+def get_weather(location: str) -> str:
+    """Get the current weather for a city."""
+    # The docstring and type hints become the tool schema the model sees.
+    return f"The weather in {location} is sunny, 24 C."
+```
+
+The model never sees your code, only the name, the argument types and the docstring. Write the docstring for the model.
+
+`ReactAgent` takes the model string and the tools. The provider is detected from the model name.
+
+```python
+agent = ReactAgent(
+    model="gpt-5-mini",
+    system_prompt=[{"role": "system", "content": "You are a concise weather assistant."}],
+    tools=[get_weather],
+)
+
+app = agent.compile()
+```
+
+`ReactAgent` builds the model node, the tool node and the routing that loops until the model stops calling tools. `compile()` returns a `CompiledGraph`. With no checkpointer given, it uses an in-memory one.
+
+Run it inside `async with app` so `aclose()` runs even if the call raises:
+
+```python
+async with app:
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("What is the weather in Tokyo?")]},
+        # thread_id names the conversation; reuse it to continue the same chat.
+        config={"thread_id": "quickstart-1"},
+    )
+```
+
+The `thread_id` is how the checkpointer finds the conversation. The default response granularity is `LOW`, so `result["messages"]` holds only the messages produced by the run. `message.text()` returns the text of a message; for an assistant message that only asked for a tool, `message.tools_calls` holds the calls, which is why the loop prints `message.text() or message.tools_calls`.
+
+### quickstart_sync.py
+
+This file defines the same agent and calls `app.invoke(...)` twice with the same `thread_id`.
+
+```python
+first = app.invoke({"messages": [Message.text_message("Weather in Paris?")]}, config)
+
+# Same thread_id: the checkpointer restores the earlier turn, so "there" resolves.
+second = app.invoke(
+    {"messages": [Message.text_message("And is that good for a picnic?")]}, config
+)
+```
+
+The second question only makes sense if the first turn is remembered. The checkpointer restores it because the `thread_id` is the same. `invoke()` wraps `ainvoke()` with `asyncio.run()`, so use it in scripts and notebooks. Inside async code such as FastAPI, use `ainvoke()`.
+
+### Using a different model
+
+Change the model string and install the matching extra. For example `model="gemini-2.5-flash"` with `pip install "10xgraph[google-genai]"` and `GEMINI_API_KEY`, or `model="claude-sonnet-5-5"` with `10xgraph[anthropic]` and `ANTHROPIC_API_KEY`.
+
+## Full code
+
+<Tabs>
+<TabItem label="quickstart.py">
+
+```python
+"""Smallest useful 10xGraph agent: a ReactAgent with one tool, called with ainvoke.
+
+Run: python examples/quickstart/quickstart.py   (needs OPENAI_API_KEY)
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+
+
+load_dotenv()
+
+
+def get_weather(location: str) -> str:
+    """Get the current weather for a city."""
+    # The docstring and type hints become the tool schema the model sees.
+    return f"The weather in {location} is sunny, 24 C."
+
+
+# ReactAgent wires the model node, the tool node and the "call tools until done"
+# routing for you. The model is just a string; the provider is detected from it.
+agent = ReactAgent(
+    model="gpt-5-mini",
+    system_prompt=[{"role": "system", "content": "You are a concise weather assistant."}],
+    tools=[get_weather],
+)
+
+# compile() returns a CompiledGraph. With no checkpointer it uses an in-memory one.
+app = agent.compile()
+
+
+async def main() -> None:
+    # `async with` calls app.aclose() on exit, which flushes background checkpoint
+    # writes and releases the checkpointer, store and publisher. You can also call
+    # `await app.aclose()` yourself in a finally block.
+    async with app:
+        result = await app.ainvoke(
+            {"messages": [Message.text_message("What is the weather in Tokyo?")]},
+            # thread_id names the conversation; reuse it to continue the same chat.
+            config={"thread_id": "quickstart-1"},
+        )
+
+        # The default response granularity (LOW) returns only messages.
+        for message in result["messages"]:
+            print(f"{message.role}:", message.text() or message.tools_calls)
+
+        print("\nassistant:", result["messages"][-1].text())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="quickstart_sync.py">
+
+```python
+"""The same quickstart agent, called with the blocking invoke().
+
+invoke() wraps ainvoke() with asyncio.run(), so use it in scripts and notebooks
+without a running event loop. Inside async code (FastAPI, other agents) use ainvoke().
+
+Run: python examples/quickstart/quickstart_sync.py   (needs OPENAI_API_KEY)
+"""
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+
+
+load_dotenv()
+
+
+def get_weather(location: str) -> str:
+    """Get the current weather for a city."""
+    return f"The weather in {location} is sunny, 24 C."
+
+
+app = ReactAgent(
+    model="gpt-5-mini",
+    system_prompt=[{"role": "system", "content": "You are a concise weather assistant."}],
+    tools=[get_weather],
+).compile()
+
+
+if __name__ == "__main__":
+    config = {"thread_id": "quickstart-sync"}
+
+    first = app.invoke({"messages": [Message.text_message("Weather in Paris?")]}, config)
+    print("assistant:", first["messages"][-1].text())
+
+    # Same thread_id: the checkpointer restores the earlier turn, so "there" resolves.
+    second = app.invoke(
+        {"messages": [Message.text_message("And is that good for a picnic?")]}, config
+    )
+    print("assistant:", second["messages"][-1].text())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/quickstart](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/quickstart)
+
+## Expected output
+
+Illustrative; the wording will vary.
+
+```text
+user: What is the weather in Tokyo?
+assistant: [{'id': 'call_1', 'type': 'function', 'function': {'name': 'get_weather', ...}}]
+tool: The weather in Tokyo is sunny, 24 C.
+assistant: It is sunny and 24 C in Tokyo.
+
+assistant: It is sunny and 24 C in Tokyo.
+```
+
+## Next steps
+
+- [Graph basics](/docs/examples/graph-basics): what `ReactAgent` builds, and graphs without an LLM.
+- [Streaming](/docs/examples/streaming): print text as it is generated.
+- [Tools](/docs/examples/tools): decorators, injected parameters and prebuilt tools.

@@ -1,0 +1,513 @@
+---
+title: Persist Agent Conversations with SQLite, PostgreSQL and Redis Checkpointers in 10xGraph
+seoTitle: Persist AI agent conversations in Python
+description: Save and resume a Python AI agent conversation by thread_id with 10xGraph's InMemory, SQLite and PostgreSQL plus Redis checkpointers, and read state back.
+section: Examples
+group: "Production"
+order: 23
+label: Persistence
+updated: "2026-10-28"
+faq:
+  - q: "Which checkpointer should I use?"
+    a: "InMemoryCheckpointer for tests and demos, SqliteCheckpointer for a single-user app or a local agent with one database file, and PgCheckpointer (PostgreSQL plus Redis) for servers that run several processes or need durable shared state."
+  - q: "How does a conversation continue across runs?"
+    a: "Pass the same thread_id in the run config. The graph loads the saved state for that thread, appends the new user message, and saves the result again."
+  - q: "Why does PgCheckpointer need Redis?"
+    a: "PostgreSQL is the durable store. Redis caches hot thread state so frequent reads during a run do not hit the database. You provide both connection settings."
+  - q: "Do I have to call setup before using a checkpointer?"
+    a: "SqliteCheckpointer and PgCheckpointer create their tables on first use. Calling await checkpointer.asetup() makes that explicit, and it is safe to repeat."
+---
+
+A checkpointer saves an agent's conversation so it can continue by `thread_id`, even after the process restarts. This example runs the same weather agent against three checkpointers: in-memory, SQLite and PostgreSQL with Redis. The agent uses DeepSeek `deepseek-chat` through its OpenAI-compatible endpoint.
+
+## What you will build
+
+The same small weather agent, run against three checkpointers. Each script chats on a fixed `thread_id`, so a conversation continues where it left off. With SQLite and PostgreSQL you run the script twice, in two separate processes: the first run tells the agent your name and city, and the second run asks it to recall them. After each chat the script lists threads and reads the saved state and messages back.
+
+## Key concepts
+
+- `InMemoryCheckpointer()`: the default. Keeps state in the process, so nothing survives a restart.
+- `SqliteCheckpointer(db_path)`: one SQLite file for state, messages and threads. Defaults to `~/.10xgraph/checkpointer.db` when `db_path` is omitted.
+- `PgCheckpointer(postgres_dsn=..., redis_url=...)`: PostgreSQL for durable storage plus Redis for the hot cache. Other arguments are `pg_pool`, `redis`, `schema`, `pool_config` and `redis_pool_config`.
+- `graph.compile(checkpointer=...)`: attaches the checkpointer to the graph.
+- `thread_id` and `user_id` in the run config: `thread_id` selects the conversation, `user_id` scopes thread ownership.
+- Read methods: `aget_state(config)`, `alist_messages(config, search=, offset=, limit=)`, `alist_threads(config, search=, offset=, limit=)`, `aget_thread(config)`.
+- `aput_thread(config, ThreadInfo(...))`: optionally registers thread metadata such as a name.
+- `await graph.aclose()`: flushes pending writes and releases connections.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[openai,sqlite_checkpoint,pg_checkpoint]" python-dotenv
+export DEEPSEEK_API_KEY="..."
+```
+
+For `postgres.py`, start the services first (Docker required):
+
+```bash
+docker compose -f examples/persistence/docker-compose.yml up -d
+```
+
+`POSTGRES_DSN` and `REDIS_URL` override the defaults (`postgresql://tenx:tenx@localhost:5432/tenx` and `redis://localhost:6379/0`).
+
+```bash
+python examples/persistence/in_memory.py
+
+python examples/persistence/sqlite.py   # run it twice
+python examples/persistence/sqlite.py
+
+python examples/persistence/postgres.py # run it twice
+python examples/persistence/postgres.py
+```
+
+Delete `conversations.db` (created in the working directory) to start over with SQLite. For Postgres, use `docker compose ... down -v`.
+
+## How the code works
+
+### Choosing a checkpointer
+
+Only one line differs between the three scripts.
+
+```python
+    checkpointer = InMemoryCheckpointer()
+```
+
+```python
+    checkpointer = SqliteCheckpointer("conversations.db")
+```
+
+```python
+    checkpointer = PgCheckpointer(
+        postgres_dsn=os.getenv("POSTGRES_DSN", "postgresql://tenx:tenx@localhost:5432/tenx"),
+        redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    )
+    await checkpointer.asetup()  # creates the tables on first use; safe to repeat
+```
+
+`PgCheckpointer` enforces user isolation by default, so reads with a different `user_id` do not see the thread. Pass `enforce_user_isolation=False` for a single-tenant app.
+
+### The agent and thread
+
+```python
+    agent = ReactAgent(
+        model="deepseek-chat",  # DeepSeek through its OpenAI-compatible endpoint
+        base_url="https://api.deepseek.com",
+        api_key=os.environ["DEEPSEEK_API_KEY"],
+        system_prompt=[{"role": "system", "content": "You are a friendly assistant."}],
+        tools=[get_weather],
+    )
+    graph = agent.compile(checkpointer=checkpointer)
+    # thread_id picks the conversation. user_id scopes ownership of the thread.
+    config = {"thread_id": "customer-42", "user_id": "demo-user"}
+```
+
+`base_url` and `api_key` point the OpenAI client at DeepSeek. `compile(checkpointer=...)` attaches storage. The config is the same on every run, which is what makes the conversation continue.
+
+### Same thread, separate runs (`sqlite.py`, `postgres.py`)
+
+```python
+    saved = await checkpointer.alist_messages(config)
+    print(f"Restored {len(saved)} message(s) for this thread.\n")
+    if not saved:
+        await chat(graph, "Hi, my name is Sam and I live in Lisbon.", config)
+    else:
+        await chat(graph, "What is my name, and what is the weather where I live?", config)
+```
+
+On the second process, the checkpointer returns the earlier messages before the agent runs, and the agent answers from them. `in_memory.py` cannot cross processes, so it makes both calls in one process on the same thread to show the same behaviour:
+
+```python
+    await chat(graph, "Hi, my name is Sam and I live in Lisbon.", config)
+    print("--- second run, same thread_id ---")
+    await chat(graph, "What is my name, and what is the weather where I live?", config)
+```
+
+### Thread metadata
+
+```python
+    if await checkpointer.aget_thread(config) is None:
+        info = ThreadInfo(
+            thread_id=config["thread_id"], thread_name="Customer 42 chat", user_id=config["user_id"]
+        )
+        await checkpointer.aput_thread(config, info)
+```
+
+The graph writes state and messages itself. Thread metadata is separate: the scripts register a `ThreadInfo` so `alist_threads` has something to list. It is optional.
+
+### Reading back
+
+```python
+    state = await checkpointer.aget_state(config)
+    print(f"\nstate: {len(state.context)} messages, step {state.execution_meta.step}")
+
+    messages = await checkpointer.alist_messages(config)
+    for m in messages:
+        print(f"  [{m.role}] {m.text()[:70]}")
+
+    threads = await checkpointer.alist_threads(config)
+    print("threads:", [(t.thread_id, t.thread_name) for t in threads])
+```
+
+`aget_state` returns the full `AgentState`, `alist_messages` returns stored messages with paging, and `alist_threads` returns `ThreadInfo` records. `in_memory.py` prints `state.context` instead of `alist_messages`, because the in-memory checkpointer can return the messages of a finished run twice.
+
+### Closing
+
+```python
+    await graph.aclose()
+```
+
+This waits for background checkpoint writes and then releases the checkpointer's connections. See [graceful shutdown](/docs/examples/graceful-shutdown).
+
+### `docker-compose.yml`
+
+It starts `postgres:16` with user, password and database all set to `tenx`, and `redis:7`, both with health checks. These match the default DSN and Redis URL in `postgres.py`. The `pgdata` volume keeps data between restarts.
+
+## Full code
+
+<Tabs>
+<TabItem label="in_memory.py">
+
+```python
+"""Persist conversation state in process memory with InMemoryCheckpointer.
+
+Two calls on the same thread_id: the second remembers the first, but nothing survives
+a restart. Then it lists threads and reads state and messages back.
+Run: python examples/persistence/in_memory.py
+"""
+
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+from tenxgraph.utils import ThreadInfo
+
+
+load_dotenv()
+
+
+def get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    return f"It is 21 C and sunny in {city}."
+
+
+async def chat(graph, text: str, config: dict) -> None:
+    result = await graph.ainvoke({"messages": [Message.text_message(text)]}, config)
+    print("user:     ", text)
+    print("assistant:", result["messages"][-1].text())
+
+
+async def main() -> None:
+    # The default checkpointer. Good for tests and demos; nothing survives a restart.
+    checkpointer = InMemoryCheckpointer()
+
+    agent = ReactAgent(
+        model="deepseek-chat",  # DeepSeek through its OpenAI-compatible endpoint
+        base_url="https://api.deepseek.com",
+        api_key=os.environ["DEEPSEEK_API_KEY"],
+        system_prompt=[{"role": "system", "content": "You are a friendly assistant."}],
+        tools=[get_weather],
+    )
+    graph = agent.compile(checkpointer=checkpointer)
+    # thread_id picks the conversation. user_id scopes ownership of the thread.
+    config = {"thread_id": "customer-42", "user_id": "demo-user"}
+
+    # An in-memory checkpointer lives as long as this process. Two separate runs are
+    # simulated with two calls on the same thread_id and the same checkpointer object.
+    await chat(graph, "Hi, my name is Sam and I live in Lisbon.", config)
+    print("--- second run, same thread_id ---")
+    await chat(graph, "What is my name, and what is the weather where I live?", config)
+
+    # The graph saves state and messages by itself. Thread metadata, such as a display
+    # name for a thread list, is registered explicitly. It is optional.
+    if await checkpointer.aget_thread(config) is None:
+        info = ThreadInfo(
+            thread_id=config["thread_id"], thread_name="Customer 42 chat", user_id=config["user_id"]
+        )
+        await checkpointer.aput_thread(config, info)
+
+    # Read what was stored. All of these take the same config dict.
+    state = await checkpointer.aget_state(config)
+    print(f"\nstate: {len(state.context)} messages, step {state.execution_meta.step}")
+
+    # state.context is the conversation the agent will see on the next turn.
+    for m in state.context:
+        print(f"  [{m.role}] {m.text()[:70]}")
+
+    threads = await checkpointer.alist_threads(config)
+    print("threads:", [(t.thread_id, t.thread_name) for t in threads])
+    info = await checkpointer.aget_thread(config)
+    print("thread info:", info.thread_id if info else None)
+
+    # Flushes background checkpoint writes and releases the connections.
+    await graph.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="sqlite.py">
+
+```python
+"""Persist conversation state in one local SQLite file with SqliteCheckpointer.
+
+Run it twice with the same thread_id: the second process continues the first. Then it
+lists threads and reads state and messages back.
+Run: python examples/persistence/sqlite.py
+"""
+
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import SqliteCheckpointer
+from tenxgraph.utils import ThreadInfo
+
+
+load_dotenv()
+
+
+def get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    return f"It is 21 C and sunny in {city}."
+
+
+async def chat(graph, text: str, config: dict) -> None:
+    result = await graph.ainvoke({"messages": [Message.text_message(text)]}, config)
+    print("user:     ", text)
+    print("assistant:", result["messages"][-1].text())
+
+
+async def main() -> None:
+    # One file holds state, messages and threads. Needs: pip install "10xgraph[sqlite_checkpoint]"
+    # The default path (db_path=None) is ~/.10xgraph/checkpointer.db.
+    checkpointer = SqliteCheckpointer("conversations.db")
+
+    agent = ReactAgent(
+        model="deepseek-chat",  # DeepSeek through its OpenAI-compatible endpoint
+        base_url="https://api.deepseek.com",
+        api_key=os.environ["DEEPSEEK_API_KEY"],
+        system_prompt=[{"role": "system", "content": "You are a friendly assistant."}],
+        tools=[get_weather],
+    )
+    graph = agent.compile(checkpointer=checkpointer)
+    # thread_id picks the conversation. user_id scopes ownership of the thread.
+    config = {"thread_id": "customer-42", "user_id": "demo-user"}
+
+    # Run this script twice. The first run teaches the agent a fact and the second run
+    # finds it again, because the thread was saved outside this process.
+    saved = await checkpointer.alist_messages(config)
+    print(f"Restored {len(saved)} message(s) for this thread.\n")
+    if not saved:
+        await chat(graph, "Hi, my name is Sam and I live in Lisbon.", config)
+    else:
+        await chat(graph, "What is my name, and what is the weather where I live?", config)
+
+    # The graph saves state and messages by itself. Thread metadata, such as a display
+    # name for a thread list, is registered explicitly. It is optional.
+    if await checkpointer.aget_thread(config) is None:
+        info = ThreadInfo(
+            thread_id=config["thread_id"], thread_name="Customer 42 chat", user_id=config["user_id"]
+        )
+        await checkpointer.aput_thread(config, info)
+
+    # Read what was stored. All of these take the same config dict.
+    state = await checkpointer.aget_state(config)
+    print(f"\nstate: {len(state.context)} messages, step {state.execution_meta.step}")
+
+    messages = await checkpointer.alist_messages(config)
+    for m in messages:
+        print(f"  [{m.role}] {m.text()[:70]}")
+
+    threads = await checkpointer.alist_threads(config)
+    print("threads:", [(t.thread_id, t.thread_name) for t in threads])
+    info = await checkpointer.aget_thread(config)
+    print("thread info:", info.thread_id if info else None)
+
+    # Flushes background checkpoint writes and releases the connections.
+    await graph.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="postgres.py">
+
+```python
+"""Persist conversation state in PostgreSQL with a Redis cache using PgCheckpointer.
+
+Run it twice with the same thread_id: the second process continues the first. Then it
+lists threads and reads state and messages back.
+Run: docker compose -f examples/persistence/docker-compose.yml up -d
+     python examples/persistence/postgres.py
+"""
+
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import PgCheckpointer
+from tenxgraph.utils import ThreadInfo
+
+
+load_dotenv()
+
+
+def get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    return f"It is 21 C and sunny in {city}."
+
+
+async def chat(graph, text: str, config: dict) -> None:
+    result = await graph.ainvoke({"messages": [Message.text_message(text)]}, config)
+    print("user:     ", text)
+    print("assistant:", result["messages"][-1].text())
+
+
+async def main() -> None:
+    # Postgres is the durable store; Redis caches hot state. Start both with
+    # `docker compose -f examples/persistence/docker-compose.yml up -d`.
+    checkpointer = PgCheckpointer(
+        postgres_dsn=os.getenv("POSTGRES_DSN", "postgresql://tenx:tenx@localhost:5432/tenx"),
+        redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    )
+    await checkpointer.asetup()  # creates the tables on first use; safe to repeat
+
+    agent = ReactAgent(
+        model="deepseek-chat",  # DeepSeek through its OpenAI-compatible endpoint
+        base_url="https://api.deepseek.com",
+        api_key=os.environ["DEEPSEEK_API_KEY"],
+        system_prompt=[{"role": "system", "content": "You are a friendly assistant."}],
+        tools=[get_weather],
+    )
+    graph = agent.compile(checkpointer=checkpointer)
+    # thread_id picks the conversation. user_id scopes ownership of the thread.
+    config = {"thread_id": "customer-42", "user_id": "demo-user"}
+
+    # Run this script twice. The first run teaches the agent a fact and the second run
+    # finds it again, because the thread was saved outside this process.
+    saved = await checkpointer.alist_messages(config)
+    print(f"Restored {len(saved)} message(s) for this thread.\n")
+    if not saved:
+        await chat(graph, "Hi, my name is Sam and I live in Lisbon.", config)
+    else:
+        await chat(graph, "What is my name, and what is the weather where I live?", config)
+
+    # The graph saves state and messages by itself. Thread metadata, such as a display
+    # name for a thread list, is registered explicitly. It is optional.
+    if await checkpointer.aget_thread(config) is None:
+        info = ThreadInfo(
+            thread_id=config["thread_id"], thread_name="Customer 42 chat", user_id=config["user_id"]
+        )
+        await checkpointer.aput_thread(config, info)
+
+    # Read what was stored. All of these take the same config dict.
+    state = await checkpointer.aget_state(config)
+    print(f"\nstate: {len(state.context)} messages, step {state.execution_meta.step}")
+
+    messages = await checkpointer.alist_messages(config)
+    for m in messages:
+        print(f"  [{m.role}] {m.text()[:70]}")
+
+    threads = await checkpointer.alist_threads(config)
+    print("threads:", [(t.thread_id, t.thread_name) for t in threads])
+    info = await checkpointer.aget_thread(config)
+    print("thread info:", info.thread_id if info else None)
+
+    # Flushes background checkpoint writes and releases the connections.
+    await graph.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="docker-compose.yml">
+
+```yaml
+# Postgres (durable state) and Redis (hot-state cache) for postgres.py.
+# Start: docker compose -f examples/persistence/docker-compose.yml up -d
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: tenx
+      POSTGRES_PASSWORD: tenx
+      POSTGRES_DB: tenx
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tenx"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/persistence](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/persistence)
+
+## Expected output
+
+Illustrative; model wording will differ.
+
+First run of `sqlite.py`:
+
+```text
+Restored 0 message(s) for this thread.
+
+user:      Hi, my name is Sam and I live in Lisbon.
+assistant: Nice to meet you, Sam! Anything I can help with in Lisbon?
+
+state: 2 messages, step 1
+threads: [('customer-42', 'Customer 42 chat')]
+```
+
+Second run:
+
+```text
+Restored 2 message(s) for this thread.
+
+user:      What is my name, and what is the weather where I live?
+assistant: Your name is Sam. It is 21 C and sunny in Lisbon.
+```
+
+## Using a different model
+
+Change `model`, and remove `base_url` and `api_key`. For example `model="gpt-5-mini"` with `pip install "10xgraph[openai]"` and `OPENAI_API_KEY`, or `model="claude-sonnet-5-5"` with `pip install "10xgraph[anthropic]"` and `ANTHROPIC_API_KEY`.
+
+## Next steps
+
+- [Human in the loop](/docs/examples/human-in-the-loop): paused runs are stored by the checkpointer and can resume in another process.
+- [Context management](/docs/examples/context-management): keep long saved threads within the model's context window.
+- [Graceful shutdown](/docs/examples/graceful-shutdown): release database connections cleanly on SIGTERM.

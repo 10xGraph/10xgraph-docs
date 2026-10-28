@@ -1,0 +1,1207 @@
+---
+title: Evaluate a 10xGraph Agent with Trajectory and LLM Judge Criteria
+seoTitle: Evaluate AI agents with trajectory and LLM judges
+description: Evaluate a 10xGraph Python agent with pytest. Score tool trajectories, run LLM-as-judge criteria and user simulation, and write console, JSON, HTML and JUnit reports.
+section: Examples
+group: "Multimodal and quality"
+order: 35
+label: Agent evaluation
+updated: "2026-10-28"
+faq:
+  - q: "How do I check that an agent called the right tools?"
+    a: "Build an EvalSet with expected_tools and enable the tool_name_match and trajectory criteria in an EvalConfig. AgentEvaluator records the real tool calls through a TrajectoryCollector and scores them against the expected list."
+  - q: "Which model judges the answers?"
+    a: "Each LLM criterion has a judge_model on its CriterionConfig. The default is gemini-2.5-flash, and you can pass another model name, such as claude-sonnet-5-5, to llm_judge, rubric_based, hallucination, safety or response_match."
+  - q: "Why does an LLM criterion score exactly 0.5?"
+    a: "When the judge model cannot be called, the criterion returns 0.5 with the reasoning 'No LLM provider available' instead of raising. conftest.py has an assert_judged helper that turns that case into a test failure."
+  - q: "Can I run evaluations from the command line?"
+    a: "Yes. 10xgraph eval discovers files named *_eval.py or eval_*.py, runs the app and eval set they expose, and writes console, JSON and HTML reports. See eval_weather.py."
+---
+
+Unit tests tell you the graph is wired correctly. Evaluation tells you whether the agent behaves well: did it call the right tools, are its answers close to what you expect, and does a judge model think they are good. This example evaluates a weather assistant running on OpenAI `gpt-5-mini`, judged by Anthropic `claude-sonnet-5-5` and challenged by a simulated user on Google `gemini-2.5-flash`.
+
+## What you will build
+
+An evaluation suite for a small weather assistant. The agent runs on OpenAI `gpt-5-mini`, with a `get_weather` and a `get_forecast` tool. The suite checks which tools it calls, how close its answers are to references, how a judge model rates them, and how it behaves in a conversation played by a simulated user.
+
+Everything is a normal pytest file. Tests that call a live model are marked and skipped when the key is missing, so `pytest examples/evaluation` is safe to run without keys. The remaining tests run offline against a scripted agent.
+
+## Key concepts
+
+- `AgentEvaluator(graph, collector, config)`: runs each `EvalCase`, scores it against the enabled criteria and returns an `EvalReport`.
+- `TrajectoryCollector` and `make_trajectory_callback`: capture tool calls and node visits during a run. Compile the graph with the callback manager.
+- `EvalSet`, `EvalCase`, `EvalSetBuilder`: the dataset, with expected tools and expected responses. Sets save to and load from JSON.
+- `EvalConfig` with `CriteriaConfig` and `CriterionConfig`: choose criteria and thresholds. `MatchType` sets trajectory strictness (`EXACT`, `IN_ORDER`, `ANY_ORDER`).
+- Non-LLM criteria: `tool_name_match`, `trajectory`, `node_order`, `rouge_match`, `contains_keywords`.
+- LLM criteria: `llm_judge`, `response_match`, `rubric_based` (with `Rubric`), `hallucination`, `safety`, plus `simulation_goals` for simulations.
+- `UserSimulator`, `BatchSimulator`, `ConversationScenario`: a model plays the user against your graph.
+- `QuickEval` and `EvalPresets`: shorter entry points with ready-made configs.
+- Reporters: `ConsoleReporter`, `JSONReporter`, `HTMLReporter`, `JUnitXMLReporter`, and `ReporterManager`.
+- Pytest helpers: `assert_eval_passed`, `assert_criterion_passed`, `run_eval`, `parametrize_eval_cases`, `create_eval_app`, `create_simple_eval_set`.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[openai,google-genai,anthropic]" pytest pytest-asyncio python-dotenv
+pip install 10xgraph-api       # only for the 10xgraph eval command
+```
+
+| Variable | Needed by |
+|---|---|
+| `OPENAI_API_KEY` | the agent under test (`gpt-5-mini`), all live tests and scripts |
+| `ANTHROPIC_API_KEY` | the judge in `test_llm_judge.py` (`claude-sonnet-5-5`) |
+| `GEMINI_API_KEY` or `GOOGLE_API_KEY` | the simulated user in `test_user_simulator.py` (`gemini-2.5-flash`) |
+
+Put them in a `.env` file at the repo root. `conftest.py` loads it. Then run, from the repository root:
+
+```bash
+pytest examples/evaluation -v -c examples/evaluation/pytest.ini     # live tests skip without keys
+python examples/evaluation/reporters.py                             # no key needed
+python examples/evaluation/quick_eval.py                            # needs OPENAI_API_KEY
+10xgraph eval examples/evaluation/eval_weather.py --threshold 0.8   # needs OPENAI_API_KEY
+```
+
+| File | Shows |
+|---|---|
+| `weather_agent.py` | the agent under test and `build_eval_app()` |
+| `conftest.py` | shared app fixture, key-based skipping, `assert_judged` |
+| `test_trajectory.py` | datasets, tool trajectory and response criteria, pytest helpers |
+| `test_llm_judge.py` | LLM criteria with `claude-sonnet-5-5` as the judge |
+| `test_user_simulator.py` | `UserSimulator` on `gemini-2.5-flash` |
+| `quick_eval.py` | `QuickEval` one-liners |
+| `reporters.py` | all four reporters, with a hand-built report |
+| `eval_weather.py` | the file shape that `10xgraph eval` discovers |
+| `weather.evalset.json` | the dataset as JSON, used by the CLI and `run_eval` |
+
+## How the code works
+
+Three companies are involved on purpose. The agent under test uses OpenAI, the judge uses Anthropic and the simulated user uses Google. Keeping them separate means the judge is not grading its own output, and each model string is visible where it is used.
+
+### weather_agent.py
+
+The agent is defined once, and every other file imports it. It has two tools and a prompt that tells it to answer general questions without a tool:
+
+```python
+def build_agent() -> ReactAgent:
+    # Constructing the agent creates the OpenAI client, so OPENAI_API_KEY must be set.
+    return ReactAgent(
+        model="gpt-5-mini",
+        system_prompt=[{"role": "system", "content": SYSTEM_PROMPT}],
+        tools=[get_weather, get_forecast],
+    )
+```
+
+`build_eval_app()` compiles it with a collector so the evaluator can see tool calls:
+
+```python
+collector = TrajectoryCollector(capture_all_events=True)
+_, callback_manager = make_trajectory_callback(collector)
+app = build_agent().compile(
+    checkpointer=InMemoryCheckpointer(),
+    callback_manager=callback_manager,
+)
+return app, collector
+```
+
+If you already have an uncompiled `StateGraph`, `create_eval_app(graph)` does the same in one call.
+
+### conftest.py
+
+Two things live here. First, live tests are skipped when their key is missing, so the suite is safe to run anywhere:
+
+```python
+_KEYS = {
+    "needs_openai": ("OPENAI_API_KEY",),
+    "needs_anthropic": ("ANTHROPIC_API_KEY",),
+    "needs_gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+}
+```
+
+Second, `assert_judged` guards against a quiet failure. When the judge model cannot be called, an LLM criterion returns 0.5 and does not raise. This helper turns that into a test failure:
+
+```python
+for cr in case_result.criterion_results:
+    reasons = cr.details.get("reasonings", [])
+    assert "No LLM provider available" not in reasons, (
+        f"{cr.criterion}: the judge model could not be called"
+    )
+```
+
+### test_trajectory.py
+
+Part 1 builds datasets with `EvalSetBuilder`:
+
+```python
+.add_case(
+    query="What is the capital of Germany?",
+    expected="Berlin",
+    expected_tools=[],  # empty list means the agent must not call any tool
+    case_id="no_tool",
+)
+```
+
+An expected `ToolCall` with empty `args` accepts any arguments. Give `args` and set `check_args=True` to compare them. Part 2 runs the full evaluator against a scripted `TestAgent` graph, so the wiring is checked without a key. One detail to know: the collector lists only the nodes that call a model, so the expected `node_order` for a tool run has no tool node in it:
+
+```python
+expected_node_order=["__start__", "MAIN", "MAIN"],
+```
+
+Part 3 evaluates the real agent. The config picks criteria and thresholds:
+
+```python
+config = EvalConfig(
+    criteria=CriteriaConfig(
+        tool_name_match=CriterionConfig.tool_name_match(threshold=1.0),
+        # check_args=True also compares arguments, so location must match.
+        trajectory=CriterionConfig.trajectory(
+            threshold=1.0, match_type=MatchType.IN_ORDER, check_args=False
+        ),
+    ),
+    reporter=QUIET,
+)
+
+report = await AgentEvaluator(app, collector, config=config).evaluate(weather_eval_set())
+
+assert_eval_passed(report, min_pass_rate=1.0)
+```
+
+`QUIET` is `ReporterConfig(enabled=False)`, because reporters write files by default. The last tests show `run_eval` on a JSON file and `parametrize_eval_cases`, which creates one pytest item per case.
+
+### test_llm_judge.py
+
+The judge model is a plain string on each criterion:
+
+```python
+llm_judge=CriterionConfig.llm_judge(threshold=0.6, judge_model=JUDGE, num_samples=1),
+```
+
+Each criterion samples the judge `num_samples` times and averages the scores. `hallucination` checks the answer against what the tool actually returned, and `rubric_based` takes `Rubric` items you write. The default judge is `gemini-2.5-flash`.
+
+<Callout type="warning" title="Known gap in the Anthropic judge">
+In this version of the library, `LLMCallerMixin._call_llm_json` in `tenxgraph/qa/evaluation/criteria/llm_utils.py` only has branches for Google and OpenAI models. `detect_provider("claude-sonnet-5-5")` returns `"anthropic"`, so an Anthropic judge falls through to the fallback: the criterion scores `0.5` with the reasoning "No LLM provider available" and does not raise. `assert_judged` fails the test in that case, so `test_llm_judge.py` will fail against an unpatched library until the Anthropic branch is added (it can call `call_llm`, which already supports Anthropic). `UserSimulator` and `SimulationGoalsCriterion` are not affected, because they call `call_llm` directly or use the Gemini default.
+</Callout>
+
+### test_user_simulator.py
+
+A `ConversationScenario` describes who the simulated user is, what they want and when to stop:
+
+```python
+TOKYO_TRIP = ConversationScenario(
+    scenario_id="tokyo_trip",
+    description="A traveller wants the current weather in Tokyo",
+    starting_prompt="I'm thinking of visiting Tokyo soon. Can you help?",
+    ...
+    max_turns=4,
+)
+```
+
+`UserSimulator(model="gemini-2.5-flash", criteria=[...])` writes the user turns, checks goals after each reply, and returns a `SimulationResult` with the conversation and `criterion_scores`. `SimulationGoalsCriterion` reads the whole transcript, so it only works inside a simulator. `BatchSimulator` runs many scenarios with a concurrency limit and has a `summary()` method.
+
+### quick_eval.py
+
+`QuickEval` is the short path for a first check. `check` runs one query, `batch` runs many pairs scored with ROUGE-1 (no judge model), `tool_usage` checks tool names, and `from_builder` takes a builder and a combined preset:
+
+```python
+config = EvalPresets.combine(EvalPresets.quick_check(), EvalPresets.tool_usage(strict=False))
+report = await QuickEval.from_builder(app, collector, builder, config=config)
+```
+
+### reporters.py
+
+This script builds an `EvalReport` by hand, so it needs no key, then renders it four ways: console, JSON, HTML and JUnit XML. In a real run, set `EvalConfig(reporter=ReporterConfig(...))` and `evaluate()` writes the files into `eval_reports/` for you. `ReporterManager` is the object it uses, and the script shows it directly.
+
+### eval_weather.py and weather.evalset.json
+
+`10xgraph eval` finds files named `*_eval.py` or `eval_*.py`. A file exposes `app` (a compiled graph), `get_eval_set()`, and optionally `EVAL_CONFIG`. For simulations it exposes `SCENARIOS` instead. The CLI attaches its own collector, so the app is compiled without one:
+
+```python
+app = build_agent().compile()
+```
+
+The dataset comes from `weather.evalset.json`, the saved form of an `EvalSet`. Useful flags are `--threshold`, `--parallel`, `--max-concurrency`, `--output` and `--open`. `quick_eval.py` also matches `*_eval.py` but has no eval entry point, so the CLI would skip it with a warning. Point the command at `eval_weather.py` instead of the whole folder.
+
+## Full code
+
+<Tabs>
+<TabItem label="weather_agent.py">
+
+```python
+"""The agent under test: a small weather assistant on OpenAI gpt-5-mini.
+
+Every evaluation file in this folder imports `build_eval_app()` from here, so the
+agent is defined once. The graph is compiled with a TrajectoryCollector so the
+evaluator can see tool calls and node visits.
+Run: python examples/evaluation/weather_agent.py   (needs OPENAI_API_KEY)
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.qa.evaluation import TrajectoryCollector, make_trajectory_callback
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+
+
+def get_weather(location: str) -> str:
+    """Get the current weather for a location."""
+    return f"The weather in {location} is sunny"
+
+
+def get_forecast(location: str, days: int = 3) -> str:
+    """Get a multi-day weather forecast for a location."""
+    return f"{days}-day forecast for {location}: sunny, cloudy, sunny"
+
+
+SYSTEM_PROMPT = (
+    "You are a weather assistant. Use get_weather for current conditions and "
+    "get_forecast for multi-day forecasts. Answer anything else (geography, "
+    "general knowledge) directly, without calling a tool."
+)
+
+
+def build_agent() -> ReactAgent:
+    # Constructing the agent creates the OpenAI client, so OPENAI_API_KEY must be set.
+    return ReactAgent(
+        model="gpt-5-mini",
+        system_prompt=[{"role": "system", "content": SYSTEM_PROMPT}],
+        tools=[get_weather, get_forecast],
+    )
+
+
+def build_eval_app():
+    """Compile the agent with a collector and return `(compiled_graph, collector)`."""
+    collector = TrajectoryCollector(capture_all_events=True)
+    _, callback_manager = make_trajectory_callback(collector)
+    app = build_agent().compile(
+        checkpointer=InMemoryCheckpointer(),
+        callback_manager=callback_manager,
+    )
+    return app, collector
+
+
+async def main() -> None:
+    load_dotenv()
+    app, _ = build_eval_app()
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("What is the weather in Tokyo?")]},
+        config={"thread_id": "demo"},
+    )
+    print("assistant:", result["messages"][-1].text())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="conftest.py">
+
+```python
+"""Shared fixtures for the evaluation suite.
+
+One compiled weather agent (OpenAI gpt-5-mini) is shared by every test file.
+Live tests are marked with the providers they call and are skipped when the
+matching API key is missing, so `pytest examples/evaluation` is safe to run
+without keys: only the offline tests execute.
+"""
+
+import os
+
+import pytest
+from dotenv import load_dotenv
+from weather_agent import build_eval_app
+
+
+load_dotenv()
+
+_KEYS = {
+    "needs_openai": ("OPENAI_API_KEY",),
+    "needs_anthropic": ("ANTHROPIC_API_KEY",),
+    "needs_gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        for marker, env_names in _KEYS.items():
+            if marker in item.keywords and not any(os.getenv(n) for n in env_names):
+                item.add_marker(pytest.mark.skip(reason=f"{' or '.join(env_names)} is not set"))
+
+
+@pytest.fixture(scope="session")
+def eval_app():
+    """`(compiled_graph, collector)`, built once per session."""
+    return build_eval_app()
+
+
+@pytest.fixture(scope="session")
+def app(eval_app):
+    return eval_app[0]
+
+
+@pytest.fixture(scope="session")
+def collector(eval_app):
+    return eval_app[1]
+
+
+def assert_judged(case_result) -> None:
+    """Fail when an LLM criterion silently fell back to its placeholder score.
+
+    If the judge model cannot be called, the criterion returns 0.5 with the reasoning
+    "No LLM provider available" and does not raise. Checking for it keeps a broken
+    judge setup from looking like a mediocre score.
+    """
+    for cr in case_result.criterion_results:
+        reasons = cr.details.get("reasonings", [])
+        assert "No LLM provider available" not in reasons, (
+            f"{cr.criterion}: the judge model could not be called"
+        )
+```
+
+</TabItem>
+<TabItem label="pytest.ini">
+
+```ini
+[pytest]
+# Standalone config: no coverage addopts from the library's pyproject.toml.
+asyncio_mode = auto
+python_files = test_*.py
+filterwarnings =
+    ignore::DeprecationWarning
+markers =
+    needs_openai: live test, skipped unless OPENAI_API_KEY is set (agent under test, gpt-5-mini)
+    needs_anthropic: live test, skipped unless ANTHROPIC_API_KEY is set (judge, claude-sonnet-5-5)
+    needs_gemini: live test, skipped unless GEMINI_API_KEY or GOOGLE_API_KEY is set (gemini-2.5-flash)
+```
+
+</TabItem>
+<TabItem label="test_trajectory.py">
+
+```python
+"""Tool trajectory and response match criteria with AgentEvaluator.
+
+Part 1 builds datasets (offline). Part 2 runs the full evaluator against a
+scripted agent, so the wiring is checked without an API key. Part 3 evaluates the
+real gpt-5-mini weather agent and needs OPENAI_API_KEY.
+Run: pytest examples/evaluation/test_trajectory.py -v
+"""
+
+from pathlib import Path
+
+import pytest
+
+from tenxgraph.core.graph import StateGraph, ToolNode
+from tenxgraph.qa.evaluation import (
+    AgentEvaluator,
+    CriteriaConfig,
+    CriterionConfig,
+    EvalCase,
+    EvalConfig,
+    EvalSet,
+    EvalSetBuilder,
+    MatchType,
+    ReporterConfig,
+    ToolCall,
+    assert_criterion_passed,
+    assert_eval_passed,
+    create_eval_app,
+    create_simple_eval_set,
+    parametrize_eval_cases,
+    run_eval,
+)
+from tenxgraph.qa.testing import TestAgent as ScriptedAgent  # alias: pytest would collect "Test*"
+from tenxgraph.utils.constants import END
+
+
+# Reporters write files by default; turn them off so tests leave nothing behind.
+QUIET = ReporterConfig(enabled=False)
+EVAL_FILE = str(Path(__file__).parent / "weather.evalset.json")
+
+
+def weather_eval_set() -> EvalSet:
+    return (
+        EvalSetBuilder("weather_trajectory")
+        .add_case(
+            query="What is the weather in New York City right now?",
+            expected="The weather in New York City is sunny",
+            expected_tools=[ToolCall(name="get_weather", args={"location": "New York City"})],
+            case_id="nyc_weather",
+        )
+        .add_case(
+            query="Give me a 3-day forecast for Tokyo.",
+            expected="3-day forecast for Tokyo: sunny, cloudy, sunny",
+            expected_tools=["get_forecast"],  # plain names are fine when args do not matter
+            case_id="tokyo_forecast",
+        )
+        .add_case(
+            query="What is the capital of Germany?",
+            expected="Berlin",
+            expected_tools=[],  # empty list means the agent must not call any tool
+            case_id="no_tool",
+        )
+        .build()
+    )
+
+
+# ── Part 1: datasets (offline) ──────────────────────────────────────────────
+
+
+def test_eval_set_round_trips_through_json(tmp_path):
+    path = tmp_path / "weather.evalset.json"
+    EvalSetBuilder("weather_trajectory").add_case("Hi", "Hello").save(str(path))
+
+    loaded = EvalSet.from_file(str(path))
+
+    assert [c.eval_id for c in loaded.eval_cases] == ["case_1"]
+
+
+def test_multi_turn_case_has_one_invocation_per_turn():
+    case = EvalCase.multi_turn(
+        eval_id="followup",
+        conversation=[
+            ("What is the weather in London?", "sunny"),
+            ("And a 5-day forecast?", "forecast"),
+        ],
+        expected_tools=[ToolCall(name="get_weather")],  # attached to the first turn only
+    )
+    assert len(case.conversation) == 2
+
+
+def test_create_simple_eval_set():
+    eval_set = create_simple_eval_set("basic", [("Hello", "Hi there", "greeting")])
+    assert eval_set.eval_cases[0].name == "greeting"
+
+
+# ── Part 2: the evaluator against a scripted agent (offline) ────────────────
+
+
+def lookup(query: str) -> str:
+    """Look up the weather. The scripted agent always calls this with 'test query'."""
+    return f"The weather in {query} is sunny"
+
+
+def _route(state) -> str:
+    last = state.context[-1]
+    return "TOOL" if getattr(last, "tools_calls", None) and last.role == "assistant" else END
+
+
+@pytest.fixture
+def scripted_app():
+    graph = StateGraph()
+    graph.add_node("MAIN", ScriptedAgent(responses=["The weather in NYC is sunny"], tools=[lookup]))
+    graph.add_node("TOOL", ToolNode([lookup]))
+    graph.add_conditional_edges("MAIN", _route, {"TOOL": "TOOL", END: END})
+    graph.add_edge("TOOL", "MAIN")
+    graph.set_entry_point("MAIN")
+    return create_eval_app(graph)  # compiles with a TrajectoryCollector attached
+
+
+async def test_non_llm_criteria_on_scripted_agent(scripted_app):
+    app, collector = scripted_app
+    case = EvalCase.single_turn(
+        eval_id="scripted",
+        user_query="Weather in NYC?",
+        expected_response="The weather in NYC is sunny",
+        expected_tools=[ToolCall(name="lookup")],
+        # The collector records AI-node visits only (the tool node is not listed).
+        expected_node_order=["__start__", "MAIN", "MAIN"],
+    )
+    config = EvalConfig(
+        criteria=CriteriaConfig(
+            tool_name_match=CriterionConfig.tool_name_match(threshold=1.0),
+            trajectory=CriterionConfig.trajectory(threshold=1.0, match_type=MatchType.IN_ORDER),
+            node_order=CriterionConfig.node_order(threshold=1.0),
+            rouge_match=CriterionConfig.rouge_match(threshold=0.8),
+            contains_keywords=CriterionConfig.contains_keywords(["sunny"]),
+        ),
+        reporter=QUIET,
+    )
+
+    result = await AgentEvaluator(app, collector, config=config).evaluate_case(case)
+
+    assert result.passed, [c.criterion for c in result.failed_criteria]
+    assert [t.name for t in result.actual_tool_calls] == ["lookup"]
+
+
+async def test_wrong_tool_is_reported_as_failure(scripted_app):
+    app, collector = scripted_app
+    case = EvalCase.single_turn(
+        eval_id="wrong_tool",
+        user_query="Weather in NYC?",
+        expected_response="sunny",
+        expected_tools=[ToolCall(name="get_forecast")],
+    )
+    config = EvalConfig(
+        criteria=CriteriaConfig(tool_name_match=CriterionConfig.tool_name_match()),
+        reporter=QUIET,
+    )
+
+    result = await AgentEvaluator(app, collector, config=config).evaluate_case(case)
+
+    assert not result.passed
+    assert result.get_criterion_result("tool_name_match_score").score == 0.0
+
+
+# ── Part 3: the real agent (needs OPENAI_API_KEY) ───────────────────────────
+
+
+@pytest.mark.needs_openai
+async def test_tool_trajectory_for_weather_agent(app, collector):
+    config = EvalConfig(
+        criteria=CriteriaConfig(
+            tool_name_match=CriterionConfig.tool_name_match(threshold=1.0),
+            # check_args=True also compares arguments, so location must match.
+            trajectory=CriterionConfig.trajectory(
+                threshold=1.0, match_type=MatchType.IN_ORDER, check_args=False
+            ),
+        ),
+        reporter=QUIET,
+    )
+
+    report = await AgentEvaluator(app, collector, config=config).evaluate(weather_eval_set())
+
+    assert_eval_passed(report, min_pass_rate=1.0)
+    assert_criterion_passed(report, "tool_name_match_score", min_score=1.0)
+
+
+@pytest.mark.needs_openai
+async def test_response_match_with_rouge_and_keywords(app, collector):
+    # Both criteria are token based, so they need no judge model.
+    config = EvalConfig(
+        criteria=CriteriaConfig(
+            rouge_match=CriterionConfig.rouge_match(threshold=0.3),
+            contains_keywords=CriterionConfig.contains_keywords(["sunny"], threshold=1.0),
+        ),
+        reporter=QUIET,
+    )
+    case = EvalCase.single_turn(
+        eval_id="nyc_weather_text",
+        user_query="What is the weather in New York City right now?",
+        expected_response="The weather in New York City is sunny",
+    )
+
+    result = await AgentEvaluator(app, collector, config=config).evaluate_case(case)
+
+    assert result.passed, [(c.criterion, c.score) for c in result.failed_criteria]
+
+
+@pytest.mark.needs_openai
+async def test_multi_turn_conversation(app, collector):
+    case = EvalCase.multi_turn(
+        eval_id="mt_followup",
+        conversation=[
+            ("What is the weather in London?", "The weather in London is sunny"),
+            ("Now a 3-day forecast for London.", "forecast for London"),
+        ],
+    )
+    config = EvalConfig(
+        criteria=CriteriaConfig(rouge_match=CriterionConfig.rouge_match(threshold=0.2)),
+        reporter=QUIET,
+    )
+
+    result = await AgentEvaluator(app, collector, config=config).evaluate_case(case)
+
+    assert result.passed, [(c.criterion, c.score) for c in result.failed_criteria]
+
+
+# ── Pytest helpers: eval files, per-case parametrisation ────────────────────
+
+
+@pytest.mark.needs_openai
+async def test_run_eval_from_file(app, collector):
+    config = EvalConfig(
+        criteria=CriteriaConfig(tool_name_match=CriterionConfig.tool_name_match()),
+        reporter=QUIET,
+    )
+
+    report = await run_eval(app, collector, EVAL_FILE, config=config)
+
+    assert_eval_passed(report)
+
+
+@pytest.mark.needs_openai
+@parametrize_eval_cases(EVAL_FILE)  # one pytest item per case in the file
+async def test_each_case(app, collector, eval_case):
+    config = EvalConfig(
+        criteria=CriteriaConfig(tool_name_match=CriterionConfig.tool_name_match()),
+        reporter=QUIET,
+    )
+
+    result = await AgentEvaluator(app, collector, config=config).evaluate_case(eval_case)
+
+    assert result.passed, [(c.criterion, c.score) for c in result.failed_criteria]
+```
+
+</TabItem>
+<TabItem label="test_llm_judge.py">
+
+```python
+"""LLM-as-judge criteria: LLMJudge, Rubric, Hallucination, Safety, ResponseMatch.
+
+The agent under test runs on OpenAI gpt-5-mini. The judge is a different company's
+model, Anthropic claude-sonnet-5-5, chosen per criterion with `judge_model=`.
+Run: pytest examples/evaluation/test_llm_judge.py -v
+(needs OPENAI_API_KEY and ANTHROPIC_API_KEY; the config tests run without keys)
+"""
+
+import pytest
+from conftest import assert_judged
+
+from tenxgraph.core.llm import detect_provider
+from tenxgraph.qa.evaluation import (
+    AgentEvaluator,
+    CriteriaConfig,
+    CriterionConfig,
+    EvalCase,
+    EvalConfig,
+    ReporterConfig,
+    Rubric,
+    ToolCall,
+)
+
+
+# The judge model is a plain string on each CriterionConfig. The default is
+# gemini-2.5-flash; every LLM criterion factory takes `judge_model` to change it.
+JUDGE = "claude-sonnet-5-5"
+
+WEATHER_CASE = EvalCase.single_turn(
+    eval_id="nyc_weather",
+    user_query="What is the weather in New York City right now?",
+    expected_response="The weather in New York City is sunny",
+    expected_tools=[ToolCall(name="get_weather")],
+)
+
+
+def judge_config() -> EvalConfig:
+    return EvalConfig(
+        criteria=CriteriaConfig(
+            llm_judge=CriterionConfig.llm_judge(threshold=0.6, judge_model=JUDGE, num_samples=1),
+            response_match=CriterionConfig.response_match(
+                threshold=0.6, judge_model=JUDGE, num_samples=1
+            ),
+            rubric_based=CriterionConfig.rubric_based(
+                rubrics=[
+                    Rubric.create(
+                        "relevance", "The answer addresses the city the user asked about."
+                    ),
+                    Rubric.create(
+                        "no_filler", "The answer is short and has no unrelated content.", 0.5
+                    ),
+                ],
+                threshold=0.5,
+                judge_model=JUDGE,
+            ),
+            # Hallucination checks the answer against what the tool actually returned.
+            hallucination=CriterionConfig.hallucination(
+                threshold=0.6, judge_model=JUDGE, num_samples=1
+            ),
+            safety=CriterionConfig.safety(threshold=0.6, judge_model=JUDGE, num_samples=1),
+        ),
+        reporter=ReporterConfig(enabled=False),
+    )
+
+
+def test_judge_model_is_set_per_criterion():
+    cfg = judge_config().criteria
+    assert cfg.llm_judge.judge_model == JUDGE
+    assert cfg.safety.judge_model == JUDGE
+    # Criteria that do not set it keep the default judge.
+    assert CriterionConfig.llm_judge().judge_model == "gemini-2.5-flash"
+    assert detect_provider(JUDGE) == "anthropic"
+
+
+@pytest.mark.needs_openai
+@pytest.mark.needs_anthropic
+async def test_all_judges_pass_on_a_grounded_answer(app, collector):
+    evaluator = AgentEvaluator(app, collector, config=judge_config())
+
+    result = await evaluator.evaluate_case(WEATHER_CASE)
+
+    assert_judged(result)
+    for cr in result.criterion_results:
+        print(f"{cr.criterion}: {cr.score:.2f} ({'pass' if cr.passed else 'fail'})")
+    assert result.passed, [(c.criterion, c.score) for c in result.failed_criteria]
+
+
+@pytest.mark.needs_openai
+@pytest.mark.needs_anthropic
+async def test_safety_flags_nothing_for_a_benign_question(app, collector):
+    config = EvalConfig(
+        criteria=CriteriaConfig(
+            safety=CriterionConfig.safety(threshold=0.8, judge_model=JUDGE, num_samples=1)
+        ),
+        reporter=ReporterConfig(enabled=False),
+    )
+    case = EvalCase.single_turn(
+        eval_id="benign",
+        user_query="What is the capital of Germany?",
+        expected_response="Berlin",
+    )
+
+    result = await AgentEvaluator(app, collector, config=config).evaluate_case(case)
+
+    assert_judged(result)
+    assert result.passed
+```
+
+</TabItem>
+<TabItem label="test_user_simulator.py">
+
+```python
+"""UserSimulator: let a second model play the user against the weather agent.
+
+The agent under test is OpenAI gpt-5-mini. The simulated user (and the goals judge)
+is Google gemini-2.5-flash, so two companies talk to each other here.
+Run: pytest examples/evaluation/test_user_simulator.py -v
+(needs OPENAI_API_KEY and GEMINI_API_KEY; the summary test runs without keys)
+"""
+
+import pytest
+
+from tenxgraph.qa.evaluation import (
+    BatchSimulator,
+    ConversationScenario,
+    CriterionConfig,
+    SimulationGoalsCriterion,
+    SimulationResult,
+    UserSimulator,
+)
+
+
+TOKYO_TRIP = ConversationScenario(
+    scenario_id="tokyo_trip",
+    description="A traveller wants the current weather in Tokyo",
+    starting_prompt="I'm thinking of visiting Tokyo soon. Can you help?",
+    conversation_plan=(
+        "1. Hint at travel interest\n"
+        "2. Ask for the current Tokyo weather\n"
+        "3. Confirm the answer is enough"
+    ),
+    goals=["Get the current weather for Tokyo"],
+    max_turns=4,
+)
+
+CAPITAL_QUIZ = ConversationScenario(
+    scenario_id="capital_quiz",
+    description="A user asks a general knowledge question that needs no tool",
+    starting_prompt="What is the capital of France?",
+    conversation_plan="1. Ask the question\n2. Thank the agent",
+    goals=["Learn that Paris is the capital of France"],
+    max_turns=2,
+)
+
+
+def goals_judge(threshold: float = 0.5) -> SimulationGoalsCriterion:
+    # SimulationGoalsCriterion reads the whole transcript, so it only works inside
+    # UserSimulator. Its judge model is gemini-2.5-flash unless judge_model is set.
+    return SimulationGoalsCriterion(config=CriterionConfig(threshold=threshold))
+
+
+def test_batch_summary_counts_results():
+    results = [
+        SimulationResult(scenario_id="a", turns=2, completed=True, goals_achieved=["g1"]),
+        SimulationResult(scenario_id="b", turns=4, completed=False, error="agent error"),
+    ]
+
+    summary = BatchSimulator().summary(results)
+
+    assert summary["total_scenarios"] == 2
+    assert summary["completed"] == 1
+    assert summary["errors"] == 1
+    assert summary["average_turns"] == 3
+
+
+@pytest.mark.needs_openai
+@pytest.mark.needs_gemini
+async def test_conversation_has_both_roles(app):
+    simulator = UserSimulator(model="gemini-2.5-flash", max_turns=4)
+
+    result = await simulator.run(app, TOKYO_TRIP)
+
+    assert result.error is None
+    assert {m["role"] for m in result.conversation} == {"user", "assistant"}
+    assert result.criterion_scores == {}  # no criteria were attached
+
+
+@pytest.mark.needs_openai
+@pytest.mark.needs_gemini
+async def test_goals_are_scored(app):
+    simulator = UserSimulator(model="gemini-2.5-flash", criteria=[goals_judge()])
+
+    result = await simulator.run(app, TOKYO_TRIP)
+
+    score = result.criterion_scores["simulation_goals"]
+    assert score >= 0.5, result.criterion_details
+    assert result.goals_achieved
+
+
+@pytest.mark.needs_openai
+@pytest.mark.needs_gemini
+async def test_batch_runs_every_scenario(app):
+    simulator = UserSimulator(model="gemini-2.5-flash", criteria=[goals_judge()])
+    batch = BatchSimulator(simulator=simulator, max_concurrency=2)
+
+    results = await batch.run_batch(app, [TOKYO_TRIP, CAPITAL_QUIZ])
+
+    assert [r.scenario_id for r in results] == ["tokyo_trip", "capital_quiz"]
+    assert batch.summary(results)["errors"] == 0
+```
+
+</TabItem>
+<TabItem label="quick_eval.py">
+
+```python
+"""QuickEval: evaluate the weather agent in a few lines.
+
+QuickEval builds the dataset, picks a preset EvalConfig, runs the evaluator, and
+prints a console report. Good for a first check before writing a full suite.
+Run: python examples/evaluation/quick_eval.py   (needs OPENAI_API_KEY)
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+from weather_agent import build_eval_app
+
+from tenxgraph.qa.evaluation import EvalPresets, EvalSetBuilder, QuickEval, ToolCall
+
+
+async def main() -> None:
+    load_dotenv()
+    app, collector = build_eval_app()
+
+    # 1. One query, one check on the reply text (ROUGE-1, no judge model). Passing
+    #    expected_tools here would also enable an LLM response_match, whose default
+    #    judge is gemini-2.5-flash, so tool checks live in step 3 instead.
+    await QuickEval.check(
+        app,
+        collector,
+        query="What is the weather in London?",
+        expected_response_contains="The weather in London is sunny",
+    )
+
+    # 2. Many (query, expected response) pairs, scored with ROUGE-1 (no judge model).
+    await QuickEval.batch(
+        app,
+        collector,
+        [
+            ("What is the weather in Paris?", "The weather in Paris is sunny"),
+            ("What is the weather in Rome?", "The weather in Rome is sunny"),
+        ],
+        threshold=0.5,
+    )
+
+    # 3. Tool usage only: (query, expected response, expected tools).
+    await QuickEval.tool_usage(
+        app,
+        collector,
+        [
+            ("Give me a 3-day forecast for Oslo.", "forecast for Oslo", ["get_forecast"]),
+            ("What is the capital of Spain?", "Madrid", []),
+        ],
+        strict=False,
+    )
+
+    # 4. A builder plus combined presets. Neither preset uses a judge model.
+    builder = EvalSetBuilder("weather_builder").add_case(
+        "What is the weather in Cairo?",
+        "The weather in Cairo is sunny",
+        expected_tools=[ToolCall(name="get_weather", args={"location": "Cairo"})],
+    )
+    config = EvalPresets.combine(EvalPresets.quick_check(), EvalPresets.tool_usage(strict=False))
+    report = await QuickEval.from_builder(app, collector, builder, config=config)
+    print(f"pass rate: {report.summary.pass_rate:.0%}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="reporters.py">
+
+```python
+"""Report an evaluation: Console, JSON, HTML and JUnit XML reporters.
+
+The report here is built by hand, so this script needs no API key and no LLM.
+With a real run you get the same `EvalReport` back from `AgentEvaluator.evaluate()`.
+Run: python examples/evaluation/reporters.py   (writes to eval_reports/example/)
+"""
+
+from pathlib import Path
+
+from tenxgraph.qa.evaluation import (
+    ConsoleReporter,
+    CriterionResult,
+    EvalCaseResult,
+    EvalReport,
+    HTMLReporter,
+    JSONReporter,
+    JUnitXMLReporter,
+    ReporterConfig,
+    ReporterManager,
+    ToolCall,
+)
+
+
+def sample_report() -> EvalReport:
+    passing = EvalCaseResult.success(
+        eval_id="nyc_weather",
+        name="NYC weather",
+        criterion_results=[
+            CriterionResult.success("tool_name_match_score", 1.0, threshold=1.0),
+            CriterionResult.success("rouge_match", 0.92, threshold=0.5),
+        ],
+        actual_tool_calls=[ToolCall(name="get_weather", args={"location": "New York City"})],
+        actual_response="The weather in New York City is sunny.",
+        duration_seconds=2.4,
+    )
+    failing = EvalCaseResult.success(
+        eval_id="capital",
+        name="Capital, no tool",
+        criterion_results=[
+            CriterionResult.success("tool_name_match_score", 0.0, threshold=1.0),
+        ],
+        actual_response="Berlin is the capital of Germany.",
+        duration_seconds=1.1,
+    )
+    return EvalReport.create(
+        eval_set_id="weather_demo",
+        eval_set_name="Weather demo",
+        results=[passing, failing],
+    )
+
+
+def main() -> None:
+    report = sample_report()
+    out = Path("eval_reports/example")
+
+    # Console: colour is on by default; turn it off for CI logs.
+    ConsoleReporter(use_color=False, verbose=True, include_actual_response=True).report(report)
+
+    # Files: each reporter has save(report, path); to_json()/to_html()/to_xml() return strings.
+    JSONReporter(indent=2).save(report, str(out / "report.json"))
+    HTMLReporter().save(report, str(out / "report.html"))
+    JUnitXMLReporter(suite_name="weather-agent").save(report, str(out / "junit.xml"))
+
+    # The evaluator does the same for you when EvalConfig.reporter is enabled. This is
+    # the manager it uses, driven by a ReporterConfig.
+    output = ReporterManager(
+        ReporterConfig(console=False, junit_xml=True, output_dir=str(out / "managed"))
+    ).run_all(report)
+    print("files written by ReporterManager:", output.generated_files)
+
+    print(f"pass rate {report.summary.pass_rate:.0%}; files in {out}/")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</TabItem>
+<TabItem label="eval_weather.py">
+
+```python
+"""Entry point for the `10xgraph eval` command.
+
+The CLI discovers files named `*_eval.py` or `eval_*.py`, takes the module-level
+`app` (a compiled graph), `get_eval_set()` and `EVAL_CONFIG`, then writes console,
+JSON and HTML reports. Run from the repo root: 10xgraph eval examples/evaluation/eval_weather.py
+(needs OPENAI_API_KEY)
+"""
+
+from pathlib import Path
+
+from dotenv import load_dotenv
+from weather_agent import build_agent
+
+from tenxgraph.qa.evaluation import (
+    CriteriaConfig,
+    CriterionConfig,
+    EvalConfig,
+    EvalSet,
+    MatchType,
+)
+
+
+load_dotenv()
+
+# The CLI attaches its own trajectory collector, so compile without one here.
+app = build_agent().compile()
+
+EVAL_CONFIG = EvalConfig(
+    criteria=CriteriaConfig(
+        tool_name_match=CriterionConfig.tool_name_match(threshold=1.0),
+        trajectory=CriterionConfig.trajectory(threshold=1.0, match_type=MatchType.IN_ORDER),
+    )
+)
+
+
+def get_eval_set() -> EvalSet:
+    return EvalSet.from_file(str(Path(__file__).parent / "weather.evalset.json"))
+```
+
+</TabItem>
+<TabItem label="weather.evalset.json">
+
+```json
+{
+  "eval_set_id": "d3e29848-36fa-45bc-a304-834ed1c4fa0f",
+  "name": "weather_trajectory",
+  "description": "",
+  "eval_cases": [
+    {
+      "eval_id": "nyc_weather",
+      "name": "",
+      "description": "",
+      "conversation": [
+        {
+          "invocation_id": "a66b69b8-0d94-4772-8972-925736410b28",
+          "user_content": {
+            "role": "user",
+            "content": "What is the weather in New York City right now?",
+            "metadata": {}
+          },
+          "expected_tool_trajectory": [
+            {
+              "name": "get_weather",
+              "args": {
+                "location": "New York City"
+              },
+              "call_id": null,
+              "result": null
+            }
+          ],
+          "expected_node_order": [],
+          "expected_intermediate_responses": [],
+          "expected_final_response": {
+            "role": "assistant",
+            "content": "The weather in New York City is sunny",
+            "metadata": {}
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "",
+        "user_id": "test_user",
+        "state": {},
+        "config": {}
+      },
+      "tags": [],
+      "metadata": {}
+    },
+    {
+      "eval_id": "tokyo_forecast",
+      "name": "",
+      "description": "",
+      "conversation": [
+        {
+          "invocation_id": "fd7826c5-3212-4cdf-9166-2134a3e9e1aa",
+          "user_content": {
+            "role": "user",
+            "content": "Give me a 3-day forecast for Tokyo.",
+            "metadata": {}
+          },
+          "expected_tool_trajectory": [
+            {
+              "name": "get_forecast",
+              "args": {},
+              "call_id": null,
+              "result": null
+            }
+          ],
+          "expected_node_order": [],
+          "expected_intermediate_responses": [],
+          "expected_final_response": {
+            "role": "assistant",
+            "content": "3-day forecast for Tokyo: sunny, cloudy, sunny",
+            "metadata": {}
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "",
+        "user_id": "test_user",
+        "state": {},
+        "config": {}
+      },
+      "tags": [],
+      "metadata": {}
+    },
+    {
+      "eval_id": "no_tool",
+      "name": "",
+      "description": "",
+      "conversation": [
+        {
+          "invocation_id": "de6d84d2-4011-4a0b-8846-ab21c71497c6",
+          "user_content": {
+            "role": "user",
+            "content": "What is the capital of Germany?",
+            "metadata": {}
+          },
+          "expected_tool_trajectory": [],
+          "expected_node_order": [],
+          "expected_intermediate_responses": [],
+          "expected_final_response": {
+            "role": "assistant",
+            "content": "Berlin",
+            "metadata": {}
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "",
+        "user_id": "test_user",
+        "state": {},
+        "config": {}
+      },
+      "tags": [],
+      "metadata": {}
+    }
+  ],
+  "metadata": {}
+}
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/evaluation](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/evaluation)
+
+## Expected output
+
+Illustrative:
+
+```text
+$ pytest examples/evaluation -v -c examples/evaluation/pytest.ini
+test_trajectory.py::test_eval_set_round_trips_through_json PASSED
+test_trajectory.py::test_non_llm_criteria_on_scripted_agent PASSED
+test_trajectory.py::test_tool_trajectory_for_weather_agent SKIPPED (OPENAI_API_KEY is not set)
+...
+7 passed, 12 skipped
+```
+
+With `OPENAI_API_KEY` set, `reporters.py` prints a report like this:
+
+```text
+Evaluation Report: Weather demo
+  Total Cases:  2
+  Passed:       1 (50.0%)
+  tool_name_match_score: 1/2 passed, avg score: 0.50
+  PASS NYC weather (2.40s)
+  FAIL Capital, no tool (1.10s)
+```
+
+<Callout type="tip" title="Using a different model">
+Change the string where it is used: `model="gpt-5-mini"` in `weather_agent.py`, `judge_model=` in `test_llm_judge.py`, and `model=` in `UserSimulator`. Install the matching extra (`openai`, `google-genai`, `anthropic`) and set its key. Swap the markers on the tests to match the keys they need.
+</Callout>
+
+## Next steps
+
+- [Testing](/docs/examples/testing) runs the same graphs offline with `TestAgent` and mock tools.
+- [Serving](/docs/examples/serving) puts an agent behind the API that `10xgraph eval` can also load from `10xgraph.json`.

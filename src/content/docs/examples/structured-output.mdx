@@ -1,0 +1,306 @@
+---
+title: "Structured Output with Pydantic in 10xGraph Agents"
+seoTitle: "Structured output with Pydantic"
+description: "Get typed Pydantic output from a 10xGraph Python AI agent with output_schema, or use StructuredOutputAgent to validate replies and retry with repair prompts."
+section: Examples
+group: "Memory and patterns"
+order: 29
+label: "Structured output"
+updated: "2026-10-28"
+faq:
+  - q: "What is the difference between output_schema and StructuredOutputAgent?"
+    a: "output_schema asks the provider to answer in a schema in one call. StructuredOutputAgent adds a validation step after generation and, if the reply does not match, sends the error back to the model and retries up to max_attempts times."
+  - q: "What happens when max_attempts is reached?"
+    a: "The graph ends and returns the last reply even if it is invalid. Validate the text yourself, as structured_output_agent.py does with model_validate_json."
+  - q: "Can structured output be combined with tools?"
+    a: "Yes. StructuredOutputAgent routes tool calls to a ToolNode and back to generation before it validates the final reply."
+  - q: "Does output_schema work with image or audio output?"
+    a: "No. output_schema requires text output, and Agent raises a ValueError for output_type image, video or audio."
+---
+
+This example returns typed data instead of free text. One script uses `output_schema` on a `ReactAgent` to get a `MovieReview` object from a single call. The other uses `StructuredOutputAgent` to fetch weather with a tool, validate the reply and retry with a repair prompt. Both use OpenAI `gpt-5-mini`.
+
+## What you will build
+
+Two scripts that return typed data instead of free text. The first uses `output_schema` on a `ReactAgent` to get a `MovieReview` object from one model call. The second uses `StructuredOutputAgent` to fetch weather with a tool and return a validated `WeatherReport`, retrying with a repair prompt when the reply does not match the schema.
+
+## Key concepts
+
+- `output_schema`: a Pydantic model (or schema dict) passed to `Agent` or `ReactAgent`. The provider is asked to answer in that shape.
+- `Message.parsed_content`: the parsed object when the provider returns one. `Message.text()` always has the JSON text.
+- `StructuredOutputAgent`: prebuilt GENERATE, validate, REPAIR loop with an optional tool node.
+- `max_attempts`: how many repair retries are allowed per turn.
+- `repair_system_prompt`: optional. If set, repair uses a dedicated model call instead of an injected correction message.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+```
+
+```bash
+pip install "10xgraph[openai]" python-dotenv
+export OPENAI_API_KEY="your-key"
+```
+
+Both scripts use `gpt-5-mini`.
+
+```bash
+python examples/structured_output/agent_output_schema.py
+python examples/structured_output/structured_output_agent.py
+```
+
+## How the code works
+
+### agent_output_schema.py
+
+```python
+class MovieReview(BaseModel):
+    title: str = Field(description="Movie title")
+    director: str = Field(description="Director's name")
+    year: int = Field(description="Release year")
+    rating: float = Field(description="Rating from 0.0 to 10.0")
+    summary: str = Field(description="One-sentence summary")
+```
+
+The schema is a normal Pydantic model. The `Field(description=...)` text is sent to the provider, so it helps the model fill each field correctly.
+
+```python
+    agent = ReactAgent(
+        model="gpt-5-mini",
+        output_schema=MovieReview,
+        system_prompt=[{"role": "system", "content": "You are a film critic."}],
+    )
+```
+
+`ReactAgent` forwards `output_schema` to its inner `Agent`. It only applies to text output. The same `Agent(output_schema=...)` argument works when you build your own `StateGraph`.
+
+```python
+    last = result["messages"][-1]
+
+    # parsed_content is the validated object when the provider returns one. Fall back to
+    # validating the JSON text so the example works across providers.
+    if isinstance(last.parsed_content, MovieReview):
+        review = last.parsed_content
+    else:
+        review = MovieReview.model_validate_json(last.text())
+```
+
+The last message holds the result. The script uses `parsed_content` when it is a `MovieReview` and otherwise validates the JSON text, so the same code works on providers that return text only.
+
+### structured_output_agent.py
+
+```python
+class WeatherReport(BaseModel):
+    city: str
+    temperature_celsius: float
+    condition: str
+    humidity_percent: int
+    advice: Literal["umbrella", "sunscreen", "jacket", "none"]
+```
+
+`advice` is a `Literal`, so a reply with any other value fails validation and triggers a repair.
+
+```python
+    agent = StructuredOutputAgent(
+        model="gpt-5-mini",
+        output_schema=WeatherReport,
+        tools=[get_current_weather],
+        system_prompt=[
+            {
+                "role": "system",
+                "content": "Fetch the weather with the tool, then answer with a WeatherReport.",
+            }
+        ],
+        # Repair attempts per turn. After that, the last reply is returned as it is,
+        # so check validity before trusting it (done below).
+        max_attempts=3,
+    )
+    app = agent.compile()
+```
+
+The graph is `GENERATE`, then a routing check. A tool call goes to `TOOL` and back. A valid reply ends the run. An invalid reply goes to `REPAIR`, which adds a user message with the validation error and the target JSON Schema, then back to `GENERATE`. After `max_attempts` repairs the agent returns what it has.
+
+```python
+    try:
+        report = WeatherReport.model_validate_json(last.text())
+    except ValueError as exc:
+        print("model never produced valid output:", exc)
+    else:
+        print(f"{report.city}: {report.temperature_celsius} C, {report.condition}")
+        print(f"humidity {report.humidity_percent}%, advice: {report.advice}")
+```
+
+Because the last reply may still be invalid, the script validates it with `model_validate_json` and handles the failure case.
+
+## Full code
+
+<Tabs>
+<TabItem label="agent_output_schema.py">
+
+```python
+"""Structured output with output_schema: get a typed Pydantic object back from an agent.
+
+Pass a Pydantic model as `output_schema` and the provider is asked to answer in that
+shape. The parsed object is on `Message.parsed_content`; the JSON text is also in the
+message. ReactAgent forwards `output_schema` to its inner Agent.
+
+Run: python examples/structured_output/agent_output_schema.py   (needs OPENAI_API_KEY)
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+
+
+load_dotenv()
+
+
+class MovieReview(BaseModel):
+    title: str = Field(description="Movie title")
+    director: str = Field(description="Director's name")
+    year: int = Field(description="Release year")
+    rating: float = Field(description="Rating from 0.0 to 10.0")
+    summary: str = Field(description="One-sentence summary")
+
+
+async def main() -> None:
+    # output_schema only applies to text output. The same Agent(output_schema=...) argument
+    # works when you build your own StateGraph.
+    agent = ReactAgent(
+        model="gpt-5-mini",
+        output_schema=MovieReview,
+        system_prompt=[{"role": "system", "content": "You are a film critic."}],
+    )
+    app = agent.compile()
+
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("Review The Matrix (1999).")]},
+        config={"thread_id": "review-1"},
+    )
+    last = result["messages"][-1]
+
+    # parsed_content is the validated object when the provider returns one. Fall back to
+    # validating the JSON text so the example works across providers.
+    if isinstance(last.parsed_content, MovieReview):
+        review = last.parsed_content
+    else:
+        review = MovieReview.model_validate_json(last.text())
+
+    print(f"{review.title} ({review.year}) directed by {review.director}")
+    print(f"rating: {review.rating}/10")
+    print(f"summary: {review.summary}")
+
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="structured_output_agent.py">
+
+```python
+"""StructuredOutputAgent: validate the answer and ask the model to repair it if it is wrong.
+
+The agent runs GENERATE, checks the reply against your schema, and on failure injects
+the validation error plus the target JSON Schema and tries again, up to `max_attempts`
+repairs per turn. Tools can be used inside the same loop before the final answer.
+
+Run: python examples/structured_output/structured_output_agent.py   (needs OPENAI_API_KEY)
+"""
+
+import asyncio
+import json
+from typing import Literal
+
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import StructuredOutputAgent
+
+
+load_dotenv()
+
+
+class WeatherReport(BaseModel):
+    city: str
+    temperature_celsius: float
+    condition: str
+    humidity_percent: int
+    advice: Literal["umbrella", "sunscreen", "jacket", "none"]
+
+
+def get_current_weather(city: str) -> str:
+    """Return raw weather data for a city as JSON."""
+    return json.dumps({"city": city, "temp_c": 22.5, "condition": "partly cloudy", "humidity": 68})
+
+
+async def main() -> None:
+    agent = StructuredOutputAgent(
+        model="gpt-5-mini",
+        output_schema=WeatherReport,
+        tools=[get_current_weather],
+        system_prompt=[
+            {
+                "role": "system",
+                "content": "Fetch the weather with the tool, then answer with a WeatherReport.",
+            }
+        ],
+        # Repair attempts per turn. After that, the last reply is returned as it is,
+        # so check validity before trusting it (done below).
+        max_attempts=3,
+    )
+    app = agent.compile()
+
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("What is the weather in Paris today?")]},
+        config={"thread_id": "weather-1"},
+    )
+    last = result["messages"][-1]
+
+    try:
+        report = WeatherReport.model_validate_json(last.text())
+    except ValueError as exc:
+        print("model never produced valid output:", exc)
+    else:
+        print(f"{report.city}: {report.temperature_celsius} C, {report.condition}")
+        print(f"humidity {report.humidity_percent}%, advice: {report.advice}")
+
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/structured_output](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/structured_output)
+
+## Expected output
+
+Illustrative output of `structured_output_agent.py`:
+
+```text
+Paris: 22.5 C, partly cloudy
+humidity 68%, advice: sunscreen
+```
+
+## Using a different model
+
+Change the model string and install the matching extra. For Gemini use `model="gemini-2.5-flash"` with `pip install "10xgraph[google-genai]"` and `GEMINI_API_KEY`. For Anthropic use `model="claude-sonnet-5-5"` with `pip install "10xgraph[anthropic]"` and `ANTHROPIC_API_KEY`.
+
+## Next steps
+
+- [Multi-agent](/docs/examples/multi-agent) combines agents from different providers in one graph.
+- [Callbacks](/docs/examples/callbacks) validates input before it reaches the model.
+- [Evaluation](/docs/examples/evaluation) scores structured answers against expected values.

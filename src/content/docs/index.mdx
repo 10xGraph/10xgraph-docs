@@ -4,10 +4,10 @@ seoTitle: 10xGraph documentation and introduction
 description: "10xGraph is an open-source Python framework for production multi-agent AI: a core library, an API server and CLI, and a TypeScript client."
 section: "Get started"
 order: 0
-updated: "2026-10-08"
+updated: "2026-10-28"
 faq:
   - q: "Is 10xGraph production-ready?"
-    a: "10xGraph is pre-1.0, so pin versions and read the changelog before each upgrade. The production layer (API server, JWT or custom auth, rate limits, replay-safe tools, Docker and Kubernetes files) ships as the `10xgraph-api` package alongside the core library."
+    a: "Yes. 10xScale runs its own AI products on it, and the production layer ships as the `10xgraph-api` package alongside the core library. Most production behavior is a key in `10xgraph.json` or an environment variable, so you tune it without touching agent code. Security: JWT or custom auth, owner-only threads or a custom authorization backend, prompt-injection and lifecycle validators, security headers, and a `MODE=production` that refuses unsafe CORS and short JWT secrets. Reliability: replay-safe tool calls, versioned state writes, node and tool timeouts, and thread state cached in Redis and stored in PostgreSQL. Scale: sliding-window rate limits by IP, user or globally, in memory, Redis or a custom backend, and multiple workers and instances that share PostgreSQL and Redis. Operations: `10xgraph build` writes Docker and Kubernetes files that let in-flight runs finish during a rolling deploy, `10xgraph audit` can gate CI, and errors and traces go to Sentry, OpenTelemetry, Logfire or LangSmith. 10xGraph is pre-1.0, so pin versions and read the changelog before each upgrade."
   - q: "Do I need LangChain to use 10xGraph?"
     a: "No. 10xGraph has no LangChain dependency. You build graphs with its own StateGraph and Agent classes and call model providers through its own interface."
   - q: "Which models does 10xGraph support?"
@@ -18,13 +18,17 @@ faq:
 
 10xGraph is an open-source Python framework for production multi-agent AI. You build agents and graphs in Python; 10xGraph generates a production server that handles authentication, scoped access control, durable state, replay-safe tools, and deployment to Docker or Kubernetes. It has three packages: a core library, an API server and CLI, and a TypeScript client.
 
+<Callout type="note" title="Why 10xGraph: you build the agent, we ship the server">
+Most frameworks stop at the graph. 10xGraph gives you the production API server too: secure by default, horizontally scalable and ready to deploy, with every part (authentication, authorization, rate limits, storage) replaceable. [See what the server does for you and how to customize it](/docs/get-started/why-10xgraph).
+</Callout>
+
 ## The three packages
 
 10xGraph ships as three packages that work together or standalone.
 
 **Core library** (`10xgraph`, import `tenxgraph`) is the foundation. You use `StateGraph` to define a graph of agents and nodes, `ReactAgent` for the standard tool-calling loop, and custom nodes for control flow, human approval, or data transformation. Tools are ordinary Python functions. Models come from OpenAI, Google Gemini, or Anthropic. The library handles state management, checkpointing to memory, SQLite or Postgres, tool replay on failure, streaming, MCP servers, and dependency injection. Its required dependencies are small (InjectQ, Pydantic, Pillow, PyYAML and python-dotenv), and you add the provider SDK you choose as an extra, such as `10xgraph[openai]`. You can run your agent entirely within Python with no server.
 
-**API server and CLI** (`10xgraph-api`, import `tenxgraph_api`, command `10xgraph`) wraps your graph in a FastAPI server. You point `10xgraph.json` at your compiled graph, and the server auto-generates REST and WebSocket endpoints, Swagger UI, authentication, rate limits, thread and memory management, file uploads, and observability hooks. The `10xgraph` CLI scaffolds a new project, runs the server in development or production, serves the built-in playground, tests your agent, evaluates against test sets, and generates Docker and Kubernetes files. Running `10xgraph api` starts the server on port 8000.
+**API server and CLI** (`10xgraph-api`, import `tenxgraph_api`, command `10xgraph`) wraps your graph in a FastAPI server. You point `10xgraph.json` at your compiled graph, and the server auto-generates REST and WebSocket endpoints, Swagger UI, authentication, rate limits, thread and memory management, file uploads, and observability hooks. The `10xgraph` CLI scaffolds a new project, runs the server in development or production, serves the built-in playground, tests your agent, evaluates against test sets, and generates Docker and Kubernetes files. Running `10xgraph dev` starts the server on port 8000 and opens the playground.
 
 **TypeScript client** (`10xgraph-client`) is a typed SDK for Node.js and browsers. It handles authentication, invokes the graph over REST or WebSocket, streams responses, manages threads and memory, uploads files, and abstracts the transport. It works with Next.js, React, plain TypeScript and Node backends. You can also call the server with plain HTTP or curl.
 
@@ -38,12 +42,16 @@ The fastest path depends on what you want to build.
 Start with [Get Started](/docs/get-started) for installation, a quickstart agent, and what the production template generates. Then move to [Concepts](/docs/concepts) to understand state, checkpointing, and the runtime model.
 </Callout>
 
+<Callout type="tip" title="Learn directly from examples">
+Prefer reading code? Every feature has a runnable example: clone the repository, add one API key, run one file. Start with the [quickstart](/docs/examples/quickstart), try a production feature like [human-in-the-loop approval](/docs/examples/human-in-the-loop), or open a full app like the [RAG assistant](/docs/examples/rag-assistant). [Browse all examples](/docs/examples).
+</Callout>
+
 <Callout type="tip" title="Coming from LangGraph?">
 10xGraph is inspired by LangGraph but simpler. Read [10xGraph vs LangGraph](/docs/compare/10xgraph-vs-langgraph) for a side-by-side comparison. Then follow the [quickstart](/docs/get-started/first-agent) and read [Concepts](/docs/concepts) to see how `StateGraph` and streaming map across.
 </Callout>
 
 <Callout type="tip" title="Ready to deploy to production?">
-Begin with [Server](/docs/server) to understand the API server and CLI. Then tackle [authentication](/docs/server/auth), [durable checkpointing](/docs/guides/set-up-checkpointing), and [deployment](/docs/server/deploy). Read [Replay-safe tools](/docs/concepts/replay-safe-tools) before giving your agent tools that move money or send email.
+Read [Why 10xGraph](/docs/get-started/why-10xgraph) for what the server gives you and where its limits are. Then go to [Server](/docs/server) to understand the API server and CLI. Then tackle [authentication](/docs/server/auth), [durable checkpointing](/docs/guides/set-up-checkpointing), and [deployment](/docs/server/deploy). Read [Replay-safe tools](/docs/concepts/replay-safe-tools) before giving your agent tools that move money or send email.
 </Callout>
 
 ## What the docs cover

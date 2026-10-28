@@ -1,0 +1,341 @@
+---
+title: "Dependency Injection in 10xGraph Agents with InjectQ"
+seoTitle: "Dependency injection in 10xGraph agents"
+description: "Register your own services in an InjectQ container, receive them in 10xGraph tools and nodes with Inject[T], and swap them in tests with rebinding or override_node."
+section: Examples
+group: "Tools and integrations"
+order: 16
+label: "Dependency injection"
+updated: "2026-10-28"
+faq:
+  - q: "How do I give a tool access to a database client in 10xGraph?"
+    a: "Bind the client in an InjectQ container, pass the container to StateGraph or ReactAgent with container=..., and declare the tool parameter as client: Client = Inject[Client]. The parameter is filled at call time and does not appear in the tool schema the model sees."
+  - q: "Why call fresh() on an Inject default?"
+    a: "An Inject[T] default caches the first object it resolves for the whole process. fresh() resolves it from the active container on each call, so a rebound service or a graph with its own container is picked up."
+  - q: "How do I replace a service in tests?"
+    a: "Build a container that binds a fake implementation, or replace a whole node with graph.override_node(\"MAIN\", fake_fn) before compile()."
+---
+
+Tools and nodes often need things the model should never see: a database client, settings, an HTTP session. 10xGraph uses an `InjectQ` container for this. You bind your services once, and functions receive them through `Inject[...]` defaults. This example builds an order-lookup agent on `gpt-5-mini` and then shows how to swap the services for tests.
+
+## What you will build
+
+A small order-lookup agent. An `OrderRepository` (a fake database) and a `Settings` object live in an InjectQ container. A tool reads them through `Inject[...]` defaults, and a hand-written node does the same. A second script swaps the repository for a test double and replaces the model node, without calling an LLM.
+
+## Key concepts
+
+- `InjectQ()` and `bind_instance(Type, obj)`: your own container and the services in it.
+- `StateGraph(container=...)` and `ReactAgent(container=...)`: make the graph use that container.
+- `Inject[T]`: a parameter default that is filled from the container. Inject parameters are not part of the tool schema.
+- `fresh(value)` from `tenxgraph.utils.injection`: resolve an `Inject[...]` default from the active container on every call.
+- `graph.override_node(name, fn)`: replace a node before `compile()`, for tests.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[openai]" python-dotenv
+export OPENAI_API_KEY=...    # only for di.py
+
+python examples/dependency_injection/di.py
+python examples/dependency_injection/nodes.py
+```
+
+`nodes.py` needs no key.
+
+## How the code works
+
+### di.py
+
+`build_container` creates the container and registers the services:
+
+```python
+def build_container(repo: OrderRepository | None = None) -> InjectQ:
+    container = InjectQ()
+    container.bind_instance(Settings, Settings())
+    container.bind_instance(OrderRepository, repo or OrderRepository())
+    return container
+```
+
+The optional `repo` argument is the hook for tests: pass a fake and it is bound instead of the real one.
+
+The tool declares what it needs as `Inject[...]` defaults. The model supplies only `customer`:
+
+```python
+def list_orders(
+    customer: str,
+    repo: OrderRepository = Inject[OrderRepository],
+    settings: Settings = Inject[Settings],
+) -> str:
+    """List the recent orders of a customer."""
+    repo, settings = fresh(repo), fresh(settings)
+```
+
+Parameters with an `Inject[...]` default are filled from the container and left out of the tool schema. `fresh()` resolves them from the active container on every call. Without it, the first resolution is cached for the whole process, which breaks rebinding in tests.
+
+The agent receives the container, and the graph activates it when it is built:
+
+```python
+return ReactAgent(
+    model="gpt-5-mini",
+    system_prompt=[{"role": "system", "content": "Answer questions about customer orders."}],
+    tools=[list_orders],
+    container=container,  # the graph activates this container when it is built
+)
+```
+
+### nodes.py
+
+Graph nodes take injected services too. `planner` is a scripted stand-in for the model, so no API key is needed:
+
+```python
+async def planner(
+    state: AgentState,
+    config: dict,
+    settings: Settings = Inject[Settings],
+) -> Message:
+```
+
+It asks for alice's orders first, then summarises the tool result using `settings.currency`. `build_graph` wires it like the ReAct loop, with `StateGraph(container=container)`, a `MAIN` node, a `TOOL` node holding `list_orders`, and a conditional edge.
+
+`FakeRepository` is a test double with fixed data. The `main` function runs the same graph three ways:
+
+```python
+# Production wiring.
+await run(build_container(), "real")
+
+# Test wiring: bind a different implementation, or swap a whole node with override_node.
+await run(build_container(repo=FakeRepository()), "fake-repo")
+
+graph = build_graph(build_container())
+stub = Message.text_message("stub", role="assistant")
+graph.override_node("MAIN", lambda state, config: stub)
+```
+
+1. With the real `OrderRepository`.
+2. With `build_container(repo=FakeRepository())`, which binds a test double. The tool code is unchanged.
+3. With `graph.override_node("MAIN", ...)` replacing the model node by a stub, before `compile()`.
+
+Each graph gets its own container, so the runs do not affect each other. That is also why `fresh()` is needed in functions that use `Inject` defaults.
+
+### Using a different model
+
+`di.py` uses `gpt-5-mini`. Change the string to `gemini-2.5-flash` (`pip install "10xgraph[google-genai]"`) or `claude-sonnet-5-5` (`pip install "10xgraph[anthropic]"`) and set that key. The container code does not change.
+
+## Full code
+
+<Tabs>
+<TabItem label="di.py">
+
+```python
+"""Register your own services and receive them in tools and nodes with Inject[T].
+
+A fake repository and a settings object go into an InjectQ container. The container is passed
+to ReactAgent, and a tool receives the services as Inject[...] defaults.
+Run: OPENAI_API_KEY=... python examples/dependency_injection/di.py
+"""
+
+import asyncio
+from dataclasses import dataclass
+
+from dotenv import load_dotenv
+from injectq import Inject, InjectQ
+
+from tenxgraph.core.state import Message
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.utils.injection import fresh
+
+
+load_dotenv()
+
+
+@dataclass
+class Settings:
+    currency: str = "USD"
+    max_results: int = 3
+
+
+class OrderRepository:
+    """Stand-in for a database client."""
+
+    def __init__(self) -> None:
+        self._orders = {"alice": [("A-100", 42.0), ("A-101", 17.5)], "bob": [("B-200", 99.0)]}
+
+    def for_customer(self, customer: str) -> list[tuple[str, float]]:
+        return self._orders.get(customer.lower(), [])
+
+
+def build_container(repo: OrderRepository | None = None) -> InjectQ:
+    container = InjectQ()
+    container.bind_instance(Settings, Settings())
+    container.bind_instance(OrderRepository, repo or OrderRepository())
+    return container
+
+
+# Parameters with an Inject[...] default are filled from the container and left out of the tool
+# schema, so the model only sees `customer`. fresh() resolves them from the active container on
+# every call; without it the first resolution is cached for the whole process, which breaks
+# rebinding in tests.
+def list_orders(
+    customer: str,
+    repo: OrderRepository = Inject[OrderRepository],
+    settings: Settings = Inject[Settings],
+) -> str:
+    """List the recent orders of a customer."""
+    repo, settings = fresh(repo), fresh(settings)
+    orders = repo.for_customer(customer)[: settings.max_results]
+    if not orders:
+        return f"No orders for {customer}."
+    return "; ".join(f"{oid}: {amount:.2f} {settings.currency}" for oid, amount in orders)
+
+
+def build_agent(container: InjectQ) -> ReactAgent:
+    return ReactAgent(
+        model="gpt-5-mini",
+        system_prompt=[{"role": "system", "content": "Answer questions about customer orders."}],
+        tools=[list_orders],
+        container=container,  # the graph activates this container when it is built
+    )
+
+
+async def main() -> None:
+    app = build_agent(build_container()).compile()
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("What did alice order?")]},
+        config={"thread_id": "di-demo"},
+    )
+    print("assistant:", result["messages"][-1].text())
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="nodes.py">
+
+```python
+"""Inject services into a hand-written graph node and read them from the container.
+
+Nodes take state and config plus any Inject[...] defaults. No LLM is called, so this file runs
+without an API key.
+Run: python examples/dependency_injection/nodes.py
+"""
+
+import asyncio
+
+from di import OrderRepository, Settings, build_container, list_orders
+from injectq import Inject, InjectQ
+
+from tenxgraph.core.graph import StateGraph, ToolNode
+from tenxgraph.core.state import AgentState, Message
+from tenxgraph.core.state.message_block import TextBlock, ToolCallBlock
+from tenxgraph.utils.constants import END
+from tenxgraph.utils.injection import fresh
+
+
+async def planner(
+    state: AgentState,
+    config: dict,
+    settings: Settings = Inject[Settings],
+) -> Message:
+    """A scripted 'model': asks for alice's orders first, then summarises the tool result."""
+    settings = fresh(settings)
+    if state.context[-1].role == "tool":
+        return Message(
+            role="assistant",
+            content=[TextBlock(text=f"Done. Amounts are in {settings.currency}.")],
+        )
+    return Message(
+        role="assistant",
+        content=[ToolCallBlock(id="call-1", name="list_orders", args={"customer": "alice"})],
+        tools_calls=[
+            {
+                "id": "call-1",
+                "type": "function",
+                "function": {"name": "list_orders", "arguments": '{"customer": "alice"}'},
+            }
+        ],
+    )
+
+
+def route(state: AgentState) -> str:
+    last = state.context[-1]
+    return "TOOL" if last.role == "assistant" and last.tools_calls else END
+
+
+def build_graph(container: InjectQ) -> StateGraph:
+    graph = StateGraph(container=container)
+    graph.add_node("MAIN", planner)
+    graph.add_node("TOOL", ToolNode([list_orders]))
+    graph.add_conditional_edges("MAIN", route, {"TOOL": "TOOL", END: END})
+    graph.add_edge("TOOL", "MAIN")
+    graph.set_entry_point("MAIN")
+    return graph
+
+
+class FakeRepository(OrderRepository):
+    """Test double: fixed data instead of the real repository."""
+
+    def __init__(self) -> None:
+        self._orders = {"alice": [("TEST-1", 1.0)]}
+
+
+async def run(container: InjectQ, label: str) -> None:
+    app = build_graph(container).compile()
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("What did alice order?")]},
+        config={"thread_id": f"di-{label}"},
+    )
+    tool_message = next(m for m in result["messages"] if m.role == "tool")
+    print(f"{label} tool result:", tool_message.text())
+    print(f"{label} assistant:", result["messages"][-1].text())
+    await app.aclose()
+
+
+async def main() -> None:
+    # Production wiring.
+    await run(build_container(), "real")
+
+    # Test wiring: bind a different implementation, or swap a whole node with override_node.
+    await run(build_container(repo=FakeRepository()), "fake-repo")
+
+    graph = build_graph(build_container())
+    stub = Message.text_message("stub", role="assistant")
+    graph.override_node("MAIN", lambda state, config: stub)
+    app = graph.compile()
+    result = await app.ainvoke(
+        {"messages": [Message.text_message("hi")]}, config={"thread_id": "t"}
+    )
+    print("override_node assistant:", result["messages"][-1].text())
+    await app.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/dependency_injection](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/dependency_injection)
+
+## Expected output
+
+Illustrative, from `nodes.py`:
+
+```text
+real tool result: A-100: 42.00 USD; A-101: 17.50 USD
+real assistant: Done. Amounts are in USD.
+fake-repo tool result: TEST-1: 1.00 USD
+fake-repo assistant: Done. Amounts are in USD.
+override_node assistant: stub
+```
+
+## Next steps
+
+- [Testing](/docs/examples/testing): test helpers that avoid live LLM calls.
+- [Tools](/docs/examples/tools): tool definitions.
+- [MCP](/docs/examples/mcp): tools that live in another process.

@@ -1,0 +1,293 @@
+---
+title: "Streaming a 10xGraph Python AI Agent with astream and StreamEmitter"
+seoTitle: "Stream a Python AI agent with astream"
+description: "Stream agent output in 10xGraph with astream: read StreamChunk events, print text as it arrives, report tool progress with StreamEmitter, and stop a run with astop."
+section: Examples
+group: "Getting started"
+order: 13
+label: "Streaming"
+updated: "2026-10-28"
+faq:
+  - q: "What does astream yield?"
+    a: "StreamChunk objects. Each has an event (message, state, updates or error), and for message events a Message that may be a partial delta of the model's text. Tool progress chunks carry a data dict instead of a message."
+  - q: "How do I show progress from inside a tool?"
+    a: "Add a parameter named emit typed StreamEmitter | None. During astream it is a StreamEmitter, so emit.progress(...) appears in the stream. During ainvoke it is None."
+  - q: "Does astop need a checkpointer?"
+    a: "Yes. astop records the stop request on the thread through the checkpointer and returns ok False with reason no-checkpointer without one. The running graph checks the flag between nodes."
+---
+
+Streaming lets you show text as the model produces it, instead of waiting for the full reply. This example streams a travel agent with `astream`, shows progress reported from inside a tool, and then stops a long run from another task with `astop`. Both scripts use Anthropic `claude-sonnet-5-5`.
+
+## What you will build
+
+A travel agent whose tool reports progress while it works, streamed to the terminal with `astream`. A second script starts a long run and stops it from another task with `astop`.
+
+Both use Anthropic `claude-sonnet-5-5`.
+
+## Key concepts
+
+- `astream(input, config)`: async generator of `StreamChunk`.
+- `StreamEvent`: `MESSAGE`, `STATE`, `UPDATES`, `ERROR`.
+- `Message.delta`: true for partial text; the complete message arrives later with `delta=False`.
+- `StreamEmitter`: injected into tools via a parameter named `emit`; methods `progress`, `message`, `update`, `error`.
+- `astop(config)`: asks a running thread to stop; needs a checkpointer and the run's `thread_id`.
+
+## Run it
+
+```bash
+git clone https://github.com/10xGraph/10xGraph.git
+cd 10xGraph/agentflow
+pip install "10xgraph[anthropic]" python-dotenv
+export ANTHROPIC_API_KEY=...
+
+python examples/streaming/stream_agent.py
+python examples/streaming/stop_stream.py
+```
+
+## How the code works
+
+### stream_agent.py
+
+The tool takes an `emit` parameter. It is injected by name and hidden from the model's schema. It is a `StreamEmitter` under `astream()` and `None` under `ainvoke()`, so always guard it.
+
+```python
+async def search_flights(
+    origin: str,
+    destination: str,
+    emit: StreamEmitter | None = None,
+) -> str:
+    """Search for flights between two cities."""
+    for step in ("Contacting airlines", "Comparing prices", "Ranking results"):
+        if emit:
+            emit.progress(step, data={"route": f"{origin}-{destination}"})
+        await asyncio.sleep(0.5)
+```
+
+Each `emit.progress(...)` call puts a chunk into the stream while the tool is still running, so the user sees activity during slow work.
+
+The `show` function handles each chunk by its event and content:
+
+```python
+if chunk.event == StreamEvent.MESSAGE:
+    msg = chunk.message
+    if msg is None:
+        # No Message attached: this is a tool progress chunk built by StreamEmitter.
+        if chunk.data and chunk.data.get("status") == "tool_progress":
+            print(f"\n[progress] {chunk.data['tool_name']}: {chunk.data['message']}")
+    elif msg.delta:
+        # Partial text from the model. Print it without a newline as it arrives.
+        print(msg.text(), end="", flush=True)
+```
+
+Progress chunks have `event=message` with `message=None` and a `data` dict whose `status` is `tool_progress`. Partial model text has `delta=True`. Tool calls arrive as assistant messages with `tools_calls`, and tool output arrives as `role == "tool"` messages. A final non-delta assistant message repeats text already printed from the deltas, so the example skips it.
+
+The loop itself is short:
+
+```python
+async for chunk in app.astream(inp, config={"thread_id": "stream-1"}):
+    show(chunk)
+```
+
+### stop_stream.py
+
+The graph is compiled with a checkpointer, because `astop()` works through it by recording the stop request on the thread:
+
+```python
+).compile(
+    checkpointer=InMemoryCheckpointer(),
+)
+
+CONFIG = {"thread_id": "stop-demo"}  # astop() finds the run by this thread_id
+```
+
+One task consumes the stream while the main task waits five seconds and then asks it to stop:
+
+```python
+reader = asyncio.create_task(consume())
+await asyncio.sleep(5)  # let a few tool calls happen
+
+status = await app.astop(CONFIG)
+```
+
+The stop flag is checked between nodes. The run ends after the current tool call or model call finishes, not in the middle of a token stream. `astop` returns `{"ok": True, "running": True}` when a run was active, and `{"ok": True, "running": False, "reason": "not-running"}` if it had already ended. Without a checkpointer it returns `{"ok": False, "reason": "no-checkpointer"}`.
+
+### Using a different model
+
+Change `model="claude-sonnet-5-5"`, for example to `"gpt-5-mini"` (`10xgraph[openai]`, `OPENAI_API_KEY`) or `"gemini-2.5-flash"` (`10xgraph[google-genai]`, `GEMINI_API_KEY`).
+
+## Full code
+
+<Tabs>
+<TabItem label="stream_agent.py">
+
+```python
+"""Stream a ReactAgent run with astream() and read the StreamChunk events.
+
+Text arrives as delta messages; a tool reports progress through an injected StreamEmitter.
+
+Run: python examples/streaming/stream_agent.py   (needs ANTHROPIC_API_KEY)
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message, StreamChunk, StreamEmitter, StreamEvent
+from tenxgraph.prebuilt.agent import ReactAgent
+
+
+load_dotenv()
+
+
+async def search_flights(
+    origin: str,
+    destination: str,
+    # Injected by name: `emit` is hidden from the model's tool schema. It is a
+    # StreamEmitter under astream() and None under ainvoke(), so always guard it.
+    emit: StreamEmitter | None = None,
+) -> str:
+    """Search for flights between two cities."""
+    for step in ("Contacting airlines", "Comparing prices", "Ranking results"):
+        if emit:
+            emit.progress(step, data={"route": f"{origin}-{destination}"})
+        await asyncio.sleep(0.5)
+    return f"Cheapest {origin} to {destination}: $212 nonstop, departs 08:15."
+
+
+app = ReactAgent(
+    model="claude-sonnet-5-5",
+    system_prompt=[{"role": "system", "content": "You are a travel assistant. Be brief."}],
+    tools=[search_flights],
+).compile()
+
+
+def show(chunk: StreamChunk) -> None:
+    # chunk.event is one of StreamEvent.MESSAGE / STATE / UPDATES / ERROR.
+    if chunk.event == StreamEvent.MESSAGE:
+        msg = chunk.message
+        if msg is None:
+            # No Message attached: this is a tool progress chunk built by StreamEmitter.
+            if chunk.data and chunk.data.get("status") == "tool_progress":
+                print(f"\n[progress] {chunk.data['tool_name']}: {chunk.data['message']}")
+        elif msg.delta:
+            # Partial text from the model. Print it without a newline as it arrives.
+            print(msg.text(), end="", flush=True)
+        elif msg.role == "assistant" and msg.tools_calls:
+            names = [call["function"]["name"] for call in msg.tools_calls]
+            print(f"\n[model asked for tools: {names}]")
+        elif msg.role == "tool":
+            print(f"[tool result] {msg.text()}")
+        # A final non-delta assistant message repeats the text already printed from
+        # the deltas, so it is skipped here.
+    elif chunk.event == StreamEvent.ERROR:
+        print(f"\n[error] {chunk.data}")
+
+
+async def main() -> None:
+    async with app:
+        inp = {"messages": [Message.text_message("Find me a flight from Oslo to Rome.")]}
+        async for chunk in app.astream(inp, config={"thread_id": "stream-1"}):
+            show(chunk)
+        print()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="stop_stream.py">
+
+```python
+"""Stop a running stream from outside with astop().
+
+A second task requests the stop for the same thread_id. The graph checks the flag
+between nodes, so the run ends after the current node finishes.
+
+Run: python examples/streaming/stop_stream.py   (needs ANTHROPIC_API_KEY)
+"""
+
+import asyncio
+
+from dotenv import load_dotenv
+
+from tenxgraph.core.state import Message, StreamEvent
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+
+
+load_dotenv()
+
+
+async def slow_lookup(topic: str) -> str:
+    """Look up one fact about a topic. Slow."""
+    await asyncio.sleep(2)
+    return f"Fact about {topic}: it is interesting."
+
+
+app = ReactAgent(
+    model="claude-sonnet-5-5",
+    system_prompt=[
+        {
+            "role": "system",
+            "content": "Call slow_lookup once for each of ten different topics, one at a time.",
+        }
+    ],
+    tools=[slow_lookup],
+).compile(
+    # astop() works through the checkpointer: it records the stop request on the
+    # thread. Without one it returns {"ok": False, "reason": "no-checkpointer"}.
+    checkpointer=InMemoryCheckpointer(),
+)
+
+CONFIG = {"thread_id": "stop-demo"}  # astop() finds the run by this thread_id
+
+
+async def consume() -> None:
+    inp = {"messages": [Message.text_message("Tell me facts about ten topics.")]}
+    async for chunk in app.astream(inp, config=CONFIG):
+        if chunk.event == StreamEvent.MESSAGE and chunk.message and not chunk.message.delta:
+            print(f"{chunk.message.role}: {chunk.message.text()[:80]}")
+    print("stream ended")
+
+
+async def main() -> None:
+    async with app:
+        reader = asyncio.create_task(consume())
+        await asyncio.sleep(5)  # let a few tool calls happen
+
+        status = await app.astop(CONFIG)
+        # {"ok": True, "running": True} when a run was active;
+        # {"ok": True, "running": False, "reason": "not-running"} if it already ended.
+        print("stop requested:", status)
+
+        await reader
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+</Tabs>
+
+Source on GitHub: [examples/streaming](https://github.com/10xGraph/10xGraph/tree/main/agentflow/examples/streaming)
+
+## Expected output
+
+Illustrative; text and timing will vary.
+
+```text
+[model asked for tools: ['search_flights']]
+[progress] search_flights: Contacting airlines
+[progress] search_flights: Comparing prices
+[progress] search_flights: Ranking results
+[tool result] Cheapest Oslo to Rome: $212 nonstop, departs 08:15.
+The cheapest option is a $212 nonstop flight at 08:15.
+```
+
+## Next steps
+
+- [Quickstart](/docs/examples/quickstart): the non-streaming version.
+- [Tools](/docs/examples/tools): injected parameters and client-side tools.
+- [Graph basics](/docs/examples/graph-basics): how the graph routes between nodes.

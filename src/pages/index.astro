@@ -7,6 +7,58 @@ import '../styles/home.css';
 
 const title = "10xGraph: Python Multi-Agent Framework With Built-In Server";
 const description = "Open-source Python multi-agent framework. Write the agent and 10xGraph generates its production server: auth, rate limits, replay-safe tools and Kubernetes.";
+// Single source for the visible FAQ and the FAQPage JSON-LD, so the two never drift apart.
+// Ordered to lead with the generated API server: you write the agent, 10xGraph serves it.
+const faq = [
+  {
+    q: "What is 10xGraph?",
+    a: "10xGraph is an open-source Python framework for production multi-agent AI. You write the agent: the graph, the tools and the prompts. 10xGraph builds and runs the API server around it, with streaming endpoints, authentication, owner-only threads, rate limits, persistent memory, and Docker and Kubernetes deployment files. It is MIT licensed and made by 10xScale."
+  },
+  {
+    q: "What do I write, and what does 10xGraph build for me?",
+    a: "You write agent.py: a StateGraph or the prebuilt ReactAgent, your tools and your system prompt. 10xGraph builds everything between that file and your users: REST, SSE and WebSocket endpoints, JWT or custom authentication, owner-only threads and scoped permissions, rate limits backed by memory or Redis, prompt-injection validators, thread state in Redis and PostgreSQL, and a Dockerfile, docker-compose.yml and Kubernetes manifests."
+  },
+  {
+    q: "Do I need to write FastAPI or any other server code?",
+    a: "No. You write the agent code, and you decide how the server behaves in production through one file, 10xgraph.json. Run 10xgraph config to open it in a browser editor, then choose authentication, authorization, rate limits, the memory store and the environment file. Every field is checked with the same parser the server uses, and secrets stay in your .env file. Run 10xgraph dev and the server starts on port 8000 with a playground UI, serving invoke, stream, thread, memory and file endpoints. When you change the config, the server adjusts. When you change the graph, the endpoints stay the same."
+  },
+  {
+    q: "Is the API server production-ready?",
+    a: "Yes. 10xScale runs its own AI products on it. Each part of running agents in production has its own options, and most of them are a key in 10xgraph.json or an environment variable. You tune production behavior without touching your agent code.\n\nSecurity: authentication is JWT or your own BaseAuth class. Authorization is owner-only threads, allow-all, or your own backend. MODE=production refuses to start with wildcard CORS plus credentials, rejects JWT secrets shorter than 32 bytes, and turns off the /docs pages by default. Security headers are on by default. The production template adds a prompt-injection validator and lifecycle validators that run before invoke, after each step and on error.\n\nReliability: tool calls are replay-safe after a crash, and versioned state writes stop two runs from overwriting each other. Node and tool timeouts stop a hung call from holding a worker. Thread state is cached in Redis and stored durably in PostgreSQL, so threads survive restarts.\n\nScale: rate limits use a sliding window keyed by IP, by user or globally, and they are stored in memory, in Redis so every worker shares them, or in your own backend. The server runs Gunicorn with Uvicorn workers, and you can run several instances behind a load balancer as long as they share PostgreSQL and Redis. WebSocket connection limits, upload size limits and allowed file types are configurable.\n\nDeployment and operations: 10xgraph build writes a Dockerfile, docker-compose.yml and a Kubernetes manifest. The manifest's grace period and probe timeouts let in-flight agent runs finish during a rolling deploy. 10xgraph audit checks the environment and config before you ship, and it exits with code 1 on failure, so it can gate CI. Every response carries an X-Request-ID, and you can send errors to Sentry, traces to OpenTelemetry, and runs to Logfire or LangSmith.\n\nThe core is at version 0.10.0, before 1.0, so pin your versions and read the changelog when you upgrade."
+  },
+  {
+    q: "How does the server handle authentication and multi-user isolation?",
+    a: "Authentication is part of the generated server. Use JWT or plug in your own auth class. The production template sets authorization to ownership, so a thread is accessible only to the user who created it, and owner checks are cached in process and in Redis so they do not cost a database round trip per request. You can also restrict individual tools by role."
+  },
+  {
+    q: "What happens if the server crashes mid-run?",
+    a: "With a checkpointer configured, 10xGraph records the current node before running it and keeps a ledger of every completed tool call. When the run resumes, on the same process or a new pod, the interrupted node runs again, but any tool call already in the ledger is skipped instead of executed. A payment tool that finished before the crash does not charge the card a second time."
+  },
+  {
+    q: "How does my frontend talk to the server?",
+    a: "Through the typed TypeScript client, installed with npm install 10xgraph-client. It covers invoke, streaming, threads, memory and file uploads, and it sends the same JWT the server checks. It works in Next.js, Vite and Node. Tools can also run in the browser, for work only the user's device can do."
+  },
+  {
+    q: "How is 10xGraph different from LangGraph?",
+    a: "Both model agents as graphs. With 10xGraph, the API server, authentication, rate limits and deployment files ship in the same MIT-licensed install, and you host them yourself. LangGraph offers its managed server through LangSmith Deployment. LangGraph also requires langchain-core, while 10xGraph has no LangChain dependency."
+  },
+  {
+    q: "Which LLM providers does 10xGraph support?",
+    a: "10xGraph picks the provider from the model string. It supports OpenAI, Google Gemini including Vertex AI, and Anthropic through the direct API, Vertex AI or Amazon Bedrock. Any OpenAI-compatible endpoint also works. Changing the model string does not change your graph, your tools or your API endpoints."
+  },
+  {
+    q: "Is 10xGraph free and open source?",
+    a: "Yes. 10xGraph is released under the MIT license, and that includes the API server and the CLI, not just the graph library. You can use it in commercial products, self-host it on your own infrastructure and modify it. There is no hosted platform to buy and no account to create before you start building."
+  },
+  {
+    q: "How do I install 10xGraph?",
+    a: "Run pip install 10xgraph 10xgraph-api on Python 3.12 or newer. Then run 10xgraph init --yes --template production to scaffold a project with auth, validators, tests and config, 10xgraph dev to serve it on port 8000 with the playground, and 10xgraph build --docker-compose --k8s to generate deployment files. The TypeScript client installs with npm install 10xgraph-client."
+  },
+  {
+    q: "Was 10xGraph previously called Agentflow?",
+    a: "Yes. 10xGraph was published as Agentflow, under the PyPI name 10xscale-agentflow, until 2026. The project was renamed because many unrelated tools share the Agentflow name. The Python package is now imported as tenxgraph. The old agentflow import path remains as a deprecated alias until 2.0, so existing code keeps working while you switch to the new package names."
+  }
+];
 const jsonLd = [
   {
     "@context": "https://schema.org",
@@ -47,80 +99,11 @@ const jsonLd = [
   {
     "@context": "https://schema.org",
     "@type": "FAQPage",
-    "mainEntity": [
-      {
-        "@type": "Question",
-        "name": "What is 10xGraph?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "10xGraph is an open-source Python framework for building production multi-agent AI systems. You write agents as typed StateGraphs or with the prebuilt ReactAgent, and 10xGraph generates the production server around them: REST and streaming endpoints, JWT auth, owner-only threads, scoped access control, rate limits, and Docker and Kubernetes manifests. It is MIT licensed and made by 10xScale."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "What happens if a run crashes mid-way?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "With a checkpointer configured, 10xGraph records the current node before running it and keeps a ledger of every completed tool call. When the run resumes, the interrupted node runs again, but any tool call already in the ledger is skipped instead of executed. A payment tool that finished before the crash does not charge the card a second time."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "How does 10xGraph handle authentication and multi-user isolation?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "The API server supports JWT or a custom auth class. The production template sets authorization to ownership, so a thread is accessible only to the user who created it, and owner checks are cached in process and in Redis. You can also restrict individual tools by role and add rate limits backed by memory or Redis."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "How is 10xGraph different from LangGraph?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Both model agents as graphs. With 10xGraph, the API server, authentication, rate limits and Docker and Kubernetes manifests come from the same MIT-licensed install, and you host them yourself. LangGraph offers its managed server through LangSmith Deployment. LangGraph also requires langchain-core, while 10xGraph has no LangChain dependency."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Which LLM providers does 10xGraph support?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "10xGraph picks the provider from the model string. It supports OpenAI, Google Gemini including Vertex AI, and Anthropic through the direct API, Vertex AI or Amazon Bedrock. Any OpenAI-compatible endpoint also works. Changing the model string does not change your graph, your tools or your API endpoints."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Is 10xGraph free and open source?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Yes. 10xGraph is released under the MIT license, including the API server and the CLI. You can use it in commercial products, self-host it on your own infrastructure and modify it. There is no hosted platform you have to buy and no account to create before you start building."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Is 10xGraph production-ready?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "10xScale runs its own AI products on 10xGraph in production. It includes replay-safe tool calls, versioned state writes, node and tool timeouts, JWT auth, owner-only threads, rate limiting and Kubernetes manifests. The core is at version 0.10.0, before 1.0, so pin your versions and read the changelog when you upgrade."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "How do I install 10xGraph?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Run pip install 10xgraph 10xgraph-api on Python 3.12 or newer. Then run 10xgraph init --yes --template production to scaffold a project with auth, validators, tests and config, 10xgraph api to serve it on port 8000, and 10xgraph build --docker-compose --k8s to generate deployment files. The TypeScript client installs with npm install 10xgraph-client."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Was 10xGraph previously called Agentflow?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Yes. 10xGraph was published as Agentflow, under the PyPI name 10xscale-agentflow, until 2026. The project was renamed because many unrelated tools share the Agentflow name. The Python package is now imported as tenxgraph. The old agentflow import path remains as a deprecated alias until 2.0, so existing code keeps working while you switch to the new package names."
-        }
-      }
-    ]
+    "mainEntity": faq.map((f) => ({
+      "@type": "Question",
+      "name": f.q,
+      "acceptedAnswer": { "@type": "Answer", "text": f.a }
+    }))
   }
 ];
 ---
@@ -239,6 +222,7 @@ const jsonLd = [
         </div>
       </div>
     </div>
+    <p class="pillar-more"><a href="/docs/get-started/why-10xgraph">See everything the server does for you, and how to replace each part &rarr;</a></p>
   </div>
 </section>
 
@@ -312,7 +296,7 @@ const jsonLd = [
           <li><b>Typed TypeScript client</b>Invoke, stream, threads, memory and files. Works in Next.js, Vite and Node.</li>
           <li><b>Tools that run in the browser</b>Remote tools execute on the client, for things only the user's device can do, with validated schemas.</li>
           <li><b>Realtime audio</b>A WebSocket endpoint at <code>/v1/graph/live</code> for voice agents.</li>
-          <li><b>Playground</b><code>10xgraph play</code> starts the server and a React UI to chat with your agent.</li>
+          <li><b>Playground</b><code>10xgraph dev</code> starts the server and a React UI to chat with your agent.</li>
         </ul>
       </div>
       <div class="code"><div class="cap"><span>support-chat.ts</span><span>typescript</span></div><pre tabindex="0"><code><span class="k">import</span> &#123; TenxGraphClient, Message &#125; <span class="k">from</span> <span class="s">'10xgraph-client'</span>;
@@ -373,7 +357,20 @@ const jsonLd = [
 <section aria-labelledby="start">
   <div class="wrap">
     <h2 id="start">Start here</h2>
+    <span class="kicker">Learn directly from examples</span>
+    <p class="lede" style="margin-bottom:24px">Skip the reading and run the code. Each example is a runnable project: clone the repository, add one API key, run one file. The examples span OpenAI, Gemini, Claude and DeepSeek, from a single agent to full-stack apps.</p>
+    <ul class="examples">
+      <li><a href="/docs/examples/quickstart"><span class="ex-tag">Getting started · OpenAI</span><b>Your first tool-calling agent</b><span class="ex-desc">A ReactAgent with one tool, sync and async.</span></a></li>
+      <li><a href="/docs/examples/human-in-the-loop"><span class="ex-tag">Production · OpenAI</span><b>Pause for human approval</b><span class="ex-desc">interrupt() a tool call, validate the answer, resume the thread.</span></a></li>
+      <li><a href="/docs/examples/graceful-shutdown"><span class="ex-tag">Production · Gemini</span><b>Shut down without losing state</b><span class="ex-desc">Handle SIGTERM and flush every checkpoint write before exit.</span></a></li>
+      <li><a href="/docs/examples/multi-agent"><span class="ex-tag">Multi-agent · Claude, GPT, Gemini, DeepSeek</span><b>One team, four AI companies</b><span class="ex-desc">Supervisor, swarm, handoff and plan-act-reflect.</span></a></li>
+      <li><a href="/docs/examples/rag-assistant"><span class="ex-tag">Full-stack app</span><b>RAG docs assistant, end to end</b><span class="ex-desc">API server, React UI, Postgres, Redis, Qdrant and Docker Compose.</span></a></li>
+      <li><a href="/docs/examples/copilotkit-agui"><span class="ex-tag">Full-stack app</span><b>An AI copilot in your React app</b><span class="ex-desc">CopilotKit over AG-UI with shared state and in-UI approvals.</span></a></li>
+    </ul>
+    <p class="examples-all"><a href="/docs/examples">Browse all examples &rarr;</a></p>
+    <h3 class="starts-h">Or read the docs</h3>
     <ul class="starts">
+      <li><a href="/docs/get-started/why-10xgraph">Why 10xGraph <span>the server you don't have to build</span></a></li>
       <li><a href="/docs/get-started">Get started <span>install, first agent, project layout</span></a></li>
       <li><a href="/docs/concepts">Concepts <span>graphs, state, memory</span></a></li>
       <li><a href="/docs/guides">Build agents <span>Python task guides</span></a></li>
@@ -389,15 +386,9 @@ const jsonLd = [
   <div class="wrap">
     <h2 id="faq">Frequently asked questions</h2>
     <div class="faq">
-<details><summary><span>What is 10xGraph?</span><svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary><p>10xGraph is an open-source Python framework for building production multi-agent AI systems. You write agents as typed StateGraphs or with the prebuilt ReactAgent, and 10xGraph generates the production server around them: REST and streaming endpoints, JWT auth, owner-only threads, scoped access control, rate limits, and Docker and Kubernetes manifests. It is MIT licensed and made by 10xScale.</p></details>
-<details><summary><span>What happens if a run crashes mid-way?</span><svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary><p>With a checkpointer configured, 10xGraph records the current node before running it and keeps a ledger of every completed tool call. When the run resumes, the interrupted node runs again, but any tool call already in the ledger is skipped instead of executed. A payment tool that finished before the crash does not charge the card a second time.</p></details>
-<details><summary><span>How does 10xGraph handle authentication and multi-user isolation?</span><svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary><p>The API server supports JWT or a custom auth class. The production template sets authorization to ownership, so a thread is accessible only to the user who created it, and owner checks are cached in process and in Redis. You can also restrict individual tools by role and add rate limits backed by memory or Redis.</p></details>
-<details><summary><span>How is 10xGraph different from LangGraph?</span><svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary><p>Both model agents as graphs. With 10xGraph, the API server, authentication, rate limits and Docker and Kubernetes manifests come from the same MIT-licensed install, and you host them yourself. LangGraph offers its managed server through LangSmith Deployment. LangGraph also requires langchain-core, while 10xGraph has no LangChain dependency.</p></details>
-<details><summary><span>Which LLM providers does 10xGraph support?</span><svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary><p>10xGraph picks the provider from the model string. It supports OpenAI, Google Gemini including Vertex AI, and Anthropic through the direct API, Vertex AI or Amazon Bedrock. Any OpenAI-compatible endpoint also works. Changing the model string does not change your graph, your tools or your API endpoints.</p></details>
-<details><summary><span>Is 10xGraph free and open source?</span><svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary><p>Yes. 10xGraph is released under the MIT license, including the API server and the CLI. You can use it in commercial products, self-host it on your own infrastructure and modify it. There is no hosted platform you have to buy and no account to create before you start building.</p></details>
-<details><summary><span>Is 10xGraph production-ready?</span><svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary><p>10xScale runs its own AI products on 10xGraph in production. It includes replay-safe tool calls, versioned state writes, node and tool timeouts, JWT auth, owner-only threads, rate limiting and Kubernetes manifests. The core is at version 0.10.0, before 1.0, so pin your versions and read the changelog when you upgrade.</p></details>
-<details><summary><span>How do I install 10xGraph?</span><svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary><p>Run pip install 10xgraph 10xgraph-api on Python 3.12 or newer. Then run 10xgraph init --yes --template production to scaffold a project with auth, validators, tests and config, 10xgraph api to serve it on port 8000, and 10xgraph build --docker-compose --k8s to generate deployment files. The TypeScript client installs with npm install 10xgraph-client.</p></details>
-<details><summary><span>Was 10xGraph previously called Agentflow?</span><svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary><p>Yes. 10xGraph was published as Agentflow, under the PyPI name 10xscale-agentflow, until 2026. The project was renamed because many unrelated tools share the Agentflow name. The Python package is now imported as tenxgraph. The old agentflow import path remains as a deprecated alias until 2.0, so existing code keeps working while you switch to the new package names.</p></details>
+{faq.map((f) => (
+<details><summary><span>{f.q}</span><svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary>{f.a.split("\n\n").map((para) => <p>{para}</p>)}</details>
+))}
     </div>
   </div>
 </section>
@@ -559,7 +550,7 @@ const jsonLd = [
       [8400, function () { show([pods[0]]); }], [8550, function () { show([pods[1]]); }], [8700, function () { show([pods[2], podLab]); }],
       [8950, function () { show([redis, redisLab]); }], [9150, function () { show([pg, pgLab]); }],
       [9500, function () { show([client, cliLab]); }],
-      [10100, function (t) { phase.textContent = "serving traffic on :8000"; setCmd("10xgraph api", t); next = t; }]
+      [10100, function (t) { phase.textContent = "serving traffic on :8000"; setCmd("docker compose up", t); next = t; }]
     ];
 
     var TOP = iso(3.2, 3, 3.24), CLI = iso(7.35, -1.45, 3.1), CORE = iso(3.2, 3, .5);
@@ -647,7 +638,7 @@ const jsonLd = [
       $("iso-ed").style.display = "none";
       show([plat, core, redis, pg, client, podLab, redisLab, pgLab, cliLab, platLab].concat(pods)); show(coreLab);
       LAY.forEach(function (L) { show([L.el]); show(L.lab); });
-      phase.textContent = "serving traffic on :8000"; cmd.textContent = "10xgraph api";
+      phase.textContent = "serving traffic on :8000"; cmd.textContent = "docker compose up";
       [REQ[3][0], REQ[0][0], REQ.ok[0]].forEach(function (r) { logDone(logRow(r), r); });
       var g = el("g", { "class": "iso-tag good" }, fx), text = "refund skipped: already in ledger", w = text.length * 6.2 + 18;
       el("rect", { x: TOP[0] - w / 2, y: TOP[1] - 58, width: w, height: 20, rx: 10 }, g); var tx = el("text", { x: TOP[0], y: TOP[1] - 44.5, "text-anchor": "middle" }, g); tx.textContent = text;
