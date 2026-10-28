@@ -14,7 +14,7 @@ export const SITE = {
   // Hosted playground (agentflow-playground/, Cloudflare). `10xgraph play` still opens the old
   // Firebase URL until the CLI's DEFAULT_PLAYGROUND_URL changes.
   playground: 'https://play.10xgraph.com',
-  version: '0.10.3',
+  version: '1.0.0rc1',
   locale: 'en_US',
   org: { name: '10xScale', url: 'https://10xscale.ai' },
   formerName: 'Agentflow',

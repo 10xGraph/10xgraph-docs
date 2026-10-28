@@ -5,7 +5,7 @@ section: "TypeScript client"
 group: "Basics"
 order: 50
 label: Manage threads
-updated: "2026-10-26"
+updated: "2026-10-28"
 faq:
   - question: "What happens if no checkpointer is configured?"
     answer: "The server falls back to InMemoryCheckpointer, so threads live only in that server process and are lost on restart. For persistence, compile the graph with a SQLite, Postgres+Redis, or custom checkpointer."
@@ -252,7 +252,7 @@ await client.updateThreadMessageFeedback('thread-abc123', 'msg-001', {
 });
 ```
 
-The object can be at most 8192 bytes serialized and 10 levels deep, otherwise the server returns 422. A missing message returns 404, and a server running a core older than `10xgraph` 0.10.4 returns 501. See [`updateThreadMessageFeedback`](/docs/reference/client/threads#updatethreadmessagefeedback).
+The object can be at most 8192 bytes serialized and 10 levels deep, otherwise the server returns 422. A missing message returns 404, and the API returns 501 when the checkpointer lacks `aupdate_message_metadata` (added in `10xgraph` 1.0). See [`updateThreadMessageFeedback`](/docs/reference/client/threads#updatethreadmessagefeedback).
 
 ---
 

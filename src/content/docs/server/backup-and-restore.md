@@ -120,7 +120,7 @@ pip install --upgrade "10xgraph[pg_checkpoint]"
 10xgraph dev --no-open
 ```
 
-If something goes wrong during migration, you can restore from the pre-upgrade dump. See [upgrading to 1.0](/docs/project/upgrade-to-1.0) for migration details.
+If something goes wrong during migration, you can restore from the pre-upgrade dump. See [Upgrade to 1.0](/docs/project/upgrade-to-1.0#database-migration) for the Postgres schema v4 migration.
 
 ### Automate with your platform
 

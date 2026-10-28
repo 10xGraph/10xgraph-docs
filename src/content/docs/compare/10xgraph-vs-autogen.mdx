@@ -5,7 +5,7 @@ description: 10xGraph vs Microsoft AutoGen compared with sources. AutoGen is in 
 section: Compare
 order: 40
 label: vs Microsoft AutoGen
-updated: "2026-10-27"
+updated: "2026-10-28"
 faq:
   - q: Is AutoGen still actively developed?
     a: According to the AutoGen repository, AutoGen is in maintenance mode. It receives no new features and is community managed, and Microsoft recommends Microsoft Agent Framework for new projects.
@@ -59,7 +59,7 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 1. **The server layer is included.** AutoGen's own README points developers to build their own application with authentication and security. 10xGraph generates the endpoints and the auth, ownership and rate-limit settings.
 2. **Side effects survive crashes.** 10xGraph's tool ledger skips tools that already ran when a run resumes. See [replay-safe tools](/docs/concepts/replay-safe-tools).
 3. **One state, one history.** Every node reads the same `AgentState`, and the checkpointer stores it per thread.
-4. **Active development.** 10xGraph is pre-1.0 but under active development, while AutoGen is in maintenance mode.
+4. **Active development.** 10xGraph is at its 1.0 release candidate and under active development, while AutoGen is in maintenance mode.
 
 ## A planner and coder loop in 10xGraph
 

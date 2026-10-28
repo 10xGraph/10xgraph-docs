@@ -5,10 +5,10 @@ description: "What 10xgraph-api does by default when you serve an agent, what yo
 section: "Production"
 order: 0
 label: Production readiness
-updated: "2026-10-27"
+updated: "2026-10-28"
 faq:
   - q: "Is 10xGraph production ready?"
-    a: "The server enforces thread ownership, scoped authorization, input limits, run limits and production-mode checks by default, and stores state durably with Postgres. It is pre-1.0 and you still own auth configuration, secrets, TLS, backups and your tools' own authorization. The limits page lists what it does not protect."
+    a: "The server enforces thread ownership, scoped authorization, input limits, run limits and production-mode checks by default, and stores state durably with Postgres. It is at its 1.0 release candidate, and you still own auth configuration, secrets, TLS, backups and your tools' own authorization. The limits page lists what it does not protect."
   - q: "Do I have to write the API server myself?"
     a: "No. You write the graph and point 10xgraph.json at it. 10xgraph-api generates the REST and WebSocket server, and 10xgraph build generates the Dockerfile, compose file and Kubernetes manifest."
   - q: "What happens if I run in production without auth?"

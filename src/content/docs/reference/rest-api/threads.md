@@ -6,7 +6,7 @@ section: Reference
 group: "REST API"
 order: 340
 label: Threads
-updated: "2026-10-27"
+updated: "2026-10-28"
 faq:
   - q: "How do I create a thread over the REST API?"
     a: "There is no create-thread endpoint. A thread comes into existence when you call the invoke or stream endpoint without a thread_id and the server generates one. With `runs.thread_ids` set to `client`, it also comes into existence the first time a request uses an id you picked."
@@ -257,7 +257,7 @@ curl -X PUT http://localhost:8000/v1/threads/t1/messages/m2 \
   -d '{"feedback": {"rating": "down", "comment": "Wrong city"}}'
 ```
 
-The response `data` is the updated `Message`, the same shape as [Get a message](#get-a-message). The route returns `404` when the thread has no such message, and `501` when the server runs a core older than `10xgraph` 0.10.4.
+The response `data` is the updated `Message`, the same shape as [Get a message](#get-a-message). The route returns `404` when the thread has no such message, and `501` when the checkpointer lacks `aupdate_message_metadata` (added in `10xgraph` 1.0; the message is "This checkpointer does not support message feedback").
 
 ## Delete a message
 

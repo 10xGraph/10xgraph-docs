@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 210
 label: Checkpointers
-updated: "2026-10-27"
+updated: "2026-10-28"
 ---
 
 A checkpointer persists graph state, messages and thread metadata between requests, so conversations survive restarts and multi-turn runs stay coherent. 10xGraph ships four: the `BaseCheckpointer` abstract class, plus `InMemoryCheckpointer`, `SqliteCheckpointer` and `PgCheckpointer`. Pass one to `graph.compile(checkpointer=...)`.
@@ -73,7 +73,7 @@ checkpointer.get_state(config)
 | `aupdate_message_metadata` | `async (config, message_id, metadata) -> Message \| None` | Merge the keys of `metadata` into a stored message's metadata. A key that already exists is replaced. Returns the updated message, or `None` if the message is not in that thread. |
 | `update_message_metadata` | `(config, message_id, metadata) -> Message \| None` | Sync wrapper. |
 
-It applies the same owner isolation as `aget_message`. `PgCheckpointer`, `SqliteCheckpointer` and `InMemoryCheckpointer` implement it. A custom checkpointer that does not override it raises `NotImplementedError`. The REST route `PUT /v1/threads/{thread_id}/messages/{message_id}` calls it to store feedback, and returns `501` when the checkpointer lacks it. This method needs `10xgraph` 0.10.4 or later.
+It applies the same owner isolation as `aget_message`. `PgCheckpointer`, `SqliteCheckpointer` and `InMemoryCheckpointer` implement it. A custom checkpointer that does not override it raises `NotImplementedError`. The REST route `PUT /v1/threads/{thread_id}/messages/{message_id}` calls it to store feedback, and returns `501` when the checkpointer lacks it. This method needs `10xgraph` 1.0 or later.
 
 ```python
 message = await checkpointer.aupdate_message_metadata(
@@ -207,7 +207,7 @@ Message ids are unique per thread. The primary key of the messages table is `(th
 
 `asetup()` creates the required tables if they do not exist and applies pending schema migrations. It is idempotent and safe to call on every startup. A failed migration raises `SchemaVersionError`, a subclass of `StorageError`.
 
-Schema version 4 changes the messages primary key to `(thread_id, message_id)`. The migration runs automatically the first time `asetup()` runs on an older schema, under the existing advisory lock. It needs `10xgraph` 0.10.4 or later.
+Schema version 4 changes the messages primary key to `(thread_id, message_id)`. The migration runs automatically the first time `asetup()` runs on an older schema, under the existing advisory lock. It needs `10xgraph` 1.0 or later.
 
 ---
 

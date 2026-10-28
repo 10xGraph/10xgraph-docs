@@ -1,11 +1,11 @@
 ---
 title: What 10xGraph does not protect
 seoTitle: "What 10xGraph does not protect"
-description: "The honest limits of the 10xGraph server: prompt injection, your tools' logic, open auth, secrets, TLS, backups, streaming replay, pre-1.0 and Python 3.12+."
+description: "The limits of the 10xGraph server: prompt injection, tool logic, open auth, secrets, TLS, backups, streaming replay, release-candidate status and Python 3.12+."
 section: "Production"
 order: 40
 label: What it does not protect
-updated: "2026-10-27"
+updated: "2026-10-28"
 faq:
   - q: "Does 10xGraph stop prompt injection?"
     a: "No. Validators, approval through interrupt() and tool allow-lists bound what an injected instruction can do, but a model can still be talked into using the tools you gave it. Give it only the tools it needs and require approval for tools with side effects."
@@ -66,9 +66,9 @@ Replay-safe tools record each finished call in the checkpointer and skip it on r
 
 What to do: send an idempotency key derived from stable inputs (an order id, not a random value) to payment, email and ticket providers. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
 
-## Pre-1.0 versioning
+## Versioning
 
-10xGraph is at 0.10 and 10xgraph-api is in beta. Public names can change between minor versions, and the deprecated `agentflow` aliases stay until 2.0. The community is smaller than the older frameworks'.
+10xGraph 1.0 is a release candidate until the final ships. From 1.0 the public API is stable under a deprecation policy: breaking changes only in a major release, after at least one minor of deprecation. The deprecated `agentflow` aliases stay until 2.0. The community is smaller than the older frameworks'.
 
 What to do: pin exact versions, read the changelog before each upgrade, and run your tests and evals in CI first. See [Test before production](/docs/testing/before-production) and the [upgrade guides](/docs/project).
 

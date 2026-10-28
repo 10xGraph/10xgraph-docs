@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 520
 label: Threads
-updated: "2026-10-27"
+updated: "2026-10-28"
 ---
 
 A thread is one conversation stored by the server's checkpointer: an ordered list of messages plus a state snapshot. The `TenxGraphClient` thread methods list threads, read and edit their state and messages, and delete them. They all call the `/v1/threads` routes and need a checkpointer on the server.
@@ -214,7 +214,7 @@ client.updateThreadMessageFeedback(
 
 Sets `message.metadata.feedback` to the object you pass, replacing any earlier feedback. Nothing else on the message changes. Needs the `checkpointer:write` scope. Returns the updated message at `response.data`, in the same shape as `singleMessage`.
 
-The server answers HTTP 422 when `feedback` is larger than 8192 serialized bytes or nested deeper than 10 levels, 404 when the thread has no such message, and 501 when the server's core library is older than `10xgraph` 0.10.4.
+The server answers HTTP 422 when `feedback` is larger than 8192 serialized bytes or nested deeper than 10 levels, 404 when the thread has no such message, and 501 when the checkpointer lacks `aupdate_message_metadata` (added in `10xgraph` 1.0).
 
 ```ts
 const response = await client.updateThreadMessageFeedback('thread-123', 'msg-001', {

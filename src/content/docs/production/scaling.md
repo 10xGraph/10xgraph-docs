@@ -4,7 +4,7 @@ seoTitle: "Scaling and reliability for a 10xGraph agent"
 description: What Redis shares across API workers, how workers and IDs scale, what is replay-safe, how the server behaves when Redis or Postgres is down, and its honest limits.
 section: Production
 order: 30
-updated: "2026-10-27"
+updated: "2026-10-28"
 faq:
   - q: "Do I need Redis to run more than one worker?"
     a: "You can run without it, but the per-thread run lock, the per-user run cap, WebSocket caps, rate limits and token revocation then count per process. A cap of 10 across 4 workers becomes up to 40. Configure Redis for any multi-worker deployment."
@@ -77,7 +77,7 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 - Streaming runs do not use the tool ledger. The ledger check is in the `invoke` tool path, so a resumed streamed run can repeat a tool that already finished. Use idempotency keys for tools with side effects on streamed runs.
 - Without Redis, every cap and lock in the table above is per process.
 - There are no published benchmarks for throughput or latency. Load-test your own graph, model and tools.
-- 10xGraph is pre-1.0, so pin versions and read the changelog before upgrading.
+- Pin versions and read the changelog before upgrading. 1.0 is a release candidate until the final ships; from 1.0 breaking changes come only in a major release.
 
 ## Related
 

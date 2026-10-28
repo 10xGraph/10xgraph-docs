@@ -20,13 +20,18 @@
  * docs site keeps building when GitHub is down or rate-limiting, and page loads
  * never spend a visitor's unauthenticated API quota.
  *
- * Set GITHUB_TOKEN to raise the rate limit (5 requests unauthenticated is
- * usually fine; CI runners share IPs and can hit the cap).
+ * A run makes at least 10 GitHub requests (contributors plus commits for each
+ * of the 5 repos, more when a list is paginated). Auth is taken from
+ * GITHUB_TOKEN or GH_TOKEN, else from the `gh` CLI login, else the run is
+ * unauthenticated, which GitHub limits to 60 requests per hour per IP (CI
+ * runners share IPs and can hit the cap).
  *
  * Usage:
  *   npm run contributors
  *   GITHUB_TOKEN=ghp_... npm run contributors
+ *   gh auth login && npm run contributors
  */
+import {execFileSync} from 'node:child_process';
 import {writeFile, mkdir} from 'node:fs/promises';
 import {resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -67,7 +72,28 @@ const DAY = 86_400_000;
  */
 const LEAD_MAINTAINER = 'Iamsdt';
 
-const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+/** Env var first, then the gh CLI login. A missing or logged-out gh means no token. */
+function resolveToken() {
+  if (process.env.GITHUB_TOKEN) return {token: process.env.GITHUB_TOKEN, source: 'GITHUB_TOKEN'};
+  if (process.env.GH_TOKEN) return {token: process.env.GH_TOKEN, source: 'GH_TOKEN'};
+  try {
+    const out = execFileSync('gh', ['auth', 'token'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (out) return {token: out, source: 'gh CLI'};
+  } catch {
+    // gh not installed or not logged in
+  }
+  return {token: null, source: null};
+}
+
+const {token, source: tokenSource} = resolveToken();
+console.log(
+  token
+    ? `Using GitHub token from ${tokenSource}`
+    : 'No GitHub token: unauthenticated requests are limited to 60/hour',
+);
 
 async function github(path) {
   const res = await fetch(`https://api.github.com/${path}`, {
@@ -79,10 +105,24 @@ async function github(path) {
   });
 
   if (!res.ok) {
-    const hint =
-      res.status === 403 && !token
-        ? ' (rate limited; set GITHUB_TOKEN and retry)'
-        : '';
+    let hint = '';
+    const limited =
+      (res.status === 403 || res.status === 429) &&
+      res.headers.get('x-ratelimit-remaining') === '0';
+    if (limited) {
+      const reset = Number(res.headers.get('x-ratelimit-reset'));
+      if (reset) {
+        const at = new Date(reset * 1000).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+        hint += ` (rate limit resets at ${at})`;
+      } else {
+        hint += ' (rate limited)';
+      }
+      if (!token) hint += '; run gh auth login or set GITHUB_TOKEN';
+    }
     throw new Error(`${path}: HTTP ${res.status} ${res.statusText}${hint}`);
   }
   return res;
@@ -129,15 +169,16 @@ async function fetchNpmReleases(name) {
   if (res.status === 404) return [];
   if (!res.ok) throw new Error(`npm ${name}: HTTP ${res.status}`);
   const data = await res.json();
-  // Skip prereleases, including the `0.0.0-stage` placeholder npm adds while a new package's
-  // first version is held for review: nobody installs them by default.
+  // Release candidates count (PyPI's rc versions do too). Only the `0.0.0-*` placeholder
+  // (for example `0.0.0-stage`) npm adds while a new package's first version is held for
+  // review is skipped.
   return Object.keys(data.versions ?? {})
-    .filter((version) => !version.includes('-'))
+    .filter((version) => !version.startsWith('0.0.0-'))
     .map((version) => ({
-    package: name,
-    version,
-    date: data.time[version].slice(0, 10),
-  }));
+      package: name,
+      version,
+      date: data.time[version].slice(0, 10),
+    }));
 }
 
 const merged = new Map();
