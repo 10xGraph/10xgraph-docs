@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Agents and graphs"
 order: 40
 label: Custom state
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 Every 10xGraph agent runs within an `AgentState` instance that persists data across all nodes in the graph. By default, `AgentState` holds the message conversation history and execution metadata. You extend it by subclassing to add typed, persistent application fields, like user IDs, ticket numbers, sentiment scores, or any domain-specific data your agent needs. The graph threads the state through every node and saves it with the checkpointer.
@@ -169,6 +169,27 @@ print(result["state"].ticket_id)
 ```
 
 Only keys that already exist as fields on your state class are applied; `context`, `context_summary` and `execution_meta` are skipped. By default `invoke` returns only `messages` and `token_usage`. Pass `response_granularity=ResponseGranularity.FULL` (from `tenxgraph.utils`) to also get the final `state` object.
+
+---
+
+## What clients can write through the API
+
+When you serve the graph with `10xgraph dev`, a client can set custom state fields on invoke, stream and WebSocket `initial_state`, and with `PUT /v1/threads/{thread_id}/state`. This is by design: a frontend can send a selected ID straight into state without spending a model turn on it.
+
+The server limits what a client can write:
+
+| Client input | Result |
+|---|---|
+| Custom fields you defined on your state class | Accepted, if the value matches the field type. A wrong type returns 422 and names the field. |
+| `context_summary` or `execution_meta` | Always 422. These built-in fields are never client-writable. |
+| `current_node` | Accepted if it names a node in the graph. An unknown node returns 422. |
+| Messages in `context` | User messages only. Roles `assistant` and `system` return 422. A `tool` message is accepted only as `tool_result` blocks that answer a pending client tool call. |
+| `message_id` on a message | Ignored. The server generates the id. |
+
+To restrict which custom keys clients may set, list them in `runs.state_keys` in `10xgraph.json`. When it is set, any other key is refused.
+
+<aside class="callout callout-warning" role="warning"><p class="callout-title">Never read identity from state</p>
+<p>Because clients can write custom state fields, a field such as <code>user_id</code>, <code>tenant_id</code>, <code>role</code> or <code>account</code> in state is not proof of who is calling. Do not use it for access checks, database filters or billing in tools or nodes. Take the user from the authenticated config with <code>get_authz(config)</code>, which clients cannot set. See <a href="/docs/guides/authorization-scopes#read-caller-identity-inside-tools-and-nodes">Authorization scopes</a>. The <code>user_id</code> field in the examples on this page is a display value only.</p></aside>
 
 ---
 

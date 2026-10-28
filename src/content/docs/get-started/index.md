@@ -5,7 +5,7 @@ description: "10xGraph is a production-grade Python framework for multi-agent AI
 section: "Get started"
 order: 20
 label: Get Started
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 10xGraph is an open-source Python framework for building and deploying multi-agent LLM systems. You write the agent graph in Python. 10xGraph generates the REST, WebSocket and realtime audio server around it, enforces thread ownership and access control, stores state durably, and generates Docker files. A tool that finished before a crash is not run twice on replay.
@@ -78,8 +78,7 @@ Test the server with curl:
 curl -X POST "http://localhost:8000/v1/graph/invoke" \
   -H "Content-Type: application/json" \
   -d '{
-    "messages": [{"role": "user", "content": [{"type": "text", "text": "Where is order 1042?"}]}],
-    "config": {"thread_id": "test-001"}
+    "messages": [{"role": "user", "content": [{"type": "text", "text": "Where is order 1042?"}]}]
   }'
 ```
 
@@ -102,17 +101,15 @@ const client = new TenxGraphClient({
   authToken: "your-jwt-token",
 });
 
-// Invoke the agent and read the final messages
-const result = await client.invoke(
-  [Message.text_message("Where is order 1042?")],
-  { config: { thread_id: "test-001" } },
-);
+// Invoke the agent and read the final messages. With no thread_id, the
+// server starts a thread and returns its id in result.meta.thread_id.
+const result = await client.invoke([Message.text_message("Where is order 1042?")]);
 console.log(result.messages);
 
-// Or stream chunks as they arrive
+// Or stream chunks as they arrive, on the same thread
 for await (const chunk of client.stream(
   [Message.text_message("Refund order 1042 for $50")],
-  { config: { thread_id: "test-001" } },
+  { config: { thread_id: result.meta.thread_id } },
 )) {
   console.log(chunk.event, chunk.message);
 }

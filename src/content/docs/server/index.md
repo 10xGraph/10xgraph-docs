@@ -5,7 +5,7 @@ description: "The 10xGraph API server handles FastAPI endpoints for graph invoca
 section: "API server"
 order: 10
 label: Overview
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The `10xgraph api` command starts a FastAPI server that exposes your compiled graph as a production-ready REST and WebSocket API, handling graph invocation, streaming, thread state, media files, authentication, rate limiting, and observability. This section is the single source of truth for operating the 10xGraph API server.
@@ -49,16 +49,18 @@ Authorization (per-resource access control) is separate and optional:
 - **RBAC** (role-based access control): Custom `AuthorizationBackend` subclass for per-tool access, team scopes, or resource-level rules.
 - **Allow all** (default in development): All authenticated users can access all resources.
 
-WebSocket and HTTP endpoints both enforce authentication via the `Authorization: Bearer <token>` header. WebSocket also accepts the token in the `Sec-WebSocket-Protocol` header as `10xgraph-bearer, <token>` (the deprecated `agentflow-bearer` name still works), or as a `?token=` query parameter as a last resort. See [Secure your server](/docs/server/auth) for setup and examples.
+WebSocket and HTTP endpoints both enforce authentication via the `Authorization: Bearer <token>` header. WebSocket also accepts the token in the `Sec-WebSocket-Protocol` header as `10xgraph-bearer, <token>` (the deprecated `agentflow-bearer` name still works), or as a `?token=` query parameter as a last resort. HTTP routes read only the `Authorization` header. See [Secure your server](/docs/server/auth) for setup and examples.
 
 ## Development vs. production modes
 
 The `MODE` environment variable switches the server's security and logging posture:
 
 - **`MODE=development`** (default): Unauthenticated `/ping` and `/v1/evals` accessible, `ORIGINS="*"` (CORS allows any domain), `IS_DEBUG` defaults to true. Use for local development and testing.
-- **`MODE=production`**: Only `/ping` is unauthenticated, the `/v1/evals` endpoints are not mounted, wildcard CORS with credentials is refused (set `ORIGINS` explicitly), and `/docs` and `/redocs` are disabled unless you set `DOCS_PATH` and `REDOCS_PATH`. Security headers (HSTS, X-Frame-Options and others) are on in every mode unless `SECURITY_HEADERS_ENABLED=false`. Use for deployments exposed to the internet.
+- **`MODE=production`**: Only `/ping` is unauthenticated, the `/v1/evals` endpoints are not mounted, a graph run is cancelled after 300 seconds unless you change `runs.timeout`, wildcard CORS with credentials is refused (set `ORIGINS` explicitly), and `/docs` and `/redocs` are disabled unless you set `DOCS_PATH` and `REDOCS_PATH`. Security headers (HSTS, X-Frame-Options and others) are on in every mode unless `SECURITY_HEADERS_ENABLED=false`. Use for deployments exposed to the internet.
 
-Together with `JWT_SECRET_KEY` (a strong, randomly generated secret in production) and an explicit `ORIGINS` list, production mode refuses to start with wildcard CORS and credentials enabled, so set `ORIGINS` to your real domains.
+Together with `JWT_SECRET_KEY` (a strong, randomly generated secret in production) and an explicit `ORIGINS` list, production mode refuses to start with wildcard CORS and credentials enabled. `STRICT_PRODUCTION_CHECKS` is on by default in production and also refuses a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST` and enabled docs paths, so set `ORIGINS` and `ALLOWED_HOST` to your real values. Set `STRICT_PRODUCTION_CHECKS=false` to opt out.
+
+`MODE` accepts `production` or `prod`, and `development`, `dev` or `local`, in any case. Unset means development. Any other value stops the server at startup, and `10xgraph dev` exits with code 2.
 
 ## Reading order for this section
 

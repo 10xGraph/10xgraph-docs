@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 520
 label: Threads
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 A thread is one conversation stored by the server's checkpointer: an ordered list of messages plus a state snapshot. The `TenxGraphClient` thread methods list threads, read and edit their state and messages, and delete them. They all call the `/v1/threads` routes and need a checkpointer on the server.
@@ -19,7 +19,7 @@ const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
 
 <aside class="callout callout-note" role="note"><p class="callout-title">A checkpointer is required</p>
 
-If the server was started without a checkpointer, every thread route returns HTTP 503 ("Checkpointer is not configured"). To create threads from the client, pass `thread_id` in the `config` of an invoke or stream call. See [Invoke](/docs/reference/client/invoke) and [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
+If the server was started without a checkpointer, every thread route returns HTTP 503 ("Checkpointer is not configured"). To create a thread from the client, call invoke or stream without a `thread_id`. The server picks the id and returns it as `meta.thread_id` (invoke) or `chunk.thread_id` (stream). See [Invoke](/docs/reference/client/invoke) and [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
 
 </aside>
 
@@ -33,8 +33,9 @@ Every method accepts `threadId` as `string | number`. Failed requests throw `Ten
 | `updateThreadState` | `PUT /v1/threads/{thread_id}/state` | Merge new values into the state |
 | `clearThreadState` | `DELETE /v1/threads/{thread_id}/state` | Delete the state snapshot |
 | `threadMessages` | `GET /v1/threads/{thread_id}/messages` | List messages |
-| `addThreadMessages` | `POST /v1/threads/{thread_id}/messages` | Append messages without running the graph |
+| `addThreadMessages` | `POST /v1/threads/{thread_id}/messages` | Deprecated. Append messages without running the graph (admin scope) |
 | `singleMessage` | `GET /v1/threads/{thread_id}/messages/{message_id}` | Fetch one message |
+| `updateThreadMessageFeedback` | `PUT /v1/threads/{thread_id}/messages/{message_id}` | Set feedback on a message |
 | `deleteMessage` | `DELETE /v1/threads/{thread_id}/messages/{message_id}` | Delete one message |
 | `deleteThread` | `DELETE /v1/threads/{thread_id}` | Delete a thread |
 
@@ -125,7 +126,7 @@ client.updateThreadState(
 | `config` | `Record<string, any>` | Config sent in the request body. Pass `{}` if you have nothing to add. |
 | `state` | `any` | Partial state to merge in. |
 
-The server merges `state` into the stored snapshot instead of replacing it. Dictionaries are deep-merged, other values overwrite, `null` values do not erase existing ones, and `context` messages are appended. `execution_meta` is kept from the stored state. Messages in `context` may not carry tool calls: the server answers 422. Returns the merged state at `response.data.state`.
+The server merges `state` into the stored snapshot instead of replacing it. Dictionaries are deep-merged, other values overwrite, `null` values do not erase existing ones, and `context` messages are appended. The server answers 422 for `context_summary` or `execution_meta` in `state`, for `context` messages that are not user messages (a `tool` message is accepted only as `tool_result` blocks answering a pending client tool call), for `context` messages that carry tool calls, and for a value that does not match its state field type. Custom fields are allowed unless the operator set `runs.state_keys`. Any `message_id` you send is replaced by the server. Returns the merged state at `response.data.state`.
 
 ```ts
 // Merge one key into the stored state
@@ -182,7 +183,7 @@ client.addThreadMessages(
 ): Promise<AddThreadMessagesResponse>
 ```
 
-Appends messages to the thread without running the graph. Use it to inject a system prompt or context. The server rejects any message that carries a tool call (HTTP 422), because only the model may request tools. Returns `response.data` as `{ success, message, data }`.
+Deprecated. Appends messages to the thread without running the graph. The server route needs the `checkpointer:import` scope, which only admin identities hold. A normal user gets HTTP 403. The server rejects any message that carries a tool call (HTTP 422), because only the model may request tools. To attach feedback to a message, use [`updateThreadMessageFeedback`](#updatethreadmessagefeedback). Returns `response.data` as `{ success, message, data }`.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -192,13 +193,35 @@ Appends messages to the thread without running the graph. Use it to inject a sys
 | `metadata` | `Record<string, any>` | `{}` sent | Optional metadata stored with the messages. |
 
 ```ts
-// Append a system message to an existing thread
+// Admin identities only: append a system message to an existing thread
 await client.addThreadMessages(
   'thread-123',
   [Message.textMessage('You are a travel guide.', 'system')],
   {},
   { injected_by: 'setup' }
 );
+```
+
+### `updateThreadMessageFeedback`
+
+```ts
+client.updateThreadMessageFeedback(
+  threadId: string | number,
+  messageId: string,
+  feedback: Record<string, any>
+): Promise<UpdateThreadMessageFeedbackResponse>
+```
+
+Sets `message.metadata.feedback` to the object you pass, replacing any earlier feedback. Nothing else on the message changes. Needs the `checkpointer:write` scope. Returns the updated message at `response.data`, in the same shape as `singleMessage`.
+
+The server answers HTTP 422 when `feedback` is larger than 8192 serialized bytes or nested deeper than 10 levels, 404 when the thread has no such message, and 501 when the server's core library is older than `10xgraph` 0.10.4.
+
+```ts
+const response = await client.updateThreadMessageFeedback('thread-123', 'msg-001', {
+  rating: 'down',
+  comment: 'Wrong city',
+});
+console.log(response.data.metadata?.feedback);
 ```
 
 ### `singleMessage`
@@ -255,7 +278,9 @@ The server checks these constraints and answers HTTP 422 when one fails.
 | `messageId` | Not empty or whitespace. |
 | `offset` | 0 or more. |
 | `limit` | Above 0. Values over 1000 are capped at 1000. |
-| Messages and `context` you write | No tool calls. |
+| Messages and `context` you write | No tool calls. User messages only: `assistant` and `system` roles are refused, and a `tool` message must be `tool_result` blocks answering a pending client tool call. |
+| State you write | No `context_summary` or `execution_meta`. Custom fields must match their state field types. |
+| `feedback` | An object of at most 8192 serialized bytes and 10 levels deep. |
 
 ## Examples
 

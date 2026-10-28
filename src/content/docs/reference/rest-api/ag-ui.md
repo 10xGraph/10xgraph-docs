@@ -5,7 +5,7 @@ section: Reference
 group: "REST API"
 order: 330
 label: AG-UI
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Is POST /v1/ag-ui always available?
     a: "No. It is mounted only when 10xgraph.json has \"ag_ui\" set to {\"enabled\": true} and the ag-ui extra is installed. Without it the route returns 404."
@@ -154,7 +154,7 @@ Resume by sending a new run on the same thread with a `resume` entry:
 }
 ```
 
-`interrupt()` returns `payload` for `resolved` and `None` for `cancelled`. While the thread is paused, a run without a matching `resume` (a new chat message, for example) reports the same interrupt again without running the graph. A `resume` for a different interrupt id, or for a thread that is not paused, ends the run with `RUN_ERROR` and code `INVALID_INPUT`.
+`interrupt()` returns `payload` for `resolved` and `None` for `cancelled`. While the thread is paused, a run without a matching `resume` (a new chat message, for example) reports the same interrupt again without running the graph. A `resume` for a different interrupt id, or for a thread that is not paused, ends the run with `RUN_ERROR` and code `INVALID_INPUT`. Each `resume` entry names its `interruptId`, so an AG-UI resume is always bound to the interrupt it answers. If the `payload` fails the interrupt's `response_schema`, the run also ends with `RUN_ERROR`.
 
 ---
 
@@ -177,7 +177,7 @@ With `ag_ui.allow_client_tools` set to `false`, tools sent by the client are ign
 
 ## Authentication
 
-The route uses `RequirePermission("graph", "stream")`, the same permission as [`POST /v1/graph/stream`](/docs/reference/rest-api/graph). When auth is configured, the server also checks that the caller may access `threadId` through the [authorization backend](/docs/reference/api-cli/auth), so with `ownership` one user cannot run or read another user's thread.
+The route uses `RequirePermission("graph", "stream")`, the same permission as [`POST /v1/graph/stream`](/docs/reference/rest-api/graph). When auth is configured, the server also checks that the caller may access `threadId` through the [authorization backend](/docs/reference/api-cli/auth), so with `ownership` one user cannot run or read another user's thread. AG-UI accepts a `threadId` the frontend made even when `runs.thread_ids` is `server`, because CopilotKit creates its own. The caller then owns that thread.
 
 Browsers should not hold the API token. With CopilotKit, set the `Authorization` header in the Next.js route handler through `HttpAgent`'s `headers` option, so the token stays on the server.
 
@@ -194,15 +194,33 @@ Errors found before the stream starts return a normal HTTP error. See [Conventio
 | `401` | Auth is configured and no valid token was sent |
 | `403` | The caller lacks `graph:stream`, or may not access this `threadId` |
 | `404` | The endpoint is not enabled (`ag_ui.enabled` is not `true`) |
-| `422` | The body is not JSON, is not a valid `RunAgentInput`, has no `threadId`, or breaks a [client tool limit](#client-tools) |
+| `409` | Another run is still active on this `threadId` after 30 seconds. See [One run per thread](#one-run-per-thread) |
+| `422` | The body is not JSON, is not a valid `RunAgentInput`, has no `threadId`, breaks a [client tool limit](#client-tools), or breaks a [request size limit](#request-size-limits) |
 
 Once the stream has started, failures arrive as a `RUN_ERROR` event instead:
 
 | `code` | Cause |
 | --- | --- |
 | `INVALID_INPUT` | A `resume` that does not match the open interrupt |
-| `GRAPH_ERROR` | The graph reported an error |
+| `GRAPH_ERROR` | The graph reported an error. With `MODE=production` the message is generic, like invoke; development shows the details |
 | `AG_UI_ERROR` | Any other failure. The message is generic and details go to the server log |
+
+---
+
+## One run per thread
+
+The server runs one graph run at a time on a thread. A second AG-UI run on a busy thread waits up to 30 seconds for the first to finish, then gets `409` with `thread is busy` in the standard error body. This happens before the stream starts. AG-UI has no `on_busy` field, so it always waits and never cancels the running run. When Redis is configured, the lock is shared across replicas; otherwise it is per process.
+
+---
+
+## Request size limits
+
+AG-UI clients resend the whole conversation on every run, so the limits work differently here than on invoke and stream:
+
+- The messages after the last assistant message (the trailing turn, which is what reaches the graph) get the normal limits: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total.
+- The full history gets a looser cap of 10,000 messages, plus the 100 blocks per message cap.
+
+A request over a limit returns `422`.
 
 ---
 

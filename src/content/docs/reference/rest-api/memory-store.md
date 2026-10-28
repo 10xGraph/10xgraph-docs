@@ -5,7 +5,7 @@ section: Reference
 group: "REST API"
 order: 350
 label: Memory store
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The `/v1/store` endpoints let you store, search, list, read, update, delete and bulk-forget long-term memories through the 10xGraph API server. They work only when a `store` is configured in `10xgraph.json`; without one, every endpoint returns `503` with "Store is not configured". Responses use the standard `data` and `metadata` envelope.
@@ -19,9 +19,9 @@ Every request body accepts two optional fields besides the endpoint-specific one
 | Field | Type | Description |
 | --- | --- | --- |
 | `config` | object | Values forwarded to the store backend. Defaults to `{}`. The keys `user_id`, `user`, `authz`, `remote_tools`, `collection` and any key starting with `_` are dropped by the server. |
-| `options` | object | Extra keyword arguments forwarded to the store backend. The key `memory_id` is dropped, so the store always generates IDs. |
+| `options` | object | Keyword arguments forwarded to the store backend. Only `infer` and `replace_metadata` are accepted; every other key is dropped, including `memory_id`, so the store always generates IDs. |
 
-The server sets `user_id` from the authenticated user (or `anonymous` when auth is off). Sending `user_id` in `config` has no effect. See the [REST conventions](/docs/reference/rest-api/conventions) for the envelope and error format.
+The server sets `user_id` from the authenticated user (or `anonymous` when auth is off). Sending `user_id` in `config` has no effect. The same goes for `collection`: a client cannot choose the collection, and the routes always use the collection default of the store (a name, or a function the developer set, called with the authenticated `user`). See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). Store operations always need a non-empty `user_id`, so an identity without one cannot use these endpoints. Reserved ids starting with `__system__` (built with `system_user_id(name)`) own shared data such as agent memory and RAG knowledge bases, and the server refuses an authenticated identity whose `user_id` starts with `__system__`. See the [REST conventions](/docs/reference/rest-api/conventions) for the envelope and error format.
 
 ---
 
@@ -43,7 +43,7 @@ Store a memory record. Requires `store:write` permission.
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `content` | string or `Message` | yes | | Memory text, or a structured `Message` object |
+| `content` | string or `Message` | yes | | Memory text (at most 100,000 characters), or a structured `Message` object |
 | `memory_type` | string | no | `episodic` | One of `episodic`, `semantic`, `procedural`, `entity`, `relationship`, `custom`, `declarative` |
 | `category` | string | no | `general` | Category label for organizing memories |
 | `metadata` | object | no | `null` | Arbitrary metadata stored alongside the memory |
@@ -100,7 +100,7 @@ Search memories by semantic similarity. Requires `store:read` permission.
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `query` | string | yes | | Search query for semantic similarity; empty or whitespace-only returns `422` |
+| `query` | string | yes | | Search query for semantic similarity; empty or whitespace-only returns `422`; longer than 8,000 characters returns `422` |
 | `memory_type` | string | no | `null` | Filter results by memory type (same values as when storing) |
 | `category` | string | no | `null` | Filter results by category |
 | `limit` | integer | no | `10` | Maximum results to return; must be between 1 and 100 |
@@ -301,7 +301,7 @@ Update the content or metadata of a stored memory. Requires `store:write` permis
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `content` | string or `Message` | yes | Replacement memory content or structured message |
+| `content` | string or `Message` | yes | Replacement memory content (string at most 100,000 characters) or structured message |
 | `metadata` | object | no | Replacement metadata (merged or replaced per backend) |
 
 **Response (200 OK):**
@@ -379,7 +379,7 @@ curl -X DELETE http://localhost:8000/v1/store/memories/mem_abc123 \
 
 ## POST /v1/store/memories/forget
 
-Delete all memories matching the given filters. Requires `store:delete` permission.
+Delete the caller's memories matching all the given filters; with none, every memory of the caller. Requires `store:delete` permission.
 
 Use this to bulk-delete memories by type, category, or custom filters without listing them first.
 
@@ -398,7 +398,7 @@ Use this to bulk-delete memories by type, category, or custom filters without li
 | --- | --- | --- | --- |
 | `memory_type` | string | no | Restrict deletion to this memory type (same values as when storing) |
 | `category` | string | no | Restrict deletion to this category |
-| `filters` | object | no | Additional backend-specific filters |
+| `filters` | object | no | Additional metadata filters. With `QdrantStore` each value must be a string, integer or boolean (otherwise the request fails). With `Mem0Store` any of `memory_type`, `category` or `filters` makes the request fail, because Mem0 can only forget by user |
 
 **Response (200 OK):**
 

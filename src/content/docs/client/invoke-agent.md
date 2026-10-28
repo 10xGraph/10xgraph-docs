@@ -5,10 +5,10 @@ section: TypeScript client
 group: Basics
 order: 30
 label: Invoke the agent
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: How do I keep conversation history between calls?
-    answer: Pass a thread_id in the config object. The same thread_id will replay messages in order and maintain state across multiple invoke calls, so the agent has context from earlier turns.
+    answer: Omit thread_id on the first call and read the id the server picked from result.meta.thread_id. Pass that thread_id in the config object on later calls. The same thread_id replays messages in order and maintains state, so the agent has context from earlier turns.
   - question: "What's the difference between response_granularity values?"
     answer: "'low' returns only messages (fastest, production); 'partial' adds context and summary; 'full' adds the graph state (debugging). Use 'low' unless you need the extra data."
   - question: How do I see what the agent is doing step by step?
@@ -68,17 +68,15 @@ For multimodal responses (images, audio, documents), the agent may include other
 
 ## Keep conversation history with threads
 
-By default, each `invoke()` call is independent. To maintain conversation history, pass a `thread_id` in the `config` object. The same thread will replay all prior messages in order:
+By default, each `invoke()` call without a `thread_id` starts a new thread. To keep conversation history, send the id of that thread back in the `config` object on later calls. The same thread replays all prior messages in order.
+
+Do not invent the id. Omit `thread_id` on the first call. The server starts a thread and returns its id in `result.meta.thread_id`:
 
 ```ts
-const threadId = 'user-123-session';
-
-// First turn
-const first = await client.invoke(
-  [Message.text_message('Tell me about Paris.')],
-  { config: { thread_id: threadId } }
-);
+// First turn: no thread_id, so the server starts a new thread
+const first = await client.invoke([Message.text_message('Tell me about Paris.')]);
 console.log(first.messages[first.messages.length - 1].content);
+const threadId = first.meta.thread_id;
 
 // Second turn: the agent sees the first message and response automatically
 const second = await client.invoke(
@@ -87,7 +85,10 @@ const second = await client.invoke(
 );
 ```
 
-The result includes metadata about the thread: `result.meta.thread_id` (the ID used) and `result.meta.is_new_thread` (true only on the first call for a given ID).
+The result includes metadata about the thread: `result.meta.thread_id` (the ID used) and `result.meta.is_new_thread` (true when the server just started the thread).
+
+<aside class="callout callout-warning" role="note"><p class="callout-title">Unknown thread ids get 403</p>
+<p>By default the server only accepts the id of a thread that already exists. An id you made up answers <code>403</code>, the same as another user's thread. Store the id the server returns and reuse it. Operators can change this with <a href="/docs/reference/api-cli/configuration#thread_ids"><code>runs.thread_ids</code></a>.</p></aside>
 
 ## Control response size with granularity
 
@@ -97,7 +98,6 @@ The `response_granularity` option tells the server how much data to include in t
 const response = await client.invoke(
   [Message.text_message('Summarize this document.')],
   {
-    config: { thread_id: 'doc-summary-1' },
     response_granularity: 'low',  // Fastest, messages only
   }
 );
@@ -190,13 +190,14 @@ const client = new TenxGraphClient({
 
 async function askAgent(
   question: string,
-  threadId: string
-): Promise<string | null> {
+  threadId?: string
+): Promise<{ text: string; threadId: string } | null> {
   try {
     const result = await client.invoke(
       [Message.text_message(question)],
       {
-        config: { thread_id: threadId },
+        // Omit thread_id on the first call. The server starts a thread and returns its id.
+        config: threadId ? { thread_id: threadId } : undefined,
         response_granularity: 'low',
       }
     );
@@ -206,10 +207,11 @@ async function askAgent(
     );
     if (!assistantMsg) return null;
 
-    return assistantMsg.content
+    const text = assistantMsg.content
       .filter(block => block.type === 'text')
       .map(block => (block as any).text)
       .join('');
+    return { text, threadId: result.meta.thread_id };
   } catch (err) {
     if (err instanceof TenxGraphError) {
       console.error(`Agent error [${err.statusCode}]: ${err.message}`);
@@ -222,13 +224,12 @@ async function askAgent(
 
 // Example usage
 (async () => {
-  const thread = 'conversation-001';
-  
-  const answer1 = await askAgent('What is quantum entanglement?', thread);
-  console.log('Agent:', answer1);
+  const first = await askAgent('What is quantum entanglement?');
+  console.log('Agent:', first?.text);
 
-  const answer2 = await askAgent('Can you explain it more simply?', thread);
-  console.log('Agent:', answer2);
+  // Continue on the thread the server started
+  const second = await askAgent('Can you explain it more simply?', first?.threadId);
+  console.log('Agent:', second?.text);
 })();
 ```
 
@@ -250,7 +251,7 @@ The agent should respond within seconds. If responses take too long, check the g
 
 - Create messages with `Message.text_message()` and pass them to `client.invoke()`.
 - Extract text from the response by filtering for `role === 'assistant'` and `block.type === 'text'`.
-- Use `thread_id` in the config to persist conversation history across calls.
+- Omit `thread_id` on the first call, then pass the returned `meta.thread_id` in the config to continue the conversation.
 - Set `response_granularity` to 'low' for production, 'full' for debugging.
 - Monitor progress with `onPartialResult` callbacks for multi-step agent runs.
 - Catch `TenxGraphError` by status code to handle auth, permission, and server errors.

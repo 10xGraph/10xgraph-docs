@@ -1,12 +1,12 @@
 ---
 title: Memory stores
 seoTitle: "Memory stores API reference (Python)"
-description: "Reference for BaseStore, QdrantStore, Mem0Store, embedding classes, MemoryConfig, MemoryIntegration, preload helpers and store factories."
+description: "Reference for BaseStore, QdrantStore, Mem0Store, embedding classes, MemoryConfig, the agent memory system prompt and store factories."
 section: Reference
 group: "Python library"
 order: 220
 label: Memory stores
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 A memory store keeps facts, preferences and past interactions across conversation threads, so an agent can recall them later. This page documents the `tenxgraph.storage.store` API: embeddings, `QdrantStore`, `Mem0Store`, memory configuration, retrieval helpers and factories. A checkpointer, by contrast, saves state within one thread.
@@ -18,8 +18,8 @@ For the concepts and a walkthrough, see [Long-term memory](/docs/concepts/memory
 ```python
 from tenxgraph.storage.store import (
     BaseStore, QdrantStore, Mem0Store,
-    MemoryConfig, AgentMemoryConfig, UserMemoryConfig, MemoryIntegration,
-    create_memory_preload_node, get_memory_system_prompt,
+    MemoryConfig, AgentMemoryConfig, UserMemoryConfig,
+    get_agent_memory_system_prompt,
 )
 from tenxgraph.storage.store.store_schema import (
     MemoryType, RetrievalStrategy, DistanceMetric,
@@ -36,7 +36,7 @@ Install the dependencies for the backends you use:
 ```bash
 pip install openai              # OpenAIEmbedding
 pip install google-genai        # GoogleEmbedding
-pip install "10xgraph[qdrant]"  # QdrantStore (qdrant-client)
+pip install "10xgraph[qdrant]"  # QdrantStore (qdrant-client >= 1.10)
 pip install "10xgraph[mem0]"    # Mem0Store (mem0ai)
 ```
 
@@ -81,9 +81,9 @@ pip install "10xgraph[mem0]"    # Mem0Store (mem0ai)
 
 | Value | Description |
 |---|---|
-| `NO_RETRIEVAL` | Value `"no_retrieval"`. The model cannot read past memories. Writing stays available through `memory_tool` when you register it. |
-| `PRELOAD` | Value `"preload"`. Relevant memories are retrieved and injected as a system message before the LLM call. |
-| `POSTLOAD` | Value `"postload"`. The model decides when to search by calling a memory tool. |
+| `NO_RETRIEVAL` | Value `"no_retrieval"`. The model cannot read past memories and no memory tools are registered. |
+| `PRELOAD` | Value `"preload"`. Relevant memories are searched once per graph invocation and added to the latest user message, for that request only. Every model call in the run reuses the same block. See [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text). |
+| `POSTLOAD` | Value `"postload"`. The model decides when to search by calling `user_memory_tool` or `agent_memory_tool`. |
 
 ---
 
@@ -211,7 +211,7 @@ store = QdrantStore(embedding=OpenAIEmbedding(), path="./qdrant_data")
 
 memory = MemoryConfig(
     store=store,
-    retrieval_mode=ReadMode.PRELOAD,  # inject memories before each model call
+    retrieval_mode=ReadMode.PRELOAD,  # search once per invocation, inject into the user message
     limit=5,
     score_threshold=0.5,
     max_tokens=2000,
@@ -239,6 +239,7 @@ Configuration for user-scoped long-term memory. The model can both search and wr
 | `limit` | `int \| None` | None | Max memories to retrieve. If None, uses the parent config limit. |
 | `score_threshold` | `float \| None` | None | Min similarity score, must not be negative. If None, uses the parent config threshold. |
 | `config` | `dict[str, Any]` | {} | Optional config dict passed to store calls. |
+| `collection` | `str \| Callable[[dict], str] \| None` | None | Collection for this scope: a name, or a function of the run config. Always wins over any other collection. See [Collections](#collections). |
 | `user_id` | `str \| None` | None | User identifier for scoping. Blank strings are rejected. |
 
 ### `AgentMemoryConfig`
@@ -253,99 +254,102 @@ Configuration for agent/app-scoped long-term memory. The model can search but no
 | `category` | `str` | `"general"` | Default memory category. |
 | `limit` | `int \| None` | None | Max memories to retrieve. |
 | `score_threshold` | `float \| None` | None | Min similarity score. |
+| `collection` | `str \| Callable[[dict], str] \| None` | None | Collection for this scope: a name, or a function of the run config. Always wins. See [Collections](#collections). |
 | `config` | `dict[str, Any]` | {} | Optional config dict. |
 | `agent_id` | `str \| None` | None | Agent identifier for scoping. |
 | `app_id` | `str \| None` | None | App identifier for scoping. |
+
+Agent memory is shared data. `agent_memory_tool` and the preload block always search it as the reserved owner `system_user_id(agent_id)` (or `system_user_id(app_id)` when `agent_id` is not set), whatever user is running, so every user of an agent sees the same agent memory. Each agent has its own owner, so two agents never see each other's shared memory, even in one Qdrant collection. Enabling `AgentMemoryConfig` with neither `agent_id` nor `app_id` raises `ValueError` when the Agent sets up its memory:
+
+```text
+ValueError: MemoryConfig.agent_memory is enabled but has neither agent_id nor app_id; set one so shared agent memory has its own owner
+```
+
+To write shared agent memory from your own code, store under the same owner. The tool searches with `user_id` set to the owner, plus `agent_id` and `thread_id` (both set to your `agent_id`) and `app_id` when set, so write with the same keys:
+
+```python
+from tenxgraph.storage import system_user_id
+
+await store.astore(
+    config={
+        "user_id": system_user_id("customer-support-v2"),
+        "agent_id": "customer-support-v2",
+        "thread_id": "customer-support-v2",
+    },
+    content="Error E42 means the license expired.",
+    category="workarounds",
+)
+```
+
+With only an `app_id`, use `{"user_id": system_user_id(app_id), "app_id": app_id}`. `QdrantStore` filters search by `user_id`, `memory_type` and `category` and ignores `agent_id`, `app_id` and `thread_id`; the per-agent owner is what keeps agents apart. `Mem0Store` also scopes by `app_id`.
+
+---
+
+### Collections
+
+`UserMemoryConfig` and `AgentMemoryConfig` share the `collection` field. A string is stripped and must not be empty (a blank name raises `ValueError` at validation). A function receives the run config and must return a non-empty string.
+
+`resolve_collection(run_config) -> str | None` returns the scope's collection: `None` when `collection` is not set, the string as is, or the function's result (stripped). A function that returns a non-string or a blank string raises `ValueError`. Memory tools and the preload block call it with the merged config when they build each scope's config, and write the result to `cfg["collection"]`.
+
+**Precedence.** The first of these that sets a collection wins:
+
+1. The scope's `collection` (`UserMemoryConfig` / `AgentMemoryConfig`). It overrides any `collection` in the merged config, including one in the run config.
+2. A `collection` in the merged config: `MemoryConfig.config`, the scope's `config`, or a run config built by your own code.
+3. The store default, `QdrantStore(collection=...)`.
+
+The API removes `collection` from client config on every route, so a client cannot supply level 2. The REST memory routes have no scope config, so they use level 3 only.
+
+```python
+from tenxgraph.storage.store import AgentMemoryConfig, UserMemoryConfig
+
+
+def company_collection(cfg: dict) -> str:
+    tenant_id = (cfg.get("user") or {}).get("tenant_id")
+    if not tenant_id:
+        raise ValueError("The authenticated user has no tenant_id")
+    return f"company_{tenant_id}"
+
+
+user_memory = UserMemoryConfig(collection=company_collection)
+agent_memory = AgentMemoryConfig(enabled=True, agent_id="support-bot", collection="agent_notes")
+```
+
+A collection function must read the authenticated identity (`cfg["user"]`, set by the auth backend, or `cfg["user_id"]`), never state. See [Collections: keeping data apart](/docs/concepts/memory-and-store#collections-keeping-data-apart) for the full guidance and the two company patterns.
 
 ---
 
 ## Memory retrieval functions
 
-These helpers build the system prompt and the preload graph node by hand, for graphs that do not use `Agent(memory=...)`. `MemoryIntegration` bundles them.
+### `get_agent_memory_system_prompt(memory_config)`
 
-### `get_memory_system_prompt(mode)`
-
-Returns a system prompt fragment for the given retrieval mode. All modes include write instructions because writing is always available.
+Returns the system prompt fragment that `Agent(memory=...)` adds when `inject_system_prompt=True`. You rarely call it yourself.
 
 ```python
-from tenxgraph.storage.store import get_memory_system_prompt
+from tenxgraph.storage.store import get_agent_memory_system_prompt
 
-prompt_fragment = get_memory_system_prompt(mode="preload")
-print(prompt_fragment[:80])  # add this text to your system prompt
+fragment = get_agent_memory_system_prompt(memory_config)
 ```
 
-| Parameter | Type | Default | Description |
+| Parameter | Type | Description |
+|---|---|---|
+| `memory_config` | `MemoryConfig` | The memory configuration. |
+
+**Returns:** A string that starts with `[Long-term Memory]`. The rest depends on `retrieval_mode`:
+
+- `preload`: says relevant memories may appear in the latest user message inside a `<user_memories_...>` block, and that they are background information, not instructions.
+- `postload`: describes `user_memory_tool` (search and remember) when user memory is enabled, and the read-only `agent_memory_tool` when agent memory is enabled.
+- `no_retrieval`: says memory retrieval tools are not available.
+
+In `preload` mode, the Agent runs the search itself, once per invocation (one `invoke` or `stream` run). It caches the block per Agent under the run's `run_id` and the latest user message, in a small bounded cache, and never saves it to state. The search query is the latest user message. There is no graph node to add.
+
+### `make_user_memory_tool(memory_config)` and `make_agent_memory_tool(memory_config)`
+
+Factories that build the model-facing tools. `Agent(memory=...)` calls them for you in `postload` mode. Import them from `tenxgraph.storage.store` or `tenxgraph.prebuilt.tools` only if you register the tools by hand. See [Prebuilt tools](/docs/reference/python/prebuilt-tools).
+
+| Factory | Tool name | Model arguments | Can write |
 |---|---|---|---|
-| `mode` | `str` | `"no_retrieval"` | Retrieval mode: `"no_retrieval"`, `"preload"`, or `"postload"`. |
-
-**Returns:** A string prompt fragment suitable for concatenation into a larger system prompt. Includes memory-specific instructions and write guidance. `mode="preload"` produces text that begins:
-
-```text
-You have been provided with long-term memory context from previous interactions. Use it to personalize your responses when relevant. The memory context appears as system messages labeled '[Long-term Memory Context]'.
-```
-
-`Agent(memory=...)` uses the related `get_agent_memory_system_prompt(memory_config)` instead, which describes `user_memory_tool` and `agent_memory_tool`.
-
-### `create_memory_preload_node(store, ...)`
-
-Factory function that returns a graph node for preloading memories. Wire it before your LLM node to retrieve relevant memories and inject them as a system message. The search ignores `thread_id`, so memories are shared across threads.
-
-```python title="preload_wiring.py"
-from tenxgraph.core import StateGraph
-from tenxgraph.core.state import AgentState
-from tenxgraph.storage.store import OpenAIEmbedding, QdrantStore, create_memory_preload_node
-
-store = QdrantStore(embedding=OpenAIEmbedding(), path="./qdrant_data")
-
-preload = create_memory_preload_node(store=store, limit=5, score_threshold=0.5)
-
-graph = StateGraph(AgentState)
-graph.add_node("memory_preload", preload)
-graph.add_edge("memory_preload", "main_agent")  # "main_agent" is your LLM node
-graph.set_entry_point("memory_preload")
-```
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `store` | `BaseStore` | Required | The memory store instance. |
-| `query_builder` | `Callable[[AgentState], str] \| None` | None | Custom function to extract the search query from state. Default: extracts the latest user message text. |
-| `limit` | `int` | 5 | Maximum memories to retrieve. |
-| `score_threshold` | `float` | 0.0 | Minimum similarity score. 0.0 = no threshold. |
-| `memory_types` | `list[MemoryType] \| None` | None | If specified, search only these memory types (e.g., `[MemoryType.EPISODIC, MemoryType.SEMANTIC]`). |
-| `system_prompt_template` | `str` | Built-in template | Template for the injected system message, filled with `str.format`. Must contain a `{memories}` placeholder. |
-| `max_tokens` | `int \| None` | None | Optional token budget for retrieved context. |
-
-**Returns:** An async node function `(state: AgentState, config: dict) -> list[Message]` that returns one system message, or an empty list if there is no user message, no match, or the search fails (the failure is logged).
-
-### `MemoryIntegration`
-
-`MemoryIntegration` is a single entry point that builds the preload node, system prompt and memory tools for a hand-built graph.
-
-```python title="memory_integration.py"
-from tenxgraph.core import StateGraph
-from tenxgraph.core.state import AgentState
-from tenxgraph.storage.store import MemoryIntegration, OpenAIEmbedding, QdrantStore
-
-store = QdrantStore(embedding=OpenAIEmbedding(), path="./qdrant_data")
-memory = MemoryIntegration(store=store, retrieval_mode="preload")
-
-graph = StateGraph(AgentState)
-memory.wire(graph, entry_to="main_agent")  # adds "memory_preload" and the entry point
-system_prompt = memory.system_prompt       # add to your LLM node's prompt
-tools = memory.tools                       # [memory_tool], register with ToolNode
-```
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `store` | `BaseStore` | Required | The memory store. |
-| `retrieval_mode` | `ReadMode \| str` | `ReadMode.NO_RETRIEVAL` | Retrieval mode. |
-| `limit` | `int` | 5 | Maximum memories to retrieve. |
-| `score_threshold` | `float` | 0.0 | Minimum similarity score. |
-| `max_tokens` | `int \| None` | None | Token budget for retrieved context. |
-| `query_builder` | `Callable[[AgentState], str] \| None` | None | Custom search query extractor. |
-| `preload_prompt_template` | `str \| None` | None | Custom preload template with `{memories}`. |
-
-Properties: `retrieval_mode`, `store`, `system_prompt`, `tools` and `preload_node` (None unless mode is preload). `wire(graph, entry_to, preload_node_name="memory_preload")` adds the preload node in preload mode and otherwise only sets `entry_to` as the entry point.
+| `make_user_memory_tool(memory_config)` | `user_memory_tool` | `action` (`"search"` or `"remember"`, default `"search"`), `text`, `memory_type`, `category`, `limit` | Yes, through `remember` |
+| `make_agent_memory_tool(memory_config)` | `agent_memory_tool` | `query`, `memory_type`, `category`, `limit` | No, search only |
 
 ---
 
@@ -363,7 +367,7 @@ Abstract base class that every store backend implements. Every method takes a `c
 | `aget_all` | `async (config, limit=100, **kwargs) -> list[MemorySearchResult]` | List memories in the config's scope. |
 | `aupdate` | `async (config, memory_id, content, metadata=None, **kwargs) -> Any` | Update a memory's content. |
 | `adelete` | `async (config, memory_id, **kwargs) -> Any` | Delete a memory by ID. |
-| `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for a user or agent scope. Accepted keyword arguments are store-specific. |
+| `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. `QdrantStore` also narrows by the keyword arguments `memory_type`, `category` and `filters` (combined with AND; a `filters` value that is not a string, integer or boolean raises `ValueError`). `Mem0Store` can delete only by user, so it raises `ValueError` when any of the three is passed. |
 | `asetup` | `async () -> Any` | Create the collection or other backing resources. Implemented by `QdrantStore`; the base class raises `NotImplementedError`. |
 | `arelease` | `async () -> None` | Release connections. Not abstract, but the base implementation raises `NotImplementedError`; `Mem0Store` overrides it. |
 
@@ -382,10 +386,44 @@ Each async method has a sync wrapper named without the `a` prefix (`store`, `sea
 
 ```python
 config = {
-    "user_id": "alice",      # user scope (required by Mem0Store)
+    "user_id": "alice",      # required by every store operation
     "thread_id": "thread-1", # optional; QdrantStore reads it
 }
 ```
+
+### The `user_id` rule and `system_user_id`
+
+Every long-term memory operation needs a non-empty `user_id`, taken from the `config` dict. A missing, `None`, empty or blank value raises:
+
+```text
+ValueError: user_id is required for memory operations; use system_user_id(name) for shared data
+```
+
+This applies to `astore`, `asearch`, `aget`, `aget_all`, `aupdate`, `adelete` and `aforget_memory` on both `QdrantStore` and `Mem0Store`. A store never falls back to searching or deleting across all users.
+
+Two rules refine this:
+
+- **Admin reads.** When the authz policy scope is `"none"` (admin or `allow_all`), reads and updates (`asearch`, `aget`, `aget_all`, `aupdate`, `adelete`) skip the user filter and see every user's memories. Writes (`astore`) and `aforget_memory` still need a concrete `user_id` under this policy.
+- **`aforget_memory`** always filters by `user_id`. `thread_id` is an optional extra filter, never a replacement. A narrowing argument is never dropped silently: it is applied or the call raises, so a narrow forget cannot delete everything.
+
+Data that belongs to no person, such as agent/app memory and RAG knowledge bases, is owned by a reserved system id. Three names are exported from `tenxgraph.storage.store` and `tenxgraph.storage`:
+
+| Name | Description |
+|---|---|
+| `SYSTEM_USER_PREFIX` | The constant `"__system__"`. Every system owner starts with it. |
+| `system_user_id(name)` | Returns `"__system__:<name>"`. Raises `ValueError` when `name` is empty. Each name is its own owner, so shared data sets stay separate. |
+| `is_system_user_id(user_id)` | Returns `True` for any `str` that starts with `__system__`. |
+
+```python
+from tenxgraph.storage import system_user_id, is_system_user_id
+# also available as: from tenxgraph.storage.store import system_user_id
+
+owner = system_user_id("knowledge_base")  # "__system__:knowledge_base"
+await store.astore(config={"user_id": owner}, content="Refunds take 5 days.")
+is_system_user_id(owner)  # True
+```
+
+Agent and app memory use `system_user_id(agent_id)` (or `system_user_id(app_id)`); `RAGAgent` searches `system_user_id("knowledge_base")` by default. The 10xGraph API refuses any authenticated identity whose `user_id` starts with `__system__` (HTTP 401 "This user id is reserved", WebSocket close code 1008), so no caller can act as a shared owner. Records written earlier with an empty owner are not found by any user-scoped read; re-index them under the intended owner.
 
 ---
 
@@ -413,7 +451,7 @@ Vector store backed by [Qdrant](https://qdrant.tech). Production-ready for simil
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Optional dependency</p>
 
-Install with `pip install "10xgraph[qdrant]"`.
+Install with `pip install "10xgraph[qdrant]"`. This needs `qdrant-client` 1.10.0 or newer and, for a server or Qdrant Cloud, Qdrant server 1.10 or newer.
 
 </aside>
 
@@ -457,9 +495,12 @@ asyncio.run(store.asetup())  # creates the collection; pass the store to graph.c
 | `port` | `int \| None` | Remote Qdrant port (default: `6333`). |
 | `url` | `str \| None` | Qdrant Cloud URL. |
 | `api_key` | `str \| None` | Qdrant Cloud API key. |
-| `collection` | `str \| None` | Qdrant collection name. Defaults to `DEFAULT_COLLECTION`, which is `"agentflow_memories"`. |
+| `collection` | `str \| Callable[[dict], str] \| None` | Default collection: a name, or a function `(config) -> name` called with the config of each operation. Used when the config has no `collection`. Defaults to `DEFAULT_COLLECTION`, which is `"agentflow_memories"`. A function must return a non-empty string (otherwise `ValueError`) and must read identity from `config["user"]` or `config["user_id"]`, never state. |
 | `distance_metric` | `DistanceMetric` | Distance metric for the collection. Default: `COSINE`. |
 | `**kwargs` | `Any` | Passed to `AsyncQdrantClient`. |
+
+**`asetup()` and the default collection.** With a name as the default, `asetup()` creates that collection. With a function, `asetup()` creates nothing, because there is no fixed name; each collection is created, with its payload indexes, by the first write or search that uses it. A collection named by `config["collection"]` is created the same way.
+
 
 ---
 
@@ -489,7 +530,7 @@ store = Mem0Store(config={
 | `config` | `mem0 MemoryConfig \| dict` | Required | Mem0 configuration. A dict goes through `AsyncMemory.from_config`. |
 | `app_id` | `str \| None` | `"agentflow_app"` | App identifier. A per-call `config["app_id"]` overrides it. |
 
-`Mem0Store` delegates to Mem0's `AsyncMemory` client, created lazily on first use. Every call needs `user_id` in the `config` dict, otherwise it raises `ValueError`. `asetup` is not implemented for `Mem0Store`, so do not call it. `aforget_memory` deletes all memories for the user.
+`Mem0Store` delegates to Mem0's `AsyncMemory` client, created lazily on first use. Every call needs `user_id` in the `config` dict, otherwise it raises the same `ValueError` as `QdrantStore`. `asetup` is not implemented for `Mem0Store`, so do not call it. `aforget_memory` deletes all memories for the user.
 
 ---
 
@@ -514,7 +555,7 @@ store = create_local_qdrant_store(
 |---|---|---|
 | `embedding` | `BaseEmbedding` | The embedding service. |
 | `path` | `str` | Local directory path for Qdrant persistence. |
-| `collection` | `str` | Collection name. Default `"agentflow_memories"`. |
+| `collection` | `str \| Callable[[dict], str]` | Default collection: a name or a function of the config. Default `"agentflow_memories"`. |
 | `**kwargs` | `Any` | Passed to `QdrantStore`. |
 
 **Returns:** A configured `QdrantStore` instance.
@@ -538,7 +579,7 @@ store = create_remote_qdrant_store(
 | `embedding` | `BaseEmbedding` | The embedding service. |
 | `host` | `str` | Remote host address. |
 | `port` | `int` | Remote server port. Required (typically 6333). |
-| `collection` | `str` | Collection name. Default `"agentflow_memories"`. |
+| `collection` | `str \| Callable[[dict], str]` | Default collection: a name or a function of the config. Default `"agentflow_memories"`. |
 | `**kwargs` | `Any` | Passed to `QdrantStore`. |
 
 **Returns:** A configured `QdrantStore` instance.
@@ -562,7 +603,7 @@ store = create_cloud_qdrant_store(
 | `embedding` | `BaseEmbedding` | The embedding service. |
 | `url` | `str` | Qdrant Cloud cluster URL. |
 | `api_key` | `str` | Qdrant Cloud API key. |
-| `collection` | `str` | Collection name. Default `"agentflow_memories"`. |
+| `collection` | `str \| Callable[[dict], str]` | Default collection: a name or a function of the config. Default `"agentflow_memories"`. |
 | `**kwargs` | `Any` | Passed to `QdrantStore`. |
 
 **Returns:** A configured `QdrantStore` instance.
@@ -701,6 +742,6 @@ The `store` parameter is injected when you pass `store=` to `graph.compile()`.
 | `ImportError: qdrant-client package is required for QdrantStore` | `qdrant-client` is not installed. | `pip install "10xgraph[qdrant]"`. |
 | `ImportError: mem0 package is required for Mem0Store` | `mem0ai` is not installed. | `pip install "10xgraph[mem0]"`. |
 | `ValueError: OpenAI API key must be provided...` | No `api_key` and no `OPENAI_API_KEY`. | Set the variable or pass `api_key`. |
-| `ValueError: user_id must be provided in config` | A `Mem0Store` call has no `user_id`. | Put `user_id` in the `config` dict. |
+| `ValueError: user_id is required for memory operations; use system_user_id(name) for shared data` | A store call has a missing, `None`, empty or blank `user_id`. | Put the user's id in the `config` dict, or `system_user_id(name)` for shared data. See [The `user_id` rule](#the-user_id-rule-and-system_user_id). |
 | `RuntimeError: Memory requires an existing ToolNode...` | `Agent(memory=...)` in `POSTLOAD` mode without a tool node. | Pass `tool_node=` or use `PRELOAD`. |
 | `NotImplementedError` from `asetup` | Called `asetup()` on `Mem0Store`. | Only `QdrantStore` implements it. |

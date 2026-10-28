@@ -5,7 +5,7 @@ section: Examples
 group: "Use cases"
 order: 270
 label: RAG
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Do I need a vector database to try RAGAgent?"
     a: "No. RAGAgent accepts any BaseStore. The example on this page uses a small in-memory store with keyword matching, so you only need an OpenAI API key. Switch to QdrantStore when you need semantic search over a real knowledge base."
@@ -39,7 +39,7 @@ For the other prebuilt graphs, see [prebuilt agents](/docs/guides/prebuilt-agent
 START -> RETRIEVE -> [RERANK] -> SYNTHESIZE -> END
 ```
 
-RETRIEVE uses the latest user message as the query and keeps the result texts in `state.execution_meta.internal_data["rag_docs"]`. SYNTHESIZE rewrites that user message as a numbered `<context>` block followed by the original question, then runs the agent. The agent's own `system_prompt` is left untouched, so use it to tell the model to answer only from the context.
+RETRIEVE uses the latest user message as the query and keeps the result texts in a per-run cache on the `RAGAgent`, not in saved state. SYNTHESIZE numbers the documents, fences them in a `<retrieved_documents_...>` block with a random suffix, and adds that block to the latest user message of the request sent to the model, before the user's text. The saved user message is never changed, so the thread does not grow with retrieved text and attachments on the message are kept. If the cache has no entry (for example after a restart between nodes), SYNTHESIZE retrieves again. The agent's own `system_prompt` is left untouched, so use it to tell the model to answer only from the documents. The `agent` you pass must accept `execute(state, config, *, request_blocks=None)`, as the built-in `Agent` does.
 
 ## Run a minimal RAG agent
 
@@ -163,7 +163,7 @@ import asyncio
 from tenxgraph.core.graph.agent import Agent
 from tenxgraph.core.state.message import Message
 from tenxgraph.prebuilt.agent.rag import RAGAgent
-from tenxgraph.storage import create_local_qdrant_store
+from tenxgraph.storage import create_local_qdrant_store, system_user_id
 from tenxgraph.storage.store.embedding import OpenAIEmbedding
 
 # Replace with your own chunks (split by headings or paragraphs, not fixed size)
@@ -172,8 +172,9 @@ CHUNKS = [
     "Returns are accepted within 30 days with a receipt.",
 ]
 
-# Search and indexing must use the same user_id, because QdrantStore filters by it
-CONFIG = {"user_id": "kb"}
+# The knowledge base is shared data, so it is owned by the reserved system_user_id("knowledge_base").
+# Search and indexing must use the same user_id, because QdrantStore filters by it.
+CONFIG = {"user_id": system_user_id("knowledge_base")}
 
 store = create_local_qdrant_store(
     path="./knowledge_base",
@@ -203,7 +204,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`QdrantStore` reads `user_id`, `thread_id` and `collection` from the config dict it receives. That makes `store_config` the way to scope retrieval per user or to pick a collection, for example `store_config={"user_id": "u42", "collection": "support_docs"}`. A `tenant_id` key is not read.
+`QdrantStore` reads `user_id`, `thread_id` and `collection` from the config dict it receives. Every store call needs a non-empty `user_id`; `system_user_id(name)` builds the reserved owner for shared data (see the [Memory stores reference](/docs/reference/python/memory-stores#the-user_id-rule-and-system_user_id)). That makes `store_config` the way to pick a collection or scope retrieval for every run, for example `store_config={"user_id": "u42", "collection": "support_docs"}`. To scope retrieval per user or tenant at run time, pass `store_config_builder`, a function from the run config to the store config, for example `store_config_builder=lambda cfg: {"user_id": cfg["user_id"]}`. Take the identity from the authenticated run config, never from state. A `tenant_id` key is not read.
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Retrieval strategy</p>
 
@@ -260,30 +261,27 @@ These are the retrieval options. The full reference is on the [prebuilt agents r
 | `top_n` | `3` | Documents kept after reranking (must be at least 1, ignored without a reranker) |
 | `retrieval_strategy` | `RetrievalStrategy.SIMILARITY` | Passed to `store.asearch` |
 | `score_threshold` | `None` | Minimum similarity score, `None` means no cutoff |
-| `store_config` | `{}` | Config dict passed to every `store.asearch` call |
+| `store_config` | `{}` | Config dict passed to every `store.asearch` call. Without a `user_id` key it searches as `system_user_id("knowledge_base")` |
+| `store_config_builder` | `None` | Function from the run config to a store config dict. When set, it replaces `store_config` for each run and is used as is, so it must include a `user_id` |
 
 `RAGAgent` also accepts `state`, `context_manager`, `publisher`, `id_generator` and `container`, which it forwards to the underlying `StateGraph`.
 
 ## Inspect what was retrieved
 
-To see which chunks reached the model, enable debug logging or request the full state. When a question gets a poor answer, check retrieval first: the model can only use what RETRIEVE and RERANK passed along.
+Retrieved documents are not saved in state, so enable debug logging to see what was found. When a question gets a poor answer, check retrieval first: the model can only use what RETRIEVE and RERANK passed along.
 
 ```python title="debug_rag.py"
 import logging
 
-from tenxgraph.utils import ResponseGranularity
-
-# Logs the query, candidate count and rerank step
+# Logs the query, the number of documents found and the number passed to the model
 logging.getLogger("tenxgraph.prebuilt.rag").setLevel(logging.DEBUG)
 
 # Inside an async function, with `app` compiled as above
 result = await app.ainvoke(
     {"messages": [Message.text_message("Can I return a download?", role="user")]},
     config={"thread_id": "debug"},
-    response_granularity=ResponseGranularity.FULL,
 )
-docs = result["state"].execution_meta.internal_data.get("rag_docs", [])
-print(f"{len(docs)} documents reached the model")
+print(result["messages"][-1].text())
 ```
 
 ## Keep a multi-turn conversation
@@ -319,6 +317,10 @@ Answer quality depends on the index at least as much as on the model.
 - Chunk by structure (headings, paragraphs), and keep chunks small enough to stay specific, roughly 200 to 500 tokens.
 - Re-index when documents change, and track when each document was last indexed.
 - Tell the model to say so when the context has no answer, as the system prompt above does, instead of letting it guess.
+
+## Separate data per company
+
+To keep each company's documents in its own collection, pass `store_config_builder` and build the collection from the authenticated user, never from state. The RAG guide has the full example: [A collection per company](/docs/guides/prebuilt/rag-agent#a-collection-per-company). The API ignores any `collection` a client sends.
 
 ## What to try next
 

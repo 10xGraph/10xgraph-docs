@@ -5,7 +5,7 @@ section: "TypeScript client"
 group: "Basics"
 order: 50
 label: Manage threads
-updated: "2026-10-08"
+updated: "2026-10-26"
 faq:
   - question: "What happens if no checkpointer is configured?"
     answer: "The server falls back to InMemoryCheckpointer, so threads live only in that server process and are lost on restart. For persistence, compile the graph with a SQLite, Postgres+Redis, or custom checkpointer."
@@ -201,7 +201,7 @@ console.log('State updated. Next invoke() will use this state.');
 
 <aside class="callout callout-warning" role="note"><p class="callout-title">State updates are immediate</p>
 
-`updateThreadState()` merges your values into the stored state and saves it. The next `invoke()` call continues from the merged state. Messages sent in `context` are appended, and the server rejects client-authored tool calls with a 422. Use with care: incorrect state can cause the agent to fail or behave unexpectedly.
+`updateThreadState()` merges your values into the stored state and saves it. The next `invoke()` call continues from the merged state. Messages sent in `context` are appended, and the server rejects client-authored tool calls, assistant or system messages, and the built-in fields `context_summary` and `execution_meta` with a 422. Use with care: incorrect state can cause the agent to fail or behave unexpectedly.
 
 </aside>
 
@@ -220,7 +220,10 @@ This is useful if you want to reset a conversation while keeping the message his
 
 ## Add messages to a thread
 
-Inject messages directly into a thread's history. This is useful for synthetic context (system prompts), importing data, or continuing a conversation from an external source:
+<aside class="callout callout-warning" role="note"><p class="callout-title">addThreadMessages is deprecated and admin-only</p>
+<p>The server route needs the <code>checkpointer:import</code> scope, so a normal user gets 403. Send messages through <code>invoke</code> or <code>stream</code>, which accept user messages only. To record feedback on a message, use <code>updateThreadMessageFeedback</code> (see the next section).</p></aside>
+
+An admin identity can inject messages of any role directly into a thread's history, for example to import data from an external source:
 
 ```ts
 import { Message } from '10xgraph-client';
@@ -237,6 +240,19 @@ console.log('Messages added to thread');
 ```
 
 Added messages become part of the thread history and will be included when you list messages or start a new invoke.
+
+## Set feedback on a message
+
+Attach a rating or comment to a message with `updateThreadMessageFeedback`. It stores your object in `message.metadata.feedback` and replaces any earlier feedback. Nothing else on the message changes.
+
+```ts
+await client.updateThreadMessageFeedback('thread-abc123', 'msg-001', {
+  rating: 'up',
+  comment: 'Clear answer',
+});
+```
+
+The object can be at most 8192 bytes serialized and 10 levels deep, otherwise the server returns 422. A missing message returns 404, and a server running a core older than `10xgraph` 0.10.4 returns 501. See [`updateThreadMessageFeedback`](/docs/reference/client/threads#updatethreadmessagefeedback).
 
 ---
 
@@ -311,7 +327,7 @@ await displayThreadHistory('thread-abc123');
 | `404 Not Found` | Thread does not exist. | Verify the thread ID exists. |
 | `422 Unprocessable Entity` | Invalid parameter, such as an empty or whitespace thread ID. | Ensure the thread ID is a non-empty string or a positive integer. |
 | Empty `threads` list | No threads have been created yet, or the server restarted with the default in-memory checkpointer. | Run a test invocation to create a thread, and compile with a durable checkpointer for persistence. |
-| `State is null` | The thread exists but has no state snapshot (e.g., after `clearThreadState()`). | Call `updateThreadState()` to set a state, or `addThreadMessages()` to add messages to the thread. |
+| `State is null` | The thread exists but has no state snapshot (e.g., after `clearThreadState()`). | Call `updateThreadState()` to set a state, or send a message with `invoke()`. |
 
 ---
 
@@ -319,7 +335,7 @@ await displayThreadHistory('thread-abc123');
 
 - **List threads** with `threads()` to discover or search for conversations.
 - **Thread details** via `threadDetails()` give you metadata (ID, name, timestamps).
-- **Messages** are read with `threadMessages()`, modified with `addThreadMessages()`, and deleted individually with `deleteMessage()`.
+- **Messages** are read with `threadMessages()`, given feedback with `updateThreadMessageFeedback()`, and deleted individually with `deleteMessage()`.
 - **Thread state** (checkpoint) is read with `threadState()`, updated with `updateThreadState()`, and cleared with `clearThreadState()`.
 - **Deletion** is permanent: `deleteThread()` removes everything, while `clearThreadState()` keeps messages but resets state.
 

@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 210
 label: Checkpointers
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 A checkpointer persists graph state, messages and thread metadata between requests, so conversations survive restarts and multi-turn runs stay coherent. 10xGraph ships four: the `BaseCheckpointer` abstract class, plus `InMemoryCheckpointer`, `SqliteCheckpointer` and `PgCheckpointer`. Pass one to `graph.compile(checkpointer=...)`.
@@ -53,6 +53,8 @@ The methods below are abstract and must be implemented by a subclass:
 | `aclean_thread` | `async (config) -> Any \| None` | Delete a thread and its state and messages. |
 | `arelease` | `async () -> Any \| None` | Release resources (close pools and connections). |
 
+`alist_messages` and `alist_threads` apply `offset` and `limit` in the backend (in SQL on SQLite and Postgres). A negative `offset` or `limit` raises `ValueError`, and a `limit` above `MAX_LIST_LIMIT` (1000, in `tenxgraph.storage.checkpointer.base_checkpointer`) is lowered to it. With no `limit` (`None` or `0`) the whole list is returned, so code that reads a full thread, such as realtime history loading, still works.
+
 ### Sync wrappers
 
 For every `async axxx()` method there is a sync `xxx()` wrapper that runs the async method to completion. Use these only from non-async contexts such as a management script:
@@ -62,7 +64,38 @@ checkpointer.put_state(config, state)
 checkpointer.get_state(config)
 ```
 
+### Update message metadata
+
+`aupdate_message_metadata` is not abstract. A backend overrides it to support feedback and other metadata updates.
+
+| Method | Signature | Description |
+|---|---|---|
+| `aupdate_message_metadata` | `async (config, message_id, metadata) -> Message \| None` | Merge the keys of `metadata` into a stored message's metadata. A key that already exists is replaced. Returns the updated message, or `None` if the message is not in that thread. |
+| `update_message_metadata` | `(config, message_id, metadata) -> Message \| None` | Sync wrapper. |
+
+It applies the same owner isolation as `aget_message`. `PgCheckpointer`, `SqliteCheckpointer` and `InMemoryCheckpointer` implement it. A custom checkpointer that does not override it raises `NotImplementedError`. The REST route `PUT /v1/threads/{thread_id}/messages/{message_id}` calls it to store feedback, and returns `501` when the checkpointer lacks it. This method needs `10xgraph` 0.10.4 or later.
+
+```python
+message = await checkpointer.aupdate_message_metadata(
+    {"thread_id": "t1"}, "msg-001", {"feedback": {"rating": "up"}}
+)
+```
+
 Optional, non-abstract async methods also exist on the base class, for example `aput_checkpoint`, `aput_cache_value`, `aget_cache_value`, `arequest_stop` and `aget_thread_owner`. Backends override them as needed.
+
+### Stop requests and active runs
+
+A stop request belongs to the run it targets. The base class tracks which run is active on each thread, so a new run cannot erase a stop meant for a run that is still going. It uses the generic cache (`aput_cache_value`, `aget_cache_value`, `aclear_cache_value`), so it works on every backend with no schema change.
+
+| Method | Description |
+|---|---|
+| `abegin_run(config)` | Registers `config["run_id"]` as the active run on the thread and drops a stale stop request: one that targets no run, or a run that is no longer active. A request that targets the run still marked active is kept. |
+| `aend_run(config)` | Marks the run as finished. Clears the active-run marker if it is still this run's, and drops a stop request that targeted this run. |
+| `aget_active_run(config)` | Returns the id of the run marked active on the thread, or `None`. |
+| `arequest_stop(config)` | Records a stop request that names the run active on the thread (`None` when none is known). |
+| `ais_stop_requested(config)` | `True` only for a request that targets `config["run_id"]`. A config with no `run_id`, or an old untargeted request, still matches. |
+
+`ainvoke` and `astream` call `abegin_run` when a run starts and `aend_run` when it ends, so a stop request for a finished run does not linger until its TTL. A custom checkpointer that implements the cache methods gets all of this without changes. One that leaves them as the base class no-ops degrades to doing nothing, as stop requests did before. The existing method signatures are unchanged.
 
 ### Wiring into a graph
 
@@ -105,7 +138,7 @@ app = graph.compile(checkpointer=checkpointer)
 | `_messages` | `thread_id` | Ordered message list. |
 | `_threads` | `thread_id` | Thread metadata (`name`, `created_at`, etc.). |
 
-All access is guarded by per-bucket `asyncio.Lock` instances for safe concurrent use within a single process.
+All access is guarded by per-bucket `asyncio.Lock` instances for safe concurrent use within a single process. The checkpointer stores and returns copies of the state, so changing a loaded state does not change the store until you save it. This costs one extra copy per state read and write.
 
 ---
 
@@ -166,9 +199,15 @@ The constructor takes the connection arguments below as named parameters; the re
 
 The value comes from the `generated_id_type` registered with InjectQ by the compiled graph, defaulting to `string`. You can override it with the `id_type` keyword argument. The `user_id` column type follows the `user_id_type` keyword argument (default `string`).
 
+### Message ids and `thread_id`
+
+Message ids are unique per thread. The primary key of the messages table is `(thread_id, message_id)`, so two threads can hold the same id. Saving a message again inside one thread still updates it. Because of this, `aget_message` and `adelete_message` need `thread_id` in the config. Without it they raise `ValueError`.
+
 ### Schema migration
 
 `asetup()` creates the required tables if they do not exist and applies pending schema migrations. It is idempotent and safe to call on every startup. A failed migration raises `SchemaVersionError`, a subclass of `StorageError`.
+
+Schema version 4 changes the messages primary key to `(thread_id, message_id)`. The migration runs automatically the first time `asetup()` runs on an older schema, under the existing advisory lock. It needs `10xgraph` 0.10.4 or later.
 
 ---
 
@@ -271,6 +310,12 @@ class DynamoDBCheckpointer(BaseCheckpointer):
 
     async def adelete_message(self, config: dict, message_id: str | int) -> Any | None:
         ...
+
+    # Optional: support message feedback over the REST API
+    async def aupdate_message_metadata(
+        self, config: dict, message_id: str | int, metadata: dict
+    ) -> Message | None:
+        ...  # merge metadata into the stored message; None if not found
 
     async def aput_thread(self, config: dict, thread_info: ThreadInfo) -> Any | None:
         ...

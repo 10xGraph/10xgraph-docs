@@ -5,7 +5,7 @@ section: Reference
 group: "REST API"
 order: 320
 label: Live WebSocket
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 `WS /v1/graph/live` is a WebSocket bridge between a client (browser, SDK, native app) and a `CompiledGraph` rooted at a `LiveAgent` (built with `AudioAgent`). It maps audio frames to `LiveInputQueue` calls and streams `RealtimeEvent` objects back.
@@ -40,6 +40,8 @@ ws://localhost:8000/v1/graph/live?token=<jwt>
 The older `agentflow-bearer` sentinel is still accepted until 2.0.
 
 An authentication or authorization failure closes the handshake with code `1008` before `accept()`.
+
+The token is not trusted for the whole session. The server checks it again after the init frame and then every 30 seconds. Each check covers expiry and revocation (`token_revocation`), and it fails closed: a revocation backend that cannot answer counts as revoked. When a check fails, the server sends a fatal `session_expired` error event and closes the socket with code `1008`. The client must reconnect with a fresh token.
 
 ---
 
@@ -110,7 +112,7 @@ The first frame from the client must be a JSON text frame. It configures the ses
 
 Fields not present in the init frame keep the agent's compiled values. An invalid init frame (not JSON, or JSON that is not an object) closes the socket with code `1003`.
 
-**Thread handling.** `thread_id` is optional. When it is absent, blank or `"new"` the server generates an id for the session and persists the thread record before the first event is pumped; the generated id is not echoed back as a separate frame, so a client that needs to resume later should supply its own id. When `thread_id` **is** present it is ownership-checked before the session starts (only when auth is configured): a thread owned by another user is rejected with a fatal `error` event (`code: "not_authorized"`) and close code `1008`.
+**Thread handling.** `thread_id` is optional. When it is absent, blank or `"new"` the server generates an id for the session and persists the thread record before the first event is pumped; the generated id is not echoed back as a separate frame, so a client that needs to resume later should supply its own id. `/v1/graph/live` accepts a client-made id even when `runs.thread_ids` is `server`, because the realtime client makes its own. The caller then owns that thread. When `thread_id` **is** present it is ownership-checked before the session starts (only when auth is configured): a thread owned by another user is rejected with a fatal `error` event (`code: "not_authorized"`) and close code `1008`.
 
 ---
 
@@ -127,12 +129,13 @@ Frame: <binary PCM16 bytes>
 Format: 16-bit signed integer, little-endian, mono, 16000 Hz
 ```
 
-100 ms chunks (~3200 bytes) are a typical packet size. There is no minimum, but the bridge enforces two bounds because WebSocket frames never pass through the HTTP request-size middleware:
+100 ms chunks (~3200 bytes) are a typical packet size. There is no minimum, but the bridge enforces three bounds because WebSocket frames never pass through the HTTP request-size middleware:
 
 | Bound | Value | Behaviour when exceeded |
 |---|---|---|
 | Maximum single frame | 1 MiB (`REALTIME_MAX_FRAME_BYTES`) | The frame is dropped and a warning is logged. The session continues; no error event is sent. |
 | Upstream queue depth | 1000 frames (`REALTIME_INPUT_QUEUE_MAXSIZE`) | The oldest queued frame is dropped to make room. At ~50 frames/second this is roughly 20 seconds of buffered audio. |
+| Buffered input per session | 16 MiB (`REALTIME_INPUT_QUEUE_MAX_BYTES`) | A frame that would push the buffered input past the budget is dropped and a warning is logged. The session continues; no error event is sent. About 8 minutes of 16 kHz PCM16 audio, so a healthy session never reaches it. |
 
 Send audio in normal chunks (tens of KB). A 1 MiB frame is around 30 seconds of 16 kHz PCM16 in one message, far beyond any realistic capture buffer.
 
@@ -293,6 +296,7 @@ Codes the bridge itself emits, in addition to any provider code passed through:
 |---|---|---|---|
 | `not_live` | `true` | The configured graph is not a live agent. Use `WS /v1/graph/ws`. | `1008` |
 | `not_authorized` | `true` | The `thread_id` in the init frame belongs to another user. | `1008` |
+| `session_expired` | `true` | The token expired or was revoked during the session. Reconnect with a fresh token. | `1008` |
 | `invalid_config` | `true` | The init frame produced an invalid `RealtimeConfig` (for example an unusable `modalities` value). | server close |
 
 ---
@@ -303,7 +307,7 @@ Codes the bridge itself emits, in addition to any provider code passed through:
 |---|---|
 | `1000` | Normal closure: the session ended. |
 | `1003` | Invalid init frame: the first frame was not JSON, or was JSON that is not an object. |
-| `1008` | Policy violation: authentication or authorization was rejected at the handshake, or the graph is not a live agent (`not_live`), or the requested `thread_id` is owned by another user (`not_authorized`). |
+| `1008` | Policy violation: authentication or authorization was rejected at the handshake, or the graph is not a live agent (`not_live`), or the requested `thread_id` is owned by another user (`not_authorized`), or the token expired or was revoked during the session (`session_expired`). |
 | `1011` | Unexpected server error during the session (provider failure, checkpointer error). This code is used only for unhandled failures. |
 | `1013` | Try again later: the global rate limit or `websocket.max_connections` was exceeded. The handshake is refused before `accept()`. |
 

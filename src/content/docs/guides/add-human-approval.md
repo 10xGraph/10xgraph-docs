@@ -6,7 +6,7 @@ section: "Build agents"
 group: "Multi-agent and control flow"
 order: 290
 label: "Pause for human input"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 ## Overview
@@ -155,6 +155,23 @@ print(result["messages"][-1].text())  # Final response after the refund tool ran
 
 The paused node runs again from the start (not from the interrupt call), and this time `interrupt()` returns the resume value instead of stopping the graph. The execution continues normally after that.
 
+### Name the interrupt you are answering
+
+A retried request or a stale tab can send an answer after the prompt has already moved on. To make a resume safe, add the `id` of the pending interrupt under `resume_interrupt_id`:
+
+```python
+from tenxgraph.utils import pending_interrupt
+
+request = pending_interrupt(result["state"])
+
+result = await app.ainvoke(
+    {"resume": {"approved": True}, "resume_interrupt_id": request.id},
+    config=config,
+)
+```
+
+If the id is not the pending interrupt's, the call raises `InterruptMismatchError` (`INTERRUPT_001`) and records nothing. If the value fails the interrupt's `response_schema`, it raises `ResumeValidationError` (`INTERRUPT_002`). Both are also `ValueError`s. The schema check supports `type`, `enum`, `properties`, `required` and `items`, and ignores other keywords. A `None` resume is never checked. See [Concepts: Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt).
+
 ### Handling cancellation
 
 If the user declines or cancels the approval, resume with `None`:
@@ -295,14 +312,13 @@ The API server exposes the pause/resume mechanism over REST. When a thread is pa
 
 ### Invoking and pausing
 
-The `thread_id` goes inside `config`. Set `response_granularity` to `full` so the response includes the state:
+Leave `thread_id` out of the first request. The server starts a thread and returns its id in `data.meta.thread_id`. Later requests send it inside `config` (shown as `THREAD_ID` below). Set `response_granularity` to `full` so the response includes the state:
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{"role": "user", "content": [{"type": "text", "text": "Refund my order, $25"}]}],
-    "config": {"thread_id": "order-42"},
     "response_granularity": "full"
   }'
 ```
@@ -335,9 +351,23 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
   -d '{
     "resume": {"approved": true},
-    "config": {"thread_id": "order-42"}
+    "config": {"thread_id": "THREAD_ID"}
   }'
 ```
+
+To bind the answer to the prompt it belongs to, add `interrupt_id` with the `id` from `execution_meta.interrupt_data.interrupt`:
+
+```bash
+curl -X POST http://localhost:8000/v1/graph/invoke \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resume": {"approved": true},
+    "interrupt_id": "int_abc123...",
+    "config": {"thread_id": "THREAD_ID"}
+  }'
+```
+
+The server answers 409 if the thread is not paused or is paused at a different interrupt, and 422 if the answer fails the `response_schema`. Nothing runs in either case. `interrupt_id` also works on `/v1/graph/stream` and on the WebSocket, where both failures arrive as an error chunk. `interrupt_id` is optional; without it the resume answers whatever the thread is paused at.
 
 The `/v1/graph/stream` route similarly accepts `"resume"` in place of `"messages"` to resume a paused thread and stream the rest of the execution. When streaming with `"response_granularity": "full"`, the pause arrives as an `updates` chunk with `"status": "interrupted"` and an `interrupt` object.
 
@@ -348,7 +378,7 @@ The [AG-UI](/docs/server/ag-ui) endpoint (off by default; it needs the `ag-ui` e
 - When the graph pauses at `interrupt()`, the run ends with an `"interrupt"` outcome.
 - The UI receives the `message`, `value`, `response_schema`, and other fields from the `Interrupt` object.
 - CopilotKit's `useInterrupt()` hook handles the pause and presents the prompt to the user.
-- The user's response is sent back to resume the thread.
+- The user's response is sent back to resume the thread. The interrupt event carries the interrupt `id`, and AG-UI matches the answer to it.
 
 See [10xGraph with CopilotKit](/docs/integrations/copilotkit) for a complete example.
 
@@ -436,7 +466,7 @@ Verify that `interrupt()` is called. If the node completes without calling it, t
 
 ### Resume value not received
 
-Ensure you pass the `resume` key in the next invocation. The value must match the `response_schema` if one is defined. Check the error response for schema validation errors.
+Ensure you pass the `resume` key in the next invocation. The value must match the `response_schema` if one is defined. Check the error response: a 422 means the answer failed the schema, and a 409 means `interrupt_id` did not match the open interrupt or the thread is not paused. In Python, these are `ResumeValidationError` and `InterruptMismatchError`.
 
 ## See also
 

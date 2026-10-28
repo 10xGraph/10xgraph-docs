@@ -6,7 +6,7 @@ label: "Security headers"
 order: 80
 group: "Security"
 section: "API server"
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - question: "Can I use ORIGINS='*' with credentials in production?"
     answer: "No. Wildcard origins combined with credentials is rejected at startup in production mode. Set explicit ORIGINS or disable CORS_ALLOW_CREDENTIALS."
@@ -30,7 +30,9 @@ When `CORS_ALLOW_CREDENTIALS=true` (the default), responses carry `Access-Contro
 
 The insecure case happens when you set `ORIGINS=*` and `CORS_ALLOW_CREDENTIALS=true`. The server then reflects any caller's origin back with credentials enabled, which turns every website into a trusted one. In development, this is accepted with a warning. In production (`MODE=production`), the server refuses to start with this configuration.
 
-To run a public, non-credentialed API from any origin in production, set `ORIGINS=*` and `CORS_ALLOW_CREDENTIALS=false`. To require authentication or cookies, set `ORIGINS` to explicit domains and keep credentials enabled.
+In production, a wildcard `ORIGINS` is refused even without credentials. `STRICT_PRODUCTION_CHECKS` is on by default in production and stops startup on a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST`, or enabled `DOCS_PATH` and `REDOCS_PATH`. See [Strict production checks](#strict-production-checks).
+
+To run a public, non-credentialed API from any origin in production, set `ORIGINS=*`, `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false`. Without the last setting the server will not start. To require authentication or cookies, set `ORIGINS` to explicit domains and keep credentials enabled.
 
 Configure CORS in your environment:
 
@@ -57,6 +59,18 @@ In production, set `ALLOWED_HOST` to the DNS names your API answers to:
 ```bash
 export ALLOWED_HOST="api.yourdomain.com,api-backup.yourdomain.com"
 ```
+
+A wildcard in the list stops startup in production, including a `*` with spaces around it. See [Strict production checks](#strict-production-checks).
+
+### Strict production checks
+
+When `MODE=production`, the server runs a set of startup checks by default. If any fails, it refuses to start and prints every problem it found. The checks reject:
+
+- a wildcard `ALLOWED_HOST`
+- a wildcard `ORIGINS`
+- an enabled `DOCS_PATH` or `REDOCS_PATH`
+
+Set `STRICT_PRODUCTION_CHECKS=false` to opt out. The server then starts and logs the same problems as warnings. A wildcard `ORIGINS` together with credentials is still refused, because that check is separate.  The checks apply only in production.
 
 Verify your configuration is working by inspecting the headers:
 
@@ -212,7 +226,7 @@ location /api/ {
 
 Before deploying to production:
 
-- [ ] Set `MODE=production` (turns off `/docs` and `/redocs` unless you set `DOCS_PATH` or `REDOCS_PATH`, and enforces the CORS and JWT secret checks) and `IS_DEBUG=false`
+- [ ] Set `MODE=production` (turns off `/docs` and `/redocs` unless you set `DOCS_PATH` or `REDOCS_PATH`, and enforces the CORS, host and JWT secret checks) and `IS_DEBUG=false`
 - [ ] Set explicit `ORIGINS` (comma-separated list of domains your frontend runs on)
 - [ ] Set `CORS_ALLOW_CREDENTIALS=false` if your API is public and token-based, or `true` if it uses cookies
 - [ ] Set `ALLOWED_HOST` to the DNS names the API answers to

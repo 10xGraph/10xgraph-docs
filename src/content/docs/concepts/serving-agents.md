@@ -5,7 +5,7 @@ description: How 10xgraph.json wires a compiled graph to the API server, plus au
 section: Concepts
 group: "Serving"
 order: 160
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The 10xGraph API server transforms a compiled graph into a production-ready HTTP service. This page explains how the server loads and runs your agent, how authentication and authorization protect it, how publishers stream execution events to external systems, and what configuration controls each piece.
@@ -109,7 +109,7 @@ The API exposes these routers (all under `/v1` except `/ping`):
 | Router | Endpoints | Purpose |
 |---|---|---|
 | Graph | `POST /v1/graph/invoke`, `POST /v1/graph/stream`, `WebSocket /v1/graph/ws`, `WebSocket /v1/graph/live`, `POST /v1/graph/stop`, `POST /v1/graph/fix`, `GET /v1/graph`, `GET /v1/graph/tools` | Invoke or stream the agent, stop a run, fix interrupted state, get graph info. |
-| Threads | `GET /v1/threads`, `GET /v1/threads/{id}`, `GET`/`PUT`/`DELETE /v1/threads/{id}/state`, `GET`/`POST /v1/threads/{id}/messages` | Manage thread state and message history. |
+| Threads | `GET /v1/threads`, `GET /v1/threads/{id}`, `GET`/`PUT`/`DELETE /v1/threads/{id}/state`, `GET`/`POST /v1/threads/{id}/messages`, `GET`/`PUT`/`DELETE /v1/threads/{id}/messages/{message_id}` | Manage thread state and message history. `POST` messages is admin-only; `PUT` message sets feedback. |
 | Store | `POST /v1/store/memories`, `POST /v1/store/memories/list`, `POST /v1/store/memories/{id}`, `POST /v1/store/search` | Long-term memory operations. |
 | Files | `POST /v1/files/upload`, `GET /v1/files/{id}`, `GET /v1/files/{id}/info`, `GET /v1/files/{id}/url` | Upload, retrieve, and get signed URLs for media. |
 | Config | `GET /v1/config/multimodal` | Get multimodal settings. |
@@ -415,7 +415,7 @@ For production scale, run multiple worker processes behind a load balancer. Beca
 Key environment variables (set in `.env`, as Docker `ENV`, or via `--env-file`):
 
 ```bash
-MODE=production              # enables security guards
+MODE=production              # enables security guards and strict startup checks
 REDIS_URL=redis://redis:6379
 JWT_SECRET_KEY=your-secret-32-chars
 SENTRY_DSN=https://...@sentry.io/123
@@ -427,14 +427,15 @@ ORIGINS=https://example.com,https://app.example.com
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MODE` | `development` | Set to `production` to enable security checks |
+| `MODE` | `development` | `production` or `prod` enables security checks; `development`, `dev` and `local` are the other values. Anything else stops startup |
 | `REDIS_URL` | none | Redis connection used by server components such as the ownership cache |
 | `JWT_SECRET_KEY` | none | Required for JWT auth; use 32+ random chars |
 | `SENTRY_DSN` | none | Sentry error tracking |
 | `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing |
 | `OTEL_SERVICE_NAME` | `10xgraph-api` | Service name in traces |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | OTLP collector URL; omit to log spans to console |
-| `ORIGINS` | `*` | CORS allowed origins; restrict in production |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | OTLP collector URL; omit to print spans to the console in development (in production nothing is exported and a warning is logged) |
+| `ORIGINS` | `*` | CORS allowed origins. Production refuses `*` unless `STRICT_PRODUCTION_CHECKS=false`, so list your domains |
+| `ALLOWED_HOST` | `*` | Allowed `Host` values. Production refuses `*` unless `STRICT_PRODUCTION_CHECKS=false` |
 
 ## OpenTelemetry
 

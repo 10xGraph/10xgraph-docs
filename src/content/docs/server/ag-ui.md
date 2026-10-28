@@ -6,7 +6,7 @@ section: "API server"
 group: "Interfaces"
 order: 110
 label: Serve over AG-UI
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Do I need AG-UI to build a frontend for 10xGraph?"
     a: "No. The TypeScript client over /v1/graph/stream is the standard path. Use AG-UI when your frontend already speaks it, such as CopilotKit."
@@ -101,7 +101,7 @@ The AG-UI endpoint is mounted whenever enabled, regardless of `MODE`. Treat it w
 
 ### Persistent checkpointing
 
-AG-UI clients identify the conversation by `threadId`, which the server maps to a 10xGraph thread. The server reads the checkpoint to determine which messages are new and only sends those to the graph. With an in-memory checkpointer:
+AG-UI clients identify the conversation by `threadId`, which the server maps to a 10xGraph thread. AG-UI accepts a `threadId` the frontend made, even when `runs.thread_ids` is `"server"`, because CopilotKit creates its own. The caller owns a new thread, and an existing thread is owner-checked as usual. The server reads the checkpoint to determine which messages are new and only sends those to the graph. With an in-memory checkpointer:
 
 - Threads are lost when the server restarts
 - State is not shared across replicas
@@ -159,6 +159,14 @@ The AG-UI endpoint counts against the global `rate_limit` configuration like any
 ```
 
 See [Rate limiting](/docs/server/rate-limiting) for details.
+
+### One run per thread and request limits
+
+The server runs one graph run at a time on a thread. A second AG-UI run on a busy thread waits up to 30 seconds, then gets `409` with `thread is busy`. AG-UI always waits; it cannot ask the running run to stop. With Redis configured, the lock is shared across replicas.
+
+Because AG-UI clients resend the whole conversation, the size limits (500 messages, 100 content blocks per message, 1,000,000 characters of text) apply to the trailing turn only. The full history is capped at 10,000 messages. Requests over a limit get `422`. See the [AG-UI endpoint reference](/docs/reference/rest-api/ag-ui#request-size-limits).
+
+In production (`MODE=production`), error events carry a generic message. Details stay in the server log.
 
 ### Stream buffering
 

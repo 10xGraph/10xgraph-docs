@@ -5,7 +5,7 @@ section: "Build agents"
 group: "State, memory and context"
 order: 230
 label: Set up checkpointing
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 A checkpointer persists your graph state after every node so that multi-turn conversations can resume across separate requests, and interrupted executions can pick up where they left off. Without a checkpointer, every `invoke()` call starts fresh with an empty state. This guide shows you how to choose the right checkpointer for your deployment and configure it completely.
@@ -98,6 +98,8 @@ async def main():
 
 asyncio.run(main())
 ```
+
+On POSIX systems, `SqliteCheckpointer` creates the database folder with mode `0700` and the file with `0600` before it connects, so only the owning user can read your threads. The `-wal` and `-shm` files take the mode of the database file. Existing files and folders keep their mode, and this has no effect on Windows.
 
 The `.db` file persists between process restarts, so each user's agent resumes all threads from disk. Pass `":memory:"` as the path for a temporary, in-memory database (useful in tests).
 
@@ -195,7 +197,7 @@ app = FastAPI(lifespan=lifespan)
 
 ### Multi-user isolation
 
-By default, `PgCheckpointer` treats `user_id` as an **ownership boundary**. Threads, state, and messages are scoped to the authenticated user, so even if an attacker knows another user's `thread_id`, they cannot read, write, or delete it. This is critical in multi-tenant deployments.
+By default, `PgCheckpointer` treats `user_id` as an **ownership boundary**. Threads, state, messages, and the [tool ledger](/docs/concepts/replay-safe-tools) are scoped to the authenticated user, so even if an attacker knows another user's `thread_id`, they cannot read, write, or delete it. This is critical in multi-tenant deployments.
 
 ```python
 # Multi-tenant deployment (recommended default)

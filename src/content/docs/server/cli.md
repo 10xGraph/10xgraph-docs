@@ -6,7 +6,7 @@ section: "API server"
 group: "Basics"
 order: 50
 label: CLI
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 The `10xgraph` command-line interface (`10xgraph-api` package) is your complete toolkit for building and operating 10xGraph agents in production. From initial scaffolding through deployment and evaluation, each command handles a specific phase of agent development.
@@ -146,6 +146,8 @@ Before deploying, use `10xgraph audit` to run a read-only check: the Python inte
 10xgraph skills --all                  # Install for all agents
 10xgraph skills --validate ./skills    # Check skills against the spec
 ```
+
+The command refuses to install when any existing part of the destination (`.claude`, `.agents`, `.github` and the paths under them) is a symlink, or when the resolved destination is outside `--path`. A repository can ship `.claude` as a symlink to another directory, and installing through it would write files elsewhere. Replace the link with a real directory, or pass a different `--path`.
 
 See [Integrate with coding assistants](/docs/integrations/coding-assistants).
 

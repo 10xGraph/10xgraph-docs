@@ -12,7 +12,7 @@ outcome:
   - A Dockerfile and docker-compose.yml with Postgres and Redis
 versions: 10xGraph 0.9.2, API and CLI 0.5.1
 order: 10
-updated: 2026-10-04
+updated: 2026-10-27
 faq:
   - q: Can I use OpenAI or Claude instead of Gemini?
     a: Yes. Change the model and provider arguments of ReactAgent, for example provider="openai" or provider="anthropic", and install the matching extra (openai or anthropic) instead of google-genai. The tools, graph and server stay the same.
@@ -424,14 +424,15 @@ Generate the Docker files:
 10xgraph build --docker-compose
 ```
 
-This writes a `Dockerfile` (non-root user, health check on `/ping`), a `.dockerignore` that keeps `.env` out of the image, and a `docker-compose.yml` with one service for the API. Add Postgres and Redis to the compose file, and pass your settings in at run time:
+This writes a `Dockerfile` (non-root user, health check on `/ping`), a `.dockerignore` that keeps `.env` and credential files out of the image, and a `docker-compose.yml` with one service for the API that reads `.env` at run time. Add Postgres and Redis to the compose file:
 
 ```yaml title="docker-compose.yml"
 services:
   10xgraph-api:
     build: .
     image: 10xgraph-api:latest
-    env_file: .env # [!code ++]
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
@@ -441,8 +442,8 @@ services:
       - REDIS_URL=redis://redis:6379/0 # [!code ++]
     depends_on: [db, redis] # [!code ++]
     ports:
-      - '8000:8000'
-    # keep the generated command, stop_grace_period and restart lines
+      - '127.0.0.1:8000:8000'
+    # keep the generated command, stop_grace_period, restart and lockdown lines
   db: # [!code ++]
     image: postgres:16 # [!code ++]
     environment: # [!code ++]
@@ -451,7 +452,8 @@ services:
       - pgdata:/var/lib/postgresql/data # [!code ++]
   redis: # [!code ++]
     image: redis:7 # [!code ++]
-volumes: # [!code ++]
+volumes:
+  uploads:
   pgdata: # [!code ++]
 ```
 

@@ -6,7 +6,7 @@ section: Reference
 group: "REST API"
 order: 310
 label: Graph
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The graph endpoints run your compiled graph over HTTP and WebSocket: invoke it for a complete result, stream it chunk by chunk, stop or repair a thread, and inspect the graph's nodes, tools, and state schema. This page lists each route with its permission, request body, and response.
@@ -56,12 +56,26 @@ Run the graph and return the complete result when all nodes finish.
 | --- | --- | --- | --- |
 | `messages` | array | yes, unless `resume` is set | One or more messages to append to state before invoking. |
 | `resume` | any | no | Answer for a thread paused by [`interrupt()`](/docs/guides/add-human-approval). The paused node runs again and `interrupt()` returns this value; `null` means cancelled. Send it only to resume a paused thread. |
-| `initial_state` | object | no | Initial state for the run |
+| `interrupt_id` | string | no | The `id` of the interrupt `resume` answers. Take it from `execution_meta.interrupt_data.interrupt.id` in the thread state. If the thread is not paused, or is paused at a different interrupt, the request gets `409` before anything runs. Ignored without `resume`. |
+| `on_busy` | string | no | `wait` (default) or `cancel`. What to do when another run is active on the thread (see [One run per thread](#one-run-per-thread)). |
+| `initial_state` | object | no | Initial state for the run. Custom fields and `current_node` are allowed; built-in fields are not (see input rules below). |
 | `config` | object | no | Run configuration |
-| `config.thread_id` | string | no | Conversation identifier. When absent or blank, the server generates one and persists the thread; the id comes back in `data.meta.thread_id`. |
-| `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `authz` and `_`-prefixed keys. |
+| `config.thread_id` | string | no | Id of an existing thread to continue. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.meta.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `403`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
+| `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `authz`, `collection` and `_`-prefixed keys. A client cannot choose a memory collection; it is ignored, not refused. See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). |
 | `recursion_limit` | integer | no | Maximum graph iterations. Default `25`, range `1`-`100`. |
 | `response_granularity` | string | no | `full`, `partial`, or `low`. Default `low`. |
+
+**Input rules.** The server refuses these with `422`:
+
+- A message with role `assistant` or `system`. Clients send user messages only.
+- A `tool` message that is not made of `tool_result` blocks, or that does not answer a remote tool call waiting for a result.
+- `context_summary` or `execution_meta` in `initial_state`. Clients can never write these built-in fields.
+- A `current_node` in `initial_state` that is not a node in the graph.
+- A state value whose type does not match the state field. The error names the field.
+
+Custom state fields are allowed. If the operator set `runs.state_keys` in `10xgraph.json`, only the listed keys are accepted. The server replaces any `message_id` you send with its own. The same rules apply to `POST /v1/graph/stream` and the WebSocket.
+
+**Size limits.** At most 500 messages per request, 100 content blocks per message, and 1,000,000 characters of text in total across text blocks. A request over a limit gets `422` with a message that names the limit, in development and production alike. The limits are fixed and apply to invoke, stream and the WebSocket (`messages` and `tool_result`), and to `PUT /v1/threads/{id}/state` `context` and `POST /v1/threads/{id}/messages`. [AG-UI](/docs/reference/rest-api/ag-ui#request-size-limits) applies them to the trailing turn.
 
 Messages may carry image and document content blocks referencing an uploaded `file_id`. Those references are resolved before the graph runs; see [Multimodal and vision](/docs/server/files-and-multimodal).
 
@@ -87,13 +101,41 @@ Messages may carry image and document content blocks referencing an uploaded `fi
 | `summary` | Summary text, or `null`. |
 | `meta` | Run metadata such as `thread_id`, or `null`. How much is filled in depends on `response_granularity`. |
 
+### One run per thread
+
+The server runs one graph run at a time on a thread. A second run on a busy thread waits up to 30 seconds for the first to finish, then the request is rejected with `409` in the standard error body:
+
+```json
+{
+  "error": {"code": "HTTPException", "message": "thread is busy", "details": []},
+  "metadata": {"request_id": "...", "timestamp": "...", "message": "thread is busy"}
+}
+```
+
+On invoke and stream, this answer comes before the response starts. A new thread (no `thread_id` in the request) is locked as soon as its id exists. The lock is shared across processes when Redis is configured, and per process otherwise. It expires on its own if a worker dies, and is released when the run ends, fails, is cancelled or the client disconnects. `/v1/graph/live` is not covered.
+
+Set `on_busy` to `"cancel"` to stop the running run (the same mechanism as [`POST /v1/graph/stop`](#post-v1graphstop)) and start the new one. The 30-second wait limit and the `409` still apply if the old run does not stop in time.
+
+### Resume answers
+
+A request with `resume` can fail two ways, both before the graph runs:
+
+| Status | Cause |
+| --- | --- |
+| `409` | `interrupt_id` was sent and the thread is not paused, or is paused at a different interrupt. |
+| `422` | The answer fails the interrupt's `response_schema`. |
+
+The schema check supports `type`, `enum`, `properties`, `required` and `items`. Other keywords are ignored. A `null` answer (cancel) is never checked. See [Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt).
+
 ---
 
 ## POST /v1/graph/stream
 
 Run the graph and stream one JSON-encoded `StreamChunk` per line.
 
-**Request body:** Same as `/v1/graph/invoke`.
+**Request body:** Same as `/v1/graph/invoke`, including `resume`, `interrupt_id`, `on_busy` and the size limits.
+
+A busy thread (`409`) and an `interrupt_id` mismatch (`409`) are answered before the stream starts, as a normal HTTP error. Failures once the stream is running arrive as an `error` chunk. With `MODE=production`, the text in an `error` chunk's `data` (`reason`, `error` or `message`) is replaced by the same generic message invoke uses, such as `An error occurred in a graph node.`; development shows the details. The built-in text for an unexpected tool failure (`Tool '<name>' failed with an internal error (reference <id>).`) is kept, because it holds no detail.
 
 **Response:** `Content-Type: text/event-stream`
 
@@ -147,7 +189,7 @@ Cancel an in-progress graph execution.
 }
 ```
 
-The request records a stop flag on the thread, and the running graph checks it between nodes, so the current node finishes first. When nothing is running the call still succeeds, with `running: false` (`reason: "no-state"`) or `ok: false` (`reason: "no-checkpointer"`). Stopping needs a checkpointer.
+The request records a stop flag on the thread, and the running graph checks it between nodes, so the current node finishes first. When nothing is running the call still succeeds, with `running: false` (`reason: "no-state"`) or `ok: false` (`reason: "no-checkpointer"`). Stopping needs a checkpointer. A stop request belongs to the run it targets: starting a new run on the thread does not clear a stop meant for a run that is still going.
 
 ---
 
@@ -251,7 +293,16 @@ Tool collection is best-effort per node: an MCP server that fails to respond is 
 
 ## POST /v1/graph/fix
 
-Repair a thread whose state contains messages with tool calls that have empty content, which is what an interrupted or failed tool execution leaves behind. Those messages are removed from the state.
+Repair a thread whose history is broken because a run stopped after the model asked for tools but before the results were saved.
+
+The repair works in two steps:
+
+1. An assistant message is removed when any of its tool calls has no matching tool result. Calls and results are matched by tool call id.
+2. Tool result messages whose call no longer exists, including results left over from a message removed in step 1, are then removed. Every remaining result has its call.
+
+If the thread is paused (an `interrupt()`, a client tool call waiting for its result, or a human-approval pause), the unanswered calls of the latest assistant message are kept, because the pause is waiting on them. Earlier dangling calls are still removed. Messages without tool calls are never touched.
+
+When nothing needs fixing, the response has `removed_count: 0` and the state is not written.
 
 **Request body:**
 
@@ -270,7 +321,7 @@ Repair a thread whose state contains messages with tool calls that have empty co
 {
   "data": {
     "success": true,
-    "message": "Removed 1 message with empty tool calls",
+    "message": "Removed 1 message with unanswered tool calls",
     "removed_count": 1,
     "state": {}
   },
@@ -298,21 +349,32 @@ Turn-based streaming over a WebSocket. Same payloads as `POST /v1/graph/stream`,
 }
 ```
 
-`messages` must be non-empty. `config.thread_id` is optional; omit it to start a new thread.
+`messages` must be non-empty, unless the frame carries `resume`. `config.thread_id` is optional; omit it, or send `"new"`, to start a new thread. The server picks the id and sends it on each chunk. A `thread_id` that does not exist gets an `error` chunk, the same as an unauthorized one, unless `runs.thread_ids` is `client`.
+
+**Answer an `interrupt()` pause.** A `fresh` frame accepts `resume` (any JSON value, `null` to cancel) and an optional `interrupt_id`, with the same meaning as on invoke. No `messages` are needed:
+
+```json
+{
+  "invoke_type": "fresh",
+  "resume": {"approved": true},
+  "interrupt_id": "int_abc123...",
+  "config": {"thread_id": "my-thread-1"}
+}
+```
 
 **Resume after a remote tool call.** When the stream contains a remote tool call, the client executes the tool and sends:
 
 ```json
 {
   "invoke_type": "resume",
-  "tool_result": [{"role": "tool", "content": "24 degrees and sunny"}],
+  "tool_result": [{"role": "tool", "content": [{"type": "tool_result", "call_id": "call-abc123", "output": "24 degrees and sunny"}]}],
   "config": {"thread_id": "my-thread-1"}
 }
 ```
 
-`tool_result` must be non-empty and `config.thread_id` is required, so the server can resume the right checkpoint.
+`tool_result` must be non-empty and `config.thread_id` is required, so the server can resume the right checkpoint. Each message must be a `tool` message of `tool_result` blocks that answers a pending remote tool call, and `call_id` must match that call.
 
-Both frames also accept `initial_state`, `recursion_limit`, and `response_granularity` with the same meaning as `POST /v1/graph/invoke`.
+Both frames also accept `initial_state`, `recursion_limit`, `on_busy` and `response_granularity` with the same meaning as `POST /v1/graph/invoke`, and the same input rules.
 
 **Server frames.** The server sends `StreamChunk` JSON messages, identical to the HTTP stream, followed by a terminator:
 
@@ -331,7 +393,7 @@ The server does not inspect chunks for tool calls; detecting a remote tool call 
 | `1011` | Unexpected server error |
 | `1013` | Rate limit or `websocket.max_connections` exceeded |
 
-Recoverable problems (an invalid frame, an unauthorized `thread_id`) are sent as an `error` `StreamChunk` and the connection stays open for the next request.
+Recoverable problems (an invalid frame, an unauthorized `thread_id`, a busy thread, a resume that does not match the open interrupt) are sent as an `error` `StreamChunk` and the connection stays open for the next request.
 
 ---
 

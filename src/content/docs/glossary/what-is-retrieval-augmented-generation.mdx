@@ -5,7 +5,7 @@ description: RAG (Retrieval-Augmented Generation) has an agent retrieve relevant
 section: Glossary
 order: 80
 label: What is RAG?
-updated: '2026-07-21'
+updated: '2026-10-27'
 faq:
   - q: What is the difference between RAG and a database query?
     a: A database query retrieves rows that exactly match a condition (WHERE user_id = 123). RAG retrieves documents by semantic similarity; it finds passages that are conceptually related to a query even if they don't share exact keywords. This is done by embedding both the query and the documents as vectors and finding the nearest neighbors in vector space.
@@ -44,7 +44,8 @@ User query: "What is our refund policy?"
 [Search vector store] → retrieve top-K relevant document chunks
      │                   e.g. ["Refund policy: 30-day window...", "Exceptions include..."]
      ▼
-[Build prompt] → system prompt + retrieved chunks + user query
+[Build prompt] → system prompt + user query, with the retrieved chunks
+     │                fenced as reference material (not instructions)
      │
      ▼
 [LLM generates answer] grounded in the retrieved documents
@@ -57,7 +58,7 @@ The retrieval step turns a potentially infinite knowledge base into a focused, q
 
 ## Building a RAG agent with 10xGraph
 
-10xGraph ships a prebuilt `RAGAgent` that handles retrieval, context injection, and generation:
+10xGraph ships a prebuilt `RAGAgent` that handles retrieval and generation. It adds the retrieved chunks to the request sent to the model in a fenced block marked as reference material, not instructions, and never saves them into the thread ([how and why](/docs/guides/prebuilt/rag-agent#why-the-documents-are-fenced)):
 
 ```python title="rag_agent.py"
 import asyncio
@@ -65,11 +66,12 @@ import asyncio
 from tenxgraph.core.graph.agent import Agent
 from tenxgraph.core.state.message import Message
 from tenxgraph.prebuilt.agent.rag import RAGAgent
-from tenxgraph.storage import create_local_qdrant_store
+from tenxgraph.storage import create_local_qdrant_store, system_user_id
 from tenxgraph.storage.store.embedding import OpenAIEmbedding
 
-# Search and indexing must use the same user_id, because QdrantStore filters by it
-CONFIG = {"user_id": "kb"}
+# The knowledge base is shared data, so it is owned by the reserved system_user_id("knowledge_base").
+# Search and indexing must use the same user_id, because QdrantStore filters by it.
+CONFIG = {"user_id": system_user_id("knowledge_base")}
 
 store = create_local_qdrant_store(
     path="./knowledge_base",

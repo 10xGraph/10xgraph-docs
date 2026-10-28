@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 470
 label: Graph control
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 Seven methods on `TenxGraphClient` inspect the graph and control its execution. They check server health, retrieve the graph's topology, list available tools, fetch observability data for a run, return the state schema, and stop or repair a thread. All are imported from `10xgraph-client` and called on a client instance.
@@ -19,7 +19,7 @@ Seven methods on `TenxGraphClient` inspect the graph and control its execution. 
 | `observability(threadId, runId?)` | `GET /v1/observability/{thread_id}` | Retrieve traces and metrics for a run |
 | `graphStateSchema()` | `GET /v1/graph:StateSchema` | Get the state schema as JSON Schema |
 | `stopGraph(threadId, config?)` | `POST /v1/graph/stop` | Request graph to halt execution |
-| `fixGraph(threadId, config?)` | `POST /v1/graph/fix` | Repair thread with orphaned tool calls |
+| `fixGraph(threadId, config?)` | `POST /v1/graph/fix` | Repair thread with unanswered tool calls |
 
 Every response follows the same envelope: the payload under `data`, and `{ request_id, timestamp, message }` under `metadata`.
 
@@ -305,7 +305,7 @@ Breaking out of a `for await` loop over `stream()` closes your end of the connec
 fixGraph(threadId: string, config?: Record<string, any>): Promise<FixGraphResponse>
 ```
 
-Repairs a thread by removing every message in its saved state that has a tool call with empty `content`, which can be left behind when a run is cut off mid-tool-call. Those leftovers can leave the thread stuck.
+Repairs a thread whose history is broken because a run stopped after the model asked for tools but before the results were saved. It removes an assistant message when any of its tool calls has no matching tool result, then removes tool result messages whose call no longer exists. Messages without tool calls are never touched. See [Graph utilities](/docs/client/graph-utilities#fixgraph) for the full rules.
 
 ```ts
 interface FixGraphResponse {
@@ -319,7 +319,7 @@ interface FixGraphResponse {
 }
 ```
 
-`removed_count: 0` means no such messages were found. If the thread has no saved state, the server returns `success: false` with `removed_count: 0`.
+`removed_count: 0` means nothing needed fixing, and the state is not written. If the thread has no saved state, the server returns `success: false` with `removed_count: 0`.
 
 ---
 
@@ -370,8 +370,8 @@ async function askUser(reason: string, data?: Record<string, any>): Promise<bool
 
 const userMessage = Message.text_message('Delete the old reports', 'user');
 
+// No thread_id: the server starts a thread and returns its id in result.meta.thread_id.
 const result = await client.invoke([userMessage], {
-  config: { thread_id: 'approval-1' },
   response_granularity: 'full',
 });
 
@@ -384,7 +384,7 @@ if (meta?.status?.startsWith('interrupted')) {
 
   // Resume by invoking the same thread again.
   await client.invoke([Message.text_message(approved ? 'approved' : 'rejected', 'user')], {
-    config: { thread_id: 'approval-1' },
+    config: { thread_id: result.meta.thread_id },
   });
 }
 ```
@@ -398,7 +398,7 @@ if (meta?.status?.startsWith('interrupted')) {
 - `ping()` and `graph()` give you early feedback on server health and what the deployment supports.
 - `graphTools()` shows what the model can actually call, tagged `local`, `mcp`, or `remote`.
 - `observability()` reconstructs a run as spans and events with token usage, and `run_ids` lists all runs.
-- `stopGraph()` halts execution cooperatively; `fixGraph()` removes messages with empty tool calls from a thread.
+- `stopGraph()` halts execution cooperatively; `fixGraph()` removes assistant messages with unanswered tool calls, and their orphaned results, from a thread.
 - `execution_meta.status` starting with `interrupted` tells you the graph is paused waiting for human input.
 
 ## Next step

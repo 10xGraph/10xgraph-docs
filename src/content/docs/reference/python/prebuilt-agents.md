@@ -4,7 +4,7 @@ description: "API reference for built-in agent patterns: ReactAgent, RAGAgent, P
 order: 240
 group: "Python library"
 section: Reference
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 Prebuilt agents are ready-made graphs for common patterns such as tool loops, retrieval, planning and teams. Import them from `tenxgraph.prebuilt.agent`, construct one, and call `compile()` to get a `CompiledGraph`. Extra keyword arguments pass through to the internal `Agent`. To choose between them, see the [prebuilt agents guide](/docs/guides/prebuilt-agents).
@@ -159,6 +159,7 @@ def __init__(
     retrieval_strategy: RetrievalStrategy = RetrievalStrategy.SIMILARITY,
     score_threshold: float | None = None,
     store_config: dict[str, Any] | None = None,
+    store_config_builder: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     state: StateT | None = None,
     context_manager: BaseContextManager[StateT] | None = None,
     publisher: BasePublisher | list[BasePublisher] | None = None,
@@ -176,14 +177,17 @@ def __init__(
 | `top_n` | `int` | `3` | Number of documents to forward to the LLM after reranking. Ignored if no reranker. |
 | `retrieval_strategy` | `RetrievalStrategy` | `SIMILARITY` | Search strategy passed to `store.asearch`. Members of `RetrievalStrategy`: `SIMILARITY`, `TEMPORAL`, `RELEVANCE`, `HYBRID`, `GRAPH_TRAVERSAL`. |
 | `score_threshold` | `float \| None` | `None` | Minimum similarity score; `None` = no cutoff. |
-| `store_config` | `dict \| None` | `None` | Extra key/value pairs passed to every store.asearch() call. |
+| `store_config` | `dict \| None` | `None` | Extra key/value pairs passed to every store.asearch() call. Fixed for all runs. If it has no `user_id`, the search runs as `system_user_id("knowledge_base")`; index the knowledge base with `config={"user_id": system_user_id("knowledge_base")}`. |
+| `store_config_builder` | `Callable[[dict], dict] \| None` | `None` | Builds the store config for each run from the run config, for example `lambda cfg: {"user_id": cfg["user_id"]}`. When set, it is used instead of `store_config`, as is, so it must include a `user_id`. Take identity from the authenticated run config, never from state. |
 | `state` | `StateT \| None` | `None` | Custom AgentState subclass. |
 | `context_manager` | `BaseContextManager[StateT] \| None` | `None` | Context manager. |
 | `publisher` | `BasePublisher \| list \| None` | `None` | Event publisher. |
 | `id_generator` | `BaseIDGenerator` | `DefaultIDGenerator()` | ID generator. |
 | `container` | `InjectQ \| None` | `None` | DI container. |
 
-**Raises:** `ValueError` if `top_k` or `top_n` is less than 1.
+**Raises:** `ValueError` if `top_k` or `top_n` is less than 1. `TypeError` at run time if documents were retrieved and `agent.execute` does not accept a `request_blocks` keyword.
+
+**How documents reach the model:** SYNTHESIZE numbers the retrieved documents, fences them in a `<retrieved_documents_...>` block (random suffix per request, `<retrieved_documents` text inside a chunk is escaped) and passes it to `agent.execute(state, config, request_blocks=[...])`. The block is added to the latest user message of the outgoing request only, before the user's text, and after any preload memory block. The saved user message is not changed and the documents are not stored in state. A custom `agent` must accept `execute(state, config, *, request_blocks=None)`; the built-in `Agent` does.
 
 **Returns:** `RAGAgent[StateT]`: call `.compile()` for a `CompiledGraph`.
 
@@ -340,7 +344,7 @@ def __init__(
 | `tools` | `Iterable[Callable] \| None` | `None` | Tools available to the PLAN agent. |
 | `plan_system_prompt` | `list[dict] \| None` | `None` | Override planner system prompt. |
 | `reflect_system_prompt` | `list[dict] \| None` | `None` | Override reflector system prompt. |
-| `max_iterations` | `int` | `3` | Max PLAN→ACT→REFLECT cycles. |
+| `max_iterations` | `int` | `3` | Max PLAN→ACT→REFLECT cycles per turn. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
 | `state` | `StateT \| None` | `None` | Custom AgentState. |
 | `context_manager` | `BaseContextManager[StateT] \| None` | `None` | Context manager. |
 | `publisher` | `BasePublisher \| list \| None` | `None` | Event publisher. |
@@ -438,7 +442,7 @@ def __init__(
 | `output_schema` | `type` | required | Pydantic BaseModel or TypedDict subclass. |
 | `tools` | `Iterable[Callable] \| None` | `None` | Tools available during generation. |
 | `system_prompt` | `list[dict] \| None` | `None` | System prompt for the generator. |
-| `max_attempts` | `int` | `2` | Max repair+retry attempts before accepting best response. |
+| `max_attempts` | `int` | `2` | Max repair+retry attempts per turn before accepting best response. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
 | `repair_system_prompt` | `list[dict] \| None` | `None` | System prompt for dedicated repair agent (if provided). |
 | `state` | `StateT \| None` | `None` | Custom AgentState. |
 | `context_manager` | `BaseContextManager[StateT] \| None` | `None` | Context manager. |
@@ -538,7 +542,7 @@ def __init__(
 | `supervisor_model` | `str` | required | LLM model for the supervisor. |
 | `workers` | `dict[str, WorkerConfig]` | required | Mapping of UPPER-CASE names to WorkerConfigs. |
 | `supervisor_system_prompt` | `list[dict] \| None` | `None` | Override auto-generated supervisor prompt. |
-| `max_rounds` | `int` | `10` | Max supervisor→worker delegations. |
+| `max_rounds` | `int` | `10` | Max supervisor→worker delegations per turn. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
 | `state` | `StateT \| None` | `None` | Custom AgentState. |
 | `context_manager` | `BaseContextManager[StateT] \| None` | `None` | Context manager. |
 | `publisher` | `BasePublisher \| list \| None` | `None` | Event publisher. |

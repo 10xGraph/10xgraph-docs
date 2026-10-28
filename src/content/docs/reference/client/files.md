@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 540
 label: Files
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 The file methods on `TenxGraphClient` upload binary files to the server, then fetch the file, its metadata or a usable access URL. An upload returns a `file_id` and a `url` that you place in a `MediaRef` inside an `ImageBlock`, `AudioBlock` or `DocumentBlock`. For the task-oriented walkthrough, see [Files and multimodal](/docs/client/files-and-multimodal).
@@ -115,6 +115,36 @@ const url = URL.createObjectURL(blob);
 | Parameter | Type | Description |
 |---|---|---|
 | `fileId` | `string` | The file ID returned by `uploadFile()`. |
+
+---
+
+## `deleteFile(fileId)`
+
+Delete a stored file and its metadata. Only the user who uploaded the file can delete it. The call needs the `files:delete` scope.
+
+**Endpoint:** `DELETE /v1/files/{fileId}`
+
+```ts
+const res = await client.deleteFile('file-abc123');
+console.log(res.data.deleted); // true
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `fileId` | `string` | The file ID returned by `uploadFile()`. |
+
+### `DeleteFileResponse`
+
+```ts
+interface DeleteFileResponse {
+  data: { file_id: string; deleted: boolean };
+  metadata: ResponseMetadata;
+}
+```
+
+The server returns `404` ("File not found") when the file does not exist or belongs to someone else, and the client throws. You rarely need this call: the server also deletes uploaded files when the last message or thread that references them is deleted (see [Delete a file and file lifecycle](/docs/server/files-and-multimodal#delete-a-file-and-file-lifecycle)).
 
 ---
 
@@ -274,8 +304,9 @@ async function askAboutImage(imageFile: File, question: string) {
 | Error | Cause | Fix |
 |---|---|---|
 | `TenxGraphError` with `statusCode` `413` | File exceeds `media_max_size_mb`. | Check `getMultimodalConfig()` and reduce file size. |
-| `TenxGraphError` with `statusCode` `415` | The server restricts content types and yours is not allowed. | Upload an allowed type, or ask the operator to adjust `MEDIA_ALLOWED_CONTENT_TYPES`. |
+| `TenxGraphError` with `statusCode` `415` | The server restricts content types and yours is not allowed, or the file's bytes do not match its declared type. | Upload an allowed type with the right `Content-Type`, or ask the operator to adjust `MEDIA_ALLOWED_CONTENT_TYPES`. |
 | `NotFoundError` (`statusCode` `404`) | `file_id` not found, or not visible to the current user. | Re-upload the file or check the ID. |
+| `TenxGraphError` with `statusCode` `403` on `deleteFile()` | The token lacks the `files:delete` scope. | Ask the operator to grant it. |
 | Signed URL expired | `expires_at` is in the past. | Call `getFileAccessUrl()` to refresh the URL. |
 
 ---

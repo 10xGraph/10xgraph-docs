@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Prebuilt agents"
 order: 140
 label: StructuredOutputAgent
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Should I use StructuredOutputAgent or the Agent output_schema parameter?"
     a: "StructuredOutputAgent is a self-contained prebuilt agent with built-in validation and repair logic. Use it when you want guaranteed schema compliance without building a custom graph. For more control, use Agent(output_schema=...) in your own graph."
@@ -106,7 +106,7 @@ Please produce a response that is **valid JSON** and strictly matches the schema
 Output only the JSON object, no extra text or code fences.
 ```
 
-The agent re-calls the LLM and validates again. If validation succeeds or `max_attempts` is reached, it returns the best response.
+The agent re-calls the LLM and validates again. If validation succeeds or `max_attempts` is reached for the turn, it returns the best response.
 
 ---
 
@@ -123,7 +123,7 @@ Repair and generation control:
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `max_attempts` | `int` | `2` | Maximum validation+repair cycles. After this many failures, the agent returns the best-effort response even if validation failed. |
+| `max_attempts` | `int` | `2` | Maximum validation+repair cycles per turn. After this many failures, the agent returns the best-effort response even if validation failed. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
 | `repair_system_prompt` | `list[dict] \| None` | `None` | Set to enable a dedicated LLM repair agent. Pass a list of message dicts with the repair instructions. When `None` (default), repair uses lightweight context injection (no extra LLM call). |
 | `system_prompt` | `list[dict] \| None` | `None` | System prompt for the generation agent. Example: `[{"role": "system", "content": "You are a data analyst..."}]`. |
 

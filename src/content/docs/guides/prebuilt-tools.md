@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 170
 label: Prebuilt tools
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Can I mix prebuilt tools with custom tools?"
     a: "Yes. Pass all tools to a single ToolNode. Prebuilt and custom tools coexist without conflict."
@@ -34,7 +34,6 @@ from tenxgraph.prebuilt.tools import (
     safe_calculator,
     google_web_search,
     vertex_ai_search,
-    memory_tool,
     make_user_memory_tool,
     make_agent_memory_tool,
     create_handoff_tool,
@@ -162,7 +161,9 @@ On failure the tool returns a JSON object with an `error` key instead, for examp
 
 ## File tools: read, write, search
 
-The file tools (`file_read`, `file_write`, `file_search`) provide controlled access to the local filesystem. All three enforce that paths stay within the configured workspace root, preventing escape attempts.
+The file tools (`file_read`, `file_write`, `file_search`) provide controlled access to the local filesystem. All three enforce that paths stay within the configured workspace root, preventing escape attempts. They also hide secret files such as `.env`, `*.pem` and anything under `.ssh` or `.git`, and refuse them with the same `path is not allowed` error whether or not the file exists.
+
+For a graph that serves requests, build the tools with `create_file_tools(root)` instead of passing the module-level functions. The root is fixed in code, so the run config cannot move it, and you can add patterns with `deny=` or drop the defaults with `use_default_deny=False`. See the [file tools guide](/docs/guides/prebuilt/file-tools) for the full list of hidden patterns.
 
 ### file_read: Read files
 
@@ -309,18 +310,7 @@ Requires: `pip install "10xgraph[google-genai]"`, Google Cloud project, and a Ve
 
 ## Memory tools
 
-Memory tools integrate with 10xGraph's long-term memory system, letting agents remember facts about users and themselves. For most cases, use `Agent(..., memory=MemoryConfig(...))` to inject memory tools automatically; these factories are useful when you need manual control.
-
-### memory_tool
-
-A legacy general-purpose memory tool for custom graphs that do not use `Agent`'s built-in memory. It is already a tool, not a factory: add it to a `ToolNode` directly. It reads the `BaseStore` registered in the dependency container (pass the store to `compile(store=...)`), and supports the actions `search`, `store`, `update` and `delete`.
-
-```python
-from tenxgraph.core.graph import ToolNode
-from tenxgraph.prebuilt.tools import memory_tool
-
-tool_node = ToolNode([memory_tool])
-```
+Memory tools integrate with 10xGraph's long-term memory system, letting agents remember facts about users and themselves. For most cases, use `Agent(..., memory=MemoryConfig(...))` to inject memory tools automatically; the factories below are useful when you need manual control. They are the only memory tools; there is no general-purpose `memory_tool`.
 
 ### make_user_memory_tool and make_agent_memory_tool
 

@@ -4,7 +4,7 @@ description: "Catch, classify, and recover from errors in the TypeScript client.
 section: "TypeScript client"
 group: "Features"
 order: 110
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 Every API call from the client can fail: the server can reject authentication, return validation errors, encounter internal issues, or experience temporary storage outages. The 10xGraph TypeScript client exports a hierarchy of error classes to help you classify failures and respond appropriately.
@@ -20,6 +20,7 @@ import {
   AuthenticationError,
   PermissionError,
   NotFoundError,
+  ConflictError,
   ValidationError,
   ServerError,
   GraphError,
@@ -33,9 +34,10 @@ import {
 |---|---|---|---|
 | `BadRequestError` | 400 | Malformed request or invalid data | Fix the request and retry immediately |
 | `AuthenticationError` | 401 | Missing or invalid auth credentials | Check token, refresh if expired, retry |
-| `PermissionError` | 403 | User lacks access to the resource | Check authorization scope, request new permissions |
+| `PermissionError` | 403 | User lacks access to the resource, or the `thread_id` does not exist or belongs to another user | Check authorization scope. For a new conversation, omit `thread_id` and use the id the server returns |
 | `NotFoundError` | 404 | Resource (thread, file) does not exist | Verify the ID, create the resource, or move on |
-| `ValidationError` | 422 | Request failed schema validation | Fix field types and ranges, retry |
+| `ConflictError` | 409 | The thread is busy with another run, or a resume's `interrupt_id` does not match | Wait and retry, or send `on_busy: 'cancel'`. For a mismatch, fetch the current interrupt id |
+| `ValidationError` | 422 | Request failed schema validation, is over a size limit, or a resume answer fails `response_schema` | Fix field types, ranges and sizes, retry |
 | `ServerError` | 500, 502, 503, 504 | Server-side failure or transient issue | Retry with exponential backoff |
 | `GraphError` | 500 | Error during graph execution | Check graph configuration, inspect logs |
 | `NodeError` | 500 | Error in a specific graph node | Review node implementation and inputs |
@@ -57,10 +59,7 @@ const client = new TenxGraphClient({
 });
 
 try {
-  const result = await client.invoke(
-    [Message.text_message('Hello', 'user')],
-    { config: { thread_id: 'user-123' } }
-  );
+  const result = await client.invoke([Message.text_message('Hello', 'user')]);
   console.log('Response:', result.messages);
 } catch (err) {
   if (err instanceof TransientStorageError) {
@@ -125,6 +124,7 @@ Some errors are temporary and safe to retry. The client itself does not retry au
 **Non-transient errors** should not be retried the same way:
 - `AuthenticationError` (401): fix your token before retrying
 - `ValidationError` (422): fix your request before retrying
+- `ConflictError` (409): the client never retries it. A busy thread already waited 30 seconds on the server, so retry only if your app can wait, or use `on_busy: 'cancel'`
 - `NotFoundError` (404): the resource does not exist; create it first
 - `PermissionError` (403): request new permissions before retrying
 
@@ -157,9 +157,7 @@ async function retryWithBackoff<T>(
 
 // Usage
 const result = await retryWithBackoff(() =>
-  client.invoke([Message.text_message('Query', 'user')], {
-    config: { thread_id: 'user-123' },
-  })
+  client.invoke([Message.text_message('Query', 'user')])
 );
 ```
 
@@ -179,9 +177,7 @@ export enum StreamEventType {
 Iterate through the stream and check the `event` field. When an error occurs, the server sends a chunk with `event: 'error'`:
 
 ```ts
-const stream = client.stream([Message.text_message('Hello', 'user')], {
-  config: { thread_id: 'user-123' },
-});
+const stream = client.stream([Message.text_message('Hello', 'user')]);
 
 try {
   for await (const chunk of stream) {
@@ -213,9 +209,7 @@ When a graph node raises an exception or a tool fails, the error is captured by 
 
 ```ts
 try {
-  const result = await client.invoke([Message.text_message('Search for X', 'user')], {
-    config: { thread_id: 'user-123' },
-  });
+  const result = await client.invoke([Message.text_message('Search for X', 'user')]);
 } catch (err) {
   if (err instanceof NodeError) {
     console.error('Node failed:', err.message);

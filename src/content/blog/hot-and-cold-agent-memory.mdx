@@ -3,7 +3,7 @@ title: "Hot and cold agent memory: why 10xGraph puts Redis in front of Postgres"
 seoTitle: "Hot and cold agent memory: Redis and Postgres"
 description: How PgCheckpointer splits agent state between a Redis hot cache and versioned Postgres history, keeps them consistent, and behaves when either one fails.
 date: 2026-09-24
-updated: 2026-10-06
+updated: 2026-10-26
 author: Shudipto Trafder
 kind: engineering
 tags: [memory, redis, postgres]
@@ -12,6 +12,8 @@ faq:
     a: PgCheckpointer caches thread state for 86400 seconds (24 hours) by default. Change it with the cache_ttl option. Postgres keeps the durable copy whatever the TTL is.
   - q: What happens if Redis is down?
     a: Runs continue on Postgres. A failed cache read falls back to Postgres and a failed cache write is logged without raising. Runs are slower but nothing is lost.
+  - q: What SQL tables does PgCheckpointer create in Postgres?
+    a: It creates threads, states, messages, tool_executions, and schema_version. The states table enforces a UNIQUE(thread_id, version) index for optimistic concurrency control, while tool_executions provides the replay-safe idempotency ledger.
   - q: How much history does PgCheckpointer keep?
     a: The last 20 state snapshots per thread by default, set with state_history_limit. Messages are stored separately in a messages table and are not pruned by that limit.
   - q: Can I run this without Redis or Postgres?
@@ -97,6 +99,122 @@ if checkpointer:
 **Connection errors are retried.** A dropped connection or interface error retries the whole transaction on a fresh pooled connection, up to three attempts with exponential backoff (one second, then two). Other errors, and connection errors that outlast the retries, are raised as a `StorageError`, so the run fails visibly instead of continuing on unsaved state.
 
 You can disable the per-step durable write with `"durable_checkpoint_every_step": False` in the run config. Steps then write only the cache, and Postgres is written when the run completes, errors, pauses or stops. That saves database writes but brings back the risk described above: a crash after the cache expires resumes from the last terminal checkpoint. The default is per-step durability, and you should keep it for any agent whose work matters.
+
+## The PostgreSQL schema and queries
+
+The durability guarantees of `PgCheckpointer` rely on five relational tables in PostgreSQL: `threads`, `states`, `messages`, `tool_executions`, and `schema_version`.
+
+### Table definitions and constraints
+
+Here is the underlying schema created during database initialization:
+
+```sql title="schema.sql"
+-- 1. Thread metadata and ownership boundary
+CREATE TABLE IF NOT EXISTS threads (
+    thread_id VARCHAR(255) PRIMARY KEY,
+    thread_name VARCHAR(255),
+    user_id VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    meta JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_threads_user_id ON threads(user_id);
+
+-- 2. Versioned state snapshots (bounded append-only log)
+CREATE TABLE IF NOT EXISTS states (
+    state_id SERIAL PRIMARY KEY,
+    thread_id VARCHAR(255) NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
+    version BIGINT NOT NULL DEFAULT 0,
+    state_data JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    meta JSONB DEFAULT '{}'::jsonb
+);
+
+-- Fast descent to the newest version on load
+CREATE INDEX IF NOT EXISTS idx_states_thread_version ON states(thread_id, version DESC);
+
+-- OCC guard: guarantees concurrent appends collide rather than duplicating a version
+CREATE UNIQUE INDEX IF NOT EXISTS uq_states_thread_version ON states(thread_id, version);
+
+-- 3. Incremental message log
+DO $$
+BEGIN
+    CREATE TYPE message_role AS ENUM ('user', 'assistant', 'system', 'tool');
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END$$;
+
+CREATE TABLE IF NOT EXISTS messages (
+    message_id VARCHAR(255) PRIMARY KEY,
+    thread_id VARCHAR(255) NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
+    role message_role NOT NULL,
+    content TEXT NOT NULL,
+    tool_calls JSONB,
+    tool_call_id VARCHAR(255),
+    reasoning TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    total_tokens INT DEFAULT 0,
+    usages JSONB DEFAULT '{}'::jsonb,
+    meta JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
+
+-- 4. Tool-execution ledger for crash replay safety
+CREATE TABLE IF NOT EXISTS tool_executions (
+    thread_id VARCHAR(255) NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
+    tool_call_id VARCHAR(255) NOT NULL,
+    result JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (thread_id, tool_call_id)
+);
+```
+
+### The atomic checkpoint transaction
+
+When `aput_checkpoint` saves a completed step, it runs the following transactional sequence in PostgreSQL:
+
+```sql title="checkpoint_transaction.sql"
+-- A. Ensure thread row exists and lock it exclusively for this write
+INSERT INTO threads (thread_id, thread_name, user_id, meta)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (thread_id) DO NOTHING;
+
+SELECT user_id FROM threads
+WHERE thread_id = $1
+FOR UPDATE;
+
+-- B. Determine the current highest version for optimistic verification
+SELECT COALESCE(MAX(version), 0) AS v
+FROM states
+WHERE thread_id = $1;
+
+-- C. Insert the new state snapshot (fails if uq_states_thread_version is violated)
+INSERT INTO states (thread_id, version, state_data, meta)
+VALUES ($1, $new_version, $state_json, $meta);
+
+-- D. Prune snapshots beyond the retention window (default: keep last 20)
+DELETE FROM states
+WHERE thread_id = $1
+  AND version <= ($new_version - $state_history_limit);
+
+-- E. Append only new messages produced in this step
+INSERT INTO messages (
+    message_id, thread_id, role, content, tool_calls, tool_call_id, reasoning, total_tokens, usages, meta
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (message_id) DO NOTHING;
+```
+
+When multiple worker processes boot simultaneously in Kubernetes or Docker Compose, `PgCheckpointer` prevents migration races on `CREATE TABLE` and `CREATE TYPE` by acquiring a transactional advisory lock:
+
+```sql title="advisory_lock.sql"
+-- Serializes schema initialization across distributed replicas
+SELECT pg_advisory_xact_lock(7483920194857201);
+```
 
 ## The read path
 

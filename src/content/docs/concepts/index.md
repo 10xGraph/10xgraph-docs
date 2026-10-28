@@ -3,7 +3,7 @@ title: Concepts
 description: Understand how 10xGraph works, from its three-layer architecture to request flow, the execution model, and production patterns.
 section: Concepts
 order: 1
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Do I need the API server and TypeScript client to use 10xGraph?"
     a: "No. The Python library works on its own, so you can run a compiled graph in a script or embed it in your own app. Add the API server to serve it over HTTP and the client to call it from a frontend."
@@ -58,7 +58,7 @@ Python code imports from `tenxgraph`, for example `from tenxgraph.core.graph imp
 
 When you call an agent over HTTP, here is what happens:
 
-1. **Client sends a request** (TypeScript SDK or curl) to `POST /v1/graph/invoke` with `messages` and a `config` that carries the `thread_id`.
+1. **Client sends a request** (TypeScript SDK or curl) to `POST /v1/graph/invoke` with `messages` and, to continue a conversation, a `config` that carries the `thread_id`. A new conversation omits it, and the server picks and returns the id.
 2. **API server verifies auth** via JWT or custom auth middleware.
 3. **Server loads the graph** from the module path in `10xgraph.json`, then loads the thread state (if resuming) or starts fresh.
 4. **Server calls the compiled graph** with the input state and config.

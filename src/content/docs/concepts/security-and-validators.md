@@ -4,7 +4,7 @@ description: "How input validators and PromptInjectionValidator work, the author
 section: Concepts
 order: 170
 group: Serving
-updated: "2026-10-08"
+updated: "2026-10-26"
 ---
 
 Validators are checks that run on incoming messages before a graph executes them. A validator subclasses `BaseValidator`, is registered on a `CallbackManager`, and raises `ValidationError` to reject unsafe input. Authorization defines who can call which endpoints and which scopes a caller has inside the graph. Together, they form a two-layer security model. Both reduce risk but do not eliminate it.
@@ -28,9 +28,9 @@ Authorization inside 10xGraph is built on two concepts: **isolation scope** and 
 The canonical scope set (verified in `tenxgraph.core.authz`):
 
 - **Graph execution:** `graph:invoke`, `graph:stream`, `graph:stop`, `graph:fix`, `graph:setup`, `graph:read`
-- **Thread state and checkpointing:** `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`
+- **Thread state and checkpointing:** `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`, and the admin-only `checkpointer:import`
 - **Long-term memory (store):** `store:read`, `store:write`, `store:delete`
-- **Files and media:** `files:read`, `files:upload`
+- **Files and media:** `files:read`, `files:upload`, `files:delete`
 - **Configuration:** `config:read`
 
 If no authorization is present (common in direct SDK usage), the defaults are permissive: isolation is not enforced and all scopes are allowed. This means existing code without explicit auth continues to work unchanged.
@@ -175,6 +175,14 @@ from tenxgraph.utils.validators import register_default_validators
 callback_manager = CallbackManager()
 register_default_validators(callback_manager, strict_mode=True)
 ```
+
+## Files and media URLs
+
+Media that a client sends is untrusted input. Three defaults protect the server:
+
+- **Media URLs.** Where the server downloads a client's media URL (Google GenAI, the Google File API, inline bytes), the download follows a `MediaFetchPolicy`: public hosts only, `http` and `https` only, redirects re-checked, 20 MiB and 10 seconds by default. The API checks client URLs before the run and returns `400` for a blocked one. A client `gs://` URL is refused unless its bucket is in `allowed_gcs_buckets`. See [Sending media from Python](/docs/guides/send-media#control-which-urls-the-server-downloads).
+- **Uploads.** The API compares the first bytes of an upload with its declared type (`415` on a mismatch), caps text extraction, lets only the owner delete a file (`files:delete`) and deletes files when the messages and threads that use them are deleted. See [Files and multimodal on the server](/docs/server/files-and-multimodal).
+- **File tools.** `file_read`, `file_write` and `file_search` hide `.env`, key files and `.ssh`, `.aws`, `.gnupg` and `.git` folders by default, and `create_file_tools(root)` fixes the root in code. See [File tools](/docs/guides/prebuilt/file-tools).
 
 ## What the production template generates
 

@@ -3,12 +3,12 @@ title: Deploy with Docker and Kubernetes
 description: Generate a Dockerfile, docker-compose.yml and Kubernetes manifest with 10xgraph build, then ship them with a production environment checklist.
 section: "API server"
 order: 150
-updated: 2026-10-08T00:00:00.000Z
+updated: "2026-10-27"
 faq:
   - q: Why does the generated config wait so long to shut down?
     a: An agent run can take minutes, and Gunicorn's default 30 second graceful timeout would kill runs mid-flight on every rolling deploy. The generated files use a 600 second graceful timeout, a 660 second worker timeout, and a 660 second Kubernetes grace period.
   - q: Can I change the image name in k8s.yaml?
-    a: Yes. The manifest uses the placeholder image 10xgraph-api:latest. Build and push your own image, then edit the image field before applying.
+    a: Yes. The manifest uses the placeholder image registry.example.com/<service>:1.0.0. Build and push your own image, then set the image field to its version tag or digest before applying.
   - q: Does build read my 10xgraph.json?
     a: No. It looks for a requirements file or pyproject.toml, and the container reads 10xgraph.json at runtime, so your code and config must be copied into the image.
   - q: The 10xgraph-api package contains CLI code, project templates and a browser config editor. Is that a security risk in production?
@@ -58,7 +58,7 @@ group: "Operate"
 | `--k8s / --no-k8s` | off | Also write `k8s.yaml` |
 | `--service-name` | `10xgraph-api` | Service name in compose and Kubernetes files |
 
-Without `--force`, `build` stops if the Dockerfile exists. It skips an existing `.dockerignore`, but errors on an existing `docker-compose.yml` or `k8s.yaml`.
+Without `--force`, `build` stops if the Dockerfile exists. It keeps an existing `.dockerignore` but appends any secret patterns it lacks (keys, certificates, cloud credential files), and errors on an existing `docker-compose.yml` or `k8s.yaml`.
 
 ## What files does it generate?
 
@@ -66,14 +66,14 @@ Without `--force`, `build` stops if the Dockerfile exists. It skips an existing 
 
 - your-project/
   - 10xgraph.json
-  - **Dockerfile** python:3.13-slim, non-root user, healthcheck on /ping
-  - .dockerignore excludes .env, caches, venvs, .git, eval_reports, tests, evals and agent skill folders
+  - **Dockerfile** python:3.13-slim, non-root user (uid 10001), healthcheck on /ping
+  - .dockerignore excludes .env, keys and credential files, caches, venvs, .git, eval_reports, tests, evals and agent skill folders
   - docker-compose.yml with `--docker-compose`
   - k8s.yaml with `--k8s`
 
 </FileTree>
 
-The Dockerfile sets `MODE=production`, `IS_DEBUG=false` and `WEB_CONCURRENCY=2`, installs `gunicorn` and `uvicorn`, removes the CLI-only files from the installed package, copies your project, drops to a non-root `appuser`, and defines a `HEALTHCHECK` that calls `/ping`. Its `CMD` runs `tenxgraph_api.src.app.main:app` under Gunicorn with `--graceful-timeout 600` and `--timeout 660`.
+The Dockerfile sets `MODE=production`, `IS_DEBUG=false` and `WEB_CONCURRENCY=2`, installs `gunicorn` and `uvicorn`, removes the CLI-only files from the installed package, copies your project, drops to the non-root user `appuser` (fixed uid and gid 10001, set as `USER 10001:10001` so Kubernetes can verify it is not root), and defines a `HEALTHCHECK` that calls `/ping`. Its `CMD` runs `tenxgraph_api.src.app.main:app` under Gunicorn with `--graceful-timeout 600` and `--timeout 660`.
 
 ## Does the image ship the CLI and the config editor?
 
@@ -92,7 +92,7 @@ RUN python -I -c "import importlib.util, pathlib, shutil; spec = importlib.util.
 
 The CLI's small Python modules stay, so `10xgraph version` and `10xgraph audit` still work inside a running container for debugging.
 
-The generated `.dockerignore` does the same for your project: `tests/`, `evals/` and installed skill folders (`.claude/`, `.agents/`, `.github/`) are not copied into the image, along with `.env` files, caches and virtual environments.
+The generated `.dockerignore` does the same for your project: `tests/`, `evals/` and installed skill folders (`.claude/`, `.agents/`, `.github/`) are not copied into the image, along with `.env` files, private keys and certificates (`*.pem`, `*.key`, `*.p12`), cloud credential files (`service_account*.json`, `credentials*.json`, `.aws/`), caches and virtual environments.
 
 You can check a built image yourself:
 
@@ -115,11 +115,15 @@ A Dockerfile generated before `10xgraph-api` 0.7.0 does not have the strip step.
 
 <TabItem label="Docker Compose">
 
-The compose file defines one service with `build: .`, the production environment, a port mapping, the same Gunicorn command, `stop_grace_period: 600s` and `restart: unless-stopped`. It sets no secrets, so pass them with `--env-file` or an `environment` block.
+The compose file defines one service with `build: .`, the production environment, the same Gunicorn command, `stop_grace_period: 600s` and `restart: unless-stopped`. It reads secrets and `ORIGINS`/`ALLOWED_HOST` from `.env` through `env_file`, so they never enter the image. Copy `.env.example` to `.env` and fill it in first.
 
 ```bash
-docker compose --env-file prod.env up --build -d
+docker compose up --build -d
 ```
+
+The port is published on `127.0.0.1:8000` only: the server speaks plain HTTP, so a TLS reverse proxy (Caddy, nginx or a cloud load balancer) on the same host is what faces the internet. If the proxy runs on another host, remove the `127.0.0.1:` prefix and firewall the port to that host.
+
+The container runs with `read_only: true`, `cap_drop: [ALL]` and `no-new-privileges`. Only `/tmp` (a tmpfs) and `/app/uploads` (the named volume `uploads`) are writable. If your graph writes elsewhere, for example a SQLite checkpointer file, mount a volume at that path.
 
 </TabItem>
 
@@ -130,7 +134,9 @@ docker compose --env-file prod.env up --build -d
 ```bash
 docker build -t registry.example.com/my-agent:1.0 .
 docker push registry.example.com/my-agent:1.0
-# edit the image field in k8s.yaml, then:
+kubectl create secret generic my-agent-secrets \
+  --from-literal=JWT_SECRET_KEY=... --from-literal=GOOGLE_API_KEY=...
+# edit the image, ORIGINS and ALLOWED_HOST in k8s.yaml, then:
 kubectl apply -f k8s.yaml
 ```
 
@@ -140,11 +146,27 @@ The settings that protect running agents:
 |---|---|---|
 | `terminationGracePeriodSeconds` | 660 | Longer than the 600 second Gunicorn drain |
 | `preStop` | `sleep 15` | Lets the load balancer stop sending new requests first |
-| `readinessProbe` | `/ping`, every 10s | Removes the pod from rotation |
+| `readinessProbe` | `/health/ready`, every 10s | Removes the pod from rotation |
 | `livenessProbe` | `/ping`, every 30s, 5 failures | Slack enough that a busy worker is not restarted mid-run |
 | Resources | request 500m CPU and 512Mi, limit 2 CPU and 2Gi | Starting point, tune for your load |
 
-The manifest sets only `MODE`, `IS_DEBUG` and a placeholder `ORIGINS`. Add the rest of your configuration from a Secret.
+The settings that lock the pod down:
+
+| Setting | Value |
+|---|---|
+| `automountServiceAccountToken` | `false`: the server never calls the Kubernetes API |
+| Pod `securityContext` | `runAsNonRoot`, uid/gid/fsGroup 10001, `seccompProfile: RuntimeDefault` |
+| Container `securityContext` | `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, all capabilities dropped |
+| Volumes | `emptyDir` at `/tmp` (Gunicorn heartbeats) and `/app/uploads` (local media) |
+| Secrets | `envFrom` the Secret `<service>-secrets`; the pod does not start until it exists |
+
+The manifest sets `MODE`, `IS_DEBUG` and placeholder `ORIGINS` and `ALLOWED_HOST` values; everything secret comes from the Secret. Create it with `--from-literal` or a secret manager, not `--from-env-file .env`: `kubectl` keeps the quotes from a `.env` file as part of each value.
+
+<Callout type="warning" title="Uploads with more than one replica">
+
+`/app/uploads` is an `emptyDir`: each pod has its own, and it is lost when the pod restarts. A file uploaded through one replica is missing on the others. For production uploads set `MEDIA_STORAGE_TYPE=cloud` (S3 or GCS) in the Secret.
+
+</Callout>
 
 </TabItem>
 
@@ -177,8 +199,8 @@ The generated files set `MODE=production` and `IS_DEBUG=false`. Add the followin
 
 | Variable | Set to | Why |
 |---|---|---|
-| `ORIGINS` | Comma-separated list of your frontend origins | Wildcard `*` is refused when `CORS_ALLOW_CREDENTIALS` is true |
-| `ALLOWED_HOST` | Your hostnames | Comma-separated. The default `*` triggers a startup warning in production |
+| `ORIGINS` | Comma-separated list of your frontend origins | `k8s.yaml` sets a placeholder; compose reads it from `.env`. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false`, and is always refused when `CORS_ALLOW_CREDENTIALS` is true |
+| `ALLOWED_HOST` | Your hostnames | Comma-separated. `k8s.yaml` sets a placeholder; compose reads it from `.env`. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false` |
 | `JWT_SECRET_KEY` | 32+ bytes, from a secret manager | Required if `auth` is `jwt`. See [Add JWT authentication](/docs/server/auth) |
 | `JWT_ALGORITHM` | `HS256` or your choice | Required with `jwt` |
 | `REDIS_URL` | Your Redis connection URL | Optional. The server falls back to it for the shared tier of the authorization ownership cache when the `redis` key in `10xgraph.json` is unset. For shared rate limiting, point `rate_limit.redis.url` at it as `${REDIS_URL}` |
@@ -194,7 +216,7 @@ Full reference is in the [configuration](/docs/reference/api-cli/configuration) 
 
 <Callout type="warning" title="CORS and credentials">
 
-Replace the placeholder `ORIGINS` and never ship `*` with credentials. In production the server refuses to start with wildcard origins while `CORS_ALLOW_CREDENTIALS` is true. This is a safety check: wildcard CORS with credentials would allow any website to read your data.
+Replace the placeholder `ORIGINS` and `ALLOWED_HOST` before you deploy. In production the server refuses to start with wildcard origins, a wildcard host or enabled docs paths, because `STRICT_PRODUCTION_CHECKS` is on by default. It always refuses wildcard origins while `CORS_ALLOW_CREDENTIALS` is true. These are safety checks: wildcard CORS with credentials would allow any website to read your data.
 
 </Callout>
 
@@ -225,7 +247,7 @@ Before deploying to production, run these checks to catch configuration issues e
    - Check that neither variable is set in your deployment
 
 6. **Persistence survives restart**
-   - Invoke an agent and save the thread_id
+   - Invoke an agent without a `thread_id` and save the one the server returns in `data.meta.thread_id`
    - Restart the server or container
    - Fetch the same thread: messages and state should be intact
 

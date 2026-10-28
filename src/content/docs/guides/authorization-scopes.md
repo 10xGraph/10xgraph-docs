@@ -4,7 +4,7 @@ description: "Read caller identity and enforce scopes inside graph nodes and too
 order: 380
 group: "Safety"
 section: "Build agents"
-updated: "2026-10-08"
+updated: "2026-10-27"
 label: "Authorization scopes"
 faq:
   - question: "What is the difference between identity and scopes?"
@@ -71,9 +71,14 @@ The scope string is always `"resource:action"`. The full list of scopes is:
 
 - Graph execution: `graph:invoke`, `graph:stream`, `graph:stop`, `graph:fix`, `graph:setup`, `graph:read`
 - Thread state (checkpointer): `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`
+- Thread import (admin only): `checkpointer:import`
 - Long-term memory (store): `store:read`, `store:write`, `store:delete`
-- Media and files: `files:read`, `files:upload`
+- Media and files: `files:read`, `files:upload`, `files:delete`
 - Configuration: `config:read`
+
+`files:delete` guards `DELETE /v1/files/{file_id}`. Only the uploader can delete a file even with the scope: a missing file or someone else's file returns 404. A role of `"*"` includes it.
+
+`checkpointer:import` guards `POST /v1/threads/{thread_id}/messages`, which imports history of any role. It is the one scope that is never implied. Other routes treat an identity with no declared scopes as unrestricted. This route returns 403 unless the scope is granted explicitly. A role of `"*"` includes it. Grant it only to trusted admin identities.
 
 `has_scope()` is permissive by default: if no authorization context is present (auth not configured, or a direct SDK call without an authz block), it returns `True`. This ensures backward compatibility, existing graphs work unchanged.
 
@@ -103,7 +108,7 @@ Combining `user_id` with a checkpointer that supports owner-only access (like `P
 
 ## Understand isolation scope
 
-The `isolation_scope` returned by `isolation_scope()` tells you (and the storage layer) which data-isolation policy is in effect:
+The `isolation_scope` returned by `isolation_scope()` tells you (and the storage layer) which data-isolation policy is in effect. A custom `AuthorizationBackend` that does not override its own `isolation_scope()` method gets `"owner"`. Return `"none"` from the backend only when users should share data:
 
 ```python
 from tenxgraph.core.authz import isolation_scope, SCOPE_OWNER, SCOPE_NONE
@@ -231,7 +236,7 @@ Without an authz block, `get_authz()` returns `None`, and all functions default 
 When a request reaches the API server, the `RequirePermission` dependency (in the route's `Depends()`) performs this flow:
 
 1. **Authenticate**: Extract and verify the bearer token (JWT or custom `BaseAuth`). Decode claims to get `user_id`, `roles`, `scopes`, etc.
-2. **Check scopes**: Call the authorization backend's `scopes_for(user)` (for example `RoleBasedAuthorizationBackend` maps roles to scopes), falling back to `user["scopes"]`. If scopes are declared, verify that the required scope (e.g., `"graph:invoke"` for a POST to `/v1/graph/invoke`) is granted.
+2. **Check scopes**: Call the authorization backend's `scopes_for(user)` (for example `RoleBasedAuthorizationBackend` maps roles to scopes), falling back to the identity's `scope` and `scopes` claims (read as exact names). If scopes are declared, verify that the required scope (e.g., `"graph:invoke"` for a POST to `/v1/graph/invoke`) is granted.
 3. **Check object access**: Call `authorize(user, resource, action, resource_id)` to enforce object-level rules (e.g., ownership checks).
 4. **Build and stamp authz**: Call `build_authz(user_id, scope=isolation_policy, scopes=granted_scopes)` and place it in `user["authz"]`. This overwrites anything the client sent, it is non-hijackable.
 5. **Place in config**: Every service (graph execution, checkpointer, store) copies `user` into `config["user"]`, so the authz block reaches your code.

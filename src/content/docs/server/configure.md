@@ -5,7 +5,7 @@ section: "API server"
 group: "Basics"
 order: 30
 label: Configure 10xgraph.json
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The `10xgraph.json` file tells the API server which graph to load, how to persist state, who can access it, and how to manage resources. This guide covers the keys you need to configure for a working deployment. For a complete list of every key, type and default, see the [configuration reference](/docs/reference/api-cli/configuration).
@@ -162,7 +162,7 @@ A minimally secured production config looks like this:
 ```
 
 - `"auth": "jwt"` requires `JWT_SECRET_KEY` (at least 32 characters; shorter keys are rejected in production) and `JWT_ALGORITHM` (for example `HS256`) in the environment. See [Authentication](/docs/server/auth) for custom auth.
-- `"authorization": "ownership"` makes threads private to their creator. With `allow_all`, any authenticated user who knows a thread ID can read it.
+- `"authorization": "ownership"` makes threads private to their creator. With the default `runs.thread_ids` of `"server"`, it also refuses thread ids the server did not create (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)). With `allow_all`, any authenticated user who knows a thread ID can read it.
 - The rate limit `backend: "redis"` shares the limit across all replicas. The `"memory"` backend counts per process, so three replicas allow three times the configured limit, making it unsuitable for production.
 
 ## Share a Redis connection for the thread cache
@@ -327,7 +327,7 @@ With `auth` unset or `null`, every request is accepted. This is fine for interna
 
 ### 2. Set authorization policy
 
-If `authorization` is unset, the server uses `ownership` when `MODE=production` and `allow_all` otherwise. With `allow_all`, any authenticated user who knows a thread ID can read that conversation. In production, set `"authorization": "ownership"` so threads are visible only to their creator. Alternatively, implement a custom `AuthorizationBackend` for role-based access control. In development, `"allow_all"` is fine. Set it explicitly rather than relying on the `MODE` default.
+If `authorization` is unset, the server uses `ownership` whenever auth is configured or `MODE=production`, and `allow_all` only with auth off in development. With `allow_all`, any authenticated user who knows a thread ID can read that conversation. In production, set `"authorization": "ownership"` so threads are visible only to their creator. Alternatively, implement a custom `AuthorizationBackend` for role-based access control. A custom backend isolates users by default, because `isolation_scope()` returns `"owner"`. Return `"none"` from it only if users should share threads and memories. In development, `"allow_all"` is fine. Set it explicitly rather than relying on the `MODE` default.
 
 ### 3. Use a shared, durable checkpointer
 
@@ -369,7 +369,7 @@ for i in $(seq 1 120); do
 done
 ```
 
-Finally, verify that persistence survives a restart: start a thread, restart the server, and read the thread back via `/v1/threads/{thread_id}`.
+Finally, verify that persistence survives a restart: start a thread by invoking without a `thread_id`, restart the server, and read the thread back via `/v1/threads/{thread_id}` using the id the server returned.
 
 ## Common configuration issues
 

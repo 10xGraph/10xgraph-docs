@@ -4,7 +4,7 @@ description: "Call your graph over HTTP: synchronous invoke, streaming with NDJS
 order: 90
 group: "Interfaces"
 section: "API server"
-updated: "2026-10-08"
+updated: "2026-10-27"
 ---
 
 The 10xGraph API server exposes your graph over HTTP, allowing you to invoke it synchronously, stream results in real time, manage thread-scoped state, and control running executions. This page covers the REST interface for graph execution.
@@ -61,12 +61,28 @@ The request body is a JSON object with these fields:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `messages` | array | `[]` | List of message objects to send to the graph. At least one message is required unless `resume` is provided. |
-| `config` | object | `{}` | Optional configuration for the run, such as `thread_id` for continuing a conversation. |
-| `initial_state` | object | `null` | Optional initial state for the graph execution. |
+| `messages` | array | `[]` | List of user messages to send to the graph. At least one message is required unless `resume` is provided. Roles `assistant` and `system` return 422. |
+| `config` | object | `{}` | Optional configuration for the run, such as `thread_id` for continuing an existing conversation. Omit it to start a new thread. |
+| `initial_state` | object | `null` | Optional initial state for the graph execution. Custom fields and `current_node` are allowed. `context_summary` and `execution_meta` return 422. |
 | `response_granularity` | string | `low` | How much to return: `low`, `partial` or `full`. `state` in the response is filled only at `full`. |
 | `recursion_limit` | integer | 25 | Maximum depth of graph execution (1-100). Raise this if your graph has deep loops. |
 | `resume` | any | `null` | Set this to resume a paused thread (see human-in-the-loop section below). |
+| `interrupt_id` | string | `null` | The id of the interrupt `resume` answers. Optional. A mismatch returns 409. |
+| `on_busy` | string | `wait` | What to do if another run is active on the thread: `wait` or `cancel` (see [One run per thread](#one-run-per-thread)). |
+
+### What the server accepts from clients
+
+The server refuses some input with `422`, on invoke, stream and the WebSocket:
+
+- Messages with role `assistant` or `system`. Clients send user messages only.
+- A `tool` message that is not `tool_result` blocks answering a pending remote tool call.
+- `context_summary` or `execution_meta` in `initial_state`. These built-in fields are never client-writable.
+- An unknown `current_node`.
+- A state value that does not match its field type. The error names the field.
+
+Requests are also limited in size: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. A request over a limit gets `422` with a message that names the limit, in development and production alike. The limits are fixed.
+
+Custom state fields are allowed, so a frontend can pass a selected ID straight into state. To limit which keys clients may set, list them in `runs.state_keys` in `10xgraph.json`. The server ignores any `message_id` you send and generates its own.
 
 ### Response fields
 
@@ -121,13 +137,44 @@ The `event` field in each chunk is one of four values:
 
 A stop request ends the stream with an `updates` chunk whose `data.reason` is `Graph execution stopped by request`.
 
+## One run per thread
+
+A thread runs one graph run at a time. Two runs on one thread would both load the state, both run and both save, so tools would run twice and the history would interleave (a double click on Send, or two tabs). The server prevents this on invoke, stream, the WebSocket and AG-UI.
+
+A second run on a busy thread waits up to 30 seconds for the first to finish. If the thread is still busy, the request is rejected with `409`:
+
+```json
+{
+  "error": {"code": "HTTPException", "message": "thread is busy", "details": []},
+  "metadata": {"request_id": "abc123", "timestamp": "2026-10-27T10:00:00", "message": "thread is busy"}
+}
+```
+
+On invoke and stream, this comes before the response starts, as a normal HTTP error. On the WebSocket it is an `error` chunk with `"reason": "thread is busy"`, and the socket stays open. AG-UI always waits.
+
+To replace the running run instead of waiting, send `"on_busy": "cancel"`. The server asks the running run to stop (the same mechanism as the stop endpoint below) and starts yours once the thread is free. The 30-second limit and the `409` still apply.
+
+A few details:
+
+- A new thread is locked as soon as its id exists, so the first run on it is covered too.
+- With Redis configured, the lock is shared across processes. Without it, the lock is per process.
+- The lock expires by itself if a worker dies, and is released when the run ends, fails, is cancelled or the client disconnects.
+- If Redis fails, the run proceeds without the lock and the error is logged.
+- `/v1/graph/live` is not covered.
+
+<aside class="callout callout-warning" role="note"><p class="callout-title">Parallel runs on one thread now queue</p>
+
+An app that sent parallel runs on the same thread will see them queue, or get `409` after 30 seconds. Use a separate thread for each concurrent conversation.
+
+</aside>
+
 ## Use threads for conversation memory
 
-A thread is a persistent conversation context. Use `thread_id` in the config to keep messages and state across multiple calls, so your graph can remember previous exchanges.
+A thread is a persistent conversation context. Use `thread_id` in the config to keep messages and state across multiple calls, so your graph can remember previous exchanges. The server makes the id of a new thread. You do not pick it.
 
 ### Start a new thread
 
-If you do not provide a `thread_id`, the server generates one:
+Leave `thread_id` out and the server starts a new thread and generates its id:
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/invoke \
@@ -154,7 +201,7 @@ The response includes `data.meta.thread_id`:
 
 ### Continue on the same thread
 
-Pass the thread_id in the next request to continue the conversation:
+Pass the returned `thread_id` in the next request to continue the conversation:
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/invoke \
@@ -168,6 +215,8 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
 ```
 
 The graph now sees all previous messages in the thread, so it can answer contextually. The checkpointer (configured in `10xgraph.json`) stores the thread state durably.
+
+By default (`runs.thread_ids` is `"server"`), a `thread_id` that does not exist answers `403`, the same as an id another user owns. Do not invent an id for a new conversation. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 
 ### Read thread history
 
@@ -205,7 +254,7 @@ curl -X POST http://localhost:8000/v1/graph/stop \
   }'
 ```
 
-Stop is a request flag. The server marks the thread, and the running graph checks the flag between nodes and then exits. The response reports whether a run was active:
+Stop is a request flag. The server marks the thread, and the running graph checks the flag between nodes and then exits. The flag belongs to the run it was made for: starting a new run on the thread does not clear a stop meant for a run that is still going. The response reports whether a run was active:
 
 ```json
 {
@@ -218,7 +267,7 @@ If nothing is running, `running` is `false` (or `ok` is `false` with a `reason` 
 
 ## Fix corrupted graph state
 
-If a graph execution is interrupted or fails mid-tool-call, the checkpoint may contain tool-call messages with empty content. Use POST `/v1/graph/fix` to clean these up:
+If a graph execution is interrupted or fails mid-tool-call, the checkpoint may contain an assistant message whose tool calls never got results. Use POST `/v1/graph/fix` to clean these up:
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/fix \
@@ -228,7 +277,7 @@ curl -X POST http://localhost:8000/v1/graph/fix \
   }'
 ```
 
-The response shows how many messages were removed. `state` is the updated state serialized as a JSON string.
+The response shows how many messages were removed (`removed_count: 0` when nothing needed fixing). A thread that is paused on an interrupt, a client tool call or a human approval keeps the unanswered calls of its latest assistant message. See [POST /v1/graph/fix](/docs/reference/rest-api/graph#post-v1graphfix) for the rules. `state` is the updated state serialized as a JSON string.
 
 ```json
 {
@@ -242,7 +291,7 @@ The response shows how many messages were removed. `state` is the updated state 
 }
 ```
 
-After fixing, the thread is safe to resume. Empty tool calls typically occur when:
+After fixing, the thread is safe to resume. Unanswered tool calls typically occur when:
 - A tool was called but the client disconnected before sending the result.
 - An interrupt happened while a tool was running.
 - A network error cut off the tool response.
@@ -264,6 +313,29 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
 
 The graph resumes from the paused node with your response. The `resume` value is passed directly to the `interrupt()` call, so shape it however your node expects.
 
+### Bind the resume to its interrupt
+
+Add `interrupt_id` to say which interrupt you are answering. This stops a retried or stale request from answering the next prompt unseen.
+
+```bash
+curl -X POST http://localhost:8000/v1/graph/invoke \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resume":{"approved":true},
+    "interrupt_id":"int_abc123",
+    "config":{"thread_id":"thread-abc123"}
+  }'
+```
+
+Get the id from the thread state, at `execution_meta.interrupt_data.interrupt.id` (invoke with `"response_granularity": "full"` to see it in the response `state`), or from the `interrupt` object of the `interrupted` update chunk. On AG-UI, the interrupt event carries it.
+
+| Status | Cause |
+|--------|-------|
+| 409 | The thread is not paused, or is paused at a different interrupt. Checked before anything runs. |
+| 422 | The answer fails the interrupt's `response_schema`. |
+
+On stream and WebSocket, both arrive as an `error` chunk. `interrupt_id` is optional: without it, the resume answers whatever the thread is paused at. The WebSocket also accepts `resume` and `interrupt_id` now. See [Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt) for the schema subset and the Python-side errors.
+
 ## Error handling
 
 If an error occurs during execution, the response will include an error chunk:
@@ -272,13 +344,16 @@ If an error occurs during execution, the response will include an error chunk:
 {"event":"error","data":{"reason":"Tool call failed"},"run_id":"run-123"}
 ```
 
+In production (`MODE=production`), the text in an `error` chunk is replaced by a generic message, the same as invoke returns, so a failing node cannot leak a connection string or a path. Development shows the details. The same applies on the WebSocket and AG-UI.
+
 Failures during a stream arrive as an `error` chunk, because the HTTP status is already 200 once streaming starts. Authentication, authorization and validation errors are returned before the stream begins. For synchronous invoke, the call fails with an HTTP error status:
 
 | Status | Meaning |
 |--------|---------|
-| 422 | Invalid request (bad schema, missing messages, or invalid input). |
+| 422 | Invalid request (bad schema, missing messages, invalid input, a request over the size limits, or a resume answer that fails the interrupt's `response_schema`). |
 | 401 | Authentication required (token missing or invalid). |
 | 403 | Permission denied (you do not own this thread, or a required scope is missing). |
+| 409 | The thread is busy (another run was still active after 30 seconds), or `interrupt_id` does not match the open interrupt. |
 | 429 | Rate limit exceeded. Retry after the `Retry-After` header. |
 | 500 | Internal server error (bug in your graph or infrastructure failure). |
 

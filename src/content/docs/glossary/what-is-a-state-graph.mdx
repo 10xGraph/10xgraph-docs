@@ -5,7 +5,7 @@ description: A state graph models AI agent workflows as nodes (processing steps)
 section: Glossary
 order: 50
 label: What is a state graph?
-updated: '2026-07-01'
+updated: '2026-10-27'
 faq:
   - q: Is 10xGraph's StateGraph the same as LangGraph's StateGraph?
     a: They share the same design pattern and mental model; both are graph-based agent runtimes with typed state, nodes, and conditional edges. 10xGraph's StateGraph is an independent implementation with its own Message and AgentState types, no LangChain dependency, and a built-in production API server included.
@@ -62,6 +62,7 @@ Three components:
 ```python
 from tenxgraph.core.graph import Agent, StateGraph, ToolNode
 from tenxgraph.core.state import AgentState, Message
+from tenxgraph.prebuilt.tools import safe_calculator
 from tenxgraph.utils import END
 
 # Define tools
@@ -69,15 +70,11 @@ def search(query: str) -> str:
     """Search the web."""
     return f"Results for: {query}"
 
-def calculate(expr: str) -> str:
-    """Evaluate a math expression."""
-    allowed = set("0123456789+-*/(). ")
-    if not expr or not set(expr) <= allowed:
-        return "Unsupported expression"
-    return str(eval(expr, {"__builtins__": {}}, {}))
+# For arithmetic use the prebuilt safe_calculator. Never pass model output to eval(),
+# even with empty builtins: it can be escaped, and 9**9**9 hangs the process.
 
 # Create nodes
-tool_node = ToolNode([search, calculate])
+tool_node = ToolNode([search, safe_calculator])
 agent_node = Agent(
     model="google/gemini-2.5-flash",
     system_prompt=[{"role": "system", "content": "Helpful assistant. Use tools when needed."}],

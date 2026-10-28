@@ -4,7 +4,7 @@ seoTitle: "10xGraph quickstart: agent, API and TS client"
 description: Install 10xGraph, build a support agent in Python, serve it with the API server, then call it with curl and the TypeScript client.
 section: "Get started"
 order: 40
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: Do I need ReactAgent, or should I write a StateGraph myself?
     a: Start with ReactAgent. It builds the standard reason-and-act graph for you (one agent node, one tool node, a conditional edge between them) and returns a normal compiled graph. Move to StateGraph when you need custom routing or several agents.
@@ -252,8 +252,7 @@ You will create two Python files: one that defines the agent, and one that runs 
            "role": "user",
            "content": [{"type": "text", "text": "Where is order 1042?"}]
          }
-       ],
-       "config": {"thread_id": "quickstart-2"}
+       ]
      }'
    ```
 
@@ -269,7 +268,7 @@ You will create two Python files: one that defines the agent, and one that runs 
        "state": null,
        "context": null,
        "summary": null,
-       "meta": null
+       "meta": {"thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f", "is_new_thread": true}
      },
      "metadata": {
        "request_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -303,16 +302,14 @@ const client = new TenxGraphClient({
 });
 
 async function main() {
-  // Send one user message on thread quickstart-3
+  // Send one user message. With no thread_id, the server starts a new thread.
   const result = await client.invoke(
     [Message.text_message("Where is order 1042?")],
-    {
-      config: { thread_id: "quickstart-3" },
-      recursion_limit: 10,
-    }
+    { recursion_limit: 10 }
   );
 
   console.log(result.messages.at(-1)?.text());
+  console.log("Thread:", result.meta.thread_id); // keep it to continue the conversation
 }
 
 main();
@@ -337,8 +334,7 @@ const client = new TenxGraphClient({ baseUrl: "http://127.0.0.1:8000" });
 
 async function main() {
   const stream = client.stream(
-    [Message.text_message("Refund order 1042 for 59.00")],
-    { config: { thread_id: "quickstart-4" } }
+    [Message.text_message("Refund order 1042 for 59.00")]
   );
 
   // Print each message chunk as it arrives
@@ -376,7 +372,7 @@ When you call `/v1/graph/invoke`, you send a `GraphInputSchema` and get back a `
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `messages` | Message[] | `[]` | List of messages. Required unless `resume` is set. |
-| `config` | object | null | Run settings. `thread_id` selects which thread (conversation) to run. |
+| `config` | object | null | Run settings. `thread_id` continues an existing thread. Omit it to start a new one. |
 | `initial_state` | object | null | Initial values for custom state fields. |
 | `recursion_limit` | number | 25 | Maximum steps the graph can take. Allowed: 1 to 100. |
 | `response_granularity` | string | `low` | Response detail level: `low` (messages only), `partial` (messages, context and summary), or `full` (messages and full state). |
@@ -390,13 +386,13 @@ When you call `/v1/graph/invoke`, you send a `GraphInputSchema` and get back a `
 | `state` | object | Full state (only when `response_granularity` is `full`). |
 | `context` | Message[] | Context window (only when `response_granularity` is `partial`). |
 | `summary` | string | Conversation summary (only when `response_granularity` is `partial`). |
-| `meta` | object | Custom metadata from your agent. |
+| `meta` | object | Run metadata: `thread_id` (the thread the run used) and `is_new_thread`. |
 
 **Message format**: A message is an object with `role` (user, assistant, or tool) and `content` (a list of typed blocks). A text block is `{"type": "text", "text": "..."}`. Images, audio, and documents use other types (see [Send media](/docs/guides/send-media)).
 
-<Callout type="tip" title="Always send a thread_id">
+<Callout type="tip" title="Let the server pick the thread id">
 
-If you omit `thread_id` from `config`, the server creates a new thread for each request. The request works, but you cannot resume or stop that conversation later because nobody has its id. Always send one.
+Omit `thread_id` from `config` to start a new thread. The server picks the id and returns it in `data.meta.thread_id`, and on every chunk of a stream. Send that id on later requests to continue, resume or stop the conversation. By default the server refuses an id it did not create (`403`), so do not make one up. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 
 </Callout>
 

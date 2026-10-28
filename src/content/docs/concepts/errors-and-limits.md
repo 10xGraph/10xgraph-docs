@@ -1,7 +1,7 @@
 ---
 title: Errors and limits
 description: "Exception taxonomy, execution limits, retry behavior, and error recovery in graph execution."
-updated: "2026-10-08"
+updated: "2026-10-27"
 order: 150
 group: "Memory and reliability"
 section: Concepts
@@ -55,6 +55,10 @@ Timing out the node converts that indefinite hang into a reportable error. Timeo
 
 **ResourceNotFoundError** indicates a resource (thread, file, stored message) does not exist. Non-retryable.
 
+### Resume errors
+
+**InterruptMismatchError** (`INTERRUPT_001`) is raised when a resume names an interrupt (`resume_interrupt_id`) that is not the one the thread is paused at. **ResumeValidationError** (`INTERRUPT_002`) is raised when a resume value fails the interrupt's `response_schema`. Both are also `ValueError`s, and nothing is recorded. See [Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt).
+
 ### Other errors
 
 **GraphStopRequested** is raised when a stop signal (from the API or client) is received while a node is running. This is control flow, not a failure: the execution loop catches it, marks the run stopped, and returns cleanly. It lets the stop check reach the caller even if a node is mid-execution.
@@ -99,6 +103,10 @@ result = graph.invoke(
 ```
 
 Defaults are in `tenxgraph/utils/constants.py`. Individual tools can also set their own timeouts with libraries that support them (for example, HTTP clients with read timeouts).
+
+### Request size (API server)
+
+The API server limits each request: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. A request over a limit gets 422. On AG-UI the limits apply to the trailing turn, and the full history gets a cap of 10,000 messages. The limits are fixed. See [Graph endpoints](/docs/reference/rest-api/graph).
 
 ### State and message size
 
@@ -213,8 +221,8 @@ The REST API maps exceptions to status codes. Notable ones:
 
 - **401 Unauthorized** and **403 Forbidden**: missing or invalid authentication, or insufficient permissions
 - **404 Not Found**: thread or resource does not exist
-- **409 Conflict**: `StaleStateError`; reload state and retry
-- **422 Unprocessable Entity**: request or validation errors, and `SchemaVersionError`
+- **409 Conflict**: `StaleStateError` (reload state and retry); a thread that is still busy with another run after 30 seconds (`thread is busy`); or a resume whose `interrupt_id` does not match the open interrupt
+- **422 Unprocessable Entity**: request or validation errors (including requests over the size limits and a resume answer that fails `response_schema`), and `SchemaVersionError`
 - **429 Too Many Requests**: rate limited
 - **500 Internal Server Error**: `GraphError`, `NodeError`, `GraphRecursionError`, `StorageError` and other server-side failures; messages are sanitized when `MODE=production`
 - **503 Service Unavailable**: `TransientStorageError`
@@ -232,7 +240,9 @@ Most errors use this body shape:
 }
 ```
 
-The 409 conflict response has its own shape:
+Outside `MODE=production`, `details` lists the exception's `context`, one entry per key: `{"loc": ["node_name"], "msg": "process_data", "type": "context"}`. In production it is always empty.
+
+A `thread is busy` or interrupt mismatch `409` uses this standard shape, with `error.code` set to `HTTPException`. Only the stale-state conflict has its own shape:
 
 ```json
 {

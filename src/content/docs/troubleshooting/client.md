@@ -4,12 +4,12 @@ description: "Symptoms, causes, and fixes for common 10xGraph TypeScript client 
 section: Troubleshooting
 order: 50
 label: Client Troubleshooting
-updated: "2026-10-08"
+updated: "2026-10-27"
 faq:
   - q: "Why does my browser request fail when curl works?"
     a: "The usual cause is CORS. The server's ORIGINS setting must include the exact origin of your web app, and credentials must be allowed consistently. Check the preflight OPTIONS request in the browser Network tab."
   - q: "Why does my agent forget earlier messages?"
-    a: "Every call must send the same config.thread_id, and the server must have a checkpointer. Without either, each request starts a fresh thread."
+    a: "Every call after the first must send the thread_id the server returned (result.meta.thread_id, or thread_id on each stream chunk), and the server must have a checkpointer. Without either, each request starts a fresh thread."
   - q: "Why does my WebSocket close with code 1008?"
     a: "1008 means the server rejected the connection by policy: the graph type does not match the endpoint, the token is invalid, or the user is not authorized for the thread."
 ---
@@ -72,7 +72,7 @@ When the browser console shows "CORS error", "net::ERR_FAILED" or "Failed to fet
 **Likely causes**
 
 - The server's `ORIGINS` setting does not include the page's origin. The server default is `*`.
-- Credentials are sent to a server that allows any origin. The server setting `CORS_ALLOW_CREDENTIALS` defaults to `true`, and in production the combination of `ORIGINS="*"` with credentials is refused at startup.
+- Credentials are sent to a server that allows any origin. The server setting `CORS_ALLOW_CREDENTIALS` defaults to `true`, and in production the combination of `ORIGINS="*"` with credentials is refused at startup. A wildcard `ORIGINS` alone is also refused in production unless `STRICT_PRODUCTION_CHECKS=false`.
 - The page is served over `https://` while the API is on `http://` (mixed content is blocked).
 - The auth header never reaches the server because the token is missing in the client.
 
@@ -101,33 +101,32 @@ Do not expose long-lived tokens in browser code. See [Create a client](/docs/cli
 
 ## Fix lost conversations and thread continuity
 
-If each request feels like a new conversation, the server is not seeing the same thread or is not saving state. The server needs both a stable `config.thread_id` from the client and a checkpointer.
+If each request feels like a new conversation, the server is not seeing the same thread or is not saving state. The server needs both the same `config.thread_id` on every call after the first and a checkpointer. The server picks the id of a new thread, so the client reads it from the first response.
 
 **Likely causes**
 
-- `thread_id` is missing, or a new one is generated for every request.
+- `thread_id` is missing from the second call onward, so each call starts a new thread.
+- You sent an id you made up. By default the server refuses an id that does not exist with `403` (`PermissionError`), the same as another user's thread. Omit `thread_id` on the first call and use the one the server returns.
 - `thread_id` is nested in the wrong place. The API reads `config.thread_id` at the top level of `config`. A LangGraph style `config.configurable.thread_id` is not read.
 - The server has no checkpointer, so nothing is persisted between calls.
 - Reading a thread that does not exist returns `STORAGE_NOT_FOUND_000`.
 
 **Fix**
 
-Build messages with `Message.text_message` and reuse one `thread_id` for the whole conversation.
+Build messages with `Message.text_message`, omit `thread_id` on the first call, and reuse the returned `thread_id` for the rest of the conversation.
 
 ```ts title="thread-continuity.ts"
 import { TenxGraphClient, Message } from '10xgraph-client';
 
 const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
-const threadId = 'user-123-conversation-1';
 
-// First call starts the thread.
-await client.invoke([Message.text_message('My name is Sam.')], {
-  config: { thread_id: threadId }, // top level of config
-});
+// First call has no thread_id, so the server starts a thread and returns its id.
+const first = await client.invoke([Message.text_message('My name is Sam.')]);
+const threadId = first.meta.thread_id;
 
 // Second call reuses the same thread, so the agent can recall the name.
 const result = await client.invoke([Message.text_message('What is my name?')], {
-  config: { thread_id: threadId },
+  config: { thread_id: threadId }, // top level of config
 });
 console.log(result.messages);
 console.log(result.meta.thread_id, result.meta.is_new_thread); // is_new_thread is false here
@@ -164,14 +163,13 @@ import { TenxGraphClient, Message } from '10xgraph-client';
 
 const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
 const messages = [Message.text_message('Hello')];
-const config = { thread_id: 'stream-test' };
 
 // One response, after the graph finishes.
-const result = await client.invoke(messages, { config });
+const result = await client.invoke(messages);
 console.log(result.messages);
 
 // Chunks as they are produced.
-for await (const chunk of client.stream(messages, { config })) {
+for await (const chunk of client.stream(messages)) {
   if (chunk.event === 'message') {
     console.log(chunk.message?.content);
   }
@@ -184,7 +182,7 @@ To isolate the transport from your client code, read the raw stream with curl. E
 # --no-buffer prints chunks as they arrive
 curl --no-buffer -X POST http://localhost:8000/v1/graph/stream \
   -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}], "config": {"thread_id": "test"}}'
+  -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}]}'
 ```
 
 If curl streams but your app receives everything at once or loses the tail, a proxy is buffering or timing out. Disable response buffering and raise the read timeout for the stream route (for nginx, `proxy_buffering off` and a larger `proxy_read_timeout`). See [Stream responses](/docs/client/stream-responses) for chunk types.
