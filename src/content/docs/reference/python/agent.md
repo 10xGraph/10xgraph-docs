@@ -58,7 +58,7 @@ def __init__(
 | `extra_messages` | `list[Message] \| None` | `None` | Additional messages prepended to context before each LLM call. |
 | `trim_context` | `bool` | `False` | Trim conversation history to fit within the model's context window. |
 | `tools_tags` | `set[str] \| None` | `None` | Filter ToolNode tools by tag. Only tools with matching tags are offered to the LLM. |
-| `api_style` | `str` | `"chat"` | (via kwargs) OpenAI API style: `"chat"` (Chat Completions) or `"responses"` (Responses API). Any other value raises `ValueError`. |
+| `api_style` | `str` | `"responses"`, or `"chat"` when `base_url` is set | (via kwargs) OpenAI API style: `"chat"` (Chat Completions) or `"responses"` (Responses API). An explicit value always wins. With `"responses"` and a `base_url`, a server that rejects the Responses API is probed once, then the Agent uses Chat Completions for its lifetime. Any other value raises `ValueError`. |
 | `reasoning_config` | `dict \| bool \| None` | `{"effort": "medium"}` | Reasoning config for models supporting extended thinking. `True` enables defaults, `False` or `None` disables, a dict sets model-specific options. See [Reasoning models](#reasoning-models). |
 | `skills` | `SkillConfig \| None` | `None` | Agent Skills configuration per agentskills.io spec. Injects skill catalog and activation/read tools. See [`skills`](/docs/reference/python/skills). |
 | `memory` | `MemoryConfig \| None` | `None` | Long-term memory config for retrieving relevant context before each LLM call. See [Memory](#memory-augmented-agent). |

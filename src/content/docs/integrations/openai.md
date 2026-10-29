@@ -13,7 +13,7 @@ faq:
   - question: "How do I enable caching for OpenAI?"
     answer: "Prompt caching is automatic on OpenAI. Cache hits are logged at DEBUG level. Pass prompt_cache_key for stable cross-request hits."
   - question: "Do I need to change code to use the Responses API?"
-    answer: "No. Chat Completions is the default. Pass api_style='responses' to your Agent if you want the Responses API."
+    answer: "No. The Responses API is the default for the Agent. With a base_url the default is Chat Completions. Pass api_style='chat' to use Chat Completions, or api_style='responses' to force the Responses API."
 ---
 
 Run GPT-class models (`gpt-4o`, `gpt-4o-mini`) and reasoning models (`o3-mini`, `o4-mini`) through the OpenAI API. 10xGraph handles response conversion, tool calling, and prompt caching automatically.
@@ -136,19 +136,19 @@ OpenAI exposes two distinct APIs for text generation. 10xGraph supports both.
 
 | `api_style` | Underlying call | When to use |
 |---|---|---|
-| `"chat"` (default) | `client.chat.completions.create` | All GPT and O-series models. Default for the Agent class. |
-| `"responses"` | `client.responses.create` | Newer Responses API. Default for `SummaryContextManager` and the evaluation judge. |
+| `"responses"` (default) | `client.responses.create` | The current OpenAI API and the default for the Agent class (unless `base_url` is set), `SummaryContextManager` and the evaluation judge. Required for function tools on some newer models when reasoning is on. |
+| `"chat"` | `client.chat.completions.create` | Older models and OpenAI-compatible servers that only speak Chat Completions. Default for an Agent with `base_url`. |
 
 ### Agent
 
 ```python
 from tenxgraph import Agent
 
-# Default, Chat Completions
+# Default, Responses API
 agent = Agent(model="gpt-4o")
 
-# Opt into the Responses API
-agent = Agent(model="gpt-4o", api_style="responses")
+# Opt out to Chat Completions
+agent = Agent(model="gpt-4o", api_style="chat")
 ```
 
 ### SummaryContextManager
@@ -272,7 +272,9 @@ dict is sent as `reasoning` (so `summary` is also allowed). Because the default 
 ## Structured Output
 
 Force the model to return a Pydantic model by passing `output_schema`. The Agent routes
-this through `beta.chat.completions.parse` regardless of `api_style`.
+this through `responses.parse` with `api_style="responses"` and `chat.completions.parse` with
+`api_style="chat"`. Either way the validated model is on `Message.parsed_content`. Streaming
+is turned off for these calls.
 
 ```python
 from pydantic import BaseModel
@@ -288,8 +290,7 @@ agent = Agent(
 )
 ```
 
-Caching still applies to the `beta.chat.completions.parse` path, cache hits are logged
-the same way.
+Caching still applies to both parse paths, cache hits are logged the same way.
 
 ---
 
@@ -302,12 +303,14 @@ Any OpenAI-compatible server (ollama, vllm, LM Studio, etc.) can be used by sett
 agent = Agent(
     model="llama3.2",
     base_url="http://localhost:11434/v1",
-    api_style="chat",  # most local servers only support Chat Completions
+    api_style="chat",  # the default when base_url is set; shown for clarity
 )
 ```
 
-When `base_url` is set and `api_style="responses"`, the Agent tries the Responses API
-first and falls back to Chat Completions automatically if the server does not support it.
+When `base_url` is set and you do not pass `api_style`, the Agent uses Chat Completions,
+because most local servers only support it. If you pass `api_style="responses"` with a
+`base_url`, the Agent tries the Responses API on the first call. If the server rejects it,
+the Agent logs one warning and uses Chat Completions for the rest of its lifetime.
 
 Prompt caching params (`prompt_cache_key`, `prompt_cache_retention`) have no effect on
 local servers unless the server explicitly implements them.

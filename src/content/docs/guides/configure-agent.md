@@ -556,15 +556,17 @@ OpenAI provides two API surfaces; use `api_style` to select which one. Only rele
 
 | `api_style` | When to use |
 |---|---|
-| `"chat"` (default) | Most models; standard Chat Completions API |
-| `"responses"` | OpenAI Responses API (newer, structured response mode) |
+| `"responses"` (default) | OpenAI Responses API, the current API. Used when `base_url` is not set. |
+| `"chat"` | Chat Completions. The default when `base_url` is set, because most OpenAI-compatible servers only support it. |
+
+An explicit `api_style` always wins.
 
 ```python
-# Chat Completions (default, works with most OpenAI models)
-agent = Agent(model="gpt-4o", api_style="chat")
+# Responses API (default)
+agent = Agent(model="o4-mini")
 
-# Responses API (falls back to Chat Completions when output_schema is set)
-agent = Agent(model="o4-mini", api_style="responses")
+# Chat Completions
+agent = Agent(model="gpt-4o", api_style="chat")
 ```
 
 ---
@@ -622,7 +624,7 @@ Agent(
     # Keyword-only arguments:
     provider: str | None = None,
     base_url: str | None = None,
-    api_style: str = "chat",
+    api_style: str | None = None,   # "responses", or "chat" when base_url is set
     use_vertex_ai: bool = False,   # default: GOOGLE_GENAI_USE_VERTEXAI == "true"
     anthropic_backend: str | None = None,
     temperature: float | None = None,

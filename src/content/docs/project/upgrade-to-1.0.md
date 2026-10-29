@@ -43,6 +43,18 @@ npm install 10xgraph-client@next
 
 ## Core (`10xgraph`)
 
+### OpenAI
+
+- **`Agent` uses the OpenAI Responses API by default.** `api_style` defaults to `"responses"`
+  (it was `"chat"`). When `base_url` is set and you do not pass `api_style`, it stays `"chat"`.
+  Pass `api_style="chat"` to keep the old behaviour. `output_schema` now goes through
+  `responses.parse` on the Responses style, and on Chat Completions `reasoning_effort` is sent
+  only if you set `reasoning_config` yourself. With a `base_url` and `api_style="responses"`, a
+  server that rejects the Responses API is probed once and the Agent then stays on Chat
+  Completions.
+- **The `openai` extra is `openai>=1.93.1,<4`.** openai 3.x uses httpx2, so an `http_client`
+  passed through `llm_kwargs` must be an `httpx2.AsyncClient` there.
+
 ### Removed APIs
 
 - **The graph-level memory API is gone** (`MemoryIntegration`, `create_memory_preload_node`,
