@@ -14,7 +14,7 @@ faq:
   - q: Does 10xGraph support OpenAI, Azure OpenAI, and Anthropic like AutoGen does?
     a: 10xGraph ships providers for OpenAI, Anthropic (direct, Vertex AI, Bedrock) and Google (Gemini and Vertex AI), and works with OpenAI-compatible endpoints. See the providers section of the docs.
   - q: How does the 10xGraph API server compare to AutoGen Studio?
-    a: AutoGen Studio is a prototyping UI that its own README says is not meant to be a production-ready app. 10xGraph's CLI generates a REST, SSE and WebSocket server with JWT auth and owner-only threads from a compiled graph.
+    a: AutoGen Studio is a prototyping UI that its own README says is not meant to be a production-ready app. 10xGraph's CLI generates a REST, NDJSON streaming and WebSocket server with JWT auth and owner-only threads from a compiled graph.
   - q: Can 10xGraph handle human-in-the-loop reviews?
     a: Yes. The graph supports interrupts and resumable threads. You can pause at a node, show state to a reviewer, and resume on the same thread_id.
 ---
@@ -37,7 +37,7 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 
 | | 10xGraph | AutoGen |
 |---|---|---|
-| Production server (REST, SSE, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | No production server documented. AutoGen Studio is a prototyping UI that its README says is "not meant to be a production-ready app" ([README](https://github.com/microsoft/autogen/tree/main/python/packages/autogen-studio)) |
+| Production server (REST, NDJSON streaming, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, NDJSON streaming, WebSocket and realtime-audio endpoints from the compiled graph | No production server documented. AutoGen Studio is a prototyping UI that its README says is "not meant to be a production-ready app" ([README](https://github.com/microsoft/autogen/tree/main/python/packages/autogen-studio)) |
 | Auth (JWT or custom) | JWT (`"auth": "jwt"`) or a custom `BaseAuth` subclass | Not documented for the framework. The Studio README tells developers to implement authentication and security themselves ([README](https://github.com/microsoft/autogen/tree/main/python/packages/autogen-studio)) |
 | Authorization | Role scopes (such as `graph:invoke`, `checkpointer:read`) or a custom `AuthorizationBackend` | Not documented |
 | Thread ownership isolation | Built-in `"authorization": "ownership"` backend, with a two-tier cached owner check | Not documented |
@@ -45,7 +45,7 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 | Rate limiting | Memory or Redis sliding-window limits on the API, set in `10xgraph.json` | Not documented |
 | Replay-safe tool calls after a crash | Tool ledger in the checkpointer: a tool that already ran is not executed again on resume. Needs a checkpointer | Not documented. State is saved and loaded with `save_state()` and `load_state()` ([state docs](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/state.html)) |
 | Versioned (compare-and-swap) state writes | Optimistic version check on durable writes in `PgCheckpointer` | Not documented. AutoGen returns state as a serializable dictionary and leaves storage to you ([state docs](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/state.html)) |
-| Node and tool timeouts | `node_timeout` and `tool_timeout`, with defaults of 900 s and 300 s | `TimeoutTermination` stops a team after a duration in seconds ([termination docs](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/termination.html)) |
+| Node and tool timeouts | `node_timeout` and `tool_timeout`, off until you set them | `TimeoutTermination` stops a team after a duration in seconds ([termination docs](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/termination.html)) |
 | Docker Compose and Kubernetes manifests | `10xgraph build --docker-compose --k8s` writes `Dockerfile`, `docker-compose.yml`, `k8s.yaml` | Not documented |
 | License | MIT, including API/CLI and client | MIT and CC-BY-4.0 dual license per the repository ([repository](https://github.com/microsoft/autogen)). `autogen-agentchat` on PyPI lists MIT ([PyPI](https://pypi.org/project/autogen-agentchat/)) |
 | TypeScript client | Typed `10xgraph-client` | Not documented |
@@ -164,7 +164,7 @@ pip install 10xgraph 10xgraph-api
 Endpoints include:
 
 - `POST /v1/graph/invoke`: run the graph and return final messages
-- `POST /v1/graph/stream`: server-sent events for streaming
+- `POST /v1/graph/stream`: newline-delimited JSON (NDJSON) for streaming
 - `GET /v1/threads/{thread_id}`: fetch persisted state
 
 ## TypeScript client

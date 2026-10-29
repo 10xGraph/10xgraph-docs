@@ -79,12 +79,27 @@ Two claims are also read by the server:
 - `scope` (a space-separated string, as in OAuth) and `scopes` (a list of strings, or a space-separated string). Both are merged into one set of scope names, and a scope matches only by its exact name. `graph:invoke_admin` does not grant `graph:invoke`. A token with neither claim is not scope-restricted. A token with `scope` set to an empty string is restricted to no scopes at all. A scope claim of the wrong type (a number, an object, or a list that holds non-strings) is rejected with 401.
 - `jti`, the token ID. When `token_revocation` is set in `10xgraph.json`, a revoked `jti` is refused. The check runs even when `user_id` is missing or unusual.
 
+### Rotating the signing key
+
+Set `JWT_SECRET_KEYS` to a JSON list so tokens signed with an old key keep working while new tokens use a new one. Each entry is an object with a `key` and an optional `kid`, or a plain string (a key with no `kid`). `JWT_SECRET_KEY` keeps working unchanged and is tried too.
+
+```bash
+JWT_SECRET_KEY=the-new-secret
+JWT_SECRET_KEYS='[{"kid": "2026-09", "key": "the-old-secret"}, "an-older-secret-without-kid"]'
+```
+
+A token whose header names a `kid` is checked against the keys with that `kid`, then the keys without one. A token with no `kid` is tried against every key. The first key that verifies wins. Remove an old key from the list once its tokens have expired.
+
+### Limiting token age
+
+Set `JWT_MAX_TOKEN_AGE_SECONDS` to refuse tokens older than that many seconds, counted from the `iat` claim, even when `exp` is far away. A token with no `iat` is refused. Both settings are off by default.
+
 ### Status codes for JWT failures
 
 | Status | `error_code` | Cause |
 |---|---|---|
 | 401 | `REVOKED_TOKEN` | No credential was presented (missing Authorization header, missing WebSocket auth, missing query param) |
-| 401 | `EXPIRED_TOKEN` | Token `exp` is in the past |
+| 401 | `EXPIRED_TOKEN` | Token `exp` is in the past, or the token is older than `JWT_MAX_TOKEN_AGE_SECONDS` by its `iat` |
 | 401 | `INVALID_TOKEN` | Signature or structure is invalid, `user_id` is missing or malformed, or a `scope` or `scopes` claim has the wrong type |
 | 500 | `JWT_SETTINGS_NOT_CONFIGURED` | `JWT_SECRET_KEY` or `JWT_ALGORITHM` is unset at request time |
 
@@ -392,7 +407,7 @@ Add the dependency, or add the path to the public allowlist if it is intentional
   - POST /v1/my-new-endpoint
 ```
 
-The check is free per request. Starlette infrastructure routes (`/docs`, `/redoc`, `/openapi.json`) are not `APIRoute`s and are skipped automatically.
+The check is free per request. Starlette infrastructure routes (`/docs`, `/redocs`, `/openapi.json`) are not `APIRoute`s and are skipped automatically.
 
 ### Public paths
 

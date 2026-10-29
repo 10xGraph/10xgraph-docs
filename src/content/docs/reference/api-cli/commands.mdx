@@ -85,6 +85,8 @@ Start the local development server (Uvicorn) and open the hosted playground when
 | `--open / --no-open` | on | Open the hosted playground when the API is ready |
 | `--verbose`, `-v` / `--quiet`, `-q` | off | Logging level |
 
+With `MODE=production` set, `dev` prints a warning if you also use `--reload`, or bind to a host other than loopback (`127.0.0.1`, `localhost`, `::1`): the dev server has no TLS and is not meant for a real deployment.
+
 `dev` is the only server command. `10xgraph api` and `10xgraph play` were removed in `10xgraph-api` 0.9.0. For production, run Gunicorn in the image that `10xgraph build` generates.
 
 ## build
@@ -99,12 +101,14 @@ Generate deployment files. See [Deploy with Docker and Kubernetes](/docs/server/
 |---|---|---|
 | `--output`, `-o` | `Dockerfile` | Dockerfile path |
 | `--force`, `-f` | off | Overwrite existing files |
-| `--python-version` | `3.13` | Python version of the base image |
+| `--python-version` | `3.13` | Python version of the base image. The minimum is 3.12; an older version is refused |
 | `--port`, `-p` | `8000` | Port to expose |
 | `--docker-compose / --no-docker-compose` | off | Also write `docker-compose.yml`, omit `CMD` from the Dockerfile |
 | `--k8s / --no-k8s` | off | Also write `k8s.yaml` |
 | `--service-name` | `10xgraph-api` | Service name in generated files |
 | `--verbose`, `-v` / `--quiet`, `-q` | off | Logging level |
+
+`--docker-compose` and `--k8s` cannot be combined: the compose image has no start command, so the pod would crash-loop. The command refuses and exits with an error. Run `build` once with `--k8s`, or once with `--docker-compose`.
 
 ## eval
 
@@ -166,7 +170,7 @@ Install locations: `.agents/skills/10xgraph` (Codex), `.claude/skills/10xgraph` 
 
 ## audit
 
-Read-only environment check: Python version, installed packages, core evaluation API, `10xgraph.json` validity and whether the default port is free. Exits 1 if any check fails, so it works as a CI gate.
+Read-only environment check: Python version, installed packages, core evaluation API, `10xgraph.json` validity, a security check and whether the default port is free. The security check reads only the JSON file and reports production-readiness gaps (auth, authorization, rate limiting, token revocation) as warnings; they never fail the command. Exits 1 if any check fails, so it works as a CI gate.
 
 ```bash
 10xgraph audit [--config FILE]
@@ -176,6 +180,25 @@ Read-only environment check: Python version, installed packages, core evaluation
 |---|---|---|
 | `--config`, `-c` | `10xgraph.json` | Config file to validate |
 | `--verbose`, `-v` / `--quiet`, `-q` | off | Logging level |
+
+## revoke
+
+Revoke one token or all of a user's tokens. It writes to the same Redis the server reads, so the revocation reaches every worker at once and the server needs no restart. It needs `"token_revocation": "redis"` in `10xgraph.json`.
+
+```bash
+10xgraph revoke (--user USER_ID | --jti JTI) [--before EPOCH] [--expires-at EPOCH] [--redis-url URL] [--config FILE]
+```
+
+| Option | Default | Purpose |
+|---|---|---|
+| `--user` | unset | Revoke all tokens of this `user_id` issued so far (log out everywhere) |
+| `--jti` | unset | Revoke the one token with this `jti` claim |
+| `--before` | unset | With `--user`: revoke tokens issued at or before this epoch time |
+| `--expires-at` | unset | With `--jti`: the token's `exp` (epoch seconds), to drop the entry |
+| `--redis-url` | `REDIS_URL`, then the `redis` key in `10xgraph.json` | Redis to write to |
+| `--config`, `-c` | `10xgraph.json` | Config file |
+
+Pass exactly one of `--user` and `--jti`. Without a Redis URL from any of the three sources, the command fails.
 
 ## config
 

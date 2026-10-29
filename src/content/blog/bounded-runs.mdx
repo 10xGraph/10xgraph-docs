@@ -14,7 +14,7 @@ faq:
   - q: What happens when two requests use the same thread at once?
     a: The second waits up to 30 seconds for the first to finish, then gets 409. With on_busy set to cancel, it asks the active run to stop first.
   - q: Do these limits apply to streaming runs?
-    a: runs.timeout, the per-user run cap, the thread lock and the request size limits do. Node and tool timeouts and the tool ledger are part of the invoke path and do not apply to streaming runs.
+    a: Yes. runs.timeout, the per-user run cap, the thread lock, the request size limits, and any node_timeout or tool_timeout you set apply to streaming runs too.
 ---
 
 Agents are loops that call a model and a set of tools, and nobody wrote down in advance how long the loop will take or how many tools one turn will start. A hung tool, a model that emits hundreds of calls in one message, two tabs sending to the same thread and a client that posts a huge body are all ordinary events once real users arrive. If nothing bounds them, the first one that happens takes the worker down.
@@ -32,12 +32,12 @@ At most `max_parallel_tool_calls` run at once, and the default is 10. Set it in 
 | Bound | Default | Where it is set |
 |---|---|---|
 | Whole run | 300 s with `MODE=production`, no limit in development | `runs.timeout` in `10xgraph.json` |
-| One node | 900 s | `node_timeout` in the run config |
-| One tool call | 300 s | `tool_timeout` in the run config |
+| One node | No limit | `node_timeout` in the run config |
+| One tool call | No limit | `tool_timeout` in the run config |
 
 A run that passes `runs.timeout` is cancelled: invoke answers 504, and a stream, WebSocket run or AG-UI run ends with an error. Realtime sessions are not limited. An explicit number overrides the default and an explicit `null` removes the limit, in either mode.
 
-The node and tool defaults are generous on purpose. The node limit sits above the 600 s default timeout of the model SDKs, so a slow model call fails with its own error instead of being masked by the node deadline. Both can be disabled with `None` or `0`.
+There is no default node or tool limit: how long they may run is your call. A value you set applies to both invoke and stream. Set the node limit above the 600 s default timeout of the model SDKs, so a slow model call fails with its own error instead of being masked by the node deadline. `None` or `0` means no limit.
 
 ## One run per thread
 
@@ -72,7 +72,6 @@ The in-memory rate limiter keeps at most 50,000 keys. It used to sweep every key
 
 Be clear about the gaps.
 
-- Streaming runs do not have a tool ledger. The ledger lookup is on the invoke path, so a streamed run that is resumed after a crash can repeat a tool that already finished. Use idempotency keys for tools with side effects on streamed runs.
-- Node and tool timeouts apply to invoke. For a streaming run, `runs.timeout` is the deadline that holds.
+- Node and tool timeouts are off until you set them. Without them, `runs.timeout` is the only deadline on a run.
 - Counts such as the per-user cap and the thread lock are per process until you add Redis.
 - These bounds protect the server. They do not cap what a model costs you. Set provider-side spend limits too.

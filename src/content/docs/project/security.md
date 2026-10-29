@@ -78,7 +78,7 @@ and [environment variables](/docs/server/production-checklist).
 
 Before exposing an agent to untrusted users:
 
-1. Set `MODE=production` and `IS_DEBUG=false`.
+1. Set `MODE=production`.
 2. Set explicit `ORIGINS`. Wildcard CORS with credentials is refused at startup.
 3. Enable authentication (`"auth": "jwt"` or a custom `BaseAuth`) and set a
    `JWT_SECRET_KEY` of at least 32 characters. See

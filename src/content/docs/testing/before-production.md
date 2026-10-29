@@ -55,7 +55,7 @@ Read the startup log. Examples of what the server refuses or changes:
 
 - `ORIGINS` or `ALLOWED_HOST` left as `*` stops startup while `STRICT_PRODUCTION_CHECKS` is on, which is the default in production. `ALLOWED_HOST` defaults to `*`, so set it. Set exact values, or `STRICT_PRODUCTION_CHECKS=false` to downgrade the refusal to a warning.
 - Wildcard `ORIGINS` together with credentials is refused. Set explicit origins or `CORS_ALLOW_CREDENTIALS=false`.
-- `IS_DEBUG=true` is ignored and the interactive docs paths are turned off.
+- Debug mode is off and the interactive docs paths are turned off.
 - With auth on, a setup whose checkpointer cannot resolve thread owners does not boot.
 
 This check does not catch `auth: null`. A server with no auth starts open even in production, and nothing refuses it. Confirm that auth is configured with the next step. See the [production checklist](/docs/server/production-checklist) and [what 10xGraph does not protect](/docs/production/limits).

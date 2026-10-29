@@ -1,13 +1,13 @@
 ---
-title: What Is AI Agent Streaming? SSE Guide for Python
-description: AI agent streaming sends responses token-by-token to a frontend over SSE instead of waiting for the full reply. Learn how it works in Python.
+title: What Is AI Agent Streaming? HTTP Streaming Guide for Python
+description: AI agent streaming sends responses token-by-token to a frontend over HTTP instead of waiting for the full reply. Learn how it works in Python.
 section: Glossary
 order: 90
 label: What is agent streaming?
 updated: "2026-10-27"
 faq:
-  - q: What is SSE (Server-Sent Events)?
-    a: "Server-Sent Events is a web standard for pushing data from server to client over a persistent HTTP connection. The client opens a GET or POST request with Accept: text/event-stream, and the server sends newline-delimited events as they occur. SSE is simpler than WebSockets for one-directional streaming and reconnects automatically if the connection drops."
+  - q: What is NDJSON streaming?
+    a: "NDJSON (newline-delimited JSON) sends one JSON object per line over a single HTTP response. The client reads the body as it arrives and parses each line as a chunk. It is simpler than WebSockets for one-directional streaming, but unlike Server-Sent Events it has no built-in reconnection, so the client starts a new request if the connection drops."
   - q: Does streaming work with AI agent tool calls?
     a: Yes. Tool activity arrives as ordinary message chunks whose content blocks are tool_call and tool_result. When the LLM calls a tool, a chunk with a tool_call block is streamed; when the tool finishes, a chunk with a tool_result block follows; then token streaming resumes for the next LLM response. This lets the frontend show what the agent is doing in real time.
   - q: How do I stop a stream mid-generation?
@@ -28,7 +28,7 @@ Streaming matters because LLMs generate tokens sequentially. A long response can
 LLM generates tokens:  "The" → " weather" → " in" → " Tokyo" → "..."
                            │         │          │          │
                            ▼         ▼          ▼          ▼
-SSE stream to client:   chunk1   chunk2     chunk3     chunk4
+NDJSON stream to client: chunk1   chunk2     chunk3     chunk4
                            │         │          │          │
                            ▼         ▼          ▼          ▼
 UI renders:             "The"  "The weather"  "The weather in"  ...
@@ -36,14 +36,14 @@ UI renders:             "The"  "The weather"  "The weather in"  ...
 
 The server sends each chunk the moment it is generated. The client receives and renders tokens in real time.
 
-## SSE vs WebSockets for streaming
+## NDJSON streaming vs WebSockets
 
-| | SSE (Server-Sent Events) | WebSockets |
+| | NDJSON over HTTP | WebSockets |
 |--|--------------------------|-----------|
 | Direction | Server → Client only | Bidirectional |
 | Protocol | HTTP/1.1 | WS upgrade |
-| Browser support | Native | Native |
-| Reconnection | Automatic | Manual |
+| Browser support | `fetch` streams | Native |
+| Reconnection | Manual (send a new request) | Manual |
 | Best for | Token streaming | Bidirectional agent interaction |
 
 10xGraph supports both: `POST /v1/graph/stream` for streaming over HTTP, and `WS /v1/graph/ws` for bidirectional WebSocket connections (used for remote tool calls where the client executes tools on behalf of the agent).
@@ -67,7 +67,7 @@ curl -N -X POST http://localhost:8000/v1/graph/stream \
   }'
 ```
 
-The response uses the `text/event-stream` content type, but the body is one JSON object per line (NDJSON), not `data:` prefixed frames. Incremental text arrives as `message` chunks with `delta: true`:
+The response uses the `application/x-ndjson` content type. The body is one JSON object per line (NDJSON), not `data:` prefixed frames. Incremental text arrives as `message` chunks with `delta: true`:
 
 ```
 {"event": "message", "message": {"role": "assistant", "delta": true, "content": [{"type": "text", "text": "Neural"}]}}
@@ -175,6 +175,6 @@ async def stream_agent():
 <LinkCard title="Streaming concepts" href="/docs/concepts/streaming" description="How 10xGraph's streaming pipeline works end-to-end." eyebrow="Concept" />
 <LinkCard title="Stream responses from TypeScript" href="/docs/client/stream-responses" description="Use the TypeScript client to consume streaming responses." eyebrow="Guide" />
 <LinkCard title="Stream a graph" href="/docs/guides/stream-graph" description="Implement streaming directly from a Python graph." eyebrow="Guide" />
-<LinkCard title="React streaming tutorial" href="/docs/examples/streaming" description="A complete React frontend consuming 10xGraph's SSE stream." eyebrow="Tutorial" />
+<LinkCard title="React streaming tutorial" href="/docs/examples/streaming" description="A complete React frontend consuming 10xGraph's NDJSON stream." eyebrow="Tutorial" />
 
 </CardGrid>

@@ -28,7 +28,7 @@ Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: th
 | `authorization` | string, object or null | by `MODE` | Access control backend |
 | `injectq` | string or null | none | Import path of an InjectQ container |
 | `store` | string or null | none | Import path of a `BaseStore` for long-term memory |
-| `checkpointer` | string or null | none | Not applied by the API server. Pass the checkpointer to `compile()` |
+| `checkpointer` | string or null | none | Not applied by the API server. If set, the server logs a warning and ignores it. Pass the checkpointer to `compile()` |
 | `thread_name_generator` | string or null | none | Import path of a thread name generator |
 | `redis` | string or null | none | Redis URL for the shared ownership cache. Falls back to `REDIS_URL` |
 | `remote_tools` | array | `[]` | Schemas of tools that run in the client |
@@ -48,7 +48,7 @@ Import paths use `module:attribute`. Unknown top-level keys are kept in the file
 | Value | Meaning |
 |---|---|
 | `null` or absent | No authentication. Every request runs as `anonymous`, and the server logs a warning |
-| `"jwt"` | Verify bearer JWTs. Needs `JWT_SECRET_KEY` and `JWT_ALGORITHM` |
+| `"jwt"` | Verify bearer JWTs. Needs `JWT_SECRET_KEY` and `JWT_ALGORITHM`, and PyJWT (`pip install "10xgraph-api[jwt]"`). The string must be exactly `jwt`; any other string, such as `JWT`, is refused at startup |
 | `{"method": "custom", "path": "auth.agent_auth:AgentAuth"}` | Load a `BaseAuth` subclass. Both `method` and `path` are required |
 
 See [Server authentication](/docs/server/auth) for the full guide.
@@ -72,7 +72,7 @@ RBAC object keys:
 | `default_scopes` | array | `[]` | Scopes granted to everyone |
 | `isolation` | string | `owner` | `owner` or `none`: whether storage is scoped per user |
 
-Scopes are `checkpointer:read|write|delete`, `config:read`, `files:read|upload|delete`, `graph:fix|invoke|read|setup|stop|stream` and `store:read|write|delete`.
+Scopes are `checkpointer:read|write|delete`, `config:read`, `files:read|upload|delete`, `graph:fix|invoke|read|stop|stream` and `store:read|write|delete`.
 
 ## runs
 
@@ -105,7 +105,7 @@ With `"server"` (the default), a request may only name a thread that already exi
 
 Naming an id that does not exist answers `403` on invoke, stream, `/v1/graph/ws` and the checkpointer write routes. It is the same `403` as for an id another user owns, so a caller cannot tell whether an id is taken.
 
-AG-UI (`POST /v1/ag-ui`) and realtime (`/v1/graph/live`) are the exception. They still accept an id the frontend made, because CopilotKit and the realtime client create their own. The caller then owns that thread, and an existing thread is owner-checked as usual.
+AG-UI (`POST /v1/ag-ui`) and realtime (`/v1/graph/live`) follow the same setting. An AG-UI `threadId` or a live `thread_id` the server never issued is refused (`403` on AG-UI; on live an error event with code `not_authorized` and close code `1008`). A blank or `"new"` id, or no id, makes the server create the thread: AG-UI returns it in `RUN_STARTED`, and live sends it in a `session_started` event. Frontends that make their own ids, such as CopilotKit by default, need `"client"`.
 
 With `"client"`, any request may start a thread under an id it picks. Under owner-only authorization the first user to write an id owns it. A user who claims a guessable id such as `default` first locks out its intended owner, and an unknown id answers differently from a taken one. Use `"client"` only if you accept that.
 
@@ -201,7 +201,7 @@ Each entry declares a tool the model can call that runs in the client. Unknown f
 
 ## Environment variables
 
-The server reads configuration from environment variables, which are listed in full in the [environment variables reference](/docs/reference/api-cli/environment). Common ones include `MODE`, `IS_DEBUG`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `ORIGINS`, `MAX_REQUEST_SIZE`, `REDIS_URL`, `SENTRY_DSN`, and OTEL/observability settings. Set them as process environment variables or in a `.env` file referenced by the `env` key in `10xgraph.json`.
+The server reads configuration from environment variables, which are listed in full in the [environment variables reference](/docs/reference/api-cli/environment). Common ones include `MODE`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `ORIGINS`, `MAX_REQUEST_SIZE`, `REDIS_URL`, `SENTRY_DSN`, and OTEL/observability settings. Set them as process environment variables or in a `.env` file referenced by the `env` key in `10xgraph.json`.
 
 ## What does a complete config look like?
 

@@ -21,6 +21,8 @@ A typical agent invocation chains several operations: the client calls the serve
 
 Kubernetes' default pod lifecycle is hostile to this. When you trigger a rolling deploy, the kubelet gives a pod 30 seconds to shut down gracefully before sending SIGKILL. If the app is still in an LLM call, the pod dies mid-request, and the client's stream breaks.
 
+On SIGTERM the generated image answers `503` on `/health/ready` (`draining`) so the Service stops routing to the pod, gives open runs up to 540 seconds to finish, and ends open streams with an "interrupted" chunk the client can resume from. Details are in [Graceful shutdown](/docs/guides/graceful-shutdown).
+
 For the scaling model behind these settings, see [scaling and reliability](/docs/production/scaling). Draining runs on shutdown is covered in [Graceful shutdown](/docs/guides/graceful-shutdown).
 
 `10xgraph build --k8s` generates a manifest that fixes this: it sets the termination grace period, pre-termination delay, and probe timeouts so that in-flight runs finish normally, even during deploys.
@@ -35,7 +37,7 @@ Create a `Dockerfile` and Kubernetes manifest in one command:
 
 This produces three files:
 
-- `Dockerfile` with a production-ready image that starts Gunicorn with a 600-second graceful timeout
+- `Dockerfile` with a production-ready image that starts Gunicorn with `TenxGraphUvicornWorker` and a 600-second graceful timeout
 - `.dockerignore`
 - `k8s.yaml` containing a Deployment and a Service
 
@@ -47,7 +49,7 @@ The manifest is a working skeleton. It sets these values, which are easy to get 
 
 | Setting | Value | Purpose |
 | --- | --- | --- |
-| `terminationGracePeriodSeconds` | 660 | Exceeds the app's 600-second graceful timeout. Ensures SIGKILL does not arrive until the app has fully drained. |
+| `terminationGracePeriodSeconds` | 675 | Exceeds the app's 600-second graceful timeout plus the 15-second `preStop` sleep, which runs inside the same period. Ensures SIGKILL does not arrive until the app has fully drained. |
 | `preStop` sleep | 15 seconds | Gives the load balancer time to notice the pod is terminating and stop routing new requests. Without it, new traffic arrives while the app shuts down. |
 | `readinessProbe` | 10s interval, 5s initial delay | Removes unhealthy pods from the load balancer quickly. Checked via `GET /health/ready`. |
 | `livenessProbe` | 30s interval, 30s initial delay, 5 failures | Deliberately slack. A worker handling a long run must not be restarted. Checked via `GET /ping`. |
@@ -82,12 +84,8 @@ containers:
   - name: my-agent
     image: registry.example.com/my-agent:1.0.0   # Replace with your own pinned image reference
     env:
-      - name: ORIGINS
-        value: "https://your-frontend.example.com"   # Set to your actual origin
       - name: MODE
         value: "production"             # Already set, but verify
-      - name: IS_DEBUG
-        value: "false"                  # Already set, but verify
 ```
 
 ### Pin the image
@@ -100,14 +98,15 @@ The manifest uses `registry.example.com/<service>:1.0.0` as a placeholder image 
 
 ### Set CORS origins explicitly
 
-The manifest sets `ORIGINS` to the placeholder `https://your-frontend.example.com`. Replace it with your actual frontend domain(s), comma-separated if there are multiple:
+The manifest does not set `ORIGINS` or `ALLOWED_HOST` as env entries. Both are read from the Secret (see [Mount secrets](#mount-secrets-do-not-bake-them)), because an env entry in the manifest would override the Secret. Put your actual frontend domain(s) in the Secret, comma-separated if there are multiple:
 
-```yaml
-- name: ORIGINS
-  value: "https://app.example.com,https://app-staging.example.com"
+```bash
+kubectl create secret generic my-agent-secrets \
+  --from-literal=ORIGINS="https://app.example.com,https://app-staging.example.com" \
+  --from-literal=ALLOWED_HOST="app.example.com"
 ```
 
-With `MODE=production`, the server refuses to start if `ORIGINS` or `ALLOWED_HOST` is the wildcard `*`. The check is `STRICT_PRODUCTION_CHECKS`, which is on by default in production. The generated manifest sets placeholders for both, so replace them. If you truly need wildcard origins, set `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false`, which is rare.
+With `MODE=production`, the server refuses to start if `ORIGINS` or `ALLOWED_HOST` is the wildcard `*`. The check is `STRICT_PRODUCTION_CHECKS`, which is on by default in production. Production refuses to start while either is missing, so add both to the Secret. If you truly need wildcard origins, set `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false`, which is rare.
 
 ### Mount secrets, do not bake them
 
@@ -119,7 +118,7 @@ envFrom:
       name: my-agent-secrets
 ```
 
-Create the secret in your cluster before deploying. The server reads `JWT_SECRET_KEY`, `JWT_ALGORITHM` and `REDIS_URL` itself; names such as the Postgres DSN variable below are whatever your graph module reads when it builds the checkpointer:
+Create the secret in your cluster before deploying. The server reads `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `REDIS_URL`, `ORIGINS` and `ALLOWED_HOST` itself; names such as the Postgres DSN variable below are whatever your graph module reads when it builds the checkpointer:
 
 ```bash
 kubectl create secret generic my-agent-secrets \
@@ -127,6 +126,8 @@ kubectl create secret generic my-agent-secrets \
   --from-literal=OPENAI_API_KEY="..." \
   --from-literal=JWT_SECRET_KEY="..." \
   --from-literal=JWT_ALGORITHM="HS256" \
+  --from-literal=ORIGINS="https://app.example.com" \
+  --from-literal=ALLOWED_HOST="app.example.com" \
   --from-literal=POSTGRES_DSN="postgresql://..." \
   --from-literal=REDIS_URL="redis://..."
 ```
@@ -233,13 +234,13 @@ CPU is the provided metric, but it is a poor signal for agent workloads. Agents 
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Runs truncate on every deploy | `terminationGracePeriodSeconds` is too short, or the process is not PID 1 | Increase to 660+ seconds. Ensure your Dockerfile uses `CMD` or `ENTRYPOINT`, not a shell wrapper. |
+| Runs truncate on every deploy | `terminationGracePeriodSeconds` is too short, or the process is not PID 1 | Increase to 675+ seconds. Ensure your Dockerfile uses `CMD` or `ENTRYPOINT`, not a shell wrapper. |
 | Requests fail for a few seconds after a deploy | `preStop` sleep removed or load balancer does not respect endpoint removal | Restore the `preStop` sleep in the manifest. Increase your load balancer's connection drain time. |
 | Pods restart during long runs | Liveness probe is too strict (failing too quickly) | Loosen the liveness probe (`periodSeconds: 30`, `failureThreshold: 5`). The readiness probe should be strict; the liveness probe should not. |
 | Thread history disappears or threads resolve differently | Replicas do not share a checkpointer | Ensure the Postgres DSN and `REDIS_URL` your graph module uses point to shared instances. Do not use `InMemoryCheckpointer` in production. |
 | Random 409 errors under high load | Two requests wrote to the same thread concurrently | This is expected with optimistic concurrency. Retry with exponential backoff, or serialize writes to the same thread. |
 | Server exits at startup with a CORS or host error | `ORIGINS` or `ALLOWED_HOST` is `*` | Set both to your real values. If you need wildcard origins, set `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false` (unusual). |
-| Browser requests fail CORS checks | `ORIGINS` still holds the placeholder | Set `ORIGINS` to your real domain. |
+| Browser requests fail CORS checks | `ORIGINS` is missing from the Secret or holds the wrong domain | Set `ORIGINS` in the Secret to your real domain. |
 
 ## Related
 

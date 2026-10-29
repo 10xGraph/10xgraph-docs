@@ -46,7 +46,7 @@ The pattern consists of five node types:
 
 **WORKER_TOOL nodes** - When a worker emits tool calls, those calls route to a ToolNode, then back to the worker for reflection. Each worker gets its own mini ReAct loop.
 
-**END** - The conversation terminates when the supervisor outputs FINISH or when max_rounds is reached.
+**END** - The conversation terminates when the supervisor outputs FINISH (matched as a whole word, so a worker name that merely contains it does not end the run) or when max_rounds is reached.
 
 ### Visual example (two-worker team)
 

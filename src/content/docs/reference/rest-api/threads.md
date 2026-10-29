@@ -110,7 +110,21 @@ curl -X DELETE http://localhost:8000/v1/threads/t1 \
 {"success": true, "message": "Thread deleted successfully", "data": null}
 ```
 
-The inner `data` is whatever the checkpointer returns from its clean-up. The server also deletes the thread's telemetry traces when a telemetry store is bound, and evicts the thread's cached ownership entry, so the `thread_id` can be reused by a different user afterwards.
+If file, trace or ownership-cache cleanup fails after the thread is deleted, the answer is `success: false` with the message `Thread deleted, but cleanup did not finish: <steps>` and `data` like this. The thread itself is gone. A delete also releases the files linked to that thread by their own metadata, even when no message references them (local and memory media stores; the cloud store cannot list its files, so it is skipped). A file left with no thread is deleted only with `media.delete_with_thread` on, which is the default.
+
+```json
+{"success": false, "message": "Thread deleted, but cleanup did not finish: cache", "data": {"deleted": true, "cleanup_failed": ["cache"], "result": {}}}
+```
+
+`cleanup_failed` lists the steps that failed. Check `success` before you treat the delete as fully clean. On success, the inner `data` is whatever the checkpointer returns from its clean-up. The server also deletes the thread's telemetry traces when a telemetry store is bound, and evicts the thread's cached ownership entry, so the `thread_id` can be reused by a different user afterwards.
+
+## Thread and message ids
+
+Thread, message and memory ids must match `^[A-Za-z0-9._:@-]{1,128}$`: 1 to 128 letters, digits and `. _ : @ -`, with no spaces or slashes. Other ids in the path or body get `422` `VALIDATION_ERROR`. See [Conventions](/docs/reference/rest-api/conventions#resource-ids).
+
+## Writes while a run is active
+
+These routes answer `409` (code `HTTPException`, message `thread is busy`, `Retry-After: 5`) at once while a run holds the thread, instead of waiting: `PUT /v1/threads/{thread_id}/state`, `DELETE /v1/threads/{thread_id}/state`, `POST /v1/threads/{thread_id}/messages`, `DELETE /v1/threads/{thread_id}/messages/{message_id}`, `DELETE /v1/threads/{thread_id}` and `POST /v1/graph/fix`. A write that raced a run would be overwritten by it, or would bring a deleted thread back. Retry after the run ends, or stop it with `POST /v1/graph/stop`.
 
 ## Get thread state
 

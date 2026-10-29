@@ -24,7 +24,7 @@ tool_node = ToolNode(create_file_tools("/srv/workspace", write=False))
 
 `create_file_tools` takes `read`, `write` and `search` flags (all `True` by default) to pick which tools you get. It raises `ValueError` if `root` is not an existing directory.
 
-The module-level `file_read`, `file_write` and `file_search` still work, but reading the root from `config["file_tool_root"]` or `config["workspace_root"]` is deprecated: it emits a `DeprecationWarning` and is removed in 0.11, because anyone who can set the run config can point the tools at any directory. The examples below use `create_file_tools`, which also hides secret files by default.
+The module-level `file_read`, `file_write` and `file_search` still work, but reading the root from `config["file_tool_root"]` or `config["workspace_root"]` is deprecated: it emits a `DeprecationWarning` and is removed in 2.0, because anyone who can set the run config can point the tools at any directory. The examples below use `create_file_tools`, which also hides secret files by default.
 
 ## When to use file tools
 
@@ -220,8 +220,8 @@ The agent will call `file_write(path="docs/api/endpoints.md", content="...", cre
 
 ### Write modes
 
-- **`"create"`** (default): Fails if the file already exists. Use when you want to write a new file and prevent accidental overwrites.
-- **`"overwrite"`**: Replaces the entire file. Use when updating existing output.
+- **`"create"`** (default): Fails if the file already exists. The check is exclusive, so two writers cannot both create the file. Use when you want to write a new file and prevent accidental overwrites.
+- **`"overwrite"`**: Replaces the entire file. The replace is atomic: a reader sees the old file or the new one, never a half-written file. Use when updating existing output.
 - **`"append"`**: Adds content to the end of the file (preserves existing content). Use for logs or incremental generation.
 
 ### Error cases
@@ -412,10 +412,11 @@ Secret files are hidden by default, for any root, including the working-director
 - `*.pem`, `*.key`, `*.p12`, `*.pfx`
 - `*key*.json` and `service_account*.json`
 - `id_rsa*` and `id_ed25519*`
-- `.netrc`, `.npmrc` and `.pypirc`
+- `.netrc`, `.npmrc`, `.pypirc` and `.git-credentials`
+- `*.tfstate`, `*.tfstate.*` and `*.tfvars`
 - anything under a directory named `.ssh`, `.aws`, `.gnupg` or `.git`
 
-Matching ignores case and uses the resolved path, so symlinks, `..` and case changes do not get around it. A read or write of a hidden path returns the same `path is not allowed` error whether or not the file exists, so the model cannot use the error to find out what is there.
+Matching ignores case and uses the resolved path, so symlinks, `..` and case changes do not get around it. A read or write of a hidden path returns the same `path is not allowed` error whether or not the file exists, so the model cannot use the error to find out what is there. Other error text does not include file system paths either.
 
 Add your own patterns with `deny=`. Each glob is matched, ignoring case, against every part of the path under the root and against the whole relative path:
 

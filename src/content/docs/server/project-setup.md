@@ -196,7 +196,7 @@ Init builds your config from your answers, not a static template. Examples:
     "window": 60,
     "by": "ip",
     "trusted_proxy_headers": false,
-    "exclude_paths": ["/ping", "/docs", "/redoc", "/openapi.json"]
+    "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
   },
   "ag_ui": {"enabled": false}
 }

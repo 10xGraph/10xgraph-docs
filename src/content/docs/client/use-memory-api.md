@@ -248,10 +248,15 @@ List all stored memories:
 
 ```ts
 const response = await client.listMemories({ limit: 100 });
-console.log(`Total memories: ${response.data.memories.length}`);
+console.log(`Memories on this page: ${response.data.memories.length}`);
 
 for (const mem of response.data.memories) {
   console.log(`[${mem.memory_type}] ${mem.content.slice(0, 60)}`);
+}
+
+// More pages: response.data.has_more is true, and next_offset is the next offset
+if (response.data.has_more) {
+  const next = await client.listMemories({ limit: 100, offset: response.data.next_offset ?? 0 });
 }
 ```
 

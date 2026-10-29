@@ -66,7 +66,7 @@ When you call an agent over HTTP, here is what happens:
 6. **Graph returns the result**, including the updated messages.
 7. **Server returns the response** to the client (as one JSON body, or as a stream).
 
-For streaming, the graph emits `StreamChunk` objects as it runs. Each chunk has an `event` of `state`, `message`, `error` or `updates`. `POST /v1/graph/stream` sends them as server-sent events (`text/event-stream`), and the `/v1/graph/ws` WebSocket endpoint sends them over a socket. See [Streaming](/docs/concepts/streaming) for the details.
+For streaming, the graph emits `StreamChunk` objects as it runs. Each chunk has an `event` of `state`, `message`, `error` or `updates`. `POST /v1/graph/stream` sends them as newline-delimited JSON (`application/x-ndjson`), and the `/v1/graph/ws` WebSocket endpoint sends them over a socket. See [Streaming](/docs/concepts/streaming) for the details.
 
 ## The execution model
 

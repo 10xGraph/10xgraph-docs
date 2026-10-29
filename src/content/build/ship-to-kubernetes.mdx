@@ -87,7 +87,7 @@ The folder now has four new files. Here is what is in them.
 - **Two stages.** The builder installs your dependencies into a virtualenv. It then removes the CLI-only parts of the API package (project templates, the config editor, typer, rich and questionary where nothing else needs them) and uninstalls `pip`. The runtime stage copies the virtualenv and your code onto `python:3.13-slim`.
 - **Gunicorn with Uvicorn workers**, started as `CMD ["gunicorn", "-k", "uvicorn_worker.UvicornWorker", "-b", "0.0.0.0:8000", "--graceful-timeout", "600", "--timeout", "660", "tenxgraph_api.src.app.main:app"]`. The image sets `WEB_CONCURRENCY=2` workers; override it with an environment variable.
 - **A graceful timeout of 600 seconds**, because an agent run can last minutes and Gunicorn's default of 30 seconds would cut runs off at every deploy.
-- **A non-root user**, `USER 10001:10001`, and `MODE=production`, `IS_DEBUG=false` as defaults.
+- **A non-root user**, `USER 10001:10001`, and `MODE=production` as the default (which turns debug off).
 - **A health check** that calls `GET /ping` from Python's standard library, so the image needs no curl.
 - **`.dockerignore`** excludes `.env`, `.env.*`, keys, certificates and cloud credential files, so `COPY . .` cannot ship a secret.
 

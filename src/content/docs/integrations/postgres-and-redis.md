@@ -124,7 +124,7 @@ You must supply one Postgres source (`postgres_dsn` or `pg_pool`) and one Redis 
 | `redis_url` | `str` | `None` | Redis URL for a pool the checkpointer creates |
 | `redis` | Redis client | `None` | Existing `redis.asyncio.Redis` instance |
 | `redis_pool` | `ConnectionPool` | `None` | Existing Redis connection pool |
-| `redis_pool_config` | `dict` | `None` | Extra keyword arguments for `ConnectionPool.from_url` |
+| `redis_pool_config` | `dict` | `None` | Extra keyword arguments for the Redis pool, merged over the defaults. The pool is capped at `max_connections=50`, and a caller past the cap waits up to `timeout=5.0` seconds for a free connection. Override either key. |
 | `schema` | `str` | `"public"` | Postgres schema for the tables. Must match `^[a-zA-Z_][a-zA-Z0-9_]*$` |
 | `cache_ttl` | `int` (kwarg) | `86400` | Redis cache lifetime in seconds |
 | `state_history_limit` | `int` (kwarg) | `20` | State snapshots kept per thread; older ones are pruned on each durable write |

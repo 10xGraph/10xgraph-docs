@@ -171,7 +171,7 @@ Minimal configuration with in-memory backend and default limits:
     "requests": 100,
     "window": 60,
     "by": "ip",
-    "exclude_paths": ["/ping", "/docs", "/redoc", "/openapi.json"]
+    "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
   }
 }
 ```
@@ -190,7 +190,7 @@ Production setup with Redis, user-based limiting, trusted proxies:
     "trusted_proxy_headers": true,
     "trusted_proxy_hops": 1,
     "trusted_proxies": ["10.0.0.0/8"],
-    "exclude_paths": ["/ping", "/docs", "/redoc"],
+    "exclude_paths": ["/ping", "/docs", "/redocs"],
     "redis": {
       "url": "${RATE_LIMIT_REDIS_URL}",
       "prefix": "10xgraph:rate-limit"

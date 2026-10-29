@@ -231,7 +231,7 @@ Both methods take the same `input_data` and `config`, but differ in how results 
 | Server endpoint | `POST /v1/graph/invoke` | `POST /v1/graph/stream` |
 | In async code | `await app.ainvoke(...)` | `async for chunk in app.astream(...)` |
 
-`invoke` calls `asyncio.run` internally, so from within an event loop, call `ainvoke` instead to avoid a "running event loop" error.
+Called inside a running event loop (a Jupyter notebook, an async web handler), `invoke` and `stream` raise a `RuntimeError` that names the async method. Call `ainvoke` or `astream` there.
 
 **Example with stream:** this reuses `app` from the triage example. At the default granularity only `message` and `error` chunks are delivered, so ask for `PARTIAL` to also receive `state` chunks.
 

@@ -45,7 +45,7 @@ JWT is the easiest path: a stateless, standard bearer token that carries the use
    JWT_ALGORITHM=HS256
    ```
 
-   The server refuses a short HS* secret at startup when `MODE=production`, and warns otherwise. RFC 7518 requires HMAC secrets to be at least 32 bytes for HS256.
+   `JWT_ALGORITHM` must be one of `HS256`, `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512` or `EdDSA`. `none`, an empty value or an unknown value stops startup. Startup also stops if PyJWT is not installed, and the `auth` value must be exactly `"jwt"`. The server refuses a short HS* secret at startup when `MODE=production`, and warns otherwise. RFC 7518 requires HMAC secrets to be at least 32 bytes for HS256.
 
 3. **Enable JWT in 10xgraph.json**
 
@@ -73,7 +73,7 @@ JWT is the easiest path: a stateless, standard bearer token that carries the use
 
 <Callout type="danger" title="Keep the signing secret safe">
 
-Anyone who holds `JWT_SECRET_KEY` can mint a token for any `user_id`. Never commit it, never bake it into a container image, and inject it at deploy time from a secret manager. Use HTTPS everywhere and rotate secrets intentionally with all issuers and consumers in sync.
+Anyone who holds `JWT_SECRET_KEY` can mint a token for any `user_id`. Never commit it, never bake it into a container image, and inject it at deploy time from a secret manager. Use HTTPS everywhere. To rotate without logging everyone out, list the old key in `JWT_SECRET_KEYS` while new tokens use `JWT_SECRET_KEY` (see [Rotating the signing key](/docs/reference/api-cli/auth#rotating-the-signing-key)). `JWT_MAX_TOKEN_AGE_SECONDS` caps how old a token may be.
 
 </Callout>
 
@@ -255,7 +255,7 @@ This is intentional: a forgotten guard becomes a deploy-time error, not a silent
 2. Use HTTPS everywhere
 3. Keep `JWT_SECRET_KEY` outside version control; inject it at deploy time
 4. Use short-lived tokens and rotate secrets intentionally
-5. Set `MODE=production` to disable `/docs` and `/redoc` (enable only if intentional)
+5. Set `MODE=production` to disable `/docs` and `/redocs` (enable only if intentional)
 6. Test both successful and rejected requests before release, asserting on the error code
 
 ## See also

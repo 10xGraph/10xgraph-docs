@@ -86,7 +86,7 @@ With `MODE=production` the server does not start if:
 - Any non-public route lacks a permission guard. Only `/ping` and `/health/ready` are public. A route you add and forget to guard is a deploy-time error.
 - Ownership is on but the checkpointer cannot name a thread's owner. With auth configured the loader refuses to boot in that setup.
 
-In production the docs and redoc pages default to off, `IS_DEBUG` is forced off, and `MEDIA_REQUIRE_OWNER` and graph introspection scoping default to on.
+In production the docs and redoc pages default to off, debug mode is off, and `MEDIA_REQUIRE_OWNER` and graph introspection scoping default to on.
 
 ## Run trace is development only
 

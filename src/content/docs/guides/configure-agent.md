@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Agents and graphs"
 order: 30
 label: Configure Agent
-updated: "2026-10-27"
+updated: "2026-10-29"
 ---
 
 `Agent` is the LLM node in a `StateGraph`. This guide covers every constructor parameter with working examples to help you configure agents with different models, providers, tools, and behaviors.
@@ -327,6 +327,15 @@ agent = Agent(model="gpt-4o", retry_config=False)
 | `circuit_breaker_enabled` | `False` | Whether to enable circuit breaker (see below). |
 | `circuit_breaker_threshold` | `5` | Consecutive failures before opening the circuit. |
 | `circuit_breaker_reset_timeout` | `30.0` | How long (seconds) the circuit stays open before attempting recovery. |
+| `jitter` | `0.25` | Fraction of each back-off delay that is randomised, so parallel runs do not retry in step. `0` disables it. |
+| `max_concurrent_calls` | `None` | Opt-in cap on in-flight LLM requests per provider for one `Agent`. |
+| `distributed_max_concurrent_calls` | `None` | Opt-in cap on in-flight requests per (provider, model) shared by every process on the same Redis. Off by default; fails open with a WARNING when Redis is down. Needs `distributed_redis` or `distributed_redis_url`. |
+| `distributed_redis` | `None` | Async Redis client for the shared cap. |
+| `distributed_redis_url` | `None` | Redis URL used to build a client when none is passed. |
+| `distributed_lease_seconds` | `300.0` | How long a slot is held before it counts as abandoned. A running call renews the lease every third of this time, so it only has to outlast a crashed process. |
+| `distributed_key_prefix` | `""` | Prefix for the Redis key. |
+
+See [Cap in-flight calls across processes](/docs/concepts/errors-and-limits#cap-in-flight-calls-across-processes).
 
 ### Circuit breaker for fault isolation
 
@@ -366,7 +375,7 @@ You can customize the timeout globally or per-request.
 Set this before starting your agent or server:
 
 ```bash
-export AGENTFLOW_LLM_TIMEOUT=120   # Use 2-minute timeout instead
+export TENXGRAPH_LLM_TIMEOUT=120   # Use 2-minute timeout instead
 ```
 
 ### Override programmatically
@@ -390,8 +399,23 @@ The timeout is determined in this order (first match wins):
 
 1. An explicit `timeout=` kwarg passed to the `Agent` (forwarded to the SDK client).
 2. A programmatic override via `set_default_llm_timeout()`.
-3. The `AGENTFLOW_LLM_TIMEOUT` environment variable.
+3. The `TENXGRAPH_LLM_TIMEOUT` environment variable. The old `AGENTFLOW_LLM_TIMEOUT` is still read as a deprecated fallback when `TENXGRAPH_LLM_TIMEOUT` is unset or empty. If `TENXGRAPH_LLM_TIMEOUT` is set but invalid or not positive, it is ignored with a warning and the built-in default applies; the old variable is not consulted.
 4. The built-in default of 600 seconds.
+
+### Stream idle timeout
+
+The request timeout covers a whole request. A stream that connects and then goes quiet would wait that full time, so streaming calls can also set `stream_idle_timeout`, the longest wait for the next chunk. It has no default and is off until you set it:
+
+```python
+from tenxgraph.core.llm import set_default_stream_idle_timeout
+
+agent = Agent(model="gpt-4o", stream_idle_timeout=20)   # this agent only
+set_default_stream_idle_timeout(45)                     # every agent in the process
+```
+
+The environment variable `TENXGRAPH_LLM_STREAM_IDLE_TIMEOUT` (seconds) sets the same process default. A per-agent value wins over the process default. When a stream stalls, it is closed and `LLMStreamIdleTimeoutError` is raised. See [LLM stream idle timeout](/docs/concepts/errors-and-limits#llm-stream-idle-timeout).
+
+With `stream_idle_timeout` set, a stall before the first chunk is retried and can fall back to the next model like a connect timeout; a stall after any chunk raises `LLMStreamIdleTimeoutError` and is not retried, so streamed output is never duplicated.
 
 ---
 

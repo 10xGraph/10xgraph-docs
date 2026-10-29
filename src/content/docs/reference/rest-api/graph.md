@@ -43,24 +43,23 @@ Run the graph and return the complete result when all nodes finish.
   "messages": [
     {
       "role": "user",
-      "content": "What is the capital of France?"
+      "content": [{"type": "text", "text": "What is the capital of France?"}]
     }
-  ],
-  "config": {
-    "thread_id": "my-thread-1"
-  }
+  ]
 }
 ```
+
+`content` is a list of content blocks, not a plain string. A string gets `422`. The example sends no `config.thread_id`, so the server starts a new thread and returns its id in `data.meta.thread_id`. Send that id as `config.thread_id` in the next request to continue the thread. With the default `runs.thread_ids` of `server`, naming an id that does not exist answers `403`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `messages` | array | yes, unless `resume` is set | One or more messages to append to state before invoking. |
-| `resume` | any | no | Answer for a thread paused by [`interrupt()`](/docs/guides/add-human-approval). The paused node runs again and `interrupt()` returns this value; `null` means cancelled. Send it only to resume a paused thread. |
+| `resume` | any | no | Answer for a thread paused by [`interrupt()`](/docs/guides/add-human-approval). The paused node runs again and `interrupt()` returns this value; `null` means cancelled. Send it only to resume a paused thread. Nested no deeper than 64 levels. |
 | `interrupt_id` | string | no | The `id` of the interrupt `resume` answers. Take it from `execution_meta.interrupt_data.interrupt.id` in the thread state. If the thread is not paused, or is paused at a different interrupt, the request gets `409` before anything runs. Ignored without `resume`. |
 | `on_busy` | string | no | `wait` (default) or `cancel`. What to do when another run is active on the thread (see [One run per thread](#one-run-per-thread)). |
-| `initial_state` | object | no | Initial state for the run. Custom fields and `current_node` are allowed; built-in fields are not (see input rules below). |
-| `config` | object | no | Run configuration |
-| `config.thread_id` | string | no | Id of an existing thread to continue. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.meta.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `403`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
+| `initial_state` | object | no | Initial state for the run. Custom fields and `current_node` are allowed; built-in fields are not (see input rules below). Nested no deeper than 64 levels. |
+| `config` | object | no | Run configuration. Nested no deeper than 64 levels. |
+| `config.thread_id` | string | no | Id of an existing thread to continue. Must match `^[A-Za-z0-9._:@-]{1,128}$`, else `422`. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.meta.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `403`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
 | `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `authz`, `collection` and `_`-prefixed keys. A client cannot choose a memory collection; it is ignored, not refused. See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). |
 | `recursion_limit` | integer | no | Maximum graph iterations. Default `25`, range `1`-`100`. |
 | `response_granularity` | string | no | `full`, `partial`, or `low`. Default `low`. |
@@ -72,6 +71,7 @@ Run the graph and return the complete result when all nodes finish.
 - `context_summary` or `execution_meta` in `initial_state`. Clients can never write these built-in fields.
 - A `current_node` in `initial_state` that is not a node in the graph.
 - A state value whose type does not match the state field. The error names the field.
+- An `initial_state`, `config` or `resume` value nested deeper than 64 levels. The answer is `422` with code `VALIDATION_ERROR`.
 
 Custom state fields are allowed. If the operator set `runs.state_keys` in `10xgraph.json`, only the listed keys are accepted. The server replaces any `message_id` you send with its own. The same rules apply to `POST /v1/graph/stream` and the WebSocket.
 
@@ -103,7 +103,7 @@ Messages may carry image and document content blocks referencing an uploaded `fi
 
 ### One run per thread
 
-The server runs one graph run at a time on a thread. A second run on a busy thread waits up to 30 seconds for the first to finish, then the request is rejected with `409` in the standard error body:
+The server runs one graph run at a time on a thread. A second run on a busy thread waits up to 30 seconds for the first to finish, then the request is rejected with `409` in the standard error body and a `Retry-After: 5` header:
 
 ```json
 {
@@ -116,14 +116,35 @@ On invoke and stream, this answer comes before the response starts. A new thread
 
 Set `on_busy` to `"cancel"` to stop the running run (the same mechanism as [`POST /v1/graph/stop`](#post-v1graphstop)) and start the new one. The 30-second wait limit and the `409` still apply if the old run does not stop in time.
 
+On invoke, a run that passes its recursion limit (`GraphRecursionError`) answers `422`, not `500`.
+
+### Idempotency keys
+
+Send an `Idempotency-Key` header (1 to 255 printable ASCII characters, else `422`) on `POST /v1/graph/invoke`, `POST /v1/graph/stream` and [`POST /v1/ag-ui`](/docs/reference/rest-api/ag-ui), or `idempotency_key` in the [WebSocket](#ws-v1graphws) run frame, so a gateway retry after a timeout does not run the tools twice. The header is opt-in: a request without it behaves as before. The key is scoped to the authenticated user.
+
+| Situation | Answer |
+| --- | --- |
+| First request with the key | Runs normally. |
+| Same key while that run is still going | `409` with `Retry-After: 5`. |
+| Same key after the run finished, invoke | The stored result, as the first call returned it. |
+| Same key after the run finished, stream | The final state line plus the `done` line, replayed as NDJSON. |
+| Same key after the run finished, AG-UI and WebSocket | `409`. Their event output is not stored. |
+| Same key with a different body | `422`. |
+| The first run failed | Nothing is stored, so the key can be retried. |
+| A result over 1 MiB | Not stored; later requests with the key answer `409`. |
+
+A finished run is remembered for `IDEMPOTENCY_TTL_SECONDS` (default 86400). Records live in Redis when it is configured, otherwise in the process, so without Redis they are per worker. If Redis cannot be reached the request runs without idempotency and a warning is logged.
+
 ### Resume answers
 
-A request with `resume` can fail two ways, both before the graph runs:
+A resume that does not fit the thread fails before the graph runs:
 
 | Status | Cause |
 | --- | --- |
-| `409` | `interrupt_id` was sent and the thread is not paused, or is paused at a different interrupt. |
-| `422` | The answer fails the interrupt's `response_schema`. |
+| `409` | `interrupt_id` was sent and the thread is not paused, or is paused at a different interrupt (`INTERRUPT_001`). |
+| `409` | `resume` was sent to a thread that is not paused at an `interrupt()` (`INTERRUPT_003`, `NothingToResumeError`). |
+| `409` | A plain new message was sent to a thread that is paused at an `interrupt()` (`INTERRUPT_004`, `InterruptPendingError`). Resume it with `resume`. |
+| `422` | The answer fails the interrupt's `response_schema` (`INTERRUPT_002`). |
 
 The schema check supports `type`, `enum`, `properties`, `required` and `items`. Other keywords are ignored. A `null` answer (cancel) is never checked. See [Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt).
 
@@ -135,13 +156,11 @@ Run the graph and stream one JSON-encoded `StreamChunk` per line.
 
 **Request body:** Same as `/v1/graph/invoke`, including `resume`, `interrupt_id`, `on_busy` and the size limits.
 
-A busy thread (`409`) and an `interrupt_id` mismatch (`409`) are answered before the stream starts, as a normal HTTP error. Failures once the stream is running arrive as an `error` chunk. With `MODE=production`, the text in an `error` chunk's `data` (`reason`, `error` or `message`) is replaced by the same generic message invoke uses, such as `An error occurred in a graph node.`; development shows the details. The built-in text for an unexpected tool failure (`Tool '<name>' failed with an internal error (reference <id>).`) is kept, because it holds no detail.
+A repeated `Idempotency-Key` is answered the same way (see [Idempotency keys](#idempotency-keys)). A busy thread (`409`, with `Retry-After: 5`), a run over the per-user cap (`429`, with `Retry-After: 5`), a resume that does not fit the thread (`409`) and a client that left while waiting for a busy thread (`499`, never read) are answered before the stream starts, as a normal HTTP error. Failures once the stream is running arrive as an `error` chunk. With `MODE=production`, the text in an `error` chunk's `data` (`reason`, `error` or `message`) is replaced by the same generic message invoke uses, such as `An error occurred in a graph node.`; development shows the details. The built-in text for an unexpected tool failure (`Tool '<name>' failed with an internal error (reference <id>).`) is kept, because it holds no detail.
 
-**Response:** `Content-Type: text/event-stream`
+**Response:** `Content-Type: application/x-ndjson`
 
-Despite the content type, the body is **not** SSE-framed. There are no `data:` prefixes and no
-blank-line separators. It is newline-delimited JSON, so split the body on newlines rather than
-using `EventSource` or an SSE client library.
+The body is newline-delimited JSON, not SSE. There are no `data:` prefixes. Split the body on newlines rather than using `EventSource` or an SSE client library. While the run is silent, the server sends a blank line every 15 seconds so a proxy's idle timeout does not cut the connection. Skip empty lines.
 
 ```
 {"event": "message", "message": {"role": "assistant", "content": [{"type": "text", "text": "The capital"}]}, "thread_id": "t1", ...}
@@ -163,7 +182,11 @@ using `EventSource` or an SSE client library.
 | `timestamp` | `number` | UNIX timestamp of chunk creation. |
 
 Tool activity arrives as ordinary `message` chunks whose `content` carries `tool_call` and
-`tool_result` blocks. There are no separate `tool_call` or `done` event types.
+`tool_result` blocks. There is no separate `tool_call` event type.
+
+A run that is refused because the graph is closing ends with a terminal `error` chunk whose `data` has `code: "SERVICE_UNAVAILABLE"`, a `reason` and `retry_after_seconds` (the same hint as the HTTP 503 `Retry-After`). No `done` chunk follows. Treat it as "retry on another replica", not as a failed run.
+
+A stream that finishes without an error ends with a terminal `updates` chunk whose `data` is `{"status": "done"}`. A client that waits for it can tell a finished stream from a cut one. If the server shuts down while the stream is open, the stream ends with a final chunk that says the run was interrupted and that the thread is saved: send a new request on the same `thread_id` to continue.
 
 ---
 
@@ -349,7 +372,7 @@ Turn-based streaming over a WebSocket. Same payloads as `POST /v1/graph/stream`,
 }
 ```
 
-`messages` must be non-empty, unless the frame carries `resume`. `config.thread_id` is optional; omit it, or send `"new"`, to start a new thread. The server picks the id and sends it on each chunk. A `thread_id` that does not exist gets an `error` chunk, the same as an unauthorized one, unless `runs.thread_ids` is `client`.
+`messages` must be non-empty, unless the frame carries `resume`. A frame may carry `idempotency_key` (see [Idempotency keys](#idempotency-keys)); a repeat of the key (while the run is going or after it finished) or a different body with the same key gets an `error` chunk, and the connection stays open. `config.thread_id` is optional; omit it, or send `"new"`, to start a new thread. The server picks the id and sends it on each chunk. A `thread_id` that does not exist gets an `error` chunk, the same as an unauthorized one, unless `runs.thread_ids` is `client`.
 
 **Answer an `interrupt()` pause.** A `fresh` frame accepts `resume` (any JSON value, `null` to cancel) and an optional `interrupt_id`, with the same meaning as on invoke. No `messages` are needed:
 

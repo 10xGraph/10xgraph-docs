@@ -20,6 +20,10 @@ The `ToolNode` converts your function's type hints and docstring into an OpenAI-
 
 **Parameter schema generation** uses your type annotations. 10xGraph supports `str`, `int`, `float`, `bool`, `datetime`, `date`, `time`, `UUID`, `Path`, `Decimal`, `bytes`, `list[X]`, `dict`, `Optional[X]`, `Literal[...]`, `Enum` subclasses, Pydantic `BaseModel` subclasses, and dataclasses. If your parameter type is not in that list, pass a hand-written schema with `@tool(parameters=...)` to avoid a runtime error.
 
+**Argument coercion.** The arguments the model sends are coerced against your type hints in lax mode. A value that converts cleanly is converted (`"5"` becomes `5` for an `int`, a number becomes a string for a `str`), and unknown extra keys are ignored. A value that cannot convert goes back to the model as a failed tool result, and the tool does not run.
+
+**Name forms.** `@tool("name")` works as a shorthand for `@tool(name="name")`, and `@tool` also works on bound methods.
+
 **The description** comes from the function's docstring (or the `description` arg). The LLM uses this to decide when and how to call the tool, so be specific: instead of "Fetch data," say "Fetch historical stock prices for a ticker symbol over a date range."
 
 **Injected parameters** like `tool_call_id`, `state`, `emit`, `config`, and others are excluded from the schema automatically. You declare them in your function signature to receive them at runtime, but the LLM never sees them.

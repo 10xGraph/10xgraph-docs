@@ -91,7 +91,7 @@ asyncio.run(stream_chat(app, "What is 2 + 2?", thread_id="session-1"))
 
 **Key patterns:**
 - Always branch on `chunk.event` before reading data.
-- `chunk.message`, `chunk.state`, and `chunk.data` are mutually exclusive; only one is set per event.
+- Usually one of `chunk.message`, `chunk.state` and `chunk.data` is set, but not always. A tool result chunk has event `message` and carries both the tool `Message` and `chunk.data` (`status`, `tool_name`, `args`, `tool_call_id`). Branch on `chunk.event`, then check each field for `None` before you read it.
 - `chunk.message.text()` extracts text from a message's content blocks (do not access `.content` directly).
 - Use `async for` to iterate; `astream()` is an async generator.
 - The first `MESSAGE` chunk is an echo of your input messages (role `user`). Skip it if you do not want to display it.

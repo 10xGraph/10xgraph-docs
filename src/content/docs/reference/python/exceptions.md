@@ -33,7 +33,7 @@ from tenxgraph.core.exceptions.media_exceptions import UnsupportedMediaInputErro
 
 ## Exception hierarchy and API status codes
 
-Most 10xGraph exceptions carry an `error_code`, a `message` and a `context` dict, and share a `to_dict()` method. When you run the API server, its error handlers map each class to an HTTP status, shown below. Subclasses fall under their parent's handler unless the table lists them.
+Most 10xGraph exceptions carry an `error_code`, a `message` and a `context` dict, and share a `to_dict()` method. Exception context is redacted in logs, but `err.context` keeps the real values, so do not forward it to a client unfiltered. For exceptions that are not 10xGraph's own, the text a client sees (the stream `ERROR` chunk `reason` and `state.error`) shows only the exception type; server logs keep the full text. When you run the API server, its error handlers map each class to an HTTP status, shown below. Subclasses fall under their parent's handler unless the table lists them.
 
 ```text
 Exception

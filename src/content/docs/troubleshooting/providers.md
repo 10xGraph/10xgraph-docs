@@ -10,7 +10,7 @@ faq:
   - q: "Which SDK extra do I need?"
     a: "Install the extra for your provider: 10xgraph[openai], 10xgraph[google-genai] or 10xgraph[anthropic]. For Claude on Vertex AI or Bedrock use 10xgraph[anthropic-vertex] or 10xgraph[anthropic-bedrock]."
   - q: "Why does my LLM call time out?"
-    a: "The default request timeout is 600 seconds. Raise it with the AGENTFLOW_LLM_TIMEOUT environment variable (in seconds), or pass timeout to Agent for OpenAI and Anthropic."
+    a: "The default request timeout is 600 seconds. Raise it with the TENXGRAPH_LLM_TIMEOUT environment variable (in seconds), or pass timeout to Agent for OpenAI and Anthropic."
   - q: "Do I need to enable retries for rate limits?"
     a: "No. Agent retries 429, 500, 502, 503 and 529 responses by default with exponential backoff. Pass a RetryConfig to change the limits."
 ---
@@ -27,7 +27,7 @@ When an agent fails at the provider boundary, the cause is almost always one of 
 | Model not found | Check the exact model id in the provider docs |
 | 429 or 529 responses | Keep retries on, or tune `RetryConfig` |
 | `GOOGLE_CLOUD_PROJECT environment variable must be set` | Export `GOOGLE_CLOUD_PROJECT` for Vertex AI |
-| Request times out | Raise `AGENTFLOW_LLM_TIMEOUT` or pass `timeout` |
+| Request times out | Raise `TENXGRAPH_LLM_TIMEOUT` or pass `timeout` |
 
 </aside>
 
@@ -209,12 +209,12 @@ Every LLM client is built with a request timeout of 600 seconds. If a call excee
 The timeout is resolved in this order, first match wins:
 
 1. A value set with `set_default_llm_timeout(seconds)` from `tenxgraph.core.llm.client_factory`.
-2. The `AGENTFLOW_LLM_TIMEOUT` environment variable, in seconds. Invalid or non-positive values are ignored with a warning.
+2. The `TENXGRAPH_LLM_TIMEOUT` environment variable, in seconds. Invalid or non-positive values are ignored with a warning. The old `AGENTFLOW_LLM_TIMEOUT` is still read as a deprecated fallback when `TENXGRAPH_LLM_TIMEOUT` is unset or empty. If `TENXGRAPH_LLM_TIMEOUT` is set but invalid or not positive, it is ignored with a warning and the built-in default applies; the old variable is not consulted.
 3. The built-in default of 600 seconds.
 
 ```bash
 # Allow up to 30 minutes per request
-export AGENTFLOW_LLM_TIMEOUT=1800
+export TENXGRAPH_LLM_TIMEOUT=1800
 ```
 
 For OpenAI and Anthropic you can also pass `timeout` to a single agent, which overrides the default for that client:

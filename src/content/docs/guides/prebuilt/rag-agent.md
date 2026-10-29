@@ -51,7 +51,7 @@ flowchart LR
 
 **RETRIEVE**, The agent extracts the user's latest question from the conversation and searches the vector store for the top `k` most similar documents. They are kept in a per-run cache on the `RAGAgent`, not in saved state.
 
-**RERANK** (optional), If you provide a reranker, it re-scores the candidates using a cross-encoder or other ranking function. This filters out false positives from vector similarity and returns only the top `n` most relevant results. Skipped if no reranker is configured.
+**RERANK** (optional), If you provide a reranker, it re-scores the candidates using a cross-encoder or other ranking function. This filters out false positives from vector similarity and returns only the top `n` most relevant results. Skipped if no reranker is configured. If the reranker raises an error, the run does not fail: the retriever's order is used.
 
 **SYNTHESIZE**, The agent numbers the retrieved documents, fences them in a `<retrieved_documents_...>` block, and adds that block to the latest user message of the request sent to the model, before the user's text. The underlying LLM (typically a faster or cheaper model) generates the answer from that request. The agent's own system prompt remains untouched, and the user message saved in the thread is never changed.
 

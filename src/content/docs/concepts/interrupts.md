@@ -163,12 +163,14 @@ result = await graph.ainvoke(
 
 The key is optional. Without it, the resume answers the pending interrupt as before.
 
-Two errors can reject a resume. Nothing is recorded when either is raised, and both are also `ValueError`s, so existing handlers for a bad resume keep working.
+Four errors can reject a resume or the input meant for a paused thread. Nothing is recorded when one is raised, and all are also `ValueError`s, so existing handlers for a bad resume keep working. The API server answers 409 for `INTERRUPT_001`, `INTERRUPT_003` and `INTERRUPT_004`, and 422 for `INTERRUPT_002`.
 
 | Exception | Code | Raised when |
 |---|---|---|
 | `InterruptMismatchError` | `INTERRUPT_001` | `resume_interrupt_id` is not the id of the pending interrupt. |
 | `ResumeValidationError` | `INTERRUPT_002` | The resume value fails the interrupt's `response_schema`. |
+| `NothingToResumeError` | `INTERRUPT_003` | A `resume` was sent to a thread that is not paused at an `interrupt()`. |
+| `InterruptPendingError` | `INTERRUPT_004` | A plain new message was sent to a thread that is paused at an `interrupt()`. Resume it with a `resume` value. |
 
 A resume of `None` (a cancel) is never checked against the schema.
 

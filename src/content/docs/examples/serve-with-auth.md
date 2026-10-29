@@ -45,7 +45,7 @@ The rate limit section of `10xgraph.json` as generated:
   "window": 60,
   "by": "ip",
   "trusted_proxy_headers": false,
-  "exclude_paths": ["/ping", "/docs", "/redoc", "/openapi.json"],
+  "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"],
   "redis": { "url": "${REDIS_URL}" }
 }
 ```
@@ -154,7 +154,7 @@ This writes `Dockerfile`, `.dockerignore` and `docker-compose.yml` (add `--k8s` 
 - A two-stage `Dockerfile`: dependencies install in a builder stage, the CLI libraries and pip are removed, and the runtime image runs as the numeric non-root user `10001:10001`.
 - `WEB_CONCURRENCY=2` Gunicorn workers with `uvicorn_worker.UvicornWorker`, and `MODE=production`.
 - A `HEALTHCHECK` against `/ping`.
-- In `docker-compose.yml`: the port bound to `127.0.0.1:8000` (put a TLS proxy in front), `read_only: true` with `/tmp` as tmpfs, `cap_drop: ALL`, `no-new-privileges`, and a 600 s `stop_grace_period`.
+- In `docker-compose.yml`: the port bound to `127.0.0.1:8000` (put a TLS proxy in front), `read_only: true` with `/tmp` as tmpfs, `cap_drop: ALL`, `no-new-privileges`, and a 660 s `stop_grace_period`.
 - Secrets come from `.env` at run time. `.dockerignore` keeps `.env` out of the image.
 
 ```bash

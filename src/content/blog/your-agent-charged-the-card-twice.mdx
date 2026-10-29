@@ -14,7 +14,7 @@ faq:
   - q: Which checkpointers support the tool ledger?
     a: PgCheckpointer stores it durably in a tool_executions table. InMemoryCheckpointer keeps it in process memory. SqliteCheckpointer does not implement it, so tools there run at least once, as before.
   - q: Does the ledger work for streaming runs?
-    a: Not yet. As of 0.10.3 the ledger, per-step durable checkpoints and node and tool timeouts apply to invoke and ainvoke. Streaming runs persist state at terminal points and run tools without a ledger lookup.
+    a: Yes. The ledger, per-step durable checkpoints and node and tool timeouts apply to invoke, ainvoke, stream and astream.
   - q: What happens if recording a tool result fails?
     a: The tool result is still returned to the model and the run continues. The failure is logged at error level with an explicit warning that a replay of that node may run the tool again.
 ---
@@ -99,7 +99,7 @@ if checkpointer and ledger_key:
     if recorded is not None:
         return recorded  # already ran: replay the result, do not call the tool
 
-timeout = resolve_timeout(config, "tool_timeout", DEFAULT_TOOL_TIMEOUT_SECONDS)
+timeout = resolve_timeout(config, "tool_timeout", DEFAULT_TOOL_TIMEOUT_SECONDS)  # default None
 tool_result = await self._invoke_tool_guarded(
     function_name, function_args, tool_call_id, state, config, timeout, tool_attrs
 )
@@ -237,14 +237,14 @@ The Redis cache has its own version guard and is cleared when a write conflicts.
 
 Crashes are not the only way a node fails to finish. A tool blocked on a half-open socket, or an MCP server that accepts a connection and never answers, will hold a node open forever. The model SDK's request timeout does not help, because it does not cover tool execution. The step counter never advances, so the recursion limit never trips. Eventually an operator kills the worker, and you are back in the crash-and-replay case.
 
-10xGraph puts a deadline on both levels:
+10xGraph can put a deadline on both levels. Neither has a default, so you set them:
 
 | Config key | Default | Bounds |
 |---|---|---|
-| `node_timeout` | 900 seconds | A whole node, including every tool it runs |
-| `tool_timeout` | 300 seconds | A single tool call |
+| `node_timeout` | None (no limit) | A whole node, including every tool it runs |
+| `tool_timeout` | None (no limit) | A single tool call |
 
-Both can be overridden per run in the config. `None` or any non-positive value, such as `0`, disables the deadline. An invalid value logs a warning and falls back to the default. The node default deliberately sits above the default model request timeout of 600 seconds, so a slow model call fails with its own error instead of a generic node timeout.
+Both can be overridden per run in the config. `None` or any non-positive value, such as `0`, disables the deadline. An invalid value logs a warning and falls back to the default, which is no limit. A value you set applies to both invoke and stream. Keep the node limit above the default model request timeout of 600 seconds, so a slow model call fails with its own error instead of a generic node timeout.
 
 ```python title="run_agent.py"
 config = {
@@ -274,7 +274,6 @@ You can turn this off with `"durable_checkpoint_every_step": False` in the run c
 
 These are the limits we know about as of 0.10.3.
 
-- **Streaming runs are not covered yet.** The ledger lookup, per-step durable checkpoints and node and tool timeouts are implemented in the `invoke` / `ainvoke` path. The streaming path (`stream` / `astream`) runs tools without a ledger lookup, writes durably only at terminal points, and has no deadlines. If an agent has non-idempotent tools and runs over streaming, the provider idempotency key is your protection until streaming gets the same treatment.
 - **At least once, not exactly once.** The window between a side effect and its ledger record is small but real. See the section above.
 - **The ledger records outcomes, not intent.** A tool that starts a long external job and crashes before returning has no record, so it is started again on replay. For long-running work, have the tool return a job handle quickly and track the job's progress separately.
 - **SQLite has no ledger.** Use `PgCheckpointer` anywhere double execution matters.
@@ -285,7 +284,7 @@ These are the limits we know about as of 0.10.3.
 - [ ] Use `invoke` / `ainvoke` for runs whose tools have side effects you cannot repeat.
 - [ ] Give every money-moving or message-sending tool an idempotency key derived from your domain.
 - [ ] Put side effects after `interrupt()` calls, never before them.
-- [ ] Set `tool_timeout` to what your slowest healthy tool needs plus some margin, not to the 300 second default.
+- [ ] Set `tool_timeout` to what your slowest healthy tool needs plus some margin, and do not leave it unset.
 - [ ] Alert on the "COMPLETED but could not be recorded" log line and on `tenxgraph.tool.timeouts`.
 - [ ] Always pass an explicit `thread_id`. Without one the runtime generates a random ID, and the run can be neither resumed nor stopped.
 - [ ] Keep `durable_checkpoint_every_step` at its default of `true`.

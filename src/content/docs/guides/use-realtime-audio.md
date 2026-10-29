@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Streaming, media and realtime"
 order: 340
 label: Realtime audio (Gemini Live)
-updated: "2026-10-27"
+updated: "2026-10-29"
 ---
 
 The realtime subsystem adds live, audio-to-audio sessions to 10xGraph. Unlike `invoke` and `stream`, which traverse a turn-based super-step loop, a realtime graph is driven by a separate runtime: the provider owns the turn loop and 10xGraph wraps it.
@@ -255,6 +255,8 @@ app = AudioAgent(
 ```
 
 Tool events appear in the stream as `ToolCallEvent` (before execution) and `ToolResultEvent` (after). Sub-agents and handoff are not supported in v1.
+
+**A tool call runs once per thread.** If the provider re-sends a call after a reconnect, or a new session on the same thread repeats it, 10xGraph returns the recorded result instead of running the tool again. The key is the thread id, a hash of the tool name and arguments, and the provider's call id, and it needs a checkpointer on the session. This matters for tools with side effects such as payments or emails. See [Tool call deduplication](/docs/reference/python/realtime#tool-call-deduplication).
 
 ---
 

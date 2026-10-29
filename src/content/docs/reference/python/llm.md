@@ -222,7 +222,7 @@ def get_default_llm_timeout() -> float
 Returns the timeout in seconds actually in effect. First match wins:
 
 1. An override set through `set_default_llm_timeout`.
-2. The `AGENTFLOW_LLM_TIMEOUT` environment variable, in seconds (invalid or non-positive values are ignored with a warning).
+2. The `TENXGRAPH_LLM_TIMEOUT` environment variable, in seconds (invalid or non-positive values are ignored with a warning). The old `AGENTFLOW_LLM_TIMEOUT` is still read as a deprecated fallback when `TENXGRAPH_LLM_TIMEOUT` is unset or empty. If `TENXGRAPH_LLM_TIMEOUT` is set but invalid or not positive, it is ignored with a warning and the built-in default applies; the old variable is not consulted.
 3. `DEFAULT_LLM_TIMEOUT_SECONDS`.
 
 ### `set_default_llm_timeout`
@@ -240,10 +240,10 @@ set_default_llm_timeout(120.0)
 get_default_llm_timeout()  # 120.0
 
 set_default_llm_timeout(None)
-get_default_llm_timeout()  # 600.0, or AGENTFLOW_LLM_TIMEOUT if set
+get_default_llm_timeout()  # 600.0, or TENXGRAPH_LLM_TIMEOUT if set
 ```
 
-This bounds the provider request only. Node and tool execution have their own deadlines: see `node_timeout` and `tool_timeout` in the [graph reference](/docs/reference/python/graph#execution-deadlines). The node default (900s) is deliberately above the LLM default (600s), so a slow LLM call fails with its own error instead of being masked by the node deadline.
+This bounds the provider request only. Node and tool execution have their own deadlines: see `node_timeout` and `tool_timeout` in the [graph reference](/docs/reference/python/graph#execution-deadlines). If you set `node_timeout`, keep it above the LLM default (600s), so a slow LLM call fails with its own error instead of being masked by the node deadline.
 
 ---
 

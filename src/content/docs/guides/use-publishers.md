@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Observability and operations"
 order: 390
 label: Publishers
-updated: "2026-10-27"
+updated: "2026-10-29"
 ---
 
 Publishers allow you to observe and audit agent execution by forwarding structured events to external systems. Every time your graph runs, publishers emit events for graph starts and ends, node execution, tool calls, LLM requests, state updates, errors, and streaming tokens. You can subscribe to these events in real-time to monitor your agent, log audits, trigger alerts, or analyze behavior. Publishers are optional: your graph works without them, but adding one is essential for production deployments.
@@ -318,8 +318,11 @@ asyncio.run(listen())
 | `exchange_type` | `"topic"` | `"topic"`, `"direct"`, `"fanout"`, `"headers"`. |
 | `declare` | `True` | Declare the exchange if it doesn't exist. |
 | `durable` | `True` | Exchange survives broker restarts. |
-| `connection_timeout` | `10` | Connection timeout in seconds. |
+| `connection_timeout` | `10` | Connection timeout in seconds. Also bounds opening the channel after the connection is up. |
 | `heartbeat` | `60` | Heartbeat interval in seconds. |
+| `publish_timeout` | none | Seconds to wait for one send. Unset waits for the broker; a timed-out event is dropped and logged. |
+
+Any publisher also accepts `publish_timeout` and `state_snapshot_limit` in its config. See [Large state snapshots](/docs/reference/python/publishers#large-state-snapshots).
 
 For TLS, use an `amqps://` URL, for example `"url": "amqps://user:pass@mq.example.com/"`.
 

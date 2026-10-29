@@ -22,7 +22,7 @@ These pages compare **10xGraph** with other Python agent frameworks, written by 
 
 Most agent frameworks give you a graph or a crew. The comparisons start with what happens after that, because it is where the frameworks differ most. 10xGraph generates, in the open-source install under the MIT license:
 
-- **A production server.** REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph, with JWT or custom auth, role scopes and owner-only threads
+- **A production server.** REST, NDJSON streaming, WebSocket and realtime-audio endpoints from the compiled graph, with JWT or custom auth, role scopes and owner-only threads
 - **Rate limits and deploy files.** Memory or Redis rate limiting, and `10xgraph build --docker-compose --k8s` for Docker Compose and Kubernetes manifests
 - **Correct behavior under failure.** Replay-safe tool calls, versioned (compare-and-swap) state writes, and node and tool timeouts
 - **A typed TypeScript client.** `10xgraph-client` for invoking and streaming from any frontend

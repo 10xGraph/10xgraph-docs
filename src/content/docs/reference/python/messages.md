@@ -262,6 +262,10 @@ Exposes a reasoning model's thinking trace when the provider returns one.
 | `type` | `"reasoning"` | Discriminator. |
 | `summary` | `str` | Summary of the reasoning. |
 | `details` | `list[str] \| None` | Detailed reasoning steps. |
+| `signature` | `str \| None` | Anthropic signature of a `thinking` block. Kept verbatim so the block can be replayed to Anthropic, which rejects an edited or unsigned one. |
+| `redacted_data` | `str \| None` | Opaque payload of an Anthropic `redacted_thinking` block, kept verbatim for replay. `summary` is empty for these. |
+
+Anthropic blocks are stored first in the message and are sent only to Anthropic. See [Thinking blocks are kept and replayed](/docs/integrations/anthropic#thinking-blocks-are-kept-and-replayed).
 
 ---
 

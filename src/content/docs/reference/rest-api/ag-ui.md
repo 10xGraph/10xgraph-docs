@@ -49,7 +49,7 @@ If `ag_ui.enabled` is `true` but the extra is missing, the server refuses to sta
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `threadId` | yes | The 10xGraph thread. Runs on the same `threadId` share the checkpoint |
+| `threadId` | yes | The 10xGraph thread, matching `^[A-Za-z0-9._:@-]{1,128}$` (else `422`). Runs on the same `threadId` share the checkpoint. Send a blank or `"new"` to have the server create the thread; the id comes back in `RUN_STARTED`. An id the server never issued gets `403` unless `runs.thread_ids` is `client` |
 | `runId` | yes | Client-chosen id, echoed on `RUN_STARTED` and `RUN_FINISHED` |
 | `messages` | yes | The conversation as the client sees it. Only the new trailing user turn, or tool results for a pending browser tool call, reach the graph |
 | `state` | no | Initial application state for the run. The keys `context`, `context_summary` and `execution_meta` are dropped |
@@ -177,7 +177,7 @@ With `ag_ui.allow_client_tools` set to `false`, tools sent by the client are ign
 
 ## Authentication
 
-The route uses `RequirePermission("graph", "stream")`, the same permission as [`POST /v1/graph/stream`](/docs/reference/rest-api/graph). When auth is configured, the server also checks that the caller may access `threadId` through the [authorization backend](/docs/reference/api-cli/auth), so with `ownership` one user cannot run or read another user's thread. AG-UI accepts a `threadId` the frontend made even when `runs.thread_ids` is `server`, because CopilotKit creates its own. The caller then owns that thread.
+The route uses `RequirePermission("graph", "stream")`, the same permission as [`POST /v1/graph/stream`](/docs/reference/rest-api/graph). When auth is configured, the server also checks that the caller may access `threadId` through the [authorization backend](/docs/reference/api-cli/auth), so with `ownership` one user cannot run or read another user's thread. AG-UI follows [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids) like REST. Under the default `server`, a `threadId` the server never issued gets `403`. A blank or `"new"` `threadId` makes the server create the thread, and the new id comes back in `RUN_STARTED`. Frontends that make their own ids (CopilotKit does by default) must set `runs.thread_ids` to `client`.
 
 Browsers should not hold the API token. With CopilotKit, set the `Authorization` header in the Next.js route handler through `HttpAgent`'s `headers` option, so the token stays on the server.
 
@@ -192,7 +192,7 @@ Errors found before the stream starts return a normal HTTP error. See [Conventio
 | Status | Cause |
 | --- | --- |
 | `401` | Auth is configured and no valid token was sent |
-| `403` | The caller lacks `graph:stream`, or may not access this `threadId` |
+| `403` | The caller lacks `graph:stream`, or may not access this `threadId` (including an id the server never issued under `runs.thread_ids: server`) |
 | `404` | The endpoint is not enabled (`ag_ui.enabled` is not `true`) |
 | `409` | Another run is still active on this `threadId` after 30 seconds. See [One run per thread](#one-run-per-thread) |
 | `422` | The body is not JSON, is not a valid `RunAgentInput`, has no `threadId`, breaks a [client tool limit](#client-tools), or breaks a [request size limit](#request-size-limits) |
@@ -212,6 +212,10 @@ Once the stream has started, failures arrive as a `RUN_ERROR` event instead:
 The server runs one graph run at a time on a thread. A second AG-UI run on a busy thread waits up to 30 seconds for the first to finish, then gets `409` with `thread is busy` in the standard error body. This happens before the stream starts. AG-UI has no `on_busy` field, so it always waits and never cancels the running run. When Redis is configured, the lock is shared across replicas; otherwise it is per process.
 
 ---
+
+## Idempotency
+
+Send an `Idempotency-Key` header to make a retried request safe. A repeat while the run is going answers `409` with `Retry-After`; a repeat after it finished answers `409` too, because the event stream is not stored; a different body with the same key answers `422`. See [Idempotency keys](/docs/reference/rest-api/graph#idempotency-keys).
 
 ## Request size limits
 

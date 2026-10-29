@@ -86,6 +86,8 @@ This ensures:
 
 ### Handoff tools injected automatically
 
+Member names match case-insensitively, and two members whose names differ only in case raise `ValueError`.
+
 SwarmAgent generates `transfer_to_<member_name>` (lowercase member name) tools for each member's allowed targets and injects them into the member's `ToolNode`. These are made with `create_handoff_tool`. They are not executed as tools; when the LLM calls one, the routing logic intercepts the call and navigates the graph directly to the target member. This prevents spurious `tool` role messages in the conversation history, the handoff is clean, and the next member sees a natural continuation of the conversation.
 
 Each handoff tool's docstring includes the target member's `description` field, so the LLM understands when and why to route there. For example, if RESEARCHER has `description="Gathers facts from the web"`, the handoff tool is named `transfer_to_researcher`, takes no arguments, and carries "Gathers facts from the web" as its description.

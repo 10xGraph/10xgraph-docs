@@ -35,7 +35,7 @@ The first rows are where the two differ most. Orchestration and retrieval basics
 
 | | 10xGraph | LlamaIndex |
 |---|---|---|
-| Production server (REST, SSE, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | The workflow server wraps workflows as REST endpoints with event streaming. `llamactl serve` runs it locally, and LlamaCloud or self-hosted infrastructure are the documented deployment options ([workflow server docs](https://developers.llamaindex.ai/python/llamaagents/llamactl/workflow-api/), [overview](https://developers.llamaindex.ai/python/llamaagents/overview/)) |
+| Production server (REST, NDJSON streaming, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, NDJSON streaming, WebSocket and realtime-audio endpoints from the compiled graph | The workflow server wraps workflows as REST endpoints with event streaming. `llamactl serve` runs it locally, and LlamaCloud or self-hosted infrastructure are the documented deployment options ([workflow server docs](https://developers.llamaindex.ai/python/llamaagents/llamactl/workflow-api/), [overview](https://developers.llamaindex.ai/python/llamaagents/overview/)) |
 | Auth (JWT or custom) | JWT (`"auth": "jwt"`) or a custom `BaseAuth` subclass | Local development runs unprotected. Cloud deployments use a LlamaCloud API token ([workflow server docs](https://developers.llamaindex.ai/python/llamaagents/llamactl/workflow-api/)) |
 | Authorization | Role scopes (such as `graph:invoke`, `checkpointer:read`) or a custom `AuthorizationBackend` | Not documented |
 | Thread ownership isolation | Built-in `"authorization": "ownership"` backend, with a two-tier cached owner check | Not documented |
@@ -43,7 +43,7 @@ The first rows are where the two differ most. Orchestration and retrieval basics
 | Rate limiting | Memory or Redis sliding-window limits on the API, set in `10xgraph.json` | Not documented |
 | Replay-safe tool calls after a crash | Tool ledger in the checkpointer: a tool that already ran is not executed again on resume. Needs a checkpointer | Not documented. The docs mention durable workflows without detail ([workflow server docs](https://developers.llamaindex.ai/python/llamaagents/llamactl/workflow-api/)) |
 | Versioned (compare-and-swap) state writes | Optimistic version check on durable writes in `PgCheckpointer` | Not documented |
-| Node and tool timeouts | `node_timeout` and `tool_timeout`, with defaults of 900 s and 300 s | Not documented |
+| Node and tool timeouts | `node_timeout` and `tool_timeout`, off until you set them | Not documented |
 | Docker Compose and Kubernetes manifests | `10xgraph build --docker-compose --k8s` writes `Dockerfile`, `docker-compose.yml`, `k8s.yaml` | Not documented |
 | License | MIT, including API/CLI and client | `llama-index-core` is MIT ([PyPI](https://pypi.org/project/llama-index-core/)). LlamaParse is credit-priced with Free, Starter, Pro and Enterprise tiers ([pricing](https://www.llamaindex.ai/pricing)) |
 | TypeScript | Typed `10xgraph-client` for the 10xGraph API | LlamaIndex.TS, a separate MIT-licensed TypeScript framework ([repository](https://github.com/run-llama/LlamaIndexTS)), and React UI hooks in LlamaAgents ([overview](https://developers.llamaindex.ai/python/llamaagents/overview/)) |
@@ -139,7 +139,7 @@ pip install "10xgraph[google-genai,pg_checkpoint]" 10xgraph-api llama-index
 10xgraph build --docker-compose --k8s
 ```
 
-You get REST and SSE endpoints for invoke, stream and thread state, plus a WebSocket endpoint, with JWT checks and owner-only threads in front of them.
+You get REST and NDJSON streaming endpoints for invoke, stream and thread state, plus a WebSocket endpoint, with JWT checks and owner-only threads in front of them.
 
 ## Calling from TypeScript
 

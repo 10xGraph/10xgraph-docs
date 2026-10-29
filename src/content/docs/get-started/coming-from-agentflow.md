@@ -90,7 +90,7 @@ For each CLI variable the CLI checks `TENXGRAPH_<NAME>` first and uses `AGENTFLO
 | `AGENTFLOW_NO_SPINNER` | `TENXGRAPH_NO_SPINNER` |
 | `AGENTFLOW_ASCII` | `TENXGRAPH_ASCII` |
 
-Variables that configure your own app or the server, such as `JWT_SECRET_KEY`, `REDIS_URL` or `DATABASE_URL`, are not renamed. Core also still reads `AGENTFLOW_LLM_TIMEOUT` for the LLM client timeout.
+Variables that configure your own app or the server, such as `JWT_SECRET_KEY`, `REDIS_URL` or `DATABASE_URL`, are not renamed. Core reads `TENXGRAPH_LLM_TIMEOUT` for the LLM client timeout and still falls back to `AGENTFLOW_LLM_TIMEOUT` when the new one is unset or empty.
 
 ## Update the WebSocket subprotocol
 

@@ -375,7 +375,7 @@ The `"memory"` backend counts per process, so with three workers you allow three
 
 ### 5. Wire observability
 
-A production agent you cannot trace is one you cannot debug. At minimum, set `MODE=production` and `IS_DEBUG=false` in the environment (the server forces debug off in production anyway), and configure logging. See [Observability](/docs/server/observability).
+A production agent you cannot trace is one you cannot debug. At minimum, set `MODE=production` in the environment (it turns debug off), and configure logging. See [Observability](/docs/server/observability).
 
 ## Verify before you deploy
 

@@ -43,7 +43,7 @@ The simplest setup stores counters in the process memory. It works with a single
     "requests": 100,
     "window": 60,
     "by": "ip",
-    "exclude_paths": ["/ping", "/docs", "/redoc", "/openapi.json"]
+    "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
   }
 }
 ```
@@ -105,7 +105,7 @@ pip install "10xgraph-api[redis]"
     "window": 60,
     "by": "ip",
     "trusted_proxy_headers": true,
-    "exclude_paths": ["/ping", "/metrics", "/docs", "/redoc", "/openapi.json"],
+    "exclude_paths": ["/ping", "/metrics", "/docs", "/redocs", "/openapi.json"],
     "redis": {
       "url": "${RATE_LIMIT_REDIS_URL}",
       "prefix": "10xgraph:rate-limit"
@@ -299,12 +299,12 @@ Add monitoring, health-check, and documentation paths to `exclude_paths` so they
 ```json
 {
   "rate_limit": {
-    "exclude_paths": ["/ping", "/metrics", "/docs", "/redoc", "/openapi.json"]
+    "exclude_paths": ["/ping", "/metrics", "/docs", "/redocs", "/openapi.json"]
   }
 }
 ```
 
-Health checks (`/ping`) are excluded automatically and do not need to be listed. Other status endpoints, readiness checks, and documentation paths should be added here so your monitoring and developers do not trigger limits.
+Health checks (`/ping`) are excluded automatically and do not need to be listed. Other status endpoints, readiness checks, and documentation paths should be added here so your monitoring and developers do not trigger limits. The ReDoc page is served at `/redocs`, not `/redoc`, so listing `/redoc` excludes nothing.
 
 ## Disabling rate limiting
 

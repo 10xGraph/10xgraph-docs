@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 40
 label: Tools
-updated: "2026-10-08"
+updated: "2026-10-29"
 ---
 
 ToolNode is a unified registry and executor for Python functions and MCP tools. It automatically generates JSON schemas from type annotations, executes tool calls in parallel, handles errors, and publishes events. Pair it with `Agent` to give LLMs access to callable tools, or use the utilities and decorators to define, inspect, and manage tool metadata.
@@ -29,14 +29,38 @@ A unified registry and executor for callable tools from multiple sources (local 
 ### Constructor
 
 ```python
-ToolNode(tools, client=None, pass_user_info_to_mcp=False)
+ToolNode(
+    tools,
+    client=None,
+    pass_user_info_to_mcp=False,
+    max_result_chars=None,
+    mcp_include=None,
+    mcp_exclude=None,
+    mcp_prefix=None,
+    mcp_max_result_chars=None,
+    mcp_max_description_chars=None,
+    mcp_cache_tools=True,
+    mcp_connect_timeout=30.0,
+)
 ```
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `tools` | `Iterable[Callable]` | **required** | Local Python functions to register. Each is registered under its `__name__`. Pass an empty list when only serving MCP tools. |
 | `client` | `fastmcp.Client \| None` | `None` | MCP client for remote tool access. Requires `pip install "10xgraph[mcp]"`. |
-| `pass_user_info_to_mcp` | `bool` | `False` | Forward the run config's `user` dict to MCP tool calls as request metadata, readable on the server. |
+| `pass_user_info_to_mcp` | `bool` | `False` | Forward the run config's `user` dict to MCP tool calls as request metadata (`meta`), readable on the server as `ctx.request_context.meta`. It is not sent as a tool argument. It logs a warning if the client's `call_tool` has no `meta` parameter. |
+| `max_result_chars` | `int \| None` | `None` | Cap on the text a local tool returns. Longer text is cut and a marker is appended, so one huge result is not saved to state and re-sent to the model every turn. `None` means no cap. |
+| `mcp_include` | `Iterable[str] \| None` | `None` | Allow-list of MCP tool names. Only these are shown to the model and callable. `None` means every tool the server lists. |
+| `mcp_exclude` | `Iterable[str] \| None` | `None` | MCP tool names to hide and refuse, applied after `mcp_include`. |
+| `mcp_prefix` | `str \| None` | `None` | String put in front of every MCP tool name the model sees (for example `"github_"`), so two `ToolNode`s can expose servers that share a tool name. It is removed again before the server call. `mcp_include` and `mcp_exclude` match the server's own names, without the prefix. |
+| `mcp_max_result_chars` | `int \| None` | `None` | Cap on the text of one MCP tool result. Longer output is cut and a marker is appended. `None` means no cap. |
+| `mcp_max_description_chars` | `int \| None` | `None` | Cap on an MCP tool description, which is sent to the model on every call. A longer description is cut and ends in `...`. `None` means no cap. |
+| `mcp_cache_tools` | `bool` | `True` | List the server's tools once per `ToolNode` and reuse the list, which saves a connect, ping and list round trip per model call. Set `False` to list the server every time. See [MCP tool list caching](#mcp-tool-list-caching). |
+| `mcp_connect_timeout` | `float \| None` | `30.0` | Seconds to wait for the MCP connection to open. Only the connect is bounded, never a tool call. If the connect times out, the tool call fails like any other tool error (the model sees a generic failure and the log says `MCP connect timed out after ...s`), and a tool listing that times out returns no MCP tools and is not cached. `None` waits without a limit. |
+
+`tools` may also be a generator. If a different callable is registered under the name of an existing tool, `ToolNode` logs a warning and the new one replaces the old.
+
+**Argument coercion.** Arguments the model sends are coerced against the tool's type hints in lax mode. A value that converts cleanly is converted: `"5"` for an `int` becomes `5`, and a number for a `str` becomes a string. Unknown extra keys are ignored. A value that cannot convert (`"abc"` for an `int`) is not run: the model gets a failed tool result and the tool does not execute.
 
 **Raises:** `TypeError` when an item in `tools` is not callable; `ImportError` when a `client` is given but the MCP packages are not installed.
 
@@ -48,6 +72,20 @@ ToolNode(tools, client=None, pass_user_info_to_mcp=False)
 | `all_tools` | `await all_tools(tags: set[str] \| None = None, config: dict \| None = None)` | `list[dict]` | Async method returning JSON schemas for all registered tools, optionally filtered by tags. |
 | `all_tools_sync` | `all_tools_sync(tags: set[str] \| None = None, config: dict \| None = None)` | `list[dict]` | Synchronous version of `all_tools`. |
 | `add_tool` | `add_tool(tool: Callable)` | `None` | Register one more function after construction. Raises `TypeError` if it is not callable. |
+| `refresh_mcp_tools` | `await refresh_mcp_tools()` | `list[dict]` | Drop the cached MCP tool list, fetch it from the server again and return the JSON schemas. Returns `[]` when there is no MCP client. |
+
+### MCP tool list caching
+
+By default a `ToolNode` fetches the MCP server's tool list once and reuses it for the life of the node. Tools that you add to the server later do not appear, and removed tools stay listed, until you refresh. A failed listing is never cached, so a server that was down at the first call is listed again on the next one.
+
+```python
+tool_node = ToolNode([], client=client)
+
+# After you deploy new tools to the MCP server:
+schemas = await tool_node.refresh_mcp_tools()
+```
+
+If your server changes its tools while the process runs and you want every model call to see the change, construct the node with `mcp_cache_tools=False`. That costs a connect, ping and list round trip per model call.
 
 ### Example
 
@@ -143,7 +181,7 @@ Mark a function as a tool with metadata for schema generation and filtering.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `name` | `str \| None` | `None` | Tool name. If None, uses the function's `__name__`. |
+| `name` | `str \| None` | `None` | Tool name. If None, uses the function's `__name__`. `@tool("name")` also works as the name form. `@tool` works on bound methods too. |
 | `description` | `str \| None` | `None` | Tool description. If None, uses the function's docstring, or "No description provided." when there is none. |
 | `tags` | `list[str] \| set[str] \| None` | `None` | Tags for categorizing and filtering tools. Examples: `["search", "web"]`. |
 | `provider` | `str \| None` | `None` | Provider or source of the tool (e.g., "local", "mcp", "composio"). |
@@ -304,6 +342,31 @@ else:
     print('MCP support requires: pip install "10xgraph[mcp]"')
     tools = ToolNode([my_function])
 ```
+
+---
+
+## Per-tool access control
+
+Scopes guard API routes. Inside a tool you have the run config, the authenticated user and the authorization helpers, so you decide what each tool may do. A tool receives these by naming the parameter, and they are not shown to the model:
+
+`tool_call_id`, `state`, `config`, `emit`, `generated_id`, `context_manager`, `publisher`, `checkpointer`, `store`, `task_manager`.
+
+```python
+from tenxgraph.core.authz import get_authz, has_scope
+from tenxgraph.core.state import ToolResult
+from tenxgraph.utils import tool
+
+
+@tool
+def delete_record(record_id: str, config: dict) -> ToolResult | str:
+    """Delete a record."""
+    if not has_scope(config, "records:delete"):
+        return ToolResult(message="You do not have permission to delete records.", is_error=True)
+    user_id = (get_authz(config) or {}).get("user_id")
+    return f"Record {record_id} deleted by {user_id}."
+```
+
+Return a `ToolResult` with `is_error=True` to refuse in words the model can relay. A raised exception reaches the model only as a generic failure with a reference. See [Control access inside a tool](/docs/guides/authorization-scopes#control-access-inside-a-tool) for the full guide, including the no-auth and empty-scope cases.
 
 ---
 

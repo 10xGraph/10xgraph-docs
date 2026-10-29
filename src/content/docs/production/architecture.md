@@ -49,7 +49,7 @@ This is the order a request travels, outermost layer first. The middleware order
 | 9 | Per-thread run lock | One run at a time on a thread. A busy thread is waited on for up to 30 seconds, then a 409. `on_busy: "cancel"` asks the active run to stop first. |
 | 10 | Per-user run cap | `runs.max_concurrent_per_user` (default 10) bounds runs in flight for a user. Over the cap is a 429. |
 | 11 | Graph run | Your compiled graph runs, bounded by `runs.timeout` if set (invoke returns 504, a stream ends with an error chunk). |
-| 12 | Nodes and tools | Each node and tool call has its own timeout (defaults 900 s and 300 s), and tools run in parallel up to a cap (default 10). |
+| 12 | Nodes and tools | Each node and tool call can have its own timeout (`node_timeout` and `tool_timeout`, no default), and tools run in parallel up to a cap (default 10). |
 | 13 | Persistence | The checkpointer saves state at each step. Stores and media are read and written as the graph asks. |
 
 Both lock and cap are taken before the response starts, so a busy or over-cap request gets a real 409 or 429 status, not an error halfway through a stream. See [Security model](/docs/production/security-model) for what steps 3, 4, 8 and 9 protect against.

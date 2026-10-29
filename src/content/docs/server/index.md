@@ -63,7 +63,7 @@ All endpoints except `/ping` enforce an auth + authorization layer. Your choice 
 Authorization (per-resource access control) is separate and optional:
 
 - **Ownership** (default in production): A user can access only threads they created. Enforced on every thread operation (invoke, stream, read state, delete).
-- **RBAC** (role-based access control): Custom `AuthorizationBackend` subclass for per-tool access, team scopes, or resource-level rules.
+- **RBAC** (role-based access control): Custom `AuthorizationBackend` subclass for per-route scopes (such as `graph:invoke` or `store:write`), team scopes, or resource-level rules. Scopes guard routes, not individual tools; to check a scope inside a tool, use `has_scope` in the tool code.
 - **Allow all** (default in development): All authenticated users can access all resources.
 
 WebSocket and HTTP endpoints both enforce authentication via the `Authorization: Bearer <token>` header. WebSocket also accepts the token in the `Sec-WebSocket-Protocol` header as `10xgraph-bearer, <token>` (the deprecated `agentflow-bearer` name still works), or as a `?token=` query parameter as a last resort. HTTP routes read only the `Authorization` header. See [Secure your server](/docs/server/auth) for setup and examples.
@@ -72,8 +72,8 @@ WebSocket and HTTP endpoints both enforce authentication via the `Authorization:
 
 The `MODE` environment variable switches the server's security and logging posture:
 
-- **`MODE=development`** (default): Unauthenticated `/ping` accessible, `ORIGINS="*"` (CORS allows any domain), `IS_DEBUG` defaults to true. Use for local development and testing.
-- **`MODE=production`**: Only `/ping` is unauthenticated, a graph run is cancelled after 300 seconds unless you change `runs.timeout`, wildcard CORS with credentials is refused (set `ORIGINS` explicitly), and `/docs` and `/redocs` are disabled unless you set `DOCS_PATH` and `REDOCS_PATH`. `IS_DEBUG` is forced off, and `graph_introspection` defaults to `"scoped"` (see [Configure the server](/docs/server/configure#control-who-can-read-the-graph-structure)). Security headers (HSTS, X-Frame-Options and others) are on in every mode unless `SECURITY_HEADERS_ENABLED=false`. Use for deployments exposed to the internet.
+- **`MODE=development`** (default): Unauthenticated `/ping` accessible, `ORIGINS="*"` (CORS allows any domain), debug mode is on. Use for local development and testing.
+- **`MODE=production`**: Only `/ping` is unauthenticated, a graph run is cancelled after 300 seconds unless you change `runs.timeout`, wildcard CORS with credentials is refused (set `ORIGINS` explicitly), and `/docs` and `/redocs` are disabled unless you set `DOCS_PATH` and `REDOCS_PATH`. debug mode is off, and `graph_introspection` defaults to `"scoped"` (see [Configure the server](/docs/server/configure#control-who-can-read-the-graph-structure)). Security headers (HSTS, X-Frame-Options and others) are on in every mode unless `SECURITY_HEADERS_ENABLED=false`. Use for deployments exposed to the internet.
 
 Together with `JWT_SECRET_KEY` (a strong, randomly generated secret in production) and an explicit `ORIGINS` list, production mode refuses to start with wildcard CORS and credentials enabled. `STRICT_PRODUCTION_CHECKS` is on by default in production and also refuses a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST` and enabled docs paths, so set `ORIGINS` and `ALLOWED_HOST` to your real values. Set `STRICT_PRODUCTION_CHECKS=false` to opt out.
 

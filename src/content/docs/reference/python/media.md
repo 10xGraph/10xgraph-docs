@@ -136,7 +136,9 @@ Abstract interface for media storage backends. Subclasses must implement four as
 | `delete(storage_key) -> bool` | yes | Returns `True` if deleted. |
 | `exists(storage_key) -> bool` | yes | Whether the key exists. |
 | `get_metadata(storage_key) -> dict \| None` | no | Returns `mime_type` and `size_bytes`; the default reads the blob. |
-| `get_direct_url(storage_key, mime_type=None, expiration=3600) -> str \| None` | no | Signed URL if the store supports it; default returns `None`. |
+| `get_direct_url(storage_key, mime_type=None, expiration=3600) -> str \| None` | no | Signed URL if the store supports it; default returns `None`. `CloudMediaStore` takes the file extension from the stored metadata and ignores the caller's `mime_type`. Its signed-URL downloads use a 10 s connect and 60 s idle timeout. |
+| `modify_metadata(storage_key, fn) -> bool` | no | Reads the metadata, applies `fn` (a plain function that returns the `update_metadata` updates, or `None`) and writes the result as one step. Use it when the new value depends on the old one, such as appending a thread link. Atomic on the local and in-memory stores (the local store also holds a `flock` on `{base_dir}/.meta.lock`, POSIX only). The cloud store re-reads right before the upload and retries up to 5 times, which leaves a small window. The default is `get_metadata` plus `update_metadata` and is not atomic. Returns `False` when the key does not exist. |
+| `list_keys_for_owner(owner_id) -> list[str]` | no | Keys whose metadata records `owner_id` as owner. The default filters `list_keys`. `CloudMediaStore` overrides it with a per-owner index object, so it works on S3 and GCS; files stored before 1.0 or with no owner are not in the index. |
 | `to_media_ref(storage_key, mime_type, **kwargs) -> MediaRef` | no | Builds a `MediaRef` with a `graph://media/{key}` URL. |
 
 ```python
