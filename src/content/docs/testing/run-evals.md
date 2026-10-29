@@ -29,7 +29,7 @@ From the folder that contains `10xgraph.json`:
 10xgraph eval
 ```
 
-The CLI scans `evals/` for files matching `*_eval.py` or `eval_*.py`, collects every case from every file into a single pool, runs them all, and writes a timestamped JSON report to `eval_reports/`:
+The CLI scans `evals/` for files matching `*_eval.py` or `eval_*.py`, collects every case from every file into a single pool, runs them all, and writes timestamped JSON and HTML reports to `eval_reports/`:
 
 ```
 eval_reports/
@@ -38,7 +38,7 @@ eval_reports/
 
 `EvalSetBuilder` assigns a random UUID as the eval set id, so that is what appears in the file name for a single set. When a run covers more than one eval set, the results are merged into one report named `combined_eval_<timestamp>`.
 
-The JSON report is machine-readable for CI systems or custom analysis. After the run the command prints the JSON path and "Open it in the playground: Evals > Open report file." The playground Evals page shows the summary pass rate, criterion scores, and per-case results, and can download a Markdown report. A progress display updates as cases complete.
+The JSON report is machine-readable for CI systems or custom analysis. After the run the command prints the HTML and JSON paths and opens the HTML report in your default browser. Pass `--no-open` to skip that; it is also skipped with `--no-report`, `-q`, `--format json` or `jsonl`, `--non-interactive`, when `CI` is set, and when stdout is not a terminal. The playground Evals page shows the summary pass rate, criterion scores, and per-case results, and can download a Markdown report. A progress display updates as cases complete.
 
 ## Running evaluations
 
@@ -77,7 +77,7 @@ You can enable parallel by default in `10xgraph.json` (see [Configure evaluation
 
 ### Reports and output
 
-Every run produces one JSON file in `eval_reports/` (or a custom directory via `--output`):
+Every run produces one JSON file and one HTML file in `eval_reports/` (or a custom directory via `--output`):
 
 | File | Format | Purpose |
 | --- | --- | --- |
@@ -89,7 +89,7 @@ The progress display shows each case as `<file>::<case>` with its status and dur
 10xgraph eval --no-report
 ```
 
-To review a report, open the playground, go to Evals, and choose Open report file (or drag the JSON file onto the page). Nothing is served by the API, so no server is needed for viewing. The page can also download a Markdown report.
+The HTML report opens automatically. To review the JSON report instead, open the playground, go to Evals, and choose Open report file (or drag the JSON file onto the page). Nothing is served by the API, so no server is needed for viewing. The page can also download a Markdown report.
 
 ### Exit codes and thresholds
 
@@ -129,10 +129,11 @@ Add an `evaluation` block to `10xgraph.json` to set project-level defaults. CLI 
 | Field | Default | Description |
 | --- | --- | --- |
 | `directory` | `"evals"` | Directory scanned when no `TARGET` argument is given |
-| `output_dir` | `"eval_reports"` | Directory where the JSON report is written |
+| `output_dir` | `"eval_reports"` | Directory where the JSON and HTML reports are written |
 | `threshold` | (none) | Pass rate below which an error message is printed; the exit code is 1 for any pass rate under 100% |
 | `parallel` | `false` | Run all cases concurrently instead of sequentially |
 | `max_concurrency` | `4` | Maximum cases running simultaneously when `parallel` is true |
+| `open_report` | `true` | Open the HTML report in the browser when the run ends; `--open` / `--no-open` overrides it |
 
 Report filenames always include a timestamp; there is no configuration setting for it.
 

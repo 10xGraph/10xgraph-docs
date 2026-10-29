@@ -125,8 +125,8 @@ Every chunk yielded by `astream()` is a `StreamChunk` with these fields:
 ## Differentiate partial from complete messages
 
 The `chunk.message.delta` field is a boolean flag:
-- `delta=True`: The message is partial; you are receiving tokens as they arrive. Append to your display buffer.
-- `delta=False`: The message is complete; replace any streaming placeholder with the final version.
+- `delta=True`: The message is partial; you are receiving tokens as they arrive. Append to your display buffer. A delta carries only the new piece of reasoning as a `ReasoningBlock` in `content`, ahead of the text; append it to the reasoning you already show.
+- `delta=False`: The message is complete; replace any streaming placeholder with the final version. Its reasoning block holds the full reasoning, not a piece.
 
 Both cases use `chunk.message.text()` to get the text:
 

@@ -168,6 +168,13 @@ npm install 10xgraph-client@next
   `ReasoningBlock` gains `signature` and `redacted_data`. Code that reads `message.content`
   and assumed thinking could follow text now sees it first. Messages saved before 1.0 carry no
   signature and are not replayed to Anthropic. Other providers never receive these blocks.
+- **`Message.reasoning` is removed.** Read the `ReasoningBlock`s (`type: "reasoning"`) from
+  `content` instead. Converters order blocks reasoning, text, media, tool calls, in the
+  non-stream response, in each streaming delta and in the final streamed message. A delta
+  carries only the new piece of reasoning as a block; the final message carries the full block.
+- **`PgCheckpointer` schema version 5 drops the unused `reasoning` column** of the `messages`
+  table automatically at startup. A rolling deploy that mixes old and new versions on one
+  database is not supported across this upgrade; follow [Database migration](#database-migration).
 - **Cloud media stores keep a per-owner index.** `GET /v1/files`, per-user quotas and release on
   thread delete now work on S3 and GCS, but only for files stored with 1.0 or later and with an
   owner. A custom `BaseMediaStore` inherits `modify_metadata` (not atomic) and

@@ -140,9 +140,9 @@ The checkpointer creates five tables in the configured schema and records the sc
 |---|---|---|
 | `threads` | One row per thread | `thread_id` (primary key), `thread_name`, `user_id`, `created_at`, `updated_at`, `meta` (jsonb) |
 | `states` | Versioned state snapshots | `state_id`, `thread_id`, `version` (bigint), `state_data` (jsonb), `created_at`, `updated_at`, `meta` |
-| `messages` | Messages per thread | `message_id`, `thread_id`, `role` (enum), `content`, `tool_calls` (jsonb), `tool_call_id`, `reasoning`, `total_tokens`, `usages` (jsonb), `meta` |
+| `messages` | Messages per thread | `message_id`, `thread_id`, `role` (enum), `content`, `tool_calls` (jsonb), `tool_call_id`, `total_tokens`, `usages` (jsonb), `meta` |
 | `tool_executions` | Tool results keyed by `(thread_id, tool_call_id)`, so a replayed node does not re-run finished tools | `thread_id`, `tool_call_id`, `result` (jsonb), `created_at` |
-| `schema_version` | Applied schema versions (currently 3) | `version`, `applied_at` |
+| `schema_version` | Applied schema versions (currently 5) | `version`, `applied_at` |
 
 Notes on the types:
 

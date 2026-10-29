@@ -105,7 +105,7 @@ Put eval files in an `evals/` directory and run the command:
 10xgraph eval
 ```
 
-The CLI discovers `*_eval.py` and `eval_*.py` files, loads your agent from `10xgraph.json`, runs all cases, and writes a JSON report to `eval_reports/` automatically. Open it in the playground (Evals > Open report file). For full CLI options, see [How to run evaluations](/docs/testing/run-evals).
+The CLI discovers `*_eval.py` and `eval_*.py` files, loads your agent from `10xgraph.json`, runs all cases, and writes JSON and HTML reports to `eval_reports/` automatically and opens the HTML report in your browser (`--no-open` to skip). The playground can also open the JSON (Evals > Open report file). For full CLI options, see [How to run evaluations](/docs/testing/run-evals).
 
 ---
 
@@ -186,7 +186,7 @@ See [User simulation](/docs/testing/user-simulation) for the full API and the `g
 
 ### Reports
 
-By default, an evaluation run writes a JSON report to `eval_reports/`, which the playground Evals page opens for review (pass rates, criterion scores, failure details). HTML, and JUnit XML for CI integrations, are opt-in through `ReporterConfig(html=True)` and `ReporterConfig(junit_xml=True)` when you call the library directly. JUnit XML for CI integrations is opt-in through `ReporterConfig(junit_xml=True)`.
+By default, `10xgraph eval` writes JSON and HTML reports to `eval_reports/` (pass rates, criterion scores, failure details) and opens the HTML report; the playground Evals page opens the JSON. When you call the library directly, HTML and JUnit XML are opt-in through `ReporterConfig(html=True)` and `ReporterConfig(junit_xml=True)`.
 
 See [Reports](/docs/testing/reports) for output formats and CI setup.
 

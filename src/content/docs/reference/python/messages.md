@@ -42,7 +42,6 @@ A Pydantic model holding one conversation turn. Conversations in graph state are
 | `content` | `Sequence[ContentBlock]` | **required** | Ordered list of typed content blocks. |
 | `delta` | `bool` | `False` | `True` for streaming intermediate chunks. |
 | `tools_calls` | `list[dict] \| None` | `None` | Raw tool call dicts from the provider SDK. Used internally. |
-| `reasoning` | `str \| None` | `None` | Reasoning trace (marked for removal in the source; use `ReasoningBlock` in `content` instead). |
 | `timestamp` | `float \| None` | current time | UNIX timestamp of message creation. |
 | `metadata` | `dict` | `{}` | Arbitrary key-value metadata. |
 | `usages` | `TokenUsages \| None` | `None` | Token usage for this message's LLM call. |
@@ -265,7 +264,7 @@ Exposes a reasoning model's thinking trace when the provider returns one.
 | `signature` | `str \| None` | Anthropic signature of a `thinking` block. Kept verbatim so the block can be replayed to Anthropic, which rejects an edited or unsigned one. |
 | `redacted_data` | `str \| None` | Opaque payload of an Anthropic `redacted_thinking` block, kept verbatim for replay. `summary` is empty for these. |
 
-Anthropic blocks are stored first in the message and are sent only to Anthropic. See [Thinking blocks are kept and replayed](/docs/integrations/anthropic#thinking-blocks-are-kept-and-replayed).
+Reasoning lives only as `ReasoningBlock`s in `content`; `Message` has no `reasoning` string. Converters order blocks reasoning, text, media, tool calls, in the non-stream response, in each streaming delta and in the final streamed message. A delta carries only the new piece of reasoning as a block; the final message carries the full block. Anthropic blocks are sent only to Anthropic. See [Thinking blocks are kept and replayed](/docs/integrations/anthropic#thinking-blocks-are-kept-and-replayed).
 
 ---
 

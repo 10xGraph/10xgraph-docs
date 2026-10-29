@@ -126,6 +126,7 @@ Run agent evaluations. Discovers `*_eval.py` and `eval_*.py` files in the target
 | `--threshold`, `-t` | unset | Fail if the overall pass rate is below this value (0.0 to 1.0) |
 | `--parallel`, `-p` | off | Run all cases from all files concurrently |
 | `--max-concurrency`, `-c` | `4` | Concurrent cases when `--parallel` is set |
+| `--open` / `--no-open` | open | Open the HTML report in your browser when the run ends. Skipped with `--no-report`, `-q`, `--format json`/`jsonl`, `--non-interactive`, when `CI` is set, or when stdout is not a terminal |
 | `--verbose`, `-v` / `--quiet`, `-q` | off | Output level |
 
 Reports are HTML and JSON unless `--no-report` is set. When an option is left at its default, the `evaluation` block of `10xgraph.json` can supply `directory`, `output_dir`, `threshold`, `parallel` and `max_concurrency`.

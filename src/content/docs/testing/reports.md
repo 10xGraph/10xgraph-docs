@@ -17,7 +17,7 @@ After every evaluation run, 10xGraph generates structured reports so you can und
 
 | Format | File | Best for |
 |---|---|---|
-| HTML | `eval_reports/<id>_<timestamp>.html` | Human review, visual dashboard (core library only, opt-in with `ReporterConfig(html=True)`) |
+| HTML | `eval_reports/<id>_<timestamp>.html` | Human review, visual dashboard (written and opened by `10xgraph eval`; opt-in with `ReporterConfig(html=True)` in the library) |
 | JSON | `eval_reports/<id>_<timestamp>.json` | Programmatic analysis, dashboards; the file `10xgraph eval` writes and the playground Evals page opens |
 | JUnit XML | `eval_reports/<id>_<timestamp>_junit.xml` | CI systems (GitHub Actions test summary) |
 | Console | stdout | Quick local feedback during development |
@@ -42,7 +42,7 @@ open eval_reports/weather-agent-regression_20260519_142301.html
 
 ## JSON report
 
-The JSON report contains every piece of data from the run in a machine-readable format. After `10xgraph eval`, open it in the playground: Evals > Open report file (file picker or drag and drop). The page can also download a Markdown report. You can consume it in post-processing scripts, ingest it into a metrics dashboard, or archive it for trend analysis.
+The JSON report contains every piece of data from the run in a machine-readable format. `10xgraph eval` writes it next to the HTML report. To view it in the playground: Evals > Open report file (file picker or drag and drop). The page can also download a Markdown report. You can consume it in post-processing scripts, ingest it into a metrics dashboard, or archive it for trend analysis.
 
 Structure (simplified):
 
@@ -291,7 +291,7 @@ The `10xgraph eval` CLI exits with code `1` whenever the pass rate is below `1.0
 
 ### Diagnosing failures
 
-1. Open the JSON report in the playground Evals page (or the HTML report if you generate one) and look at the per-case criterion bars.
+1. Open the JSON report in the playground Evals page (or the HTML report that `10xgraph eval` opens) and look at the per-case criterion bars.
 2. Find which criterion scored lowest.
 3. If it is a trajectory criterion, the trajectory section shows which tool calls were expected vs actual.
 4. If it is an LLM criterion, the detail section shows the judge's reasoning (when `include_details=True`).

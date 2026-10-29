@@ -135,7 +135,7 @@ The `PgCheckpointer.asetup()` method creates these tables (in the specified sche
 |---|---|
 | `threads` | Thread metadata: `thread_id`, `thread_name`, `user_id`, `created_at`, `updated_at`, `meta` |
 | `states` | Versioned state snapshots: `thread_id`, `version`, `state_data` (JSONB), `created_at`, `updated_at`, `meta` |
-| `messages` | Message history: message id, `thread_id`, `role`, `content`, `tool_calls`, `tool_call_id`, `reasoning`, token usage and `meta` columns |
+| `messages` | Message history: message id, `thread_id`, `role`, `content`, `tool_calls`, `tool_call_id`, token usage and `meta` columns |
 | `tool_executions` | Tool call ledger for replay safety: `thread_id`, `tool_call_id`, `result`, `created_at` |
 | `schema_version` | Tracks migrations |
 

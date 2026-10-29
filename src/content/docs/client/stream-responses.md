@@ -80,7 +80,7 @@ for await (const chunk of stream) {
 }
 ```
 
-When a message is streaming, the server sends many chunks with `message.delta === true`. After the message completes, it sends one final chunk with `delta === false`.
+When a message is streaming, the server sends many chunks with `message.delta === true`. After the message completes, it sends one final chunk with `delta === false`. Reasoning arrives as `{ type: 'reasoning' }` blocks in `content`, ordered before the text. A delta carries only the new piece of reasoning; the final message carries the full reasoning block.
 
 ---
 

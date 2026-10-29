@@ -108,7 +108,7 @@ Run it:
 10xgraph eval --parallel --max-concurrency 4
 ```
 
-The CLI detects `get_scenarios()` (or a `SCENARIOS` module-level constant), runs each scenario with a `SimulationGoalsCriterion` attached automatically (threshold 0.7, one judge sample), and produces the same HTML + JSON report as regular eval cases. Simulation scenarios and regular eval cases are pooled together in the same report.
+The CLI detects `get_scenarios()` (or a `SCENARIOS` module-level constant), runs each scenario with a `SimulationGoalsCriterion` attached automatically (threshold 0.7, one judge sample), and produces the same HTML + JSON report as regular eval cases. Simulation scenarios and regular eval cases are pooled together in the same report. While a scenario runs, the CLI prints a muted line per step (each simulated user message, the agent reply, newly achieved goals, and the criteria being judged), and the result line shows the real duration. `-q` hides these lines.
 
 For full details on CLI flags, parallel execution, and integration into CI, see [How to run evaluations](/docs/testing/run-evals).
 

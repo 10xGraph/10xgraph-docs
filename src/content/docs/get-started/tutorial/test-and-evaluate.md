@@ -241,7 +241,7 @@ def get_eval_config() -> EvalConfig:
 
 ### Run the evaluation
 
-Point `10xgraph eval` at the folder. It runs every case, prints a summary and writes a JSON report to `eval_reports/` unless you pass `--no-report`.
+Point `10xgraph eval` at the folder. It runs every case, prints a summary and writes JSON and HTML reports to `eval_reports/` unless you pass `--no-report`, then opens the HTML report in your browser (pass `--no-open` to skip that).
 
 ```bash
 10xgraph eval evals/
@@ -254,11 +254,12 @@ Criteria  weather_eval.py  (source: per-file)
   tool_name_match    threshold=1.0
   rouge_match        threshold=0.4
 ...
+HTML report: eval_reports/<report file>.html
 JSON report: eval_reports/<report file>.json
-Open it in the playground: Evals > Open report file.
+Also viewable in the playground: Evals > Open report file (pick the JSON).
 ```
 
-Each case passes only when every criterion meets its threshold. Open the JSON file in the playground (Evals > Open report file) to see the conversation, tool calls and per-criterion scores of each failed case.
+Each case passes only when every criterion meets its threshold. Review the HTML report, or open the JSON file in the playground (Evals > Open report file) to see the conversation, tool calls and per-criterion scores of each failed case.
 
 | Flag | Short | Default | Purpose |
 |---|---|---|---|
