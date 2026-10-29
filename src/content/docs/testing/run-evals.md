@@ -6,7 +6,7 @@ section: "Testing and evaluation"
 group: "Evaluation"
 order: 100
 label: Run Evaluations
-updated: "2026-10-08"
+updated: "2026-10-30"
 ---
 
 ## What is evaluation and why it matters
@@ -93,13 +93,13 @@ The HTML report opens automatically. To review the JSON report instead, open the
 
 ### Exit codes and thresholds
 
-The command exits with code 0 only when every case passes (100% pass rate) and 1 otherwise. For CI this already gates merges on any regression.
+The command exits with code 0 when the pass rate meets the gate and 1 otherwise. Without `--threshold` the gate is 100%, so only a run where every case passes exits 0. For CI this already gates merges on any regression.
 
 ```bash
 10xgraph eval --threshold 0.8
 ```
 
-`--threshold` makes the command print an error ("Pass rate ... is below threshold ...") when the overall pass rate is under 80%. It does not relax the exit code: a run at 90% still exits 1. The threshold can also be set in `10xgraph.json` (see below).
+`--threshold` sets the gate: the command exits 0 at 80% or more, and otherwise prints an error ("Pass rate ... is below threshold ...") and exits 1. The HTML report states the gate in its verdict. The threshold can also be set in `10xgraph.json` (see below).
 
 ### Custom output directory
 
@@ -130,7 +130,7 @@ Add an `evaluation` block to `10xgraph.json` to set project-level defaults. CLI 
 | --- | --- | --- |
 | `directory` | `"evals"` | Directory scanned when no `TARGET` argument is given |
 | `output_dir` | `"eval_reports"` | Directory where the JSON and HTML reports are written |
-| `threshold` | (none) | Pass rate below which an error message is printed; the exit code is 1 for any pass rate under 100% |
+| `threshold` | (none) | Pass-rate gate: below it the command prints an error and exits 1. Without it the gate is 100% |
 | `parallel` | `false` | Run all cases concurrently instead of sequentially |
 | `max_concurrency` | `4` | Maximum cases running simultaneously when `parallel` is true |
 | `open_report` | `true` | Open the HTML report in the browser when the run ends; `--open` / `--no-open` overrides it |
