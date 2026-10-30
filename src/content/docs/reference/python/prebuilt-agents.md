@@ -743,7 +743,7 @@ from tenxgraph.core.realtime.base import RealtimeConfig
 from tenxgraph.core.realtime.queue import LiveInputQueue
 from tenxgraph.prebuilt.agent import AudioAgent
 
-MODEL = "gemini-live-2.5-flash-preview"
+MODEL = "gemini-3.8-live"
 
 agent = AudioAgent(
     MODEL,

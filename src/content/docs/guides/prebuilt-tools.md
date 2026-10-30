@@ -125,11 +125,13 @@ app = agent.compile()
 
 `fetch_url` retrieves the text of a public HTTP or HTTPS URL. It only connects to globally routable addresses, re-checks every redirect hop (at most 5), connects to the address it checked, ignores proxy environment variables, strips HTML to text, and truncates to `max_chars` (default and cap 20000). On failure it returns a JSON object with an `error` key. Tags: `["web", "fetch", "network"]`.
 
+To limit the hosts the model can reach, build the tool with `create_fetch_url(allowed_hosts)`. It takes host names or globs such as `docs.example.com` or `*.example.com`, matched ignoring case, and checks the list on the first request and on every redirect hop. An empty list raises `ValueError`.
+
 Parameters, the response shape and common errors are in the [web tools guide](/docs/guides/prebuilt/web-tools#fetch_url-fetch-and-parse-web-pages).
 
 ## File tools: read, write, search
 
-`file_read`, `file_write` and `file_search` give an agent controlled access to one directory. Paths stay inside the root, and secret files (`.env`, `*.pem`, anything under `.ssh` or `.git`) are hidden and refused with the same `path is not allowed` error whether or not they exist. Tags: `["file", "filesystem", "search"]`.
+`file_read`, `file_write` and `file_search` give an agent controlled access to one directory. Paths stay inside the root, and secret files (`.env`, `*.pem`, `.git-credentials`, `*.tfstate`, `*.tfvars`, anything under `.ssh` or `.git`) are hidden and refused with the same `path is not allowed` error whether or not they exist. Tags: `["file", "filesystem", "search"]`.
 
 For a graph that serves requests, build the tools with `create_file_tools(root)` so the root is fixed in code and the run config cannot move it:
 
@@ -147,7 +149,7 @@ Parameters, return formats, the full list of hidden patterns, `deny=` and limits
 
 `google_web_search` searches the public web with Gemini Google Search grounding. `vertex_ai_search` searches a private Vertex AI Search datastore. Both need `pip install "10xgraph[google-genai]"` and Google Cloud credentials, and both default to `gemini-2.5-flash`. Tags: `["web", "search", "google"]` and `["search", "google", "vertex_ai"]`.
 
-Parameters and examples are in the [web tools guide](/docs/guides/prebuilt/web-tools).
+The model chooses `datastore` and `model` on the module-level tools. To fix them in code, build the tools with `create_google_web_search(model)` and `create_vertex_ai_search(datastore, model)`; the model cannot change them. Parameters and examples are in the [web tools guide](/docs/guides/prebuilt/web-tools).
 
 ## Memory tools
 

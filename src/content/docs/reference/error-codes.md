@@ -83,6 +83,11 @@ Use this table to find an exception by its code prefix. Codes ending in `_000` a
 | `RECURSION_000` | `GraphRecursionError` | No, needs a config change | 500 |
 | `INTERRUPT_001` | `InterruptMismatchError` | No, send the current interrupt id | 409 |
 | `INTERRUPT_002` | `ResumeValidationError` | No, send an answer that fits the schema | 422 |
+| `INTERRUPT_003` | `NothingToResumeError` | No, the thread is not paused; send a normal message | 409 |
+| `INTERRUPT_004` | `InterruptPendingError` | No, resume the thread with a `resume` value | 409 |
+| `GRAPH_CLOSED_001` | `GraphClosedError` | Yes, on another instance | 503 `SERVICE_UNAVAILABLE`, `Retry-After: 5` |
+| `GRAPH_NODE_MISSING_001` | `StoredNodeMissingError` | No, add a `node_aliases` entry or start a new thread | 409 |
+| `STATE_FORMAT_001` | `StateFormatVersionError` | No, upgrade `10xgraph` | 500 |
 | `STORAGE_000` | `StorageError` | No | 500 |
 | `STORAGE_TRANSIENT_000` | `TransientStorageError` | Yes, with backoff | 503 |
 | `STORAGE_SERIALIZATION_000` | `SerializationError` | No | 500 |
@@ -128,7 +133,7 @@ Common causes: a tool that raised, invalid node input, resource exhaustion.
 
 ### Node or tool timeout
 
-`NodeTimeoutError` (default `NODE_TIMEOUT_000`, a subclass of `NodeError`) is raised when a node or tool call exceeds its deadline. Defaults are 900 seconds per node and 300 seconds per tool call. A transient hang is worth a retry; a genuinely slow operation is not.
+`NodeTimeoutError` (default `NODE_TIMEOUT_000`, a subclass of `NodeError`) is raised when a node or tool call exceeds its deadline. There are no default deadlines: set `node_timeout` and `tool_timeout` to turn them on. A transient hang is worth a retry; a genuinely slow operation is not.
 
 Without a deadline, a node that hangs on a half-open socket or an unresponsive MCP server blocks the graph forever: the loop never advances a step, so the recursion limit never trips and the between-nodes stop check is never reached. The timeout turns that hang into a normal node error the execution loop can persist and report.
 
@@ -180,6 +185,12 @@ raise TransientStorageError(
 
 `SchemaVersionError` (`STORAGE_SCHEMA_000`) means schema version detection or migration failed. The usual cause is upgrading 10xGraph without migrating the database, or a database out of sync with the installed version. It is not retryable. Check the stored schema version against the installed version and migrate.
 
+### Stored thread errors
+
+`StoredNodeMissingError` (`GRAPH_NODE_MISSING_001`) means a thread was stored at a node the deployed graph no longer has, because a deploy renamed or removed it. The message names the node and the thread, and the `context` has `node_name`, `thread_id` and `available_nodes`. Fix: compile with `node_aliases={"old_name": "new_name"}`, restore the node, or start the thread over with a new `thread_id`. The API answers 409.
+
+`StateFormatVersionError` (`STATE_FORMAT_001`) means stored state was written in a newer format than this version reads, typically after a rollback. The `context` has `found`, `supported` and `thread_id`. The state is left untouched. Fix: upgrade `10xgraph` to the version that wrote it. It is not retryable. The API answers 500 with a message that says to upgrade.
+
 ### Resource not found
 
 `ResourceNotFoundError` (`STORAGE_NOT_FOUND_000`) means the requested thread, checkpoint or other resource does not exist in storage. Check the `thread_id`, whether the thread was deleted, and that the graph was compiled with a `checkpointer`. It is not retryable.
@@ -208,13 +219,17 @@ Fix: reload the latest state and retry the turn rather than overwriting blindly.
 
 ## Resume errors
 
-Both errors come from resuming a thread paused by `interrupt()`. Each is also a `ValueError`, and nothing is recorded when either is raised.
+These errors come from resuming a thread paused by `interrupt()`, or from sending the wrong kind of input to one. Each is also a `ValueError`, and nothing is recorded when any of them is raised.
 
 `InterruptMismatchError` (`INTERRUPT_001`): the resume input carried `resume_interrupt_id`, and it is not the id of the pending interrupt. Typical causes are a stale tab or a retried request after the first answer was consumed. The `context` has `expected` and `received`. Fix: read the pending interrupt again and send its id.
 
 `ResumeValidationError` (`INTERRUPT_002`): the resume value fails the interrupt's `response_schema`. The `context` has `interrupt_id` and `errors`. Only `type`, `enum`, `properties`, `required` and `items` are checked. Fix: send a value that fits the schema. A `None` resume is never checked.
 
-The API server returns 409 for the first and 422 for the second. See [Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt).
+`NothingToResumeError` (`INTERRUPT_003`): a `resume` was sent to a thread that is not paused at an `interrupt()`. Fix: send a normal message instead.
+
+`InterruptPendingError` (`INTERRUPT_004`): a plain new message was sent to a thread that is paused at an `interrupt()`. The paused node needs the answer. The message names the interrupt id and node. Fix: resume the thread with `{"resume": value}`.
+
+The API server returns 409 for `INTERRUPT_001`, `INTERRUPT_003` and `INTERRUPT_004`, and 422 for `INTERRUPT_002`. See [Interrupts](/docs/concepts/interrupts#bind-a-resume-to-its-interrupt).
 
 ## Control flow signals
 
@@ -299,6 +314,8 @@ Start from what you see and jump to the code that explains it.
 | Concurrent writes to one thread fail | `STORAGE_CONFLICT_000` | Reload state and retry |
 | Resume rejected with a wrong-interrupt message | `INTERRUPT_001` | Read the pending interrupt and send its id |
 | Resume rejected for the answer's shape | `INTERRUPT_002` | Send a value that matches `response_schema` |
+| `resume` sent to a thread that is not paused | `INTERRUPT_003` | Send a normal message |
+| New message sent to a thread paused at `interrupt()` | `INTERRUPT_004` | Resume with `{"resume": value}` |
 | `409 thread is busy` from the API server | none (not a core error) | Wait for the running run, or send `on_busy: "cancel"` |
 | User input rejected | `ValidationError` | Inspect `violation_type`, tune the validator |
 | Media input rejected | `UnsupportedMediaInputError` | Use a model that supports the media type |
@@ -310,8 +327,8 @@ Run limits are run-config keys, not `compile()` arguments:
 config = {
     "thread_id": "support-42",
     "recursion_limit": 50,  # max steps before GraphRecursionError (default 25)
-    "node_timeout": 60,     # seconds per node (default 900)
-    "tool_timeout": 30,     # seconds per tool call (default 300)
+    "node_timeout": 60,     # seconds per node (no default)
+    "tool_timeout": 30,     # seconds per tool call (no default)
 }
 result = await app.ainvoke({"messages": [...]}, config)
 ```
@@ -326,6 +343,8 @@ The server maps exceptions to responses in `tenxgraph_api/src/app/core/exception
 | `GraphError`, `NodeError`, `GraphRecursionError`, `StorageError` (including `StaleStateError`, `ResourceNotFoundError`), `SerializationError`, `MetricsError` | 500 |
 | `TransientStorageError` | 503 |
 | `InterruptMismatchError` and a resume `interrupt_id` that does not match | 409 |
+| `StoredNodeMissingError` | 409 |
+| `StateFormatVersionError` | 500 (message says to upgrade) |
 | `ResumeValidationError` | 422 |
 
 A `429` is not a core exception either. The server returns it when the `rate_limit` window is used up (`error.code` `RATE_LIMIT_EXCEEDED`, with a `Retry-After` header) or when one user has more than `runs.max_concurrent_per_user` runs in flight (standard body, code `HTTPException`, no `Retry-After`).

@@ -15,6 +15,7 @@ Base path: `/v1/files`. Every route needs authentication when `auth` is configur
 | Method and path | Permission | Purpose |
 | --- | --- | --- |
 | `POST /v1/files/upload` | `files:upload` | Upload a file, receive a `file_id`. |
+| `GET /v1/files` | `files:read` | List your files, newest first. |
 | `GET /v1/files/{file_id}` | `files:read` | Download the raw bytes. |
 | `GET /v1/files/{file_id}/info` | `files:read` | Read metadata only. |
 | `GET /v1/files/{file_id}/url` | `files:read` | Get a direct access URL. |
@@ -87,6 +88,21 @@ curl -X POST http://127.0.0.1:8000/v1/files/upload \
 | `direct_url_expires_at` | Expiry of the signed URL as a Unix timestamp. |
 
 The uploader is recorded as the file's owner. Every read path checks it, and a file owned by another user returns `404`, not `403`, so the API never confirms that a foreign `file_id` exists.
+
+---
+
+## GET /v1/files
+
+Lists the files the caller uploaded, newest first. Files with no recorded owner are not listed. With auth off there is no user, so every file is listed.
+
+| Query parameter | Default | Description |
+| --- | --- | --- |
+| `limit` | `50` | Page size, 1 to 200. |
+| `offset` | `0` | Files to skip. |
+
+The response `data` has `files` (each with `file_id`, `filename`, `mime_type`, `size_bytes`, `url`, `created_at`), `has_more`, `offset` and `limit`.
+
+It works on every store, cloud (S3, GCS) included. A cloud store keeps a per-owner index, so files stored before `10xgraph` 1.0, or stored with no owner, are not listed. Listing with auth off on a cloud store, and any custom store that cannot enumerate its keys, answers `501`. The same index serves the per-user quotas and the release of a thread's files when the thread is deleted.
 
 ---
 
@@ -200,7 +216,8 @@ Uploads fail with `400`, `413` or `415`; reads fail with `404`. A missing permis
 | Status | Description |
 | --- | --- |
 | `400` | Missing filename or empty file. |
-| `413` | File exceeds `MEDIA_MAX_SIZE_MB` (or the media service rejects its size). The limit is checked as data arrives in 1 MiB chunks, so uploads are rejected before the whole file is buffered. |
+| `422` | The multipart body has no `file` part. Auth is checked before the body is parsed, so an unauthenticated request never gets this far. |
+| `413` | File exceeds `MEDIA_MAX_SIZE_MB` (or the media service rejects its size). The limit is checked as data arrives in 1 MiB chunks, so uploads are rejected before the whole file is buffered. The same status answers an image over `MEDIA_MAX_IMAGE_PIXELS`, a PDF over `MEDIA_MAX_PDF_MB` or `MEDIA_MAX_PDF_PAGES`, and an upload past the per-user quota (`MEDIA_MAX_FILES_PER_USER`, `MEDIA_MAX_USER_STORAGE_MB`). |
 | `415` | Content type not allowed by `MEDIA_ALLOWED_CONTENT_TYPES`. |
 | `404` | `file_id` not found or owned by another user. |
 

@@ -49,7 +49,7 @@ This provides at-most-once protection for recorded calls, not a global exactly-o
 - **A failed record write.** If the checkpointer cannot store the record, 10xGraph logs an error but continues. A replay may then execute the call a second time.
 - **A failed ledger read.** If the ledger cannot be read, the tool runs again with a warning logged. 10xGraph treats an unreadable entry as "no record" because skipping a tool that never ran is worse.
 - **Timeouts.** A tool exceeding its timeout is cancelled and raises an error with nothing recorded. If the provider already acted, the call may run again.
-- **Streaming runs.** The ledger check lives in the `invoke` and `ainvoke` tool path. The streaming tool path (`stream` and `astream`) does not consult or write the ledger, so streamed runs get no replay protection.
+- **Streaming runs.** The ledger check also runs in the streaming tool path (`stream` and `astream`), so streamed runs get the same replay protection.
 - **Missing ids.** Without a `tool_call_id` or message id, no ledger key can be built and the tool is not protected.
 
 For these cases, always send an idempotency key to your payment or email provider. Derive it from stable inputs such as the order id, never from a random value generated inside the tool.
@@ -109,7 +109,7 @@ The API server uses the checkpointer carried by the compiled graph. For setup de
 Replay safety works alongside two other mechanisms that handle related failure modes.
 
 - **Versioned state writes.** `PgCheckpointer` keeps a per-thread version counter and uses optimistic compare-and-swap for durability. This prevents concurrent runs on the same thread from overwriting each other's state. Redis cache writes are guarded by the same version, so a stale run cannot regress the cache. The ledger protects side effects; versioned writes protect state.
-- **Timeouts.** `node_timeout` (default 900 seconds) and `tool_timeout` (default 300 seconds) prevent hung calls from blocking workers forever. Configure per run: `config={"thread_id": "t1", "tool_timeout": 60}`. Pass `None` or `0` to disable. Defaults are in `tenxgraph/utils/constants.py`.
+- **Timeouts.** `node_timeout` and `tool_timeout` have no default. Set them to stop hung calls from blocking workers forever. Configure per run: `config={"thread_id": "t1", "tool_timeout": 60}`. A value you set applies to both invoke and stream. `None` or `0` means no limit.
 
 ## Related pages
 

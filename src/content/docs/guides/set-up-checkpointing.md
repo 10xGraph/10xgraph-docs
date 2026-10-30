@@ -166,7 +166,7 @@ PgCheckpointer(
 
 ### Schema setup
 
-For production deployments, call `asetup()` (or the sync `setup()` outside a running event loop) before your first request to create the PostgreSQL tables. `PgCheckpointer` does not create them on first use.
+`asetup()` (or the sync `setup()` outside a running event loop) creates the PostgreSQL tables and applies pending migrations. It is idempotent. Behind the API server you do not need to call it: the server calls `asetup()` at boot, and if that fails it logs the error and the checkpointer retries on first use, so a fresh Postgres works without a manual step. Call it yourself when you run the graph outside the API server and want errors at startup.
 
 ```python
 import asyncio
@@ -180,7 +180,7 @@ checkpointer = PgCheckpointer(
 asyncio.run(checkpointer.asetup())
 ```
 
-In a FastAPI lifespan handler:
+In your own FastAPI lifespan handler:
 
 ```python
 from contextlib import asynccontextmanager
@@ -314,6 +314,8 @@ The server loads the compiled `app` and uses its checkpointer for all requests.
 
 ## Choosing a checkpointer: decision table
 
+`compile()` with no checkpointer falls back to `InMemoryCheckpointer` and logs a WARNING. A graph logs one WARNING per graph on its first run with no `user_id`. Behind the API server in production, or with `WEB_CONCURRENCY` above 1, an in-memory or SQLite checkpointer (or no Redis) also logs a WARNING that threads and limits are per process.
+
 Use this table to pick the right one for your scenario:
 
 | Scenario | Checkpointer | Why |
@@ -349,7 +351,7 @@ assert "Alice" in result2["messages"][-1].content
 
 ## Run it in production
 
-The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The `checkpointer` key in `10xgraph.json` is not read. Use `PgCheckpointer` when you run more than one worker, since workers share state only through it. See [Scaling and reliability](/docs/production/scaling) and [Backup and restore](/docs/server/backup-and-restore).
+The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The `checkpointer` key in `10xgraph.json` is not read. Use `PgCheckpointer` when you run more than one worker, since workers share state only through it. Run one graph per process or container. Two graphs in one process share a checkpointer unless each gets its own checkpointer instance and its own `container=InjectQ()`; see [`compile`](/docs/reference/python/graph#compile). See [Scaling and reliability](/docs/production/scaling) and [Backup and restore](/docs/server/backup-and-restore).
 
 ## Next steps
 

@@ -6,7 +6,7 @@ section: Reference
 group: Python library
 order: 100
 label: Realtime
-updated: "2026-10-08"
+updated: "2026-10-29"
 ---
 
 This page is the Python API reference for live audio-to-audio sessions backed by Gemini Live: `AudioAgent`, `arealtime()`, `LiveInputQueue`, the config objects, and the `RealtimeEvent` types. Realtime is a separate runtime from `invoke` and `stream`, where the provider drives each turn. Install it with `pip install "10xgraph[realtime]"`. The matching server WebSocket route is covered in [Live WebSocket](/docs/reference/rest-api/live).
@@ -154,7 +154,7 @@ Returns: a `CompiledGraph` ready to drive with `arealtime()` or `realtime()`. Un
 
 ## CompiledGraph.arealtime() / realtime()
 
-`arealtime()` runs a realtime session and yields normalized events. `realtime()` is a synchronous wrapper for code with no running event loop. The session ends when the input queue is closed and the provider goes idle, or on a fatal error.
+`arealtime()` runs a realtime session and yields normalized events. `realtime()` is a synchronous wrapper for code with no running event loop. The session ends when the input queue is closed and the provider goes idle, or on a fatal error. Every `arealtime()` connection runs on its own copy of the `LiveAgent` (made with `LiveAgent.new_session()`), so concurrent sessions on one compiled graph do not share a client, resume handle or transcript buffers.
 
 ```python
 async def arealtime(
@@ -537,10 +537,16 @@ def client_factory() -> GeminiLiveClient:
 app = AudioAgent("gemini-2.5-flash", realtime_client_factory=client_factory).compile()
 ```
 
-The constructor is `GeminiLiveClient(client=None, *, connector=None, api_key=None, use_vertex_ai=False, project=None, location=None)`. Without `api_key`, it reads `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+The constructor is `GeminiLiveClient(client=None, *, connector=None, api_key=None, use_vertex_ai=False, project=None, location=None, connect_timeout=30.0)`. `connect_timeout` is the number of seconds to wait for the live connection to open; pass `None` to wait without a limit. Only the connect is bounded, never the session. A timeout raises `TimeoutError("Gemini Live connect timed out after ...s")`. This applies to the first connect and to each reconnect. Without `api_key`, it reads `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
 
 `normalize_message(message)` maps a Google `LiveServerMessage` (the SDK object, not a dict) to a `list[RealtimeEvent]` in wire order.
 
+
+### Tool call deduplication
+
+A realtime tool call runs at most once per thread. Before running a tool, `LiveAgent` looks up the call in the same tool ledger the text path uses, in the run's checkpointer. The key is made of the thread id (the session id when there is no thread id), a hash of the tool name and arguments, and the provider's call id. If the key already has a recorded result, the tool does not run again and the recorded result is sent back to the model.
+
+This covers a call that the provider re-sends after a reconnect, and a call that a new session on the same thread repeats. Pairing the call id with the call's content means a provider that reuses an id for a different call in a later session does not skip the new call. The dedupe needs a checkpointer on the session; without one, or when the provider sends no call id, every call runs. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
 
 ## Lifecycle hooks
 
@@ -587,6 +593,7 @@ The API server exposes the WebSocket route `/v1/graph/live` for graphs that cont
 | `ValueError: LiveAgent v1 supports only Gemini Live (google provider)` | Model resolved to a non-Google provider. | Use a Gemini model name, optionally prefixed with `"gemini/"`. |
 | `RuntimeError: This graph contains a LiveAgent; use .arealtime() / .realtime()...` | Called `invoke`/`stream` on realtime graph. | Switch to `arealtime()` or `realtime()`. |
 | `RuntimeError: arealtime() requires a graph rooted at a LiveAgent` | No `LiveAgent` in the graph. | Build the graph with `AudioAgent`. |
+| `RuntimeError: This LiveAgent already runs a session` | You called `LiveAgent.arun()` a second time on one instance while its first session was still running. | Use `LiveAgent.new_session()` to get a fresh copy for each concurrent session. `arealtime()` does this for you. |
 | `RuntimeError: realtime() (sync) cannot be called from a running event loop` | Called `realtime()` in async context. | Use `await arealtime()` instead. |
 | `ValueError: response_modalities must contain exactly one modality` | Passed two modalities. | Pass `["AUDIO"]` or `["TEXT"]`, not both. |
 | `ErrorEvent(code="reconnect_failed", fatal=True)` | Reconnect attempts exhausted. | Check network; increase `max_attempts` or `max_delay`. |

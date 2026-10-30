@@ -49,7 +49,7 @@ Identity comes only from the authenticated user in the run config. The server ne
 | SSRF through media URLs and fetch tools | Every external media URL in client input is checked against the graph's `MediaFetchPolicy` before the run (400 if blocked). Downloads and the built-in `fetch_url` tool use a client that resolves the host once, requires public addresses, pins the connection, re-checks each redirect and caps the body | `media_policy` argument of `graph.compile(...)`, a `MediaFetchPolicy` (default `MediaFetchPolicy()`; import from `tenxgraph.storage.media`) | [Files and multimodal](/docs/server/files-and-multimodal) |
 | Upload abuse | The first bytes must match the declared type for formats with a signature (else 415), uploads are size-limited, and text extraction is capped | `MEDIA_MAX_SIZE_MB` | [Files and multimodal](/docs/server/files-and-multimodal) |
 | Abuse and cost | Rate limit per IP, user or global; per-user cap on runs in flight (429); WebSocket connection caps (global and per user, close code 1013 when full); run timeout (300 s by default in production); request size cap (413); cap on parallel tool calls per model turn | `rate_limit`, `runs.max_concurrent_per_user`, `websocket.max_connections`, `websocket.max_connections_per_user`, `runs.timeout`, `MAX_REQUEST_SIZE`, `runs.max_parallel_tool_calls` | [Rate limiting](/docs/server/rate-limiting) |
-| Information leaks | In production, 5xx bodies, error chunks on streams and WebSockets, and validation messages that did not come from client input carry generic text; user-controlled values are escaped before logging; `/docs` and `/redocs` are off; graph introspection needs an explicit `graph:read` scope; the eval routes are not mounted; Sentry is sent without request bodies or local variables; OTEL prints no spans to stdout | `MODE`, `graph_introspection`, `DOCS_PATH`, `REDOCS_PATH`, `SENTRY_DSN` | [Production checklist](/docs/server/production-checklist) |
+| Information leaks | In production, 5xx bodies, error chunks on streams and WebSockets, and validation messages that did not come from client input carry generic text; user-controlled values are escaped before logging; `/docs` and `/redocs` are off; graph introspection needs an explicit `graph:read` scope; Sentry is sent without request bodies or local variables; OTEL prints no spans to stdout | `MODE`, `graph_introspection`, `DOCS_PATH`, `REDOCS_PATH`, `SENTRY_DSN` | [Production checklist](/docs/server/production-checklist) |
 | Browser attacks | CORS with explicit origins, Host header validation, security headers (HSTS, frame options, CSP) on by default, and `X-Forwarded-For` honoured only from trusted proxies | `ORIGINS`, `ALLOWED_HOST`, `SECURITY_HEADERS_ENABLED`, `rate_limit.trusted_proxies` | [CORS and security headers](/docs/server/cors-and-security-headers) |
 | Concurrent runs on one thread | A per-thread lock lets one run proceed; a second waits up to 30 s, then gets 409 "thread is busy". `on_busy: "cancel"` stops the running one instead | `on_busy` request option | [Invoke and stream](/docs/server/invoke-and-stream) |
 | Deployment | The generated image runs as a non-root user with a numeric id, drops the CLI code, and the compose file publishes the port on 127.0.0.1 only | `10xgraph build` | [Deploy](/docs/server/deploy) |
@@ -86,7 +86,13 @@ With `MODE=production` the server does not start if:
 - Any non-public route lacks a permission guard. Only `/ping` and `/health/ready` are public. A route you add and forget to guard is a deploy-time error.
 - Ownership is on but the checkpointer cannot name a thread's owner. With auth configured the loader refuses to boot in that setup.
 
-In production the docs and redoc pages default to off, `IS_DEBUG` is forced off, and `MEDIA_REQUIRE_OWNER` and graph introspection scoping default to on.
+In production the docs and redoc pages default to off, debug mode is off, and `MEDIA_REQUIRE_OWNER` and graph introspection scoping default to on.
+
+## Run trace is development only
+
+> **Run trace is a development tool.** It exists for the playground. It is turned off in production mode: nothing is recorded, and the endpoint returns `enabled: false`.
+>
+> The playground's Run trace page reads `GET /v1/observability/{thread_id}`, which needs `graph:read`. With auth on, the thread id goes through the authorization backend, so by default a user can read traces only for their own threads, the same rule as reading the thread. With `MODE=production` the in-memory trace store is never created, so there is nothing to read and no memory cost. Run any server that other people can reach (staging, demos) with `MODE=production`, or at least with auth on.
 
 ## What you must still do
 

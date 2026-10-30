@@ -160,7 +160,7 @@ If `checkpointer` is `false`, configure one: see [Set up checkpointing](/docs/gu
 **Likely causes**
 
 - Different routes: `invoke()` calls `POST /v1/graph/invoke`, `stream()` calls `POST /v1/graph/stream`.
-- A hand-written parser expects SSE `data:` frames. The stream endpoint is sent with `Content-Type: text/event-stream`, but the client parses it as newline-delimited JSON chunks.
+- A hand-written parser expects SSE `data:` frames. The stream endpoint is sent with `Content-Type: application/x-ndjson`, and the client parses it as newline-delimited JSON chunks.
 - A proxy buffers the response or times out long-lived connections.
 
 **Fix**

@@ -35,7 +35,7 @@ The leases expire on their own, so a crashed worker cannot hold a thread or a us
 
 ## Workers and sizing
 
-`10xgraph build` generates a Dockerfile that runs Gunicorn with Uvicorn workers. The worker count comes from `WEB_CONCURRENCY`, set to `2` in the image; override it at deploy time, for example `-e WEB_CONCURRENCY=8`. The image sets a graceful timeout of 600 seconds and a worker timeout of 660 seconds, because an agent run can last minutes and the default 30 seconds would kill runs during a rolling deploy. With `--k8s`, the generated manifest sets `terminationGracePeriodSeconds` above that and a `preStop` sleep so the load balancer stops sending new traffic first.
+`10xgraph build` generates a Dockerfile that runs Gunicorn with Uvicorn workers. The worker count comes from `WEB_CONCURRENCY`, set to `2` in the image; override it at deploy time, for example `-e WEB_CONCURRENCY=8`. The image runs `TenxGraphUvicornWorker` and sets a graceful timeout of 600 seconds and a worker timeout of 660 seconds, because an agent run can last minutes and the default 30 seconds would kill runs during a rolling deploy. With `--k8s`, the generated manifest sets `terminationGracePeriodSeconds` above that and a `preStop` sleep so the load balancer stops sending new traffic first.
 
 Each in-flight run holds a connection open and waits on model calls, so size and autoscale on concurrent runs, not CPU alone. Choose the worker count and the per-user cap together: without Redis the cap is per worker.
 
@@ -54,9 +54,9 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 | Replay-safe tool ledger | A tool call recorded in the checkpointer's ledger is not executed again when a run resumes after a crash. A crash between the tool finishing and its record being written can still repeat it, so pass idempotency keys to payment and email providers. [Details](/docs/concepts/replay-safe-tools) |
 | Versioned state writes | With `PgCheckpointer`, each write is a new version under a row lock. A write based on a stale version is rejected, and the API returns 409 `state_conflict` instead of silently discarding another run's work. |
 | Per-thread run lock | One run per thread, so a double click or a second tab does not interleave history. |
-| Timeouts | `runs.timeout` bounds a whole run. Nodes default to 900 s and tools to 300 s, and one stuck tool cannot hold a run forever. |
+| Timeouts | `runs.timeout` bounds a whole run. Set `node_timeout` and `tool_timeout` (no default) so one stuck tool cannot hold a run forever. |
 | Parallel tool cap | Tools run in parallel up to 10 by default. Change it with `runs.max_parallel_tool_calls` or `TENXGRAPH_MAX_PARALLEL_TOOL_CALLS`. |
-| Graceful shutdown | SIGTERM gives in-flight runs the graceful timeout to finish, and the app closes limiters, revocation and authorization backends on exit. |
+| Graceful shutdown | On SIGTERM the worker marks the app as draining, so `/health/ready` answers 503 and the load balancer stops sending new requests. Open runs get up to `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` (540 by default) to finish. Open streams then end with a final "interrupted" chunk. The app calls `graph.aclose()` with `SHUTDOWN_GRACE_SECONDS`, `SHUTDOWN_STOP_SECONDS` and `SHUTDOWN_TIMEOUT_SECONDS` (10, 10 and 30 seconds by default), which also drains background work, and closes limiters, revocation and authorization backends. A run that was cut off leaves a thread the next message can use. See [Graceful shutdown](/docs/guides/graceful-shutdown). |
 | Readiness probe | `GET /health/ready` checks the checkpointer, Redis and store (each time-boxed to 2 s, cached for 3 s) and returns 200 or 503. It is public and returns only `ok` or `fail` per component. `/ping` is the liveness probe. |
 
 ## Failure behaviour
@@ -66,6 +66,8 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 | Redis down: rate limit | Follows `rate_limit.fail_open`. Default `true` allows the request; set `false` to deny. |
 | Redis down: run lock, run cap, WebSocket caps | Fail open. The request proceeds and the error is logged, because refusing every request would be an outage of its own. The Postgres version check still protects state. |
 | Redis down: ownership | Falls back to the checkpointer lookup in the database. A request is never failed by the cache. |
+| Redis clock | Lease expiry for the run cap uses the Redis clock (`TIME`), not each pod's own, so clock skew between pods cannot trim a live lease. |
+| Redis not answering | Every call fails after `REDIS_SOCKET_TIMEOUT` (5 seconds by default) instead of hanging the request. See [environment variables](/docs/reference/api-cli/environment#redis-variables). |
 | Redis down: token revocation | Fails closed: a 503, not a possibly revoked token served. |
 | Redis down: readiness | `/health/ready` reports `redis: fail` and returns 503. |
 | Postgres down | Runs that need the checkpointer fail. `/health/ready` returns 503, so Kubernetes stops routing to the pod. `/ping` stays 200 so the pod is not restarted for a dependency outage. |
@@ -74,7 +76,7 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 ## Honest limits
 
 - Runs execute in the worker that received the request. There is no separate queue or worker tier, so a long run ties up that worker's connection and a deploy waits on the graceful timeout.
-- Streaming runs do not use the tool ledger. The ledger check is in the `invoke` tool path, so a resumed streamed run can repeat a tool that already finished. Use idempotency keys for tools with side effects on streamed runs.
+- A tool can still run twice if a run crashes in the short gap between the tool finishing and its ledger record being written, or if the run was cut off while the tool was running. Use idempotency keys for tools with side effects.
 - Without Redis, every cap and lock in the table above is per process.
 - There are no published benchmarks for throughput or latency. Load-test your own graph, model and tools.
 - Pin versions and read the changelog before upgrading. 1.0 is a release candidate until the final ships; from 1.0 breaking changes come only in a major release.

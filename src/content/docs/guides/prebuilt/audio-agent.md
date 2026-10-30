@@ -87,7 +87,7 @@ AudioAgent accepts most of the same parameters as `ReactAgent`, with provider fi
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `model` | `str` | required | Gemini Live model identifier, e.g. `"gemini-live-2.5-flash-preview"`. Only Google models are supported. |
+| `model` | `str` | required | Gemini Live model identifier, e.g. `"gemini-3.8-live"`. Only Google models are supported. |
 | `realtime_config` | `RealtimeConfig \| None` | `None` | Voice, modalities, VAD, reconnect backoff, and audio format settings. If `None`, a default config is created from the model string. |
 | `system_prompt` | `list[dict] \| None` | `None` | List of system-role message dicts (e.g. `[{"role": "system", "content": "..."}]`). Flattened at connect time; supports `{field}` placeholders from state. |
 | `tools` | `Iterable[Callable] \| None` | `None` | Tool functions exposed to the model. Can be plain functions or decorated with `@tool`. Executed in parallel during the session. |
@@ -135,7 +135,7 @@ from tenxgraph.core.realtime.base import RealtimeConfig
 from tenxgraph.core.realtime.queue import LiveInputQueue
 from tenxgraph.prebuilt.agent import AudioAgent
 
-MODEL = "gemini-live-2.5-flash-preview"
+MODEL = "gemini-3.8-live"
 
 app = AudioAgent(
     MODEL,
@@ -175,7 +175,7 @@ from tenxgraph.core.realtime.base import RealtimeConfig
 from tenxgraph.core.realtime.queue import LiveInputQueue
 from tenxgraph.prebuilt.agent import AudioAgent
 
-MODEL = "gemini-live-2.5-flash-preview"
+MODEL = "gemini-3.8-live"
 
 def get_weather(city: str) -> str:
     """Get the current weather for a city."""
@@ -231,7 +231,7 @@ from tenxgraph.core.realtime.queue import LiveInputQueue
 from tenxgraph.prebuilt.agent import AudioAgent
 from tenxgraph.storage.checkpointer import InMemoryCheckpointer
 
-MODEL = "gemini-live-2.5-flash-preview"
+MODEL = "gemini-3.8-live"
 
 # For production, use PgCheckpointer (needs postgres_dsn, redis_url and a user_id in config)
 checkpointer = InMemoryCheckpointer()
@@ -288,7 +288,7 @@ from tenxgraph.core.realtime.base import RealtimeConfig
 from tenxgraph.core.realtime.queue import LiveInputQueue
 from tenxgraph.prebuilt.agent import AudioAgent
 
-MODEL = "gemini-live-2.5-flash-preview"
+MODEL = "gemini-3.8-live"
 
 app = AudioAgent(MODEL).compile()
 
@@ -325,7 +325,7 @@ from tenxgraph.core.realtime.base import RealtimeConfig, VADConfig
 from tenxgraph.core.realtime.queue import LiveInputQueue
 from tenxgraph.prebuilt.agent import AudioAgent
 
-MODEL = "gemini-live-2.5-flash-preview"
+MODEL = "gemini-3.8-live"
 
 config = RealtimeConfig(
     model=MODEL,
@@ -366,7 +366,7 @@ When you create an AudioAgent, you can customize the realtime session with `Real
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `model` | `str` | required | Gemini Live model name (e.g. `"gemini-live-2.5-flash-preview"`). |
+| `model` | `str` | required | Gemini Live model name (e.g. `"gemini-3.8-live"`). |
 | `voice` | `str \| None` | `None` | Voice to use for model output. Examples: `"Puck"` (neutral), `"Aoede"` (calm), `"Charon"` (expressive). Omit for the provider's default. |
 | `response_modalities` | `list[str]` | `["AUDIO"]` | Output modality. Must be exactly one of `["AUDIO"]` or `["TEXT"]`. |
 | `system_instruction` | `str \| None` | `None` | Direct system instruction string. Overridden by `system_prompt` / `skills` / `memory` if provided. |

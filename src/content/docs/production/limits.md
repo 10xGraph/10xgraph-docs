@@ -12,7 +12,7 @@ faq:
   - q: "Does the server refuse to start without auth?"
     a: "No. With auth set to null the server starts and accepts every request, including in production. Configure auth before you expose the server."
   - q: "Do streamed runs get replay-safe tool calls?"
-    a: "No. The tool ledger is consulted only on the invoke path. A streamed run that crashes and resumes can run a finished tool again, so give side-effecting tools an idempotency key."
+    a: "Yes. The tool ledger is consulted on both the invoke and the streaming path. A crash in the short gap between a tool finishing and its record being written can still repeat the tool, so give side-effecting tools an idempotency key."
 ---
 
 10xGraph enforces a lot at the server, and the [readiness table](/docs/production) says which. This page lists what it does not do, so you can plan for it. Each item says what to do.
@@ -60,9 +60,9 @@ Threads, messages and uploaded files stay until something deletes them. Deleting
 
 What to do: back up PostgreSQL, decide a retention policy, and delete threads when users ask. See [Backup and restore](/docs/server/backup-and-restore).
 
-## Streaming runs have no tool ledger
+## Tools run at least once
 
-Replay-safe tools record each finished call in the checkpointer and skip it on resume. That check is in the invoke path only. The streaming tool path does not read or write the ledger, so a streamed run that crashes mid-node can run a finished tool again. A crash before a tool returns, or in the short gap before its record is written, can also repeat it.
+Replay-safe tools record each finished call in the checkpointer and skip it on resume. The check runs on both the invoke and the streaming path. A crash before a tool returns, or in the short gap before its record is written, can repeat the tool. A tool that was running when a run was cancelled or crashed gets an error result on the next turn, and the model may call it again.
 
 What to do: send an idempotency key derived from stable inputs (an order id, not a random value) to payment, email and ticket providers. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
 

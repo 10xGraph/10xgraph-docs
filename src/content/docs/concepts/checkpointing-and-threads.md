@@ -159,7 +159,7 @@ Install with:
 pip install "10xgraph[pg_checkpoint]"
 ```
 
-The schema is created automatically on the first call to `await checkpointer.asetup()`. See [guides/set-up-checkpointing](/docs/guides/set-up-checkpointing) for full configuration.
+`await checkpointer.asetup()` creates the schema and is safe to repeat. The API server calls it at boot (on failure it logs and retries on first use), so a fresh Postgres needs no manual step there. See [guides/set-up-checkpointing](/docs/guides/set-up-checkpointing) for full configuration.
 
 ## Trade-offs and decision guide
 

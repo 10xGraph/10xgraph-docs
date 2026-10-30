@@ -260,7 +260,7 @@ await client.invoke([Message.text_message('Hello')], { initial_state: initialSta
 
 ## observability()
 
-Fetches the reconstructed execution trace for a thread from `GET /v1/observability/{thread_id}`. The server returns the most recent run by default; pass a `runId` to fetch a specific one. Use it to show a timeline, attribute latency to a node, or report token usage per run.
+Fetches the reconstructed execution trace for a thread from `GET /v1/observability/{thread_id}`. The server returns the most recent run by default; pass a `runId` to fetch a specific one. Use it to show a timeline, attribute latency to a node, or report token usage per run. It is a development aid: with `MODE=production` on the server it returns an empty result with `enabled: false`.
 
 ```ts
 const result = await client.observability('thread-abc123');

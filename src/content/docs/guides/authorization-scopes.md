@@ -4,7 +4,7 @@ description: "Read caller identity and enforce scopes inside graph nodes and too
 order: 380
 group: "Safety"
 section: "Build agents"
-updated: "2026-10-27"
+updated: "2026-10-29"
 label: "Authorization scopes"
 faq:
   - question: "What is the difference between identity and scopes?"
@@ -56,12 +56,15 @@ Use `has_scope()` to gate operations behind permissions:
 
 ```python
 from tenxgraph.core.authz import has_scope
+from tenxgraph.core.state import ToolResult
 
 @tool
 def create_memory(text: str, *, config):
     """Store long-term memory, only for users with store:write scope."""
     if not has_scope(config, "store:write"):
-        raise PermissionError("You do not have permission to write to memory")
+        return ToolResult(
+            message="You do not have permission to write to memory.", is_error=True
+        )
     
     # Proceed with the memory operation
     return f"Memory created: {text}"
@@ -69,18 +72,61 @@ def create_memory(text: str, *, config):
 
 The scope string is always `"resource:action"`. The full list of scopes is:
 
-- Graph execution: `graph:invoke`, `graph:stream`, `graph:stop`, `graph:fix`, `graph:setup`, `graph:read`
+- Graph execution: `graph:invoke`, `graph:stream`, `graph:stop`, `graph:fix`, `graph:read`
 - Thread state (checkpointer): `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`
 - Thread import (admin only): `checkpointer:import`
 - Long-term memory (store): `store:read`, `store:write`, `store:delete`
 - Media and files: `files:read`, `files:upload`, `files:delete`
 - Configuration: `config:read`
 
+The built-in scopes guard API routes. Names you define yourself work the same way inside tools (see [Control access inside a tool](#control-access-inside-a-tool)).
+
 `files:delete` guards `DELETE /v1/files/{file_id}`. Only the uploader can delete a file even with the scope: a missing file or someone else's file returns 404. A role of `"*"` includes it.
 
 `checkpointer:import` guards `POST /v1/threads/{thread_id}/messages`, which imports history of any role. It is the one scope that is never implied. Other routes treat an identity with no declared scopes as unrestricted. This route returns 403 unless the scope is granted explicitly. A role of `"*"` includes it. Grant it only to trusted admin identities.
 
 `has_scope()` is permissive by default: if no authorization context is present (auth not configured, or a direct SDK call without an authz block), it returns `True`. This ensures backward compatibility, existing graphs work unchanged.
+
+## Control access inside a tool
+
+Scopes guard API routes: a caller needs `graph:invoke` to start a run, and the server enforces that before your graph runs. What a tool may do once a run is going is up to you, and you have everything you need to decide. A tool can take these parameters by name and 10xGraph injects them:
+
+- `config`: the run config. `get_authz(config)` returns the authz block (`user_id`, `scope`, `scopes`) the server stamped, and `has_scope(config, "resource:action")` checks one scope.
+- `state`, `tool_call_id`, `store`, `checkpointer` and the other injectable names listed in the [tools reference](/docs/reference/python/tools#per-tool-access-control).
+
+Scope names are exact strings, so you can define your own next to the built-in ones. If your auth backend or token issues `orders:refund`, a tool can require it. The server only checks the route scope (`graph:invoke`), and passes the others through to `config` untouched.
+
+This tool refuses politely when the caller lacks a scope, and tells the model what to say:
+
+```python
+from tenxgraph.core.authz import get_authz, has_scope
+from tenxgraph.core.state import ToolResult
+from tenxgraph.utils import tool
+
+
+@tool
+def refund_order(order_id: str, config: dict) -> ToolResult | str:
+    """Refund an order."""
+    if not has_scope(config, "orders:refund"):
+        return ToolResult(
+            message=(
+                "Refunds need the orders:refund permission, which this account does not "
+                "have. Tell the user to contact an administrator."
+            ),
+            is_error=True,
+        )
+    user_id = (get_authz(config) or {}).get("user_id", "anonymous")
+    return f"Order {order_id} refunded by {user_id}."
+```
+
+`ToolResult(..., is_error=True)` marks the call as failed and puts your text in front of the model, so it can explain the refusal. If you raise an exception instead, the model only sees `Tool 'refund_order' failed with an internal error (reference ...)` and the detail goes to the server log. Raise when you want an operator to investigate; return a `ToolResult` when the refusal is an expected answer.
+
+Two behaviors to keep in mind:
+
+- With no authz block (direct SDK calls, or an API server with `"auth": null`), `has_scope()` returns `True`. A tool that must never run without auth should check `get_authz(config) is None` itself and refuse.
+- With auth on, an identity that declares no scopes gets an empty `scopes` list, and `has_scope()` returns `False` for every scope, including your own. Issue the scopes your tools need in the token or from your authorization backend.
+
+You can apply the same check to every tool in one place with a `before_invoke` callback on `InvocationType.TOOL`: `context.function_name` is the tool name and `context.metadata["config"]` is the run config. Raise from the callback to block the call, or keep a dict that maps tool names to required scopes. See [Use callbacks](/docs/guides/use-callbacks).
 
 ## Read caller identity inside tools and nodes
 
@@ -114,7 +160,12 @@ The `isolation_scope` returned by `isolation_scope()` tells you (and the storage
 from tenxgraph.core.authz import isolation_scope, SCOPE_OWNER, SCOPE_NONE
 
 def authorize_thread_access(thread_id: str, user_id: str, config):
-    """Apply custom per-thread access control based on the isolation policy."""
+    """Apply custom per-thread access control based on the isolation policy.
+
+    This is a plain helper, not a tool, so it raises. Call it from your own route or
+    node code. If a tool calls it, catch PermissionError there and return a ToolResult
+    instead, because a raise inside a tool reaches the model only as a generic failure.
+    """
     policy = isolation_scope(config)
     
     if policy == SCOPE_OWNER:
@@ -142,6 +193,7 @@ Install with `pip install "10xgraph[google-genai]"`. Here is a complete example 
 
 ```python
 from tenxgraph.core.authz import get_authz, has_scope
+from tenxgraph.core.state import ToolResult
 from tenxgraph.prebuilt.agent import ReactAgent
 from tenxgraph.utils import tool
 
@@ -173,7 +225,7 @@ def list_notes(*, config) -> str:
 def create_note(text: str, *, config) -> str:
     """Create a note, restricted to users with store:write scope."""
     if not has_scope(config, "store:write"):
-        raise PermissionError("Missing scope: store:write")
+        return ToolResult(message="Missing scope: store:write.", is_error=True)
     
     authz = get_authz(config)
     user_id = authz.get("user_id") if authz else "anonymous"
@@ -186,7 +238,7 @@ def create_note(text: str, *, config) -> str:
 def export_data(format: str, *, config) -> str:
     """Export all user data, admin-only."""
     if not has_scope(config, "config:read"):
-        raise PermissionError("Missing scope: config:read")
+        return ToolResult(message="Missing scope: config:read.", is_error=True)
     
     authz = get_authz(config)
     user_id = authz.get("user_id")
@@ -206,8 +258,8 @@ When you invoke this over the API server:
 2. The authorization backend (`OwnershipAuthorizationBackend` or custom) checks scopes.
 3. `RequirePermission` builds `user["authz"]` with the user's ID and granted scopes.
 4. Your graph runs; each tool calls `get_authz()`, `has_scope()`, or `isolation_scope()`.
-5. If a tool tries to perform an unauthorized action, it raises an error.
-6. If the caller's scopes don't include `store:write`, `create_note()` fails immediately with a PermissionError.
+5. If a tool is asked to perform an unauthorized action, it returns a `ToolResult` with `is_error=True` and a clear message, which the model can relay to the user.
+6. If the caller's scopes don't include `store:write`, `create_note()` returns the failed result "Missing scope: store:write." and does not run.
 
 ## Direct SDK calls with authorization
 
@@ -245,7 +297,7 @@ This flow is defined in `tenxgraph_api/src/app/core/auth/permissions.py`. For de
 
 ## Common errors and fixes
 
-**PermissionError: "Missing scope: store:write"**
+**Tool result "Missing scope: store:write"**
 
 The caller doesn't have the required scope. This happens when:
 

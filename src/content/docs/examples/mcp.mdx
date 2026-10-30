@@ -15,7 +15,7 @@ faq:
   - q: "How do I authenticate to a remote MCP server?"
     a: "Add a headers entry to that server in the mcpServers config, such as an Authorization bearer token read from an environment variable."
   - q: "How does the MCP server know which user made the call?"
-    a: "Set pass_user_info_to_mcp=True on ReactAgent or ToolNode. The ToolNode adds config[\"user\"], or a user_id dict when only user_id is set, as a user argument on each MCP tool call."
+    a: "Set pass_user_info_to_mcp=True on ReactAgent or ToolNode. The ToolNode adds config[\"user\"], or a user_id dict when only user_id is set, as request metadata (`meta`) on each MCP tool call, not as a tool argument."
 ---
 
 MCP (Model Context Protocol) servers expose tools over a network, so an agent can use them without you writing Python tool functions. This example runs a small FastMCP weather server on your machine and points a 10xGraph `ReactAgent` at two copies of it. The agent uses Google `gemini-2.5-flash`. Two more pages cover hosted servers that need a token: [GitHub MCP](/docs/examples/mcp-github) and [Xquik MCP](/docs/examples/mcp-xquik).
@@ -31,7 +31,7 @@ All of them share one pattern: describe the servers in an `mcpServers` dict, wra
 - `fastmcp.Client(config)`: the MCP client. The config lists servers by name with `url`, `transport` and optional `headers`.
 - `ReactAgent(client=...)`: builds a `ToolNode` around the client and wires the model and tool loop.
 - `ToolNode.all_tools()`: lists the tool schemas the client discovered.
-- `pass_user_info_to_mcp`: forwards the caller identity to the server as a `user` argument.
+- `pass_user_info_to_mcp`: forwards the caller identity to the server as request metadata (`meta`).
 - Tool name prefixes: with several servers, each tool is named `<server>_<tool>`.
 
 ## Run it
@@ -68,14 +68,16 @@ The server builds a FastMCP instance and registers tools with a decorator.
     @mcp.tool(
         description="Get the current weather for a location",
         tags={"weather", "information"},
-        exclude_args=["user"],
     )
-    def get_weather(location: str, user: dict | None = None) -> dict:
+    def get_weather(location: str, ctx: Context) -> dict:
+        # ToolNode sends the caller as request metadata under the key "user".
+        meta = ctx.request_context.meta
+        user = (meta.model_extra or {}).get("user") if meta else None
         print(f"[{name}] weather for {location}, caller: {user}")
         return {"location": location, "temperature": "22C", "description": f"Sunny ({name})"}
 ```
 
-`exclude_args=["user"]` hides `user` from the schema the model sees. The `ToolNode` fills it in when `pass_user_info_to_mcp=True`, so the server can log who called without the model inventing a value.
+The `ctx: Context` parameter is injected by FastMCP and is not part of the schema the model sees. With `pass_user_info_to_mcp=True`, the `ToolNode` sends the user dict as request metadata (`meta`) under the key `user`. The tool reads it from `ctx.request_context.meta`, an object that keeps extra fields in `model_extra`. The model never sees or sets it.
 
 ```python
     build_server(args.name).run(transport="streamable-http", host="127.0.0.1", port=args.port)
@@ -122,7 +124,7 @@ agent = ReactAgent(
         {"role": "system", "content": "Answer weather questions with the available tools."}
     ],
     client=Client(mcp_config),
-    # Adds config["user"] (or {"user_id": ...}) to every MCP call as the `user` argument.
+    # Sends config["user"] (or {"user_id": ...}) with every MCP call as request metadata (meta["user"]).
     pass_user_info_to_mcp=True,
 )
 ```
@@ -136,7 +138,7 @@ agent = ReactAgent(
     )
 ```
 
-The `user_id` in the run config is what reaches the server as `user`. `recursion_limit` caps the tool loop at 10 steps.
+The `user_id` in the run config is what reaches the server in the request metadata (`meta["user"]`). `recursion_limit` caps the tool loop at 10 steps.
 
 ### Remote servers with authentication
 
@@ -157,20 +159,23 @@ Run it in its own terminal first:
 
 import argparse
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 
 
 def build_server(name: str) -> FastMCP:
     mcp = FastMCP(f"{name} weather server")
 
-    # exclude_args hides `user` from the tool schema the LLM sees. The ToolNode fills it in
-    # when pass_user_info_to_mcp=True (see agent.py).
+    # With pass_user_info_to_mcp=True (see agent.py) the ToolNode sends the caller as request
+    # metadata. A `Context` parameter is injected by FastMCP and never shows in the tool
+    # schema the LLM sees, so the model cannot invent or change the caller.
     @mcp.tool(
         description="Get the current weather for a location",
         tags={"weather", "information"},
-        exclude_args=["user"],
     )
-    def get_weather(location: str, user: dict | None = None) -> dict:
+    def get_weather(location: str, ctx: Context) -> dict:
+        # ToolNode sends the caller as request metadata under the key "user".
+        meta = ctx.request_context.meta
+        user = (meta.model_extra or {}).get("user") if meta else None
         print(f"[{name}] weather for {location}, caller: {user}")
         return {"location": location, "temperature": "22C", "description": f"Sunny ({name})"}
 
@@ -273,7 +278,7 @@ agent = ReactAgent(
         {"role": "system", "content": "Answer weather questions with the available tools."}
     ],
     client=Client(mcp_config),
-    # Adds config["user"] (or {"user_id": ...}) to every MCP call as the `user` argument.
+    # Sends config["user"] (or {"user_id": ...}) with every MCP call as request metadata (meta["user"]).
     pass_user_info_to_mcp=True,
 )
 

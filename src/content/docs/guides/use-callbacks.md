@@ -23,7 +23,7 @@ By the end of this guide, you will understand when to use callbacks vs lifecycle
 
 **Invocation-level callbacks** fire on every LLM, tool, or MCP call within a node:
 - `before_invoke`: Validate or modify inputs before they are sent.
-- `after_invoke`: Log, filter, or modify outputs after they return.
+- `after_invoke`: Log, filter, or modify outputs after they return. On a streaming run it changes the saved result only; it cannot redact output that was already streamed.
 - `on_error`: Handle errors that occur during a call and optionally return a recovery value.
 
 Use these for input/output validation, prompt injection protection, logging at invocation granularity, or modifying tool behavior on-the-fly.

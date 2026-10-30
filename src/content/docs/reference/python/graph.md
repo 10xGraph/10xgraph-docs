@@ -168,6 +168,7 @@ app = graph.compile(
     interrupt_before=["review_node"],
     interrupt_after=["tool_node"],
     shutdown_timeout=30.0,
+    node_aliases={"old_node": "new_node"},  # after renaming a node
 )
 ```
 
@@ -181,9 +182,30 @@ app = graph.compile(
 | `interrupt_before` | `list[str] \| None` | `None` | Node names to pause execution **before**. |
 | `interrupt_after` | `list[str] \| None` | `None` | Node names to pause execution **after**. |
 | `callback_manager` | `CallbackManager` | `CallbackManager()` | Hooks for evaluation collectors and monitoring. |
-| `shutdown_timeout` | `float` | `30.0` | Seconds to wait for background tasks during graceful shutdown. |
+| `shutdown_timeout` | `float` | `30.0` | Total seconds `aclose()` splits between the grace, stop and cancel phases (50%, 25%, 25%). |
+| `node_aliases` | `dict[str, str] \| None` | `None` | Opt-in map `{old_name: new_name}` for threads stored at a node that a deploy renamed or removed. A thread stored at `old_name` resumes at `new_name`, in `invoke` and `stream`. Without an alias such a thread fails with `StoredNodeMissingError` (`GRAPH_NODE_MISSING_001`). A stored state newer than the code raises `StateFormatVersionError` (`STATE_FORMAT_001`). |
+| `owns_resources` | `bool` | `True` | Whether `aclose()` may close the checkpointer, store and publisher. A resource shared by several live graphs is closed only when the last of them closes. Pass `False` when you manage the resource yourself, for example your own connection pool. |
 
 **Raises:** `GraphError` with `GRAPH_002` if no entry point is set, `GRAPH_003` if a node is orphaned (no edge touches it), or `GRAPH_004` if an edge target or an interrupt node does not exist.
+
+**One graph per container.** A process runs one graph per DI container. Without `container=`, every `StateGraph` uses the global `InjectQ` singleton, so a second graph shares the first graph's checkpointer, store and context manager. Its threads then land in the first graph's database. `compile()` logs a WARNING when a checkpointer is already used by another compiled graph in the process.
+
+Passing `container=InjectQ()` alone is not enough, because a second graph that reuses the same checkpointer object still shares its threads. To run two graphs in one process, give each graph its own container and its own checkpointer instance (and its own store, if you use one):
+
+```python
+from injectq import InjectQ
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
+
+graph_a = StateGraph(container=InjectQ())
+# ... add nodes and edges to graph_a ...
+app_a = graph_a.compile(checkpointer=InMemoryCheckpointer())
+
+graph_b = StateGraph(container=InjectQ())
+# ... add nodes and edges to graph_b ...
+app_b = graph_b.compile(checkpointer=InMemoryCheckpointer())
+```
+
+With `PgCheckpointer`, create one instance per graph, each with its own DSN or `schema=`. The simplest and safest setup is one graph per process or container, which is also how the API server runs.
 
 ---
 
@@ -203,7 +225,11 @@ result = app.invoke(
 )
 ```
 
-Blocks until the graph finishes. It uses `asyncio.run()` internally, so do not call it from an async context. Use `ainvoke()` instead.
+Blocks until the graph finishes. It then waits up to `shutdown_timeout` for pending background work.
+
+Sync `invoke()`, `stream()` and `stop()` raise `RuntimeError` when they are called inside a running event loop (a Jupyter notebook, or an async web handler). The message names the async method to use: `ainvoke()`, `astream()` or `astop()`. Sync checkpointer methods such as `get_state()` raise the same way; use their async versions (`aget_state()`) there.
+
+Publisher events are best-effort background work. Sync `invoke()` and `stream()` wait up to `shutdown_timeout` (default 30 s) for pending events, memory writes and thread naming before they return. The async `ainvoke()` and `astream()` do not wait: call `await graph.aclose()` before the process exits. At most 1000 background tasks can be pending. Beyond that, new ones are dropped, a WARNING is logged at most every 5 s, and the `background_task_manager.tasks_dropped` counter increases. Delivery is at-most-once, with no retry. A slow or unreachable sink loses events and never blocks a run.
 
 ---
 
@@ -330,7 +356,19 @@ Releases the graph's resources.
 await app.aclose()
 ```
 
-It stops background tasks, closes the checkpointer, closes the publisher, and releases the store. Always call this when shutting down a long-lived application.
+```python
+stats = await app.aclose(grace=10, stop_timeout=5, timeout=5)
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `grace` | `float \| None` | 50% of `shutdown_timeout` | Seconds to let active runs finish on their own. |
+| `stop_timeout` | `float \| None` | 25% of `shutdown_timeout` | Seconds to wait after the stop flag is set. Each run saves its thread INTERRUPTED (reason `stop_requested`). |
+| `timeout` | `float \| None` | 25% of `shutdown_timeout` | Seconds for the hard cancel (half) and the background drain (the rest). The cancel saves the thread INTERRUPTED (reason `shutdown`). |
+
+Order: refuse new runs (they raise `GraphClosedError`, code `GRAPH_CLOSED_001`), wait for `grace`, set the stop flag, wait for `stop_timeout`, hard-cancel what still runs, drain background tasks, then release the checkpointer, the publisher and the store by the resource ownership rules. Always call this when shutting down a long-lived application.
+
+The returned dict has `runs` (`active`, `finished`, `stopped`, `cancelled`), `background_tasks` and one entry per released component. To call `aclose()` on SIGTERM and SIGINT, see [`install_shutdown_signals`](/docs/reference/python/runtime-utilities#install_shutdown_signalsgraph-).
 
 `aclose()` is idempotent: calling it a second time is a no-op and returns `{"status": "already_closed"}` rather than raising. This means calling `aclose()` explicitly inside an `async with` block, then having `__aexit__` call it again, is safe.
 
@@ -557,17 +595,17 @@ The `config` dict passed to `invoke`, `ainvoke`, `stream`, `astream` and `stop` 
 | `run_id` | `str \| int` | Yes | Unique run identifier. |
 | `recursion_limit` | `int` | No (framework default: 25) | Maximum node transitions before `GraphRecursionError`. |
 | `timestamp` | `str` | Yes | ISO 8601 timestamp of the run. |
-| `node_timeout` | `float \| None` | No (framework default: `900.0` seconds) | Deadline for a single node execution. |
-| `tool_timeout` | `float \| None` | No (framework default: `300.0` seconds) | Deadline for a single tool call inside a `ToolNode`. |
+| `node_timeout` | `float \| None` | No (default: `None`, no limit) | Deadline for a single node execution. |
+| `tool_timeout` | `float \| None` | No (default: `None`, no limit) | Deadline for a single tool call inside a `ToolNode`. |
 | `durable_checkpoint_every_step` | `bool` | No (default `True`) | Persist state and new messages after each completed step. See [Set up checkpointing](/docs/guides/set-up-checkpointing). |
 
 ### Execution deadlines
 
-Every node and tool call has a deadline, so a hung call cannot block a run forever.
+You can put a deadline on every node and tool call, so a hung call cannot block a run forever. There is no default deadline. A value you set applies to both invoke and stream.
 
 Nothing else bounds a node or a tool. The provider SDK's own timeout does not cover custom tools, MCP calls, or condition functions, so without a deadline a hung call blocks the run forever: the loop never advances a step, the recursion limit never trips, and the between-nodes stop check is never reached.
 
-Both defaults are deliberately generous. They are a backstop against hangs, not a latency budget. The node default (900s) sits above the LLM client timeout (600s) so a slow LLM call fails with its own error rather than being masked by the node deadline.
+Treat them as a backstop against hangs, not a latency budget. Keep the node deadline above the LLM client timeout (600s) so a slow LLM call fails with its own error rather than being masked by the node deadline.
 
 ```python
 result = app.invoke(
@@ -583,7 +621,7 @@ result = app.invoke(
 config = {"thread_id": "t-1", "node_timeout": None}
 ```
 
-An absent key uses the framework default. An explicit `None` disables the deadline, which is different from the key being absent. A non-positive value (`0`) also disables it. A value that cannot be parsed as a float logs a warning and falls back to the default.
+An absent key means no deadline. An explicit `None` also means no deadline. A non-positive value (`0`) disables it too. A value that cannot be parsed as a float logs a warning and falls back to no deadline.
 
 When a deadline expires the node task is cancelled and a `NodeTimeoutError` is raised, which the execution loop persists and reports as a normal node error.
 

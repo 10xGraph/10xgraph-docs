@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 30
 label: Agent
-updated: "2026-10-27"
+updated: "2026-10-29"
 ---
 
 The `Agent` class is a graph node that calls an LLM through the native OpenAI, Google, or Anthropic SDK. It handles message conversion, tool calls, memory retrieval, skills, streaming, and retries for you. Add it to a `StateGraph` as a node, and the graph supplies state and routing.
@@ -58,7 +58,7 @@ def __init__(
 | `extra_messages` | `list[Message] \| None` | `None` | Additional messages prepended to context before each LLM call. |
 | `trim_context` | `bool` | `False` | Trim conversation history to fit within the model's context window. |
 | `tools_tags` | `set[str] \| None` | `None` | Filter ToolNode tools by tag. Only tools with matching tags are offered to the LLM. |
-| `api_style` | `str` | `"chat"` | (via kwargs) OpenAI API style: `"chat"` (Chat Completions) or `"responses"` (Responses API). Any other value raises `ValueError`. |
+| `api_style` | `str` | `"responses"`, or `"chat"` when `base_url` is set | (via kwargs) OpenAI API style: `"chat"` (Chat Completions) or `"responses"` (Responses API). An explicit value always wins. With `"responses"` and a `base_url`, a server that rejects the Responses API is probed once, then the Agent uses Chat Completions for its lifetime. Any other value raises `ValueError`. |
 | `reasoning_config` | `dict \| bool \| None` | `{"effort": "medium"}` | Reasoning config for models supporting extended thinking. `True` enables defaults, `False` or `None` disables, a dict sets model-specific options. See [Reasoning models](#reasoning-models). |
 | `skills` | `SkillConfig \| None` | `None` | Agent Skills configuration per agentskills.io spec. Injects skill catalog and activation/read tools. See [`skills`](/docs/reference/python/skills). |
 | `memory` | `MemoryConfig \| None` | `None` | Long-term memory config for retrieving relevant context before each LLM call. See [Memory](#memory-augmented-agent). |
@@ -189,6 +189,15 @@ agent = Agent(model="gpt-4o", retry_config=False)
 | `circuit_breaker_enabled` | `False` | Track consecutive failures per (provider, model) pair and skip open circuits. |
 | `circuit_breaker_threshold` | `5` | Consecutive failures that open a circuit. |
 | `circuit_breaker_reset_timeout` | `30.0` | Seconds a circuit stays open before retrying. |
+| `jitter` | `0.25` | Fraction of each back-off delay that is randomised, so parallel runs do not retry in step. `0` disables it. |
+| `max_concurrent_calls` | `None` | Opt-in cap on in-flight LLM requests per provider for one `Agent`. |
+| `distributed_max_concurrent_calls` | `None` | Opt-in cap on in-flight requests per (provider, model) shared by every process on the same Redis. Off by default; fails open with a WARNING when Redis is down. Needs `distributed_redis` or `distributed_redis_url`. |
+| `distributed_redis` | `None` | Async Redis client for the shared cap. |
+| `distributed_redis_url` | `None` | Redis URL used to build a client when none is passed. |
+| `distributed_lease_seconds` | `300.0` | How long a slot is held before it counts as abandoned. A running call renews the lease every third of this time, so it only has to outlast a crashed process. |
+| `distributed_key_prefix` | `""` | Prefix for the Redis key. |
+
+See [Cap in-flight calls across processes](/docs/concepts/errors-and-limits#cap-in-flight-calls-across-processes).
 
 When `circuit_breaker_enabled=True`, consecutive failures to a (provider, model) pair open its circuit, causing calls to skip it and try the next fallback for `circuit_breaker_reset_timeout` seconds. After the timeout, one trial is allowed; success closes the circuit.
 

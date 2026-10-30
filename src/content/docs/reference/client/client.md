@@ -132,7 +132,7 @@ See [Threads](/docs/reference/client/threads) for full details.
 | `getMemory(memoryId, options?)` | `Promise<GetMemoryResponse>` | Fetch a single memory by ID. |
 | `updateMemory(memoryId, content, options?)` | `Promise<UpdateMemoryResponse>` | Update an existing memory. |
 | `deleteMemory(memoryId, options?)` | `Promise<DeleteMemoryResponse>` | Delete a memory by ID. |
-| `listMemories(options?)` | `Promise<ListMemoriesResponse>` | List all stored memories with optional pagination. |
+| `listMemories(options?)` | `Promise<ListMemoriesResponse>` | List stored memories with `limit` and `offset` paging (`has_more`, `next_offset`). |
 | `forgetMemories(options?)` | `Promise<ForgetMemoriesResponse>` | Bulk-delete memories by type, category, or filter. |
 
 See [Memory](/docs/reference/client/memory) for full details.

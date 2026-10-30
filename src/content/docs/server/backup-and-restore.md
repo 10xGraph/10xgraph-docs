@@ -57,7 +57,7 @@ The `version` column in `states` is the linchpin of optimistic concurrency contr
 
 ### Schema versioning
 
-The current schema version is **3**. If you pass a custom `schema=` to `PgCheckpointer`, the tables are schema-qualified (e.g., `myschema.threads`), and your backup must target that schema:
+The current schema version is **5**. If you pass a custom `schema=` to `PgCheckpointer`, the tables are schema-qualified (e.g., `myschema.threads`), and your backup must target that schema:
 
 ```bash
 pg_dump "$DATABASE_URL" --format=custom \

@@ -91,7 +91,7 @@ asyncio.run(stream_chat(app, "What is 2 + 2?", thread_id="session-1"))
 
 **Key patterns:**
 - Always branch on `chunk.event` before reading data.
-- `chunk.message`, `chunk.state`, and `chunk.data` are mutually exclusive; only one is set per event.
+- Usually one of `chunk.message`, `chunk.state` and `chunk.data` is set, but not always. A tool result chunk has event `message` and carries both the tool `Message` and `chunk.data` (`status`, `tool_name`, `args`, `tool_call_id`). Branch on `chunk.event`, then check each field for `None` before you read it.
 - `chunk.message.text()` extracts text from a message's content blocks (do not access `.content` directly).
 - Use `async for` to iterate; `astream()` is an async generator.
 - The first `MESSAGE` chunk is an echo of your input messages (role `user`). Skip it if you do not want to display it.
@@ -125,8 +125,8 @@ Every chunk yielded by `astream()` is a `StreamChunk` with these fields:
 ## Differentiate partial from complete messages
 
 The `chunk.message.delta` field is a boolean flag:
-- `delta=True`: The message is partial; you are receiving tokens as they arrive. Append to your display buffer.
-- `delta=False`: The message is complete; replace any streaming placeholder with the final version.
+- `delta=True`: The message is partial; you are receiving tokens as they arrive. Append to your display buffer. A delta carries only the new piece of reasoning as a `ReasoningBlock` in `content`, ahead of the text; append it to the reasoning you already show.
+- `delta=False`: The message is complete; replace any streaming placeholder with the final version. Its reasoning block holds the full reasoning, not a piece.
 
 Both cases use `chunk.message.text()` to get the text:
 

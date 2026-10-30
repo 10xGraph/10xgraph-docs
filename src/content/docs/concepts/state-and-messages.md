@@ -136,7 +136,6 @@ class Message(BaseModel):
     content: Sequence[ContentBlock]
     delta: bool = False
     tools_calls: list[dict[str, Any]] | None = None
-    reasoning: str | None = None
     timestamp: float | None
     metadata: dict[str, Any] = {}
     usages: TokenUsages | None = None
@@ -149,9 +148,8 @@ class Message(BaseModel):
 | `message_id` | Generated automatically unless you pass one. The reducer uses it to avoid duplicates. |
 | `role` | `"user"`, `"assistant"`, `"system"` or `"tool"`. |
 | `content` | A sequence of content blocks. |
-| `delta` | `True` for a partial streaming message. Delta messages are not stored in `context`. |
+| `delta` | `True` for a partial streaming message. Delta messages are not stored in `context`. A delta carries only the new piece of reasoning or text as a block; the final message carries the full reasoning block. |
 | `tools_calls` | Raw tool-call dicts from the model. Tool calls also appear as `ToolCallBlock` entries in `content`. |
-| `reasoning` | Reasoning text, when the provider returns it. |
 | `timestamp` | UNIX timestamp, set at creation. |
 | `usages` | Token counts, when the provider returned them. |
 | `raw` | The provider-native response, when kept. |
@@ -237,7 +235,7 @@ A message carries its content as typed blocks, one per kind of content. All bloc
 | `DataBlock` | Generic binary data. |
 | `ToolCallBlock` | A model request to call a tool: `id`, `name` and `args`. |
 | `ToolResultBlock` | The output of a tool call, linked by `call_id`, with `is_error` and `status`. |
-| `ReasoningBlock` | Reasoning content from models that expose it. |
+| `ReasoningBlock` | Reasoning content from models that expose it. Read it from `content`; a message has no separate reasoning field. Converters order blocks reasoning, text, media, tool calls. |
 | `ErrorBlock` | An error recorded in the conversation. |
 | `AnnotationBlock` | Annotation data attached to content. |
 

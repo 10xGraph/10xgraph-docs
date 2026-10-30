@@ -9,7 +9,7 @@ label: Production Checklist
 updated: "2026-10-27"
 faq:
   - question: "What is the minimum checklist for production?"
-    answer: "Set MODE=production, IS_DEBUG=false, use explicit ORIGINS, configure Postgres+Redis for persistence, enable rate limiting, and run at least two API instances."
+    answer: "Set MODE=production, use explicit ORIGINS, configure Postgres+Redis for persistence, enable rate limiting, and run at least two API instances."
   - question: "Can I use in-memory checkpointing in production?"
     answer: "No. InMemoryCheckpointer loses all state on restart and cannot be shared across instances. Use PgCheckpointer for all production deployments."
   - question: "Do I have to use Redis?"
@@ -25,13 +25,12 @@ With `MODE=production`, the server does these for you. You do not configure them
 - Validates `MODE` at startup: a typo stops the server instead of running with development defaults.
 - Runs strict production checks (`STRICT_PRODUCTION_CHECKS`, on by default): wildcard `ORIGINS` or `ALLOWED_HOST`, wildcard CORS with credentials and enabled docs paths are refused at boot, and short HMAC JWT secrets are rejected.
 - Turns off the `/docs` and `/redocs` pages unless you set their paths.
-- Does not mount the unauthenticated `/v1/evals` routes.
 - Replaces 5xx error text, including streamed error chunks, with a generic message. Raise `ClientInputError` for 422 messages that must reach the client.
 - Cancels a graph run after 300 seconds unless you set `runs.timeout`.
 - Scopes graph introspection (`GET /v1/graph`, `/v1/graph/tools`, `/v1/graph:StateSchema`) to callers with the `graph:read` scope, unless you set `graph_introspection` to `"open"`.
 - Defaults authorization to ownership, so each user reaches only their own threads.
-- Forces `IS_DEBUG` off, even if the environment sets it to true.
-- Ships a hardened image when you use `10xgraph build`: non-root user, Gunicorn with long graceful timeouts, health check on `/ping`.
+- Turns debug mode off.
+- Ships a hardened image when you use `10xgraph build`: non-root user, Gunicorn with `TenxGraphUvicornWorker` and long graceful timeouts, health check on `/ping`. On SIGTERM `/health/ready` answers 503 while open runs finish.
 
 For why these matter, see the [security model](/docs/production/security-model) and [scaling and reliability](/docs/production/scaling).
 
@@ -59,13 +58,12 @@ The first critical step is disabling development features. Set these environment
 
 ```bash
 MODE=production
-IS_DEBUG=false
 LOG_LEVEL=INFO
 ```
 
 `MODE` accepts `production` (or `prod`) and `development` (or `dev`, `local`), trimmed and case-insensitive. Unset means `development`. Any other value, such as a typo, stops the server at startup, so a misspelling cannot run with the development defaults.
 
-`MODE=production` enforces stricter validation at startup: wildcard CORS origins combined with credentials fail the server boot, and HMAC JWT secrets shorter than 32 bytes are rejected. `STRICT_PRODUCTION_CHECKS` is on by default in production and also stops startup on a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST`, or enabled `DOCS_PATH` and `REDOCS_PATH`. Set `STRICT_PRODUCTION_CHECKS=false` to start with warnings only. It also turns off the `/docs` and `/redocs` pages unless you set their paths explicitly, and it does not mount the eval report routes. Leave `IS_DEBUG=false`. In production the server forces `IS_DEBUG` off and logs a warning if it was set to true.
+`MODE=production` enforces stricter validation at startup: wildcard CORS origins combined with credentials fail the server boot, and HMAC JWT secrets shorter than 32 bytes are rejected. `STRICT_PRODUCTION_CHECKS` is on by default in production and also stops startup on a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST`, or enabled `DOCS_PATH` and `REDOCS_PATH`. Set `STRICT_PRODUCTION_CHECKS=false` to start with warnings only. It also turns off the `/docs` and `/redocs` pages unless you set their paths explicitly. Debug mode follows `MODE`, so it is off in production.
 
 ## 2. Secrets and authentication
 
@@ -86,7 +84,7 @@ JWT_SECRET_KEY=$(openssl rand -hex 32)   # 64 hex chars = 32 bytes, production m
 JWT_ALGORITHM=HS256
 ```
 
-Export these to your deployment. The server requires them at startup when JWT auth is configured and will fail to boot otherwise.
+Export these to your deployment. The server requires them at startup when JWT auth is configured and will fail to boot otherwise. It also fails to boot if PyJWT is missing, or if `JWT_ALGORITHM` is `none`, empty or not one of `HS256`, `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512` or `EdDSA`. The `auth` value must be exactly `"jwt"`.
 
 The server rejects a token that has no `user_id` claim. To mint a test token:
 
@@ -176,7 +174,7 @@ my_checkpointer = PgCheckpointer(
 app = state_graph.compile(checkpointer=my_checkpointer)
 ```
 
-The checkpointer creates tables automatically on first connection (call `setup()` or `asetup()` if your code manages startup itself). Make sure the database user has CREATE permission. List the tables:
+The API server calls the checkpointer's `asetup()` at boot to create the tables. If that fails it logs the error and retries on first use. Call `setup()` or `asetup()` yourself only if your code manages startup outside the server. Make sure the database user has CREATE permission. List the tables:
 
 ```bash
 psql "postgresql://user:password@postgres.internal/10xgraph" -c "
@@ -188,9 +186,13 @@ psql "postgresql://user:password@postgres.internal/10xgraph" -c "
 
 Expected tables in the `public` schema (or the `schema=` you pass): `threads`, `states`, `messages`, `tool_executions`, `schema_version`. They have no name prefix, so use a dedicated database or schema if you share the instance.
 
+`/health/ready` answers 503 while the database schema version is below what the code expects, so a pod started before its migration ran stays out of rotation.
+
 ### Redis caching
 
 Redis acts as a hot cache in front of Postgres. `PgCheckpointer` requires a Redis connection, but the durable data lives in Postgres.
+
+If several deployments share one Redis, set `REDIS_KEY_PREFIX` for the API (run locks, caps, ownership cache, token revocation) and `redis_key_prefix` on `PgCheckpointer` to the same value. They are two separate settings, and each prefixes only its own keys.
 
 ```bash
 REDIS_URL=redis://redis.internal:6379/0
@@ -206,6 +208,10 @@ redis-cli -u redis://redis.internal:6379/0 ping
 ### One run per thread
 
 The server runs one graph run at a time on a thread. With Redis configured, the lock is shared across all instances, so two replicas cannot run the same thread at once. Without Redis, the lock is per process and does not stop two replicas from running one thread together. A second run waits up to 30 seconds, then gets `409` (`thread is busy`). The lock expires on its own if a worker dies. If Redis is unreachable, runs proceed without the lock and the error is logged. See [Invoke and stream](/docs/server/invoke-and-stream#one-run-per-thread).
+
+### Warnings you may see
+
+The server logs a WARNING at startup in production, or when `WEB_CONCURRENCY` is above 1, if the checkpointer is `InMemoryCheckpointer` or `SqliteCheckpointer` (threads live in one process) or if no Redis is configured (run locks, caps and in-memory rate limits count per process). `compile()` logs a WARNING when you give it no checkpointer and it falls back to in-memory, and a graph logs one WARNING per graph on its first run with no `user_id`. These are your call; use `PgCheckpointer` with Redis for more than one process.
 
 ### Topology diagram
 
@@ -229,21 +235,20 @@ Deploy at least two API instances behind a load balancer to survive instance fai
 
 ### Gunicorn + Uvicorn (ASGI server)
 
-The `Dockerfile` from `10xgraph build` already starts Gunicorn with Uvicorn workers. If you run the server yourself, use the same flags. The generated command uses a 600-second graceful timeout and a 660-second worker timeout so long agent runs are not killed mid-flight:
+The `Dockerfile` from `10xgraph build` already starts Gunicorn with Uvicorn workers. If you run the server yourself, use the same flags. The generated command uses the `TenxGraphUvicornWorker` class, a 600-second graceful timeout and a 660-second worker timeout so long agent runs are not killed mid-flight. The worker marks the app as draining on SIGTERM (readiness answers 503) and waits `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` (540 by default) for open responses. Plain `uvicorn.workers.UvicornWorker` also works but skips the draining flag and the final "interrupted" chunk for open streams:
 
 ```bash
 #!/bin/bash
 set -e
 
 export MODE=production
-export IS_DEBUG=false
 export REDIS_URL="redis://redis.internal:6379/0"
 export JWT_SECRET_KEY=$JWT_SECRET_KEY  # from environment
 export ORIGINS="https://app.example.com"
 
 gunicorn \
   --workers 4 \
-  -k uvicorn.workers.UvicornWorker \
+  -k tenxgraph_api.src.app.uvicorn_worker.TenxGraphUvicornWorker \
   -b 0.0.0.0:8000 \
   --graceful-timeout 600 \
   --timeout 660 \
@@ -278,7 +283,7 @@ SNOWFLAKE_WORKER_ID=2
 
 ### Error text and request limits
 
-With `MODE=production`, error chunks on stream, WebSocket and AG-UI carry a generic message instead of the raw exception text, the same as invoke. Requests are also limited to 500 messages, 100 content blocks per message and 1,000,000 characters of text; over a limit gets `422` naming the limit. Neither needs configuration.
+With `MODE=production`, error chunks on stream, WebSocket and AG-UI carry a generic message instead of the raw exception text, the same as invoke. Requests are also limited to 500 messages, 100 content blocks per message and 1,000,000 characters of text; over a limit gets `422` naming the limit. `initial_state`, `config` and `resume` may be nested no deeper than 64 levels. Neither needs configuration.
 
 ## 7. Rate limiting
 
@@ -368,11 +373,7 @@ MEDIA_CLOUD_PREFIX=10xgraph-media
 
 Ensure the storage directory (or cloud bucket) is writable and has sufficient capacity. Monitor disk or cloud storage usage.
 
-## 10. Eval endpoints
-
-The eval report routes (`/v1/evals/runs`) have no authentication. The server does not mount them when `MODE=production`, so no extra configuration is needed. Confirm `MODE=production` is set in every environment that faces users.
-
-## 11. Database backups
+## 10. Database backups
 
 PostgreSQL holds all thread history, messages, and state snapshots. Back it up regularly:
 
@@ -405,6 +406,8 @@ SENTRY_TRACES_SAMPLE_RATE=0.1
 ```
 
 Sampling 10% of traces is typical for production.
+
+The playground's Run trace endpoint (`GET /v1/observability/{thread_id}`) is a development tool. With `MODE=production` it records nothing and returns `enabled: false`, so you have nothing to configure or secure for it. Use OTEL or a publisher for production traces.
 
 The API reports only server faults: 4xx responses are logged at WARNING and never become events, and request bodies are never sent to Sentry. If an alert matches ERROR logs for client errors, match WARNING instead.
 

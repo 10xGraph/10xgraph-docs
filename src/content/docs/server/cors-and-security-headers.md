@@ -228,7 +228,7 @@ location /api/ {
 
 Before deploying to production:
 
-- [ ] Set `MODE=production` (turns off `/docs` and `/redocs` unless you set `DOCS_PATH` or `REDOCS_PATH`, and enforces the CORS, host and JWT secret checks) and `IS_DEBUG=false`
+- [ ] Set `MODE=production` (turns off `/docs` and `/redocs` unless you set `DOCS_PATH` or `REDOCS_PATH`, and enforces the CORS, host and JWT secret checks, and turns debug off)
 - [ ] Set explicit `ORIGINS` (comma-separated list of domains your frontend runs on)
 - [ ] Set `CORS_ALLOW_CREDENTIALS=false` if your API is public and token-based, or `true` if it uses cookies
 - [ ] Set `ALLOWED_HOST` to the DNS names the API answers to

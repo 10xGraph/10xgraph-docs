@@ -347,7 +347,6 @@ APP_NAME="MyAgent"
 APP_VERSION="0.1.0"
 MODE="production"
 LOG_LEVEL="INFO"
-IS_DEBUG="false"
 SUMMARY="MyAgent Backend"
 
 ORIGINS="https://your-app.example.com"
@@ -413,7 +412,7 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
     "window": 60,
     "by": "ip",
     "trusted_proxy_headers": false,
-    "exclude_paths": ["/ping", "/docs", "/redoc", "/openapi.json"]
+    "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
   }
 }
 ```

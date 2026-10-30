@@ -141,6 +141,8 @@ callback_manager.register_before_invoke(InvocationType.TOOL, clamp_search_query)
 
 Use `after_invoke` to log, cache, or transform the output before it is stored in state.
 
+When you stream (`stream` or `astream`), an Agent node's chunks are already with the client when `after_invoke` runs. What the callback returns replaces the saved result only. It cannot redact output that was already streamed, so do not rely on `after_invoke` to hide content from a streaming client.
+
 ```python
 async def log_tool_results(context: CallbackContext, input_data: dict, output_data):
     """Log every tool result."""

@@ -4,7 +4,7 @@ description: "How input validators and PromptInjectionValidator work, the author
 section: Concepts
 order: 170
 group: Serving
-updated: "2026-10-27"
+updated: "2026-10-29"
 ---
 
 Validators are checks that run on incoming messages before a graph executes them. A validator subclasses `BaseValidator`, is registered on a `CallbackManager`, and raises `ValidationError` to reject unsafe input. Authorization defines who can call which endpoints and which scopes a caller has inside the graph. Together, they form a two-layer security model. Both reduce risk but do not eliminate it. For the full list of what the server enforces and what it leaves to you, see the [Security model](/docs/production/security-model).
@@ -27,7 +27,7 @@ Authorization inside 10xGraph is built on two concepts: **isolation scope** and 
 
 The canonical scope set (verified in `tenxgraph.core.authz`):
 
-- **Graph execution:** `graph:invoke`, `graph:stream`, `graph:stop`, `graph:fix`, `graph:setup`, `graph:read`
+- **Graph execution:** `graph:invoke`, `graph:stream`, `graph:stop`, `graph:fix`, `graph:read`
 - **Thread state and checkpointing:** `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`, and the admin-only `checkpointer:import`
 - **Long-term memory (store):** `store:read`, `store:write`, `store:delete`
 - **Files and media:** `files:read`, `files:upload`, `files:delete`
@@ -45,9 +45,9 @@ When a run starts, validators are applied to the incoming messages before anythi
 4. If a validator raises `ValidationError`, execution stops and the error is returned to the caller. If a publisher is configured, a rejection event is emitted.
 5. If all validators pass, the graph continues normally.
 
-Through the API server, a `ValidationError` becomes an HTTP 422 response with the error code `AGENTFLOW_VALIDATION_ERROR`. In production mode the message is sanitized; the `violation_type` is not included in the response.
+Through the API server, a `ValidationError` becomes an HTTP 422 response with the error code `VALIDATION_ERROR`. In production mode the message is sanitized; the `violation_type` is not included in the response.
 
-Input validators see only messages entering the graph on fresh runs and continued threads (resume calls). They do not inspect model output or tool arguments. To guard those, use `register_before_invoke()` and `register_after_invoke()` callbacks (see [Callbacks and Command](/docs/concepts/callbacks-and-command)).
+Input validators see only messages entering the graph on fresh runs and continued threads (resume calls). They do not inspect model output or tool arguments. To guard those, use `register_before_invoke()` and `register_after_invoke()` callbacks (see [Callbacks and Command](/docs/concepts/callbacks-and-command)). For tool, MCP and RAG results, the guide [Validate tool, MCP and RAG output](/docs/guides/protect-against-prompt-injection#validate-tool-mcp-and-rag-output) has a working `after_invoke` example.
 
 ## Writing a validator
 
@@ -188,7 +188,7 @@ Media that a client sends is untrusted input. Three defaults protect the server:
 
 When you run `10xgraph init --template production`, the generated project includes a security setup:
 
-- `graph/validators/validators.py` defines a `PromptInjectionValidator(strict_mode=True, max_length=1000)` with domain-specific suspicious keywords: `"bypass"`, `"override"`, `"token"`, `"coupon"`, `"free"`, and others. **Tune this list to your product.** Words like `"free"` are normal in a customer-facing e-commerce app but may be red flags in a payment processing app.
+- `graph/validators/validators.py` defines a `PromptInjectionValidator(strict_mode=True, max_length=10000)` with `max_length=10000` and a short list of suspicious keywords (`"ignore previous"`, `"forget previous"`, `"disregard previous"`, `"circumvent"`, `"remove restrictions"`, `"coupon"`). It no longer blocks everyday words such as `bypass`, `override`, `disable`, `token` or `free`. **Tune this list to your product.** Keywords match whole words.
 
 - `graph/validators/manager.py` creates a `CallbackManager`, registers the validators, and registers an `AgentLifecycleHook` (a `GraphLifecycleHook` subclass).
 
@@ -200,7 +200,7 @@ The template also sets up `10xgraph.json` with an `auth` entry; choose the mode 
 
 - **Validators are heuristic.** A rephrased attack or one in a language the validator does not recognize may pass. A legitimate message with unlucky wording may be incorrectly rejected. Test with your real users.
 
-- **Indirect injection is not covered.** If a tool fetches a document or web page containing malicious instructions, validators will not catch it. Mitigate by validating tool results inside tools before using them.
+- **Indirect injection is yours to place.** Input validators do not see tool, MCP or RAG output. If a tool fetches a document or web page containing malicious instructions, you decide where to check it: an `after_invoke` callback on `InvocationType.TOOL` and `InvocationType.MCP` can validate, edit or replace any result before the model reads it, and you can reuse a validator inside it. See [Validate tool, MCP and RAG output](/docs/guides/protect-against-prompt-injection#validate-tool-mcp-and-rag-output).
 
 - **Validators do not replace authorization.** Narrow tool permissions, check scopes inside tools with `has_scope()`, and design tool side effects (refunds, deletions) to be idempotent and replay-safe so that authorization failures do not leave data in an inconsistent state.
 

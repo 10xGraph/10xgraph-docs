@@ -102,7 +102,7 @@ Point `10xgraph.json` at it with `"agent": "graph.agent:app"`. The server uses t
 - **Crash after the charge, before the node finished.** If the record was written, the resumed node reuses it. If the process died inside the window between the provider charging and the record write, the tool runs again and the provider returns the first charge because the key is the same.
 - **Crash while the tool was running.** Nothing is recorded, so the tool runs again. Same protection: the idempotency key.
 
-Limits you should know: the ledger check lives on the `invoke` tool path, so streamed runs (`astream`, `/v1/graph/stream`) do not consult it. A tool that exceeds `tool_timeout` is cancelled with nothing recorded. `InMemoryCheckpointer` supports the ledger but loses it on restart; `SqliteCheckpointer` does not implement it. Details in [Replay-safe tools](/docs/concepts/replay-safe-tools).
+Limits you should know: the ledger check runs on the invoke and the streaming tool path alike (`astream` and `/v1/graph/stream` use it too). A tool that exceeds `tool_timeout` is cancelled with nothing recorded. `InMemoryCheckpointer` supports the ledger but loses it on restart; `SqliteCheckpointer` does not implement it. Details in [Replay-safe tools](/docs/concepts/replay-safe-tools).
 
 ## Run it over the server
 

@@ -14,6 +14,8 @@ Base path: `/v1/store`
 
 ## Request fields shared by every endpoint
 
+The `memory_id` path parameter must match `^[A-Za-z0-9._:@-]{1,128}$` (letters, digits and `. _ : @ -`). Any other value gets `422` with code `VALIDATION_ERROR`.
+
 Every request body accepts two optional fields besides the endpoint-specific ones, and the server decides whose memories a request touches from the authenticated user, not from the body.
 
 | Field | Type | Description |
@@ -168,6 +170,7 @@ This is a `POST` endpoint (not `GET`) because the request carries a `config` obj
 ```json
 {
   "limit": 50,
+  "offset": 0,
   "config": {}
 }
 ```
@@ -175,6 +178,7 @@ This is a `POST` endpoint (not `GET`) because the request carries a `config` obj
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `limit` | integer | no | `100` | Maximum memories to return; must be between 1 and 1000 |
+| `offset` | integer | no | `0` | Memories to skip, for paging. Send `next_offset` from the previous response. |
 
 **Response (200 OK):**
 
@@ -192,7 +196,9 @@ This is a `POST` endpoint (not `GET`) because the request carries a `config` obj
         "thread_id": null,
         "timestamp": "2026-10-08T10:30:00Z"
       }
-    ]
+    ],
+    "has_more": false,
+    "next_offset": null
   },
   "metadata": {
     "request_id": "req_xyz",
@@ -202,11 +208,13 @@ This is a `POST` endpoint (not `GET`) because the request carries a `config` obj
 }
 ```
 
+`has_more` is `true` when more memories follow this page. Then `next_offset` holds the `offset` to send next; on the last page it is `null`.
+
 **Error codes:**
 
 - `401` Unauthorized: missing or invalid auth token
 - `403` Forbidden: insufficient permission (not `store:read`)
-- `422` Unprocessable Entity: `limit` is outside the 1 to 1000 range
+- `422` Unprocessable Entity: `limit` is outside the 1 to 1000 range, or `offset` is negative or above the server maximum
 
 **Example:**
 

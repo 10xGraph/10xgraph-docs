@@ -27,7 +27,7 @@ The same weather-tool ReactAgent running on nine provider setups, chosen by a co
 ## Key concepts
 
 - Model string: `gpt-5-mini`, `gemini-2.5-flash`, `claude-sonnet-5-5`. The provider is detected from it; do not pass `provider=`.
-- `api_style="responses"`: use the OpenAI Responses API instead of Chat Completions.
+- `api_style="chat"`: use Chat Completions instead of the OpenAI Responses API (the default, except with `base_url`).
 - `use_vertex_ai=True`: Gemini on Vertex AI.
 - `anthropic_backend="vertex"` or `"bedrock"`: Claude on Vertex AI or Amazon Bedrock.
 - `base_url` and `api_key`: any OpenAI-compatible server, such as DeepSeek or Ollama.
@@ -80,8 +80,8 @@ One dict holds the `ReactAgent` arguments for each provider, with the model visi
 ```python
 CONFIGS: dict[str, dict] = {
     # --- OpenAI: pip install "10xgraph[openai]", OPENAI_API_KEY ---
-    "openai": {"model": "gpt-5-mini"},  # Chat Completions
-    "openai-responses": {"model": "gpt-5-mini", "api_style": "responses"},  # Responses API
+    "openai": {"model": "gpt-5-mini"},  # Responses API (the default)
+    "openai-responses": {"model": "gpt-5-mini", "api_style": "responses"},  # Responses API, explicit
     # --- Google: pip install "10xgraph[google-genai]", GEMINI_API_KEY ---
     "gemini": {"model": "gemini-2.5-flash"},
     "gemini-vertex": {"model": "gemini-2.5-flash", "use_vertex_ai": True},
@@ -192,8 +192,8 @@ def get_weather(location: str) -> str:
 # Anything else is an ordinary keyword argument for ReactAgent / Agent.
 CONFIGS: dict[str, dict] = {
     # --- OpenAI: pip install "10xgraph[openai]", OPENAI_API_KEY ---
-    "openai": {"model": "gpt-5-mini"},  # Chat Completions
-    "openai-responses": {"model": "gpt-5-mini", "api_style": "responses"},  # Responses API
+    "openai": {"model": "gpt-5-mini"},  # Responses API (the default)
+    "openai-responses": {"model": "gpt-5-mini", "api_style": "responses"},  # Responses API, explicit
     # --- Google: pip install "10xgraph[google-genai]", GEMINI_API_KEY ---
     "gemini": {"model": "gemini-2.5-flash"},
     # Same model on Vertex AI. Needs GOOGLE_CLOUD_PROJECT (+ optional GOOGLE_CLOUD_LOCATION)

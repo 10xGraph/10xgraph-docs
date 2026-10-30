@@ -1,7 +1,7 @@
 ---
 title: Errors and limits
 description: "Exception taxonomy, execution limits, retry behavior, and error recovery in graph execution."
-updated: "2026-10-27"
+updated: "2026-10-29"
 order: 150
 group: "Memory and reliability"
 section: Concepts
@@ -35,11 +35,15 @@ Graph-level exceptions (`GraphError`, `NodeError`, `NodeTimeoutError`, `GraphRec
 
 **GraphRecursionError** occurs when the graph exceeds its recursion limit (default 25 steps). This is a safety mechanism to prevent infinite loops. Each node execution counts as one step, including a `ToolNode` run.
 
+### What clients see
+
+For an exception that is not one of 10xGraph's own, the text a client sees (the stream `ERROR` chunk `reason` and `state.error`) shows only the exception type, for example `ConnectionError`. The full text stays in the server logs. 10xGraph's own errors keep their message. The `context` of an exception is redacted in logs, but `err.context` in your code keeps the real values.
+
 ### Timeout errors
 
 **NodeTimeoutError** (a subclass of `NodeError`) is raised when a node or tool execution exceeds its timeout. Without a bound, a hanging tool (a half-open socket in an MCP server, a custom tool that never returns, a database query with no read timeout) blocks the entire graph forever. The recursion limit never trips because no step completes, and stop signals are only checked between nodes, never within them.
 
-Timing out the node converts that indefinite hang into a reportable error. Timeouts are on by default; see [Timeouts](#timeouts).
+Timing out the node converts that indefinite hang into a reportable error. Timeouts are off until you set them; see [Timeouts](#timeouts).
 
 ### Storage and concurrency errors
 
@@ -84,16 +88,46 @@ result = graph.invoke(
 
 When the limit is hit, the run raises `GraphRecursionError`.
 
+### Bounding cost
+
+10xGraph has no per-run token budget and no cost cap, by design. Pricing differs by provider and model, and what counts as too much differs by product, so the framework records what each call used and leaves the limit to you. These are the bounds that exist:
+
+- **`recursion_limit`** caps the number of steps in one run (default 25). A run cannot loop forever, so in a typical agent loop (one model call per agent step) this is the run-level bound on model calls. A step you write yourself can call a model more than once, and the limit does not count those calls.
+- **`max_tokens`** in the agent's `llm_kwargs` caps the output of each model call.
+- **`node_timeout` and `tool_timeout`** bound how long one node or tool may run (see [Timeouts](#timeouts)).
+- **Context managers** (`MessageContextManager`, `SummaryContextManager`) keep the input from growing every turn. See [Context management](/docs/concepts/context-management).
+- **On the API server**, rate limits and the request size limits bound how much work one client can start.
+
+Token usage is recorded per message. When the provider returns it, each assistant message carries `msg.usages`, a `TokenUsages` with `prompt_tokens`, `completion_tokens`, `total_tokens`, `reasoning_tokens`, `cache_read_input_tokens` and `cache_creation_input_tokens`. Read it from the messages in a result:
+
+```python
+result = graph.invoke(
+    {"messages": [Message.text_message("Summarize the report")]},
+    config={"thread_id": "t1", "recursion_limit": 15},
+)
+
+used = 0
+for msg in result["messages"]:
+    if msg.usages:
+        used += msg.usages.total_tokens
+        print(msg.message_id, msg.usages.prompt_tokens, msg.usages.completion_tokens)
+print("tokens in this result:", used)
+```
+
+In a stream, the assistant message that ends each model call carries `usages` as well, so you can add it up as chunks arrive. The messages saved to the thread keep their `usages`, so you can total a thread later from the checkpointer. The same numbers go to your publishers: the LLM span's END event carries `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` and `reasoning_tokens`. See [Streaming LLM spans](/docs/reference/python/publishers#llm-span-events).
+
+To enforce a cap of your own, such as a token ceiling per user per day, keep the running total where you keep user data (a database, Redis) and check it before you start a run. Inside a run, a conditional edge can read `usages` from `state.context` and route to `END` when your threshold is passed.
+
 ### Timeouts
 
-Both timeouts are on by default:
+Neither timeout has a default. Set them to turn them on. A value you set applies to both invoke and stream:
 
 | Config key | Default | Applies to |
 |---|---|---|
-| `node_timeout` | 900 seconds | One node execution |
-| `tool_timeout` | 300 seconds | One tool call |
+| `node_timeout` | None (no limit) | One node execution |
+| `tool_timeout` | None (no limit) | One tool call |
 
-Override them per run, or disable one with `None` or `0`. A timed-out node raises `NodeTimeoutError`:
+Set them per run. `None` or `0` means no limit. A timed-out node raises `NodeTimeoutError`:
 
 ```python
 result = graph.invoke(
@@ -103,6 +137,26 @@ result = graph.invoke(
 ```
 
 Defaults are in `tenxgraph/utils/constants.py`. Individual tools can also set their own timeouts with libraries that support them (for example, HTTP clients with read timeouts).
+
+#### LLM stream idle timeout
+
+A provider request has an overall timeout (600 seconds by default), but a stream that connects and then stops sending would wait that whole time. `stream_idle_timeout` bounds the wait for the next chunk. It has no default: nothing changes until you set it, in one of three places. The first one that is set wins:
+
+1. Per agent, as a keyword argument that goes into `llm_kwargs`: `Agent(model="gpt-4o", stream_idle_timeout=30)`.
+2. For the whole process: `set_default_stream_idle_timeout(30)` from `tenxgraph.core.llm` (pass `None` to clear it). It raises `ValueError` for a value that is not positive.
+3. The environment variable `TENXGRAPH_LLM_STREAM_IDLE_TIMEOUT`, in seconds. A value that is not a positive number is ignored with a warning.
+
+```python
+from tenxgraph.core.graph import Agent
+from tenxgraph.core.llm import set_default_stream_idle_timeout
+
+set_default_stream_idle_timeout(45)                      # process default
+agent = Agent(model="gpt-4o", stream_idle_timeout=20)    # this agent only
+```
+
+When a stream goes quiet for longer than the limit, 10xGraph closes the stream and raises `LLMStreamIdleTimeoutError` (error code `LLM_STREAM_IDLE_TIMEOUT_000`, with `stream_idle_timeout` in its context) from `tenxgraph.core.exceptions`. It is a subclass of `NodeTimeoutError`, so code that already handles node timeouts catches it. It applies to streaming calls on all four converters (OpenAI Chat Completions, OpenAI Responses, Anthropic and Google GenAI).
+
+With `stream_idle_timeout` set, a stall before the first chunk is retried and can fall back to the next model like a connect timeout; a stall after any chunk raises `LLMStreamIdleTimeoutError` and is not retried, so streamed output is never duplicated.
 
 ### Parallel tool calls
 
@@ -136,7 +190,7 @@ When you serve with `10xgraph-api` and an authorization backend, importing threa
 
 ### Request size (API server)
 
-The API server limits each request: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. A request over a limit gets 422. On AG-UI the limits apply to the trailing turn, and the full history gets a cap of 10,000 messages. The limits are fixed. See [Graph endpoints](/docs/reference/rest-api/graph).
+The API server limits each request: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. A request over a limit gets 422. `initial_state`, `config` and `resume` may be nested no deeper than 64 levels; deeper also gets 422 (`VALIDATION_ERROR`). On AG-UI the limits apply to the trailing turn, and the full history gets a cap of 10,000 messages. The limits are fixed. See [Graph endpoints](/docs/reference/rest-api/graph).
 
 ### State and message size
 
@@ -171,6 +225,30 @@ agent = Agent(
 ```
 
 Retries are on by default with `RetryConfig()` (3 retries, 1s initial delay, 2x backoff). Pass `retry_config=False` to disable them.
+
+### Cap in-flight calls across processes
+
+`RetryConfig(max_concurrent_calls=N)` limits in-flight LLM requests per provider inside one `Agent`. When several workers share one provider key, add a cap that all processes share through Redis. It is off by default.
+
+```python
+retry = RetryConfig(
+    distributed_max_concurrent_calls=20,            # across every process using this Redis
+    distributed_redis_url="redis://localhost:6379/0",
+    distributed_lease_seconds=300.0,
+    distributed_key_prefix="prod:",
+)
+agent = Agent(model="gpt-4o", retry_config=retry)
+```
+
+| Field | Default | Description |
+|---|---|---|
+| `distributed_max_concurrent_calls` | `None` (off) | Maximum calls in flight per (provider, model) across all processes. Needs `distributed_redis` or `distributed_redis_url`. It applies on top of `max_concurrent_calls`. |
+| `distributed_redis` | `None` | An async Redis client to use. |
+| `distributed_redis_url` | `None` | A Redis URL used to build a client when none is passed. |
+| `distributed_lease_seconds` | `300.0` | How long a slot is held before it counts as abandoned. A running call renews its lease every third of this time, so a call that outlives it keeps its slot (a renewal error is logged and does not fail the call). The lease only has to outlast a crashed process, which frees its slots after this long. |
+| `distributed_key_prefix` | `""` | Prefix for the Redis key, like the checkpointer's `redis_key_prefix`. |
+
+If the cap is set with neither a client nor a URL, 10xGraph logs a warning and the shared cap stays off. The limiter fails open: when Redis cannot be reached, a WARNING is logged (at most every 30 seconds) and the call goes ahead without a slot, so a Redis outage never blocks runs. For a streaming call, the cap covers opening the stream, not reading it. Waiting for a free slot has no timeout of its own, so keep `distributed_lease_seconds` close to your real call time.
 
 ### What gets retried
 

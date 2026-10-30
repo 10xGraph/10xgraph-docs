@@ -263,7 +263,7 @@ interface StreamRequest {
 
 The server sends the stream as **NDJSON** (newline-delimited JSON) over HTTP. Each line is a JSON object matching the `StreamChunk` shape. The client's parser also handles concatenated JSON objects (no newlines) for compatibility with some proxy configurations.
 
-The server sets the response header `Content-Type: text/event-stream`, but the body is NDJSON, not Server-Sent Events framing.
+The server sets the response header `Content-Type: application/x-ndjson`. The body is NDJSON, not Server-Sent Events framing. The client skips the blank keep-alive lines the server sends while a run is silent.
 
 Example raw stream output:
 

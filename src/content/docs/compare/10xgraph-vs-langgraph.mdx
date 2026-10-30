@@ -10,7 +10,7 @@ faq:
   - q: Is 10xGraph a fork of LangGraph?
     a: No. 10xGraph is an independent open-source project with its own runtime, state types, and CLI. Both frameworks model agents as graphs of nodes and edges.
   - q: How does the 10xGraph API server compare to LangSmith Deployment?
-    a: 10xGraph generates a REST, SSE and WebSocket server from your graph in the open-source install, under the MIT license. LangGraph routes deployment to LangSmith Deployment, which has cloud, hybrid, self-hosted and standalone options, with plan or license requirements listed in LangChain's docs.
+    a: 10xGraph generates a REST, NDJSON streaming and WebSocket server from your graph in the open-source install, under the MIT license. LangGraph routes deployment to LangSmith Deployment, which has cloud, hybrid, self-hosted and standalone options, with plan or license requirements listed in LangChain's docs.
   - q: Does LangGraph have a TypeScript client?
     a: Yes. LangChain publishes @langchain/langgraph-sdk, an MIT-licensed client library for the LangGraph API, and LangGraph.js. 10xGraph ships its own typed TypeScript client for the 10xGraph API.
   - q: Does 10xGraph depend on LangChain?
@@ -37,7 +37,7 @@ The rows below start with what differs most between the two. The shared basics (
 
 | | 10xGraph | LangGraph |
 |---|---|---|
-| Production server (REST, SSE, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, SSE, WebSocket and realtime-audio endpoints from the compiled graph | The `langgraph` library is MIT ([PyPI](https://pypi.org/project/langgraph/)). Serving goes through Agent Server: cloud needs Plus or above, self-hosted control plane needs Enterprise, standalone needs a LangSmith license ([deployment options](https://docs.langchain.com/langsmith/deployments), [pricing](https://www.langchain.com/pricing)) |
+| Production server (REST, NDJSON streaming, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, NDJSON streaming, WebSocket and realtime-audio endpoints from the compiled graph | The `langgraph` library is MIT ([PyPI](https://pypi.org/project/langgraph/)). Serving goes through Agent Server: cloud needs Plus or above, self-hosted control plane needs Enterprise, standalone needs a LangSmith license ([deployment options](https://docs.langchain.com/langsmith/deployments), [pricing](https://www.langchain.com/pricing)) |
 | Auth (JWT or custom) | JWT (`"auth": "jwt"`) or a custom `BaseAuth` subclass | Custom auth via `@auth.authenticate`, supported on all plans ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
 | Authorization | Role scopes (such as `graph:invoke`, `checkpointer:read`) or a custom `AuthorizationBackend` | `@auth.on` handlers per resource and action ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
 | Thread ownership isolation | Built-in `"authorization": "ownership"` backend, with a two-tier cached owner check | Not built in. The docs show a handler pattern you write yourself ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
@@ -45,7 +45,7 @@ The rows below start with what differs most between the two. The shared basics (
 | Rate limiting | Memory or Redis sliding-window limits, set in `10xgraph.json` | Not verified |
 | Replay-safe tool calls after a crash | Tool ledger in the checkpointer: a tool that already ran is not executed again on resume. Needs a checkpointer | Resume replays from a checkpoint. The docs advise wrapping side effects in tasks and making them idempotent ([functional API docs](https://docs.langchain.com/oss/python/langgraph/functional-api)) |
 | Versioned (compare-and-swap) state writes | Optimistic version check on durable writes in `PgCheckpointer` | Not documented |
-| Node and tool timeouts | `node_timeout` and `tool_timeout`, with defaults of 900 s and 300 s | `TimeoutPolicy` per node, async nodes only, plus `RetryPolicy` ([fault tolerance docs](https://docs.langchain.com/oss/python/langgraph/fault-tolerance)) |
+| Node and tool timeouts | `node_timeout` and `tool_timeout`, off until you set them | `TimeoutPolicy` per node, async nodes only, plus `RetryPolicy` ([fault tolerance docs](https://docs.langchain.com/oss/python/langgraph/fault-tolerance)) |
 | Docker Compose and Kubernetes manifests | `10xgraph build --docker-compose --k8s` writes `Dockerfile`, `docker-compose.yml`, `k8s.yaml` | `langgraph build` builds an image ([CLI docs](https://docs.langchain.com/langsmith/cli)). Standalone self-hosting documents Helm and a Docker Compose example, and needs a license key ([standalone docs](https://docs.langchain.com/langsmith/deploy-standalone-server)) |
 | License | MIT, including API/CLI and client | MIT for the library. LangSmith plans are commercial ([pricing](https://www.langchain.com/pricing)) |
 | TypeScript client | Typed `10xgraph-client` for the 10xGraph API | `@langchain/langgraph-sdk`, MIT ([npm](https://www.npmjs.com/package/@langchain/langgraph-sdk)) |

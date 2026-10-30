@@ -80,7 +80,7 @@ The server refuses some input with `422`, on invoke, stream and the WebSocket:
 - An unknown `current_node`.
 - A state value that does not match its field type. The error names the field.
 
-Requests are also limited in size: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. A request over a limit gets `422` with a message that names the limit, in development and production alike. The limits are fixed.
+Requests are also limited in size: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. `initial_state`, `config` and `resume` may be nested no deeper than 64 levels; deeper gets `422` with code `VALIDATION_ERROR`. A request over a limit gets `422` with a message that names the limit, in development and production alike. The limits are fixed.
 
 Custom state fields are allowed, so a frontend can pass a selected ID straight into state. To limit which keys clients may set, list them in `runs.state_keys` in `10xgraph.json`. The server ignores any `message_id` you send and generates its own.
 
@@ -98,7 +98,7 @@ The `data` object has these fields:
 
 ## Stream results in real time
 
-Use POST `/v1/graph/stream` to get results as they are produced. The response body is NDJSON (newline-delimited JSON), one chunk per line. The `Content-Type` header is `text/event-stream`, but lines are plain JSON, not `data:` frames.
+Use POST `/v1/graph/stream` to get results as they are produced. The response body is NDJSON (newline-delimited JSON), one chunk per line. The `Content-Type` header is `application/x-ndjson`. Lines are plain JSON, not `data:` frames. While the run is silent the server sends a blank line every 15 seconds so a proxy does not cut the connection; skip empty lines. A stream that finishes without an error ends with an `updates` chunk whose `data` is `{"status": "done"}`.
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/stream \

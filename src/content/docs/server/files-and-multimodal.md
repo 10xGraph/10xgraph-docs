@@ -75,6 +75,9 @@ The server reads uploads in 1 MiB chunks, so oversized files are rejected before
 | `415 Unsupported Media Type` | The file's MIME type is not in `MEDIA_ALLOWED_CONTENT_TYPES`. |
 | `415 Unsupported Media Type` (content check) | The first bytes of the file do not match its declared type. The detail is `file content does not match <type>`. |
 | `413 Payload Too Large` | The file exceeds `MEDIA_MAX_SIZE_MB`. The limit is checked during streaming, so rejection occurs before the full body is loaded. |
+| `413 Payload Too Large` (PDF) | A PDF is over `MEDIA_MAX_PDF_MB` (default 10) or `MEDIA_MAX_PDF_PAGES` (default 500). Checked before text extraction, while `DOCUMENT_HANDLING=extract_text`. |
+| `413 Payload Too Large` (image) | An image has more than `MEDIA_MAX_IMAGE_PIXELS` pixels (default 50 million). Needs Pillow; without it the check is skipped. |
+| `413 Payload Too Large` (quota) | The user is at `MEDIA_MAX_FILES_PER_USER` files or `MEDIA_MAX_USER_STORAGE_MB` of storage. Both default to `0`, which means no limit. On the cloud store the quota counts files through the per-owner index, so files stored before `10xgraph` 1.0, or with no owner, are not counted. |
 
 ### Content check on upload
 
@@ -332,9 +335,15 @@ MEDIA_CLOUD_CREDENTIALS_JSON='{"type": "service_account", ...}'
 
 Or set `GOOGLE_APPLICATION_CREDENTIALS` and omit `MEDIA_CLOUD_CREDENTIALS_JSON`.
 
+## Cloud listing, quotas and thread delete
+
+On S3 and GCS the cloud store keeps a per-owner index object (`{prefix}/owners/<hash>.index.json`), updated on every store and delete. `GET /v1/files`, the per-user quotas and the release of a thread's files on thread delete use it. Files stored before `10xgraph` 1.0, or stored without an owner, are not in the index, so they are not listed, counted or released. The orphan sweeper (`MEDIA_SWEEP_INTERVAL_SECONDS`) does not run on the cloud store, because the library cannot list blobs.
+
+Thread links on a file are updated atomically on the local and memory stores. On the cloud store each update re-reads the metadata just before it writes and retries up to 5 times, which leaves a small window where two writers racing at that instant can lose an update. Several workers sharing one local media folder serialize through a `.meta.lock` file in that folder (POSIX only).
+
 ## Signed URLs and direct access
 
-With a cloud storage backend, clients can request signed direct URLs to bypass the API server. With `local` or `memory` storage there is no direct URL, and `url` is the API path `/v1/files/{file_id}`. `expires_at` is a Unix timestamp in seconds.
+With a cloud storage backend, clients can request signed direct URLs to bypass the API server. With `local` or `memory` storage there is no direct URL, and `url` is the API path `/v1/files/{file_id}`. The signed URL's file extension comes from the stored metadata. `expires_at` is a Unix timestamp in seconds.
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
@@ -370,6 +379,7 @@ Before shipping to production, configure the following:
 
 - **Content types**: Set `MEDIA_ALLOWED_CONTENT_TYPES` to only the types your agent handles. Do not leave it empty.
 - **File size**: Set `MEDIA_MAX_SIZE_MB` to the smallest value that works for your use case. This is independent of `MAX_REQUEST_SIZE` (10 MB by default), which applies to entire HTTP request bodies.
+- **Per-user limits**: Set `MEDIA_MAX_FILES_PER_USER` and `MEDIA_MAX_USER_STORAGE_MB` if users upload freely. Both are off (`0`) by default; set either to a positive number (for example `MEDIA_MAX_FILES_PER_USER=100`) to turn it on. With a quota on, every upload reads the metadata of each stored file to count the user's files, so the cost grows with the number of stored files. `MEDIA_INLINE_MAX_BYTES` (default 50000, `0` is off) moves large inline base64 media in a run request into the store, and `MEDIA_SWEEP_INTERVAL_SECONDS` (default 3600, `0` is off) cleans up files a crash left in the local store.
 - **Storage backend**: Use `cloud` storage (S3 or GCS) for any deployment with multiple workers. The `local` backend requires a shared filesystem and is not suitable for containerized deployments. Memory storage is development-only.
 - **Extraction cache**: Configure a checkpointer (PostgreSQL + Redis recommended) to share document extraction cache across workers. Without it, the same document is extracted per worker per process, wasting CPU.
 - **Ownership enforcement**: Set `MEDIA_REQUIRE_OWNER=true` if you need absolute certainty that no file without a recorded owner can be accessed. Files uploaded before ownership tracking was enabled have no owner and are otherwise allowed with a warning.

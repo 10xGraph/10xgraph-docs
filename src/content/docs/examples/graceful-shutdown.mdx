@@ -9,7 +9,7 @@ label: Graceful shutdown
 updated: "2026-10-28"
 faq:
   - q: "What does graph.aclose() do, and in what order?"
-    a: "It waits for background tasks (including fire-and-forget checkpoint writes) up to shutdown_timeout, then releases the checkpointer, then the publisher, then the store. It returns a dict with one stats entry per component and a total_duration. A second call returns a dict with status already_closed."
+    a: "It refuses new runs (they raise GraphClosedError), lets active runs finish for a grace period, asks the rest to stop and save, cancels what is left, drains background tasks, then releases the checkpointer, the publisher and the store. The times default to a 50/25/25 split of shutdown_timeout and can be set with grace, stop_timeout and timeout. It returns a dict with runs and background_tasks stats and one entry per component. A second call returns a dict with status already_closed."
   - q: "Do I need GracefulShutdownManager if I use async with graph?"
     a: "They solve different problems. async with graph guarantees aclose() runs when the block exits. GracefulShutdownManager turns SIGINT and SIGTERM into a flag your loop can check, so the process leaves the block on purpose instead of being killed mid-run."
   - q: "How does this work in Kubernetes or Docker?"
@@ -29,8 +29,9 @@ A second script shows the short form, `async with graph:`, which calls `aclose()
 - `GracefulShutdownManager.register_signal_handlers()`: installs asyncio handlers for SIGINT and SIGTERM that set `shutdown_requested`. They do not raise, so your loop chooses where to stop.
 - `manager.wait_for_shutdown()`: awaitable that returns once a signal arrives. Wrap it in `asyncio.wait_for` for an interruptible idle sleep.
 - `delayed_keyboard_interrupt()` / `DelayedKeyboardInterrupt`: a context manager that holds back SIGINT and SIGTERM for a short critical section and re-delivers them on exit.
-- `compile(shutdown_timeout=...)`: the time budget `aclose()` has. The default is 30 seconds.
-- `await graph.aclose()`: releases everything the graph owns and returns a stats dict.
+- `compile(shutdown_timeout=...)`: the time budget `aclose()` has. The default is 30 seconds, split 50% grace, 25% stop and 25% cancel and drain.
+- `await graph.aclose(grace=..., stop_timeout=..., timeout=...)`: ends active runs in phases, then releases everything the graph owns and returns a stats dict.
+- `install_shutdown_signals(graph)`: an opt-in helper that calls `aclose()` on SIGTERM and SIGINT. Nothing installs signal handlers unless you call it. The repository example `signal_helper.py` shows it.
 - `async with graph:`: calls `aclose()` on exit, including after an exception.
 
 ## Run it
@@ -79,7 +80,7 @@ Inside the block, SIGINT and SIGTERM are recorded instead of acted on. When the 
     graph = agent.compile(checkpointer=InMemoryCheckpointer(), shutdown_timeout=20.0)
 ```
 
-`shutdown_timeout` is the total time `aclose()` may spend flushing and releasing.
+`shutdown_timeout` is the total time `aclose()` may spend ending runs, flushing and releasing. Runs get half of it to finish, a quarter to stop and save, and a quarter for the hard cancel and the background drain.
 
 **4. The job loop.**
 
@@ -116,12 +117,14 @@ The flag is checked before each job. Each job gets its own `thread_id`. The idle
 
 `aclose()` runs in a fixed order:
 
-1. **Background tasks.** The task manager waits for pending work, mainly checkpoint writes, which run in the background so they do not slow streaming. This step gets the full `shutdown_timeout`.
-2. **Checkpointer.** `arelease()` closes its connections. This step gets `shutdown_timeout / 3`.
-3. **Publisher.** `close()` flushes and disconnects the event bus, with `shutdown_timeout / 3`.
-4. **Store.** `arelease()` on the vector store, with `shutdown_timeout / 3`.
+1. **Refuse new runs.** A run started now raises `GraphClosedError`.
+2. **Grace.** Active runs get `grace` seconds to finish on their own.
+3. **Stop.** Runs still going get a stop request and save their thread as INTERRUPTED. This waits up to `stop_timeout`.
+4. **Cancel.** Runs still going are cancelled. The cancel saves the thread as INTERRUPTED too.
+5. **Background tasks.** The task manager drains pending work, mainly checkpoint writes and publisher events, then cancels what is left.
+6. **Release.** The checkpointer, the publisher and the store are closed, following the resource ownership rules.
 
-The order matters because the checkpointer has to stay open until the background writes that use it are done. A component that was not configured reports a status of `skipped`. A component that exceeds its time reports `timeout` and the next one still runs.
+The order matters because the checkpointer has to stay open until the runs and the background writes that use it are done. A component that was not configured reports a status of `skipped`. A component that exceeds its time reports `timeout` and the next one still runs.
 
 ### `async_with.py`
 
@@ -143,7 +146,7 @@ The order matters because the checkpointer has to stay open until the background
 
 Kubernetes sends SIGTERM when it stops a pod and sends SIGKILL after `terminationGracePeriodSeconds` (30 seconds by default). Docker does the same with `docker stop` and `stop_grace_period`. SIGKILL cannot be caught, so anything not flushed by then is lost.
 
-- Set `terminationGracePeriodSeconds` higher than your longest job plus `shutdown_timeout`.
+- Set `terminationGracePeriodSeconds` higher than your longest job plus `shutdown_timeout`. The API image uses 675 seconds.
 - Run the Python process as PID 1 with an exec-form `CMD ["python", "..."]`, or put an init such as `tini` in front. A shell wrapper may not forward SIGTERM.
 - Stop accepting new work as soon as `shutdown_requested` is set, as the loop does here, and fail the readiness probe if you serve traffic.
 

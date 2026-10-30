@@ -15,7 +15,7 @@ faq:
   - q: "Why does an LLM criterion score exactly 0.5?"
     a: "When the judge model cannot be called, the criterion returns 0.5 with the reasoning 'No LLM provider available' instead of raising. conftest.py has an assert_judged helper that turns that case into a test failure."
   - q: "Can I run evaluations from the command line?"
-    a: "Yes. 10xgraph eval discovers files named *_eval.py or eval_*.py, runs the app and eval set they expose, and writes console, JSON and HTML reports. See eval_weather.py."
+    a: "Yes. 10xgraph eval discovers files named *_eval.py or eval_*.py, runs the app and eval set they expose, and writes console and JSON reports. See eval_weather.py."
 ---
 
 Unit tests tell you the graph is wired correctly. Evaluation tells you whether the agent behaves well: did it call the right tools, are its answers close to what you expect, and does a judge model think they are good. This example evaluates a weather assistant running on OpenAI `gpt-5-mini`, judged by Anthropic `claude-sonnet-5-5` and challenged by a simulated user on Google `gemini-2.5-flash`.
@@ -220,7 +220,7 @@ This script builds an `EvalReport` by hand, so it needs no key, then renders it 
 app = build_agent().compile()
 ```
 
-The dataset comes from `weather.evalset.json`, the saved form of an `EvalSet`. Useful flags are `--threshold`, `--parallel`, `--max-concurrency`, `--output` and `--open`. `quick_eval.py` also matches `*_eval.py` but has no eval entry point, so the CLI would skip it with a warning. Point the command at `eval_weather.py` instead of the whole folder.
+The dataset comes from `weather.evalset.json`, the saved form of an `EvalSet`. Useful flags are `--threshold`, `--parallel`, `--max-concurrency`, and `--output`. `quick_eval.py` also matches `*_eval.py` but has no eval entry point, so the CLI would skip it with a warning. Point the command at `eval_weather.py` instead of the whole folder.
 
 ## Full code
 

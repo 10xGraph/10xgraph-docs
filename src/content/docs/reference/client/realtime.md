@@ -42,8 +42,8 @@ The session configuration, sent to the server as the first frame. Every field is
 
 | Field | Type | Description |
 |---|---|---|
-| `model` | `string` | The realtime model, e.g. `'gemini-2.5-flash-live'`. Honoured only when the server lists it in `websocket.realtime_models`; otherwise the agent's own model is used. |
-| `thread_id` | `string` | Conversation/thread id. If omitted, the session generates one (`session.threadId`) and reuses it for reconnects so the conversation resumes from its checkpoint. |
+| `model` | `string` | The realtime model, e.g. `'gemini-3.8-live'`. Honoured only when the server lists it in `websocket.realtime_models`; otherwise the agent's own model is used. |
+| `thread_id` | `string` | Conversation/thread id. If omitted, the server creates one and sends it in the `session_started` event; the client stores it in `session.threadId` and reuses it for reconnects so the conversation resumes from its checkpoint. With `runs.thread_ids: server` (the default) an id you invent is refused. |
 | `voice` | `string` | Provider voice name (e.g. `'Puck'`). |
 | `modalities` | `'AUDIO' \| 'TEXT' \| ('AUDIO' \| 'TEXT')[]` | Response modality. A realtime session is single-modality; a bare string is accepted and coerced server-side. Defaults to the agent's config (usually `'AUDIO'`). |
 | `vad` | `RealtimeVADConfig` | Voice-activity-detection overrides. Disable for push-to-talk and drive turns with `activityStart()` / `activityEnd()`. |
@@ -90,8 +90,8 @@ The object returned by `realtime()`. Long-lived and bidirectional, so it uses an
 
 | Property | Type | Description |
 |---|---|---|
-| `ready` | `Promise<void>` | Resolves once the socket is open and the init frame has been sent. Rejects if the initial connection fails. |
-| `threadId` | `string` | The thread id in use (the one you passed, or a generated one). Stable across reconnects. |
+| `ready` | `Promise<void>` | Resolves once the socket is open and the init frame has been sent. It does not wait for `session_started`: listen with `session.on('session_started', ...)` if you need the thread id first. Rejects if the initial connection fails. |
+| `threadId` | `string \| null` | The thread id in use: the one you passed, or the one the server created. `null` until the `session_started` event arrives when you passed none. Sent back on reconnect so the same thread continues. |
 | `resumptionHandle` | `string \| null` | The latest provider resumption handle seen on a `session_update` event. Sent back automatically on reconnect. |
 
 ### Send methods
@@ -130,6 +130,7 @@ Each variant of `RealtimeEvent` also has its own channel, so you can subscribe n
 
 | Channel | Payload shape |
 |---|---|
+| `'session_started'` | `{ type: 'session_started'; thread_id: string }`. The first server event; `session.threadId` is set before listeners run. |
 | `'input_transcript'` | `{ type: 'input_transcript'; text: string; finished: boolean }` |
 | `'output_transcript'` | `{ type: 'output_transcript'; text: string; finished: boolean }` |
 | `'tool_call'` | `{ type: 'tool_call'; id: string; name: string; args: Record<string, unknown> }` |
@@ -154,6 +155,7 @@ Each variant of `RealtimeEvent` also has its own channel, so you can subscribe n
 
 ```ts
 type RealtimeEvent =
+  | { type: 'session_started'; thread_id: string }
   | { type: 'input_transcript'; text: string; finished: boolean }
   | { type: 'output_transcript'; text: string; finished: boolean }
   | { type: 'tool_call'; id: string; name: string; args: Record<string, unknown> }
@@ -206,7 +208,7 @@ declare function playback(pcm16: Uint8Array, sampleRate: number): void;
 declare const micChunk: Uint8Array; // PCM16 mono @ 16 kHz
 
 const session = client.realtime(
-  { model: 'gemini-2.5-flash-live', modalities: 'AUDIO' },
+  { model: 'gemini-3.8-live', modalities: 'AUDIO' },
   { reconnect: { maxAttempts: 5 } }
 );
 
@@ -230,7 +232,7 @@ session.close();
 declare const micChunk: Uint8Array; // PCM16 mono @ 16 kHz, from your capture code
 
 const session = client.realtime({
-  model: 'gemini-2.5-flash-live',
+  model: 'gemini-3.8-live',
   vad: { enabled: false },
 });
 
@@ -276,7 +278,7 @@ declare function playback(pcm16: Uint8Array, sampleRate: number): void;
 declare function appendTranscript(text: string): void;
 
 const session = client.realtime(
-  { model: 'gemini-2.5-flash-live' },
+  { model: 'gemini-3.8-live' },
   {
     onAudio: (pcm16) => playback(pcm16, 24000),
     onEvent: (e) => {

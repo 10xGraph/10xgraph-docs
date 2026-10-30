@@ -131,7 +131,7 @@ To stop the running run and take its place, add `"on_busy": "cancel"` to the fra
 
 ### Request limits and error text
 
-A frame is limited to 500 messages (in `messages` or `tool_result`), 100 content blocks per message and 1,000,000 characters of text in total. An oversized frame gets 422 from the schema check. In production (`MODE=production`), `error` chunks from a failing node or tool carry a generic message instead of the raw exception text. Development shows the details.
+A frame is limited to 500 messages (in `messages` or `tool_result`), 100 content blocks per message and 1,000,000 characters of text in total. An oversized frame gets 422 from the schema check, as does an `initial_state`, `config` or `resume` nested deeper than 64 levels. In production (`MODE=production`), `error` chunks from a failing node or tool carry a generic message instead of the raw exception text. Development shows the details.
 
 ### Rate limiting and concurrency
 
@@ -139,6 +139,12 @@ Every WebSocket handshake and every graph run on the socket counts against the g
 
 - A handshake over the limit is refused before `accept()` with close code 1013.
 - A run over the limit gets an `error` chunk whose `data` has `reason` and `retry_after_seconds`. The run is skipped and the socket stays open; the check runs again on the next frame.
+
+A run refused because the graph is closing gets an `error` frame whose `data` has `code: "SERVICE_UNAVAILABLE"`, a `reason` and `retry_after_seconds`, and no `done` frame. The server then closes the socket with code 1012 (service restart). Reconnect, which lands on another replica.
+
+A frame that fails to parse or validate also counts against the rate limit. After 20 invalid frames in a row the server closes the socket with code 1008. A valid frame resets the count.
+
+A socket that sits idle is not kept past its token's expiry. When the token expires, the server checks the credential again, and if it no longer verifies it sends an `error` chunk ("Session expired. Reconnect with a valid token.") and closes with code 1008. Reconnect with a fresh token.
 
 Connection caps apply at the handshake only: `websocket.max_connections` and `websocket.max_connections_per_user`. Over either cap, the handshake is refused with close code 1013. Live sessions on `/v1/graph/live` count against `websocket.max_connections_per_user` like any other socket.
 
@@ -155,7 +161,7 @@ Realtime is only for agents built for it: connecting to `/v1/graph/ws` with a re
 ```json
 Client → Server:
 {
-  "model": "gemini-2.5-flash-live",
+  "model": "gemini-3.8-live",
   "voice": "Puck",
   "modalities": ["AUDIO"],
   "vad": {
@@ -167,7 +173,7 @@ Client → Server:
 }
 ```
 
-The realtime client makes its own thread id when you do not pass one, and `/v1/graph/live` accepts it even with `runs.thread_ids` set to `"server"`. The caller owns that new thread.
+`/v1/graph/live` follows `runs.thread_ids` like the other routes. With the default `"server"`, a `thread_id` the server never issued is refused with a `not_authorized` error event and close code `1008`. Omit `thread_id` (or send `"new"` or a blank value) and the server creates the thread. Every session starts with a `session_started` event that carries the id, so send that id back on reconnect to continue the thread. The TypeScript client does this for you and exposes the id as `session.threadId`.
 
 The `model` override is honored only if it is listed in `websocket.realtime_models`; otherwise it is ignored and the agent's own model is used. A bad value (for example an invalid `modalities` entry) returns a fatal `error` event with code `invalid_config`.
 
@@ -189,7 +195,7 @@ WebSocket behavior is controlled by keys in the `websocket` object within `10xgr
 |---|---|---|---|
 | `max_connections` | integer, null | 1000 | Hard cap on concurrent WebSocket connections (both `/v1/graph/ws` and `/v1/graph/live`) across this process. Set to `0` or `null` for unlimited. |
 | `max_connections_per_user` | integer, null | 10 | Cap on how many WebSocket connections one verified user can hold (by `user_id`). Set to `0` or `null` for unlimited. |
-| `realtime_models` | array of strings | `[]` | Models a `/v1/graph/live` client is allowed to request (for example `["gemini-2.5-flash-live"]`). Empty means clients cannot override the agent's model. |
+| `realtime_models` | array of strings | `[]` | Models a `/v1/graph/live` client is allowed to request (for example `["gemini-3.8-live"]`). Empty means clients cannot override the agent's model. |
 
 **Example:**
 
@@ -199,7 +205,7 @@ WebSocket behavior is controlled by keys in the `websocket` object within `10xgr
   "websocket": {
     "max_connections": 5000,
     "max_connections_per_user": 50,
-    "realtime_models": ["gemini-2.5-flash-live"]
+    "realtime_models": ["gemini-3.8-live"]
   }
 }
 ```

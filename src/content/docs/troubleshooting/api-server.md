@@ -84,7 +84,7 @@ async def my_endpoint(
     return {"ok": True}
 ```
 
-Only three paths are public: `/ping`, `/v1/evals/runs`, and `/v1/evals/runs/{run_id}`. Modifying the public allowlist requires editing the source code frozenset, which is intentional. Do not use it to silence this error on a route that handles user data.
+Only `/ping` is public. Modifying the public allowlist requires editing the source code frozenset, which is intentional. Do not use it to silence this error on a route that handles user data.
 
 ### Issue: `InsecureCorsConfigError` on startup
 
@@ -266,7 +266,7 @@ A common case: switching to the RBAC backend. `RoleBasedAuthorizationBackend` al
 | `1003` | Invalid init frame on `/v1/graph/live`: not JSON, or JSON that is not an object | Send the init control frame as a JSON object first, before any audio |
 | `1011` | Unexpected server error during the session | Check server logs; this is not an auth or config rejection |
 
-A `404` on `/v1/evals/*` means the server runs with `MODE=production`: the eval report viewer has no auth, so it is mounted only outside production. A `404` on `POST /v1/ag-ui` means `ag_ui.enabled` is not `true` in `10xgraph.json`. The threads, store, and files routers are always mounted.
+A `404` on `POST /v1/ag-ui` means `ag_ui.enabled` is not `true` in `10xgraph.json`. The threads, store, and files routers are always mounted.
 
 A `1008` accompanied by an `error` event with `code: "not_live"` or `"not_authorized"` tells you which of the two `1008` causes applies.
 

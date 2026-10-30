@@ -33,7 +33,7 @@ Evals score real agent behavior. Use `--threshold` to turn them into a release g
 10xgraph eval --threshold 0.9
 ```
 
-The run exits 1 when the overall pass rate is below `0.9`. Without `--threshold`, the run exits 1 unless every case passes. Reports go to `eval_reports/` as HTML and JSON (`--no-report` skips them). See [run evaluations](/docs/testing/run-evals).
+The run exits 1 when the overall pass rate is below `0.9`. Without `--threshold`, the run exits 1 unless every case passes. Reports go to `eval_reports/` as JSON (`--no-report` skips it). See [run evaluations](/docs/testing/run-evals).
 
 ## 3. Audit the environment
 
@@ -55,7 +55,7 @@ Read the startup log. Examples of what the server refuses or changes:
 
 - `ORIGINS` or `ALLOWED_HOST` left as `*` stops startup while `STRICT_PRODUCTION_CHECKS` is on, which is the default in production. `ALLOWED_HOST` defaults to `*`, so set it. Set exact values, or `STRICT_PRODUCTION_CHECKS=false` to downgrade the refusal to a warning.
 - Wildcard `ORIGINS` together with credentials is refused. Set explicit origins or `CORS_ALLOW_CREDENTIALS=false`.
-- `IS_DEBUG=true` is ignored and the interactive docs paths are turned off.
+- Debug mode is off and the interactive docs paths are turned off.
 - With auth on, a setup whose checkpointer cannot resolve thread owners does not boot.
 
 This check does not catch `auth: null`. A server with no auth starts open even in production, and nothing refuses it. Confirm that auth is configured with the next step. See the [production checklist](/docs/server/production-checklist) and [what 10xGraph does not protect](/docs/production/limits).

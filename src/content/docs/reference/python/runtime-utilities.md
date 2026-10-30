@@ -145,6 +145,37 @@ async def main():
 asyncio.run(main())
 ```
 
+### install_shutdown_signals(graph, ...)
+
+Connect SIGTERM and SIGINT to `graph.aclose()` on the running event loop. It is opt-in: 10xGraph never installs signal handlers by itself.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `graph` | `CompiledGraph` | Required | The graph to close. |
+| `loop` | `asyncio.AbstractEventLoop \| None` | `None` | The running loop. `None` uses the running loop. |
+| `signals` | `tuple[int, ...]` | `(SIGTERM, SIGINT)` | Signals to handle. |
+| `grace` | `float \| None` | `None` | Passed to `aclose()`. |
+| `stop_timeout` | `float \| None` | `None` | Passed to `aclose()`. |
+| `timeout` | `float \| None` | `None` | Passed to `aclose()`. |
+
+Returns a `SignalShutdown` with `uninstall()` to remove the handlers, `wait()` to await the stats dict of the close that a signal started (`None` if none ran), and the `close_task` attribute (`None` until a signal arrives).
+
+Call it once, from the main thread, inside the running loop. From another thread it raises `RuntimeError`. It is not available on Windows event loops (the signal is skipped and a log line is written). It replaces the default Ctrl+C behavior while installed. The first signal starts `aclose()`; later signals are ignored. A server that already handles SIGTERM, such as Uvicorn or Gunicorn, should call `graph.aclose()` from its shutdown hook instead.
+
+Example:
+
+```python
+from tenxgraph.utils import install_shutdown_signals
+
+async def main():
+    graph = build_graph().compile(checkpointer=checkpointer, shutdown_timeout=30)
+    shutdown = install_shutdown_signals(graph)
+    try:
+        await serve(graph)
+    finally:
+        shutdown.uninstall()
+```
+
 ## Logging and secret redaction
 
 Redact credentials from log output. Redaction is heuristic, so treat it as a safety net and avoid logging secrets in the first place.

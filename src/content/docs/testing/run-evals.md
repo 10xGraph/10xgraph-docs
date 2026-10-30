@@ -6,7 +6,7 @@ section: "Testing and evaluation"
 group: "Evaluation"
 order: 100
 label: Run Evaluations
-updated: "2026-10-08"
+updated: "2026-10-30"
 ---
 
 ## What is evaluation and why it matters
@@ -29,17 +29,16 @@ From the folder that contains `10xgraph.json`:
 10xgraph eval
 ```
 
-The CLI scans `evals/` for files matching `*_eval.py` or `eval_*.py`, collects every case from every file into a single pool, runs them all, and writes timestamped reports to `eval_reports/`:
+The CLI scans `evals/` for files matching `*_eval.py` or `eval_*.py`, collects every case from every file into a single pool, runs them all, and writes timestamped JSON and HTML reports to `eval_reports/`:
 
 ```
 eval_reports/
-  <eval-set-id>_20260513_142301.html
   <eval-set-id>_20260513_142301.json
 ```
 
 `EvalSetBuilder` assigns a random UUID as the eval set id, so that is what appears in the file name for a single set. When a run covers more than one eval set, the results are merged into one report named `combined_eval_<timestamp>`.
 
-The HTML report shows a visual dashboard: summary pass rate, criterion scores, and per-case results. The JSON report is machine-readable for CI systems or custom analysis. A progress display updates as cases complete.
+The JSON report is machine-readable for CI systems or custom analysis. After the run the command prints the HTML and JSON paths and opens the HTML report in your default browser. Pass `--no-open` to skip that; it is also skipped with `--no-report`, `-q`, `--format json` or `jsonl`, `--non-interactive`, when `CI` is set, and when stdout is not a terminal. The playground Evals page shows the summary pass rate, criterion scores, and per-case results, and can download a Markdown report. A progress display updates as cases complete.
 
 ## Running evaluations
 
@@ -78,34 +77,29 @@ You can enable parallel by default in `10xgraph.json` (see [Configure evaluation
 
 ### Reports and output
 
-Every run produces two files in `eval_reports/` (or a custom directory via `--output`):
+Every run produces one JSON file and one HTML file in `eval_reports/` (or a custom directory via `--output`):
 
 | File | Format | Purpose |
 | --- | --- | --- |
-| `<eval-id>_<timestamp>.html` | HTML + interactive | Visual dashboard with summary, criterion bars, and per-case details for humans to review |
-| `<eval-id>_<timestamp>.json` | JSON | Machine-readable results for CI tooling, dashboards, or programmatic analysis |
+| `<eval-id>_<timestamp>.json` | JSON | Machine-readable results for CI tooling, dashboards, or programmatic analysis. Open it in the playground Evals page for review |
 
-The progress display shows each case as `<file>::<case>` with its status and duration. Both report files are written after all cases finish. To skip writing files and see only console output:
+The progress display shows each case as `<file>::<case>` with its status and duration. The report file is written after all cases finish. To skip writing files and see only console output:
 
 ```bash
 10xgraph eval --no-report
 ```
 
-To open the HTML report automatically in your browser:
-
-```bash
-10xgraph eval --open
-```
+The HTML report opens automatically. To review the JSON report instead, open the playground, go to Evals, and choose Open report file (or drag the JSON file onto the page). Nothing is served by the API, so no server is needed for viewing. The page can also download a Markdown report.
 
 ### Exit codes and thresholds
 
-The command exits with code 0 only when every case passes (100% pass rate) and 1 otherwise. For CI this already gates merges on any regression.
+The command exits with code 0 when the pass rate meets the gate and 1 otherwise. Without `--threshold` the gate is 100%, so only a run where every case passes exits 0. For CI this already gates merges on any regression.
 
 ```bash
 10xgraph eval --threshold 0.8
 ```
 
-`--threshold` makes the command print an error ("Pass rate ... is below threshold ...") when the overall pass rate is under 80%. It does not relax the exit code: a run at 90% still exits 1. The threshold can also be set in `10xgraph.json` (see below).
+`--threshold` sets the gate: the command exits 0 at 80% or more, and otherwise prints an error ("Pass rate ... is below threshold ...") and exits 1. The HTML report states the gate in its verdict. The threshold can also be set in `10xgraph.json` (see below).
 
 ### Custom output directory
 
@@ -135,10 +129,11 @@ Add an `evaluation` block to `10xgraph.json` to set project-level defaults. CLI 
 | Field | Default | Description |
 | --- | --- | --- |
 | `directory` | `"evals"` | Directory scanned when no `TARGET` argument is given |
-| `output_dir` | `"eval_reports"` | Directory where HTML and JSON reports are written |
-| `threshold` | (none) | Pass rate below which an error message is printed; the exit code is 1 for any pass rate under 100% |
+| `output_dir` | `"eval_reports"` | Directory where the JSON and HTML reports are written |
+| `threshold` | (none) | Pass-rate gate: below it the command prints an error and exits 1. Without it the gate is 100% |
 | `parallel` | `false` | Run all cases concurrently instead of sequentially |
 | `max_concurrency` | `4` | Maximum cases running simultaneously when `parallel` is true |
+| `open_report` | `true` | Open the HTML report in the browser when the run ends; `--open` / `--no-open` overrides it |
 
 Report filenames always include a timestamp; there is no configuration setting for it.
 
@@ -413,13 +408,13 @@ A CLI flag overrides `10xgraph.json` for run settings. For criteria, the eval fi
 
 ## Common scenarios and recipes
 
-**Fast local check on a single file, open the report:**
+**Fast local check on a single file:**
 
 ```bash
-10xgraph eval evals/weather_eval.py --open
+10xgraph eval evals/weather_eval.py
 ```
 
-Run one file sequentially, write the report, and open it in your browser for inspection.
+Run one file sequentially, and write the JSON report; open it in the playground Evals page for inspection.
 
 **Parallel run with 8 concurrent cases:**
 
@@ -494,7 +489,7 @@ A file was found but does not expose any recognized entry point. Add `get_eval_s
 
 **Exit code 1 although most cases pass**
 
-The exit code is 1 whenever the pass rate is below 100%, including cases that errored. Check the summary line and the HTML report for cases with status `error`.
+The exit code is 1 whenever the pass rate is below 100%, including cases that errored. Check the summary line and the report in the playground Evals page for cases with status `error`.
 
 **Simulator scenarios always fail**
 

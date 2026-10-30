@@ -145,7 +145,7 @@ async def main():
     # Now each invoke fetches the next ID from the database
 ```
 
-`AsyncIDGenerator.generate()` returns an awaitable, and the framework resolves it when it generates message IDs. Test the async path with your own thread and run IDs before relying on it: `thread_id` and `run_id` defaults are read from the same factory without being awaited, so pass explicit values in `config` when using an async generator. Use this for IDs from an external sequence or counter service.
+`AsyncIDGenerator.generate()` returns an awaitable, and the framework resolves it when it generates message IDs. This works from sync `invoke()` and from `ainvoke()` alike. Test the async path with your own thread and run IDs before relying on it: `thread_id` and `run_id` defaults are read from the same factory without being awaited, so pass explicit values in `config` when using an async generator. Use this for IDs from an external sequence or counter service.
 
 ## Access the generated ID inside a node
 

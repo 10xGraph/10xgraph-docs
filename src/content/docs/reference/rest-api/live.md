@@ -61,7 +61,7 @@ WebSocket handshakes bypass the HTTP rate-limit and request-size middleware (Sta
   "websocket": {
     "max_connections": 100,
     "max_connections_per_user": 5,
-    "realtime_models": ["gemini-live-2.5-flash-preview"]
+    "realtime_models": ["gemini-3.8-live"]
   }
 }
 ```
@@ -74,7 +74,7 @@ A missing key gets the default above. Set a key to `0` or `null` for unlimited. 
 
 1. Client opens the WebSocket connection.
 2. Client sends a JSON init frame as the first message.
-3. Server starts the realtime session and begins pumping events.
+3. Server starts the realtime session. Its first event is `session_started`, which carries the thread id. Then it begins pumping events.
 4. Client sends upstream frames (audio binary, control JSON) throughout the session.
 5. Server sends downstream frames (audio binary, event JSON) as the model generates.
 6. Either side closes the connection to end the session.
@@ -88,7 +88,7 @@ The first frame from the client must be a JSON text frame. It configures the ses
 ```json title="init frame"
 {
   "thread_id": "session-001",
-  "model": "gemini-live-2.5-flash-preview",
+  "model": "gemini-3.8-live",
   "voice": "Puck",
   "modalities": ["AUDIO"],
   "system_prompt": "You are a terse voice assistant.",
@@ -112,7 +112,7 @@ The first frame from the client must be a JSON text frame. It configures the ses
 
 Fields not present in the init frame keep the agent's compiled values. An invalid init frame (not JSON, or JSON that is not an object) closes the socket with code `1003`.
 
-**Thread handling.** `thread_id` is optional. When it is absent, blank or `"new"` the server generates an id for the session and persists the thread record before the first event is pumped; the generated id is not echoed back as a separate frame, so a client that needs to resume later should supply its own id. `/v1/graph/live` accepts a client-made id even when `runs.thread_ids` is `server`, because the realtime client makes its own. The caller then owns that thread. When `thread_id` **is** present it is ownership-checked before the session starts (only when auth is configured): a thread owned by another user is rejected with a fatal `error` event (`code: "not_authorized"`) and close code `1008`.
+**Thread handling.** `thread_id` is optional. When it is absent, blank or `"new"` the server generates an id for the session and persists the thread record before the first event is pumped; the generated id is sent in the `session_started` event, so a client that needs to resume later keeps it and sends it back. With the default `runs.thread_ids` of `server`, an id the server never issued is refused like a thread owned by someone else. Set `runs.thread_ids` to `client` to let the caller name a new thread. When `thread_id` **is** present it is ownership-checked before the session starts (only when auth is configured): a thread owned by another user is rejected with a fatal `error` event (`code: "not_authorized"`) and close code `1008`.
 
 ---
 
@@ -193,6 +193,14 @@ Format: 16-bit signed integer, little-endian, mono, 24000 Hz
 ### JSON event frames
 
 All `RealtimeEvent` types other than `audio_delta` are serialized to JSON text frames. The `type` field discriminates the event.
+
+**Session started**
+
+```json
+{"type": "session_started", "thread_id": "01J9..."}
+```
+
+The first server event of every session. `thread_id` is the id from the init frame, or the one the server created when the init frame had none (absent, blank or `"new"`). Keep it and send it as `thread_id` in the init frame of a reconnect to continue the thread.
 
 **Input transcript (partial)**
 
@@ -295,7 +303,7 @@ Codes the bridge itself emits, in addition to any provider code passed through:
 | `code` | `fatal` | Meaning | Followed by close |
 |---|---|---|---|
 | `not_live` | `true` | The configured graph is not a live agent. Use `WS /v1/graph/ws`. | `1008` |
-| `not_authorized` | `true` | The `thread_id` in the init frame belongs to another user. | `1008` |
+| `not_authorized` | `true` | The `thread_id` in the init frame belongs to another user, or (with `runs.thread_ids: server`, the default) was never issued by the server. | `1008` |
 | `session_expired` | `true` | The token expired or was revoked during the session. Reconnect with a fresh token. | `1008` |
 | `invalid_config` | `true` | The init frame produced an invalid `RealtimeConfig` (for example an unusable `modalities` value). | server close |
 

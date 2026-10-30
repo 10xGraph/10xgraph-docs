@@ -180,7 +180,7 @@ The constructor takes the connection arguments below as named parameters; the re
 | `redis_url` | `str \| None` | `None` | Redis URL for caching. One of `redis_url`, `redis` or `redis_pool` is required. |
 | `redis` | `Redis \| None` | `None` | Pre-created Redis instance. |
 | `redis_pool` | `ConnectionPool \| None` | `None` | Pre-created Redis connection pool. |
-| `redis_pool_config` | `dict \| None` | `None` | Config passed to `redis.asyncio.ConnectionPool()` if creating a new pool. |
+| `redis_pool_config` | `dict \| None` | `None` | Config passed to the Redis pool if creating a new one. Merged over the defaults: a bounded `BlockingConnectionPool` with `max_connections=50` and `timeout=5.0` (seconds a caller waits for a free connection), plus Redis socket timeouts (5 s connect, 10 s read). Override any key. |
 | `schema` | `str` | `"public"` | PostgreSQL schema name where checkpointer tables live. Must match `^[a-zA-Z_][a-zA-Z0-9_]*$`, otherwise `ValueError`. |
 | `cache_ttl` (kwarg) | `int` | `86400` | Redis cache TTL in seconds (24 hours). |
 | `state_history_limit` (kwarg) | `int` | `20` | Number of historical state snapshots to retain per thread. |

@@ -138,6 +138,12 @@ Internally, 10xGraph translates `reasoning_config={"effort": "high"}` to Anthrop
 
 The parameters `budget_tokens` and `thinking_budget` are not used. Newer Claude models reject these with a 400 error when combined with the model's adaptive reasoning control. 10xGraph detects these and logs a warning without sending them. Use the `effort` setting (`"low"`, `"medium"`, or `"high"`) to control reasoning depth.
 
+### Thinking blocks are kept and replayed
+
+Anthropic signs each `thinking` block and returns `redacted_thinking` blocks for content it hides. A later turn that includes tool use must send these blocks back unchanged, or the API rejects the request. 10xGraph keeps them on the message as `ReasoningBlock` entries: `signature` holds the signature of a `thinking` block, and `redacted_data` holds the payload of a `redacted_thinking` block (its `summary` is empty). They are stored first in the message, in the order the model produced them, and sent back before the text and `tool_use` blocks on the next Anthropic call. Do not edit them.
+
+Other providers never receive these blocks. A message saved before 1.0 has no signature, so its thinking is not replayed to Anthropic. See [`ReasoningBlock`](/docs/reference/python/messages#reasoningblock).
+
 ## Token limits and defaults
 
 The Anthropic Messages API requires `max_tokens` on every request. 10xGraph provides sensible defaults that depend on the execution mode:

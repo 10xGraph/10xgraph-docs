@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 210
 label: MCP tools
-updated: "2026-10-27"
+updated: "2026-10-29"
 faq:
   - q: "Can I use MCP tools without a local Python function?"
     a: "Yes. Pass an empty list to ToolNode(tools=[]) and provide the MCP client. The graph will offer only the MCP server's tools."
@@ -163,7 +163,7 @@ When the LLM requests a tool, `ToolNode` runs it on the MCP client if the name i
 
 ## Forwarding user context to MCP
 
-Many MCP servers need to know who is calling them (for access control, logging, or per-user state). Set `pass_user_info_to_mcp=True` on `ToolNode` to send the `user` dict from the execution config to the MCP server. It is added to the tool call arguments under the key `user`. If `config` has no `user` dict but has a `user_id`, the server receives `{"user_id": ...}` instead.
+Many MCP servers need to know who is calling them (for access control, logging, or per-user state). Set `pass_user_info_to_mcp=True` on `ToolNode` to send the `user` dict from the execution config to the MCP server. It is sent as request metadata (`meta`) on the MCP call, not as a tool argument, and the server reads it from `ctx.request_context.meta`. If the client's `call_tool` has no `meta` parameter, a warning is logged and the user info is not sent. If `config` has no `user` dict but has a `user_id`, the server receives `{"user_id": ...}` instead.
 
 ```python
 tool_node = ToolNode(
@@ -173,16 +173,18 @@ tool_node = ToolNode(
 )
 ```
 
-The MCP tool receives it as an argument, so declare a `user` parameter on the server tool:
+The MCP server reads it from the request metadata, not from a tool argument. Declare a `ctx: Context` parameter on the server tool. FastMCP injects it and it is not part of the schema the model sees. The user dict is under the key `user` in `ctx.request_context.meta`, which keeps extra fields in `model_extra`:
 
 ```python
 # Code on the MCP server (fastmcp)
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 
 mcp = FastMCP("secure")
 
 @mcp.tool()
-def secure_action(query: str, user: dict | None = None) -> str:
+def secure_action(query: str, ctx: Context) -> str:
+    meta = ctx.request_context.meta
+    user = (meta.model_extra or {}).get("user") if meta else None
     user = user or {}
     if "admin" not in user.get("roles", []):
         raise PermissionError(f"User {user.get('id')} does not have permission")
@@ -200,6 +202,29 @@ result = app.invoke(
     },
 )
 ```
+
+## Tune how a `ToolNode` uses an MCP server
+
+These `ToolNode` options bound what an MCP server can put in front of the model. All are optional.
+
+```python
+tool_node = ToolNode(
+    tools=[],
+    client=client,
+    mcp_prefix="github_",             # the model sees github_create_issue, the server gets create_issue
+    mcp_max_result_chars=20_000,      # cut one tool result at 20,000 characters
+    mcp_max_description_chars=500,    # cut each tool description at 500 characters
+    mcp_cache_tools=True,             # default: list the server's tools once
+    mcp_connect_timeout=30.0,         # default: seconds to wait for the connection to open
+)
+```
+
+- **Prefix.** `mcp_prefix` lets two `ToolNode`s expose servers that have a tool with the same name. `mcp_include` and `mcp_exclude` still use the server's own names.
+- **Size caps.** A result over `mcp_max_result_chars` is cut and a marker with the number of dropped characters is appended. A description over `mcp_max_description_chars` is cut and ends in `...`. Descriptions go to the model on every call, so a long one costs tokens each turn. Neither cap has a default.
+- **Tool list caching.** The tool list is fetched once per `ToolNode` and reused. Tools you add to the server later are not seen until you call `await tool_node.refresh_mcp_tools()`, or you build the node with `mcp_cache_tools=False` to list the server on every model call. A listing that fails is not cached.
+- **Connect timeout.** `mcp_connect_timeout` bounds only the connect, never a tool call. Set `None` to wait without a limit.
+
+To check what an MCP tool returns before the model reads it, register an `after_invoke` callback for `InvocationType.MCP`. See [Validate tool, MCP and RAG output](/docs/guides/protect-against-prompt-injection#validate-tool-mcp-and-rag-output). The `END` event of a tool call, which publishers and the run trace see, carries the value `after_invoke` returned, not the raw MCP result.
 
 ## Filtering MCP tools by tag
 

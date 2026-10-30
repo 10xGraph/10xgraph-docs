@@ -267,7 +267,7 @@ interface DeleteMemoryResponse {
 
 ## `listMemories(options?)`
 
-List stored memories, up to a limit that defaults to 100. It returns `response.data.memories`, an array of `MemoryResult`.
+List stored memories, up to a limit that defaults to 100. It returns `response.data.memories`, an array of `MemoryResult`, plus `has_more` and `next_offset` for paging.
 
 **Endpoint:** `POST /v1/store/memories/list`
 
@@ -278,6 +278,11 @@ console.log(`Found ${response.data.memories.length} memories`);
 for (const mem of response.data.memories) {
   console.log(`[${mem.memory_type}] ${mem.content.slice(0, 80)}`);
 }
+
+// Next page
+if (response.data.has_more) {
+  const next = await client.listMemories({ limit: 100, offset: response.data.next_offset ?? 0 });
+}
 ```
 
 ### Parameters
@@ -285,6 +290,7 @@ for (const mem of response.data.memories) {
 | Parameter | Type | Description |
 |---|---|---|
 | `options.limit` | `number` | Maximum number of memories to return. Default `100`. |
+| `options.offset` | `number` | Memories to skip, for paging. Pass `next_offset` from the previous page. Needs `10xgraph-api` with paging support. |
 | `options.config` | `Record<string, any>` | Optional store-level config. |
 | `options.options` | `Record<string, any>` | Optional store-level options. |
 
@@ -406,7 +412,7 @@ Failed requests from every method except `forgetMemories()` throw `TenxGraphErro
 
 - Use `MemoryType` to categorize memories and filter on it when searching.
 - `searchMemory()` with `RetrievalStrategy.SIMILARITY` performs vector search, so the store must support embeddings.
-- `listMemories()` returns up to `limit` memories (default 100); it has no offset.
+- `listMemories()` returns up to `limit` memories (default 100). Pass `offset` and follow `has_more` and `next_offset` to read further pages.
 - `forgetMemories()` bulk-deletes by type, category or filter.
 
 ## Next step

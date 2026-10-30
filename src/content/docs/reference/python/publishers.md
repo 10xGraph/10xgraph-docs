@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 190
 label: Publishers
-updated: "2026-10-27"
+updated: "2026-10-29"
 faq:
   - q: "How do I attach a publisher to a graph?"
     a: "Pass the publisher, or a list of publishers, to StateGraph(publisher=...). Tracing helpers such as setup_tracing and setup_logfire must run before compile()."
@@ -17,6 +17,38 @@ faq:
 ---
 
 Publishers receive an `EventModel` for every graph, node, LLM, tool and streaming step, so you can send execution events to a logger, a message bus or a tracing backend. This page lists each publisher class, its configuration, its defaults, and the `publish_event` helper for custom events. For a task-oriented walkthrough, see [Use publishers](/docs/guides/use-publishers); for the concepts, see [Events and observability](/docs/concepts/events-and-observability).
+
+## Delivery guarantees
+
+Publisher events are best-effort background work. Sync `invoke()` and `stream()` wait up to `shutdown_timeout` (default 30 s) for pending events, memory writes and thread naming before they return. The async `ainvoke()` and `astream()` do not wait: call `await graph.aclose()` before the process exits. At most 1000 background tasks can be pending. Beyond that, new ones are dropped, a WARNING is logged at most every 5 s, and the `background_task_manager.tasks_dropped` counter increases. Delivery is at-most-once, with no retry. A slow or unreachable sink loses events and never blocks a run.
+
+### Large state snapshots
+
+Some events carry the run state in `data["state"]`. Events are queued in the background before the sink sends them, and a queued event must not hold a whole run state while the sink is slow. When the JSON form of `data["state"]` is longer than `state_snapshot_limit` characters, the event carries a summary in its place. Set the limit in the publisher config:
+
+```python
+publisher = RedisPublisher(config={"url": "redis://localhost:6379", "state_snapshot_limit": 131072})
+```
+
+| Value | Meaning |
+|---|---|
+| not set | 65536 characters |
+| a positive integer | Summarize states longer than this many JSON characters |
+| `0`, `None` or a negative number | No limit: the full state is always sent |
+
+A state at or under the limit is sent unchanged. A longer one is replaced by a dict with these fields:
+
+| Field | Description |
+|---|---|
+| `truncated` | Always `True`, so a consumer can tell a summary from a real state. |
+| `bytes` | The size of the original state as JSON, in characters. |
+| `fields` | Sorted names of the state's top-level fields. |
+| `context_count` | The number of messages in the state's `context`. |
+| `context` | The last 50 messages as `{"message_id", "role"}`. A system message of 8 KiB or less is included whole. |
+| `context_summary` | The state's `context_summary`, cut to 1000 characters. Present only when the state has one. |
+| `execution_meta` | The state's `execution_meta`, included whole when it is under 8 KiB. |
+
+Only the published event is affected. The state in your checkpointer and the state your nodes see are not changed. If a consumer reads message text from `data["state"]`, raise the limit or set it to `0`.
 
 ## Import paths
 
@@ -161,9 +193,25 @@ Semantic label for what is in the event payload.
 
 ---
 
+## LLM span events
+
+Each model call publishes an `Event.LLM_CALL` span: a `START` event when the request goes out, then one `END` or one `ERROR` event.
+
+| Event | When | `data` fields |
+|---|---|---|
+| `START` | The request is sent | `model`, `provider`, `input_messages`, `system_prompt`, `request_params`, `tool_count` |
+| `END` | The call finished | `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `reasoning_tokens`, `finish_reason`, `response_model` |
+| `ERROR` | The call or the stream failed | `error` (the exception type name); `is_error` is `True` |
+
+A non-streaming call also adds `output_response` and `response_id` to the `END` event.
+
+For a streaming call, the span ends when the stream ends, not when the first chunk arrives. The `END` event is published once the last chunk has been read, so it carries the real token counts from the final chunks and the `finish_reason` and `response_model` the provider reported. If the stream fails partway (a connection drop, a [stream idle timeout](/docs/concepts/errors-and-limits#llm-stream-idle-timeout)), an `ERROR` event is published instead, with whatever usage was available. The cost and latency a tracing backend shows for a streaming call therefore covers the whole stream.
+
+---
+
 ## `BasePublisher`
 
-`BasePublisher` is the abstract base class for all publishers. Subclasses implement `publish`, `close` and `sync_close`. It stores the config dict as `self.config`, tracks closed state in `self._is_closed`, and works as an async context manager that calls `close()` on exit.
+`BasePublisher` is the abstract base class for all publishers. Subclasses implement `publish`, `close` and `sync_close`. It stores the config dict as `self.config`, which may carry an optional `publish_timeout` (seconds, no default) that bounds one send: if a send takes longer, the error is logged and that event is dropped. Without it, a publish waits for the broker. Queued events are snapshots taken when they are emitted, so consumers see the real `START` and `PROGRESS` events rather than later state, and a failed LLM call publishes an `ERROR` event. It also tracks closed state in `self._is_closed`, and works as an async context manager that calls `close()` on exit.
 
 **Signature:**
 
@@ -305,7 +353,7 @@ graph = StateGraph(publisher=stream)
 
 ## `KafkaPublisher`
 
-`KafkaPublisher` sends each event as a UTF-8 JSON message to a Kafka topic with `aiokafka`, waiting for the broker acknowledgement. The producer starts lazily on the first publish.
+`KafkaPublisher` sends each event as a UTF-8 JSON message to a Kafka topic with `aiokafka`, waiting for the broker acknowledgement. The producer starts lazily on the first publish. If the first start fails, the next publish tries again instead of staying closed. `RedisPublisher` does the same.
 
 **Requires:** `pip install "10xgraph[kafka]"`
 
@@ -373,8 +421,9 @@ class RabbitMQPublisher(BasePublisher):
 | `exchange_type` | `str` | `"topic"` | Exchange type (for example `"topic"`, `"direct"`, `"fanout"`). Unknown values fall back to topic. |
 | `declare` | `bool` | `True` | Declare the exchange. When `False`, the default exchange is used. |
 | `durable` | `bool` | `True` | Declare the exchange as durable. |
-| `connection_timeout` | `int` | `10` | Connect timeout in seconds. |
+| `connection_timeout` | `int` | `10` | Connect timeout in seconds. It also bounds opening the channel and declaring the exchange after the connection is up. If that step fails or times out, the connection is closed and the next publish starts clean. |
 | `heartbeat` | `int` | `60` | Heartbeat interval in seconds. |
+| `publish_timeout` | `float` | none | Seconds to wait for one send to the exchange. Unset waits for the broker. A send that times out is logged and that event is dropped. |
 
 **Returns:** `True` from `publish`. **Raises:** `RuntimeError` if closed or `aio-pika` is missing.
 

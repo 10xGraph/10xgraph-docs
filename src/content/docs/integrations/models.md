@@ -281,7 +281,7 @@ Common examples:
 - **OpenRouter:** `base_url="https://openrouter.ai/api/v1"`
 - **Self-hosted:** Any private gateway that mimics the OpenAI Chat Completions API.
 
-Some gateways only support the legacy Chat Completions endpoint and not the newer Responses API. In that case, pass `api_style="chat"`:
+Most gateways only support the legacy Chat Completions endpoint, so an Agent with a `base_url` uses Chat Completions by default. Pass `api_style="responses"` if your gateway implements the Responses API. To state the default explicitly:
 
 ```python
 agent = Agent(

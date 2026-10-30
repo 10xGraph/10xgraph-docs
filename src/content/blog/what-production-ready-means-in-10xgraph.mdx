@@ -70,7 +70,7 @@ The short version: you build the agent, and the server owns the request surface,
 
 ## 6. What the server reveals: production mode
 
-**Default with `MODE=production`:** an unknown `MODE` value refuses to start. A wildcard `ORIGINS` or `ALLOWED_HOST` refuses to start (`STRICT_PRODUCTION_CHECKS` is on by default in production). API docs are off, graph introspection is scoped, `IS_DEBUG` is forced off, and 5xx bodies and error chunks carry generic text. A node exception reaches the client as 500 `NODE_001` "An error occurred in a graph node.", with no stack trace. A tool that raises reaches the model only as "failed with an internal error (reference ...)"; the raw text stays in the server log under that reference.
+**Default with `MODE=production`:** an unknown `MODE` value refuses to start. A wildcard `ORIGINS` or `ALLOWED_HOST` refuses to start (`STRICT_PRODUCTION_CHECKS` is on by default in production). API docs are off, graph introspection is scoped, debug output is off, and 5xx bodies and error chunks carry generic text. A node exception reaches the client as 500 `NODE_001` "An error occurred in a graph node.", with no stack trace. A tool that raises reaches the model only as "failed with an internal error (reference ...)"; the raw text stays in the server log under that reference.
 
 **Config:** `MODE`, `ORIGINS`, `ALLOWED_HOST`, `STRICT_PRODUCTION_CHECKS`.
 

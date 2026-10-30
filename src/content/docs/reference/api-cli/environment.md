@@ -46,10 +46,9 @@ MODE=production 10xgraph dev --no-reload
 | --- | --- | --- |
 | `APP_NAME` | `MyApp` | Application name shown in logs |
 | `APP_VERSION` | `0.1.0` | Application version |
-| `MODE` | `development` | `production` (or `prod`), or `development` (or `dev`, `local`). Trimmed and case-insensitive. Unset means `development`. Any other value stops the server at startup, and `10xgraph dev` exits with code 2; the message lists the accepted values. Drives several defaults, including the authorization backend, the run timeout and the strict startup checks. |
+| `MODE` | `development` | `production` (or `prod`), or `development` (or `dev`, `local`). Trimmed and case-insensitive. Unset means `development`. Any other value stops the server at startup, and `10xgraph dev` exits with code 2; the message lists the accepted values. Drives several defaults, including debug mode (on in development, off in production), the authorization backend, the run timeout and the strict startup checks. |
 | `STRICT_PRODUCTION_CHECKS` | on in production | In production, refuse to start on a wildcard `ALLOWED_HOST`, a wildcard `ORIGINS`, or an enabled `DOCS_PATH` or `REDOCS_PATH`. Set `false` to log warnings instead. Has no effect outside production. |
 | `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `IS_DEBUG` | `true` | Enable debug mode. Set `false` in production; leaving it on logs a startup warning. |
 | `SUMMARY` | `10xGraph Backend` | One-line service summary shown in the OpenAPI schema |
 | `LOGGER_NAME` | `10xgraph-api` | Name of the root logger the server writes under. Read at import time, so it must be a process environment variable; setting it in `.env` is too late. |
 | `GRAPH_PATH` | `10xgraph.json` | Path to the config file the ASGI app loads. `10xgraph dev --config` sets this for you; set it directly when running the app under an external server such as Gunicorn or Uvicorn. |
@@ -113,11 +112,13 @@ In development the same combination only logs a warning, which tells you the dep
 | Variable | Description | Required for |
 | --- | --- | --- |
 | `JWT_SECRET_KEY` | Secret key for JWT signing and verification. No default. | `auth: "jwt"` |
-| `JWT_ALGORITHM` | JWT algorithm. Default `HS256`. | `auth: "jwt"` |
+| `JWT_ALGORITHM` | JWT algorithm. Default `HS256`. Allowed values: `HS256`, `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512` and `EdDSA`, spelled exactly. `none`, an empty value or any other value stops startup. | `auth: "jwt"` |
 | `JWT_ISSUER` | Required `iss` claim. Unset means not checked. | Optional |
 | `JWT_AUDIENCE` | Required `aud` claim. Unset means not checked. | Optional |
+| `JWT_SECRET_KEYS` | Extra verification keys for rotation, as a JSON list of `{"kid": "...", "key": "..."}` objects or plain strings. Tried beside `JWT_SECRET_KEY`, which keeps working unchanged. Unset by default. See [rotate the signing key](/docs/reference/api-cli/auth#rotating-the-signing-key). | Optional |
+| `JWT_MAX_TOKEN_AGE_SECONDS` | Refuse a token older than this many seconds by its `iat` claim, and refuse a token with no `iat`. Unset (off) by default. | Optional |
 
-Both must be set when `10xgraph.json` has `"auth": "jwt"`; the config load raises a `ValueError` otherwise and the server does not start. JWT support also needs the extra: `pip install "10xgraph-api[jwt]"`.
+Both must be set when `10xgraph.json` has `"auth": "jwt"`; the config load raises a `ValueError` otherwise and the server does not start. JWT support also needs the extra: `pip install "10xgraph-api[jwt]"`. The server checks at startup that PyJWT is installed and stops if it is missing.
 
 ---
 
@@ -126,11 +127,19 @@ Both must be set when `10xgraph.json` has `"auth": "jwt"`; the config load raise
 | Variable | Default | Description |
 | --- | --- | --- |
 | `REDIS_URL` | `null` | Redis connection URL, for example `redis://localhost:6379/0` |
+| `REDIS_SOCKET_TIMEOUT` | `5.0` | Seconds a Redis call may take before it fails, so a Redis that stops answering does not hang the request. `0` turns the timeout off. |
+| `REDIS_CONNECT_TIMEOUT` | `5.0` | Seconds to wait when opening a Redis connection. `0` turns it off. |
+| `REDIS_MAX_CONNECTIONS` | `50` | Pool size of each Redis client the API opens. `0` means no bound. |
+| `REDIS_POOL_TIMEOUT` | `5.0` | Seconds a request waits for a free pooled connection. `0` means no timeout. |
+| `REDIS_KEY_PREFIX` | `""` | Put in front of every key the API writes to Redis (run locks and caps, ownership cache, token revocation), so two deployments sharing one Redis cannot read each other's entries. The core checkpointer has its own `redis_key_prefix` option for its cache keys. To separate a whole deployment, set both to the same value. |
+| `REDIS_HEALTH_CHECK_INTERVAL` | `30.0` | Seconds between health checks of an idle connection. `0` turns them off. |
+
+The `REDIS_*` limits apply to every Redis client the API opens: run locks and caps, rate limiting, token revocation, the ownership cache and the readiness probe.
 
 `REDIS_URL` is **optional everywhere**. Two things use it:
 
 - **The ownership authorization cache (L2).** The `ownership` and `rbac` backends resolve their Redis URL from the `redis` key in `10xgraph.json` first, falling back to `REDIS_URL`. With neither set, or with the `redis` package not installed, the cache runs in-process only (L1) and the server logs a warning at startup. Nothing breaks; each worker just pays its own first lookup per thread.
-- **`PgCheckpointer`.** It can use Redis as a hot cache layer in front of Postgres. This is a performance choice, not a requirement: `PgCheckpointer` runs without it.
+- **`PgCheckpointer`.** It requires a Redis connection (`redis_url`, `redis_pool` or `redis`) as the hot cache in front of Postgres; constructing it without one raises `ValueError`. It does not read `REDIS_URL` itself, so pass the URL to its constructor. The durable data lives in Postgres.
 
 The rate limiter does **not** read `REDIS_URL`. Configure its connection under `rate_limit.redis.url` in `10xgraph.json`.
 
@@ -198,7 +207,14 @@ For Sentry integration, install: `pip install "10xgraph-api[sentry]"`.
 | `MEDIA_MAX_SIZE_MB` | `25.0` | Maximum upload size in megabytes |
 | `DOCUMENT_HANDLING` | `extract_text` | `extract_text`, `pass_raw`, or `skip` |
 | `MEDIA_ALLOWED_CONTENT_TYPES` | `""` | Comma-separated MIME allowlist for uploads. **Empty means allow every type.** Entries may be exact (`image/png`) or wildcard subtype (`image/*`). |
-| `MEDIA_REQUIRE_OWNER` | `false` | Deny access to files with no recorded owner (uploaded before ownership tracking was enabled, or while auth was disabled). Set to `true` for deployments that require a hard guarantee of ownership isolation. |
+| `MEDIA_REQUIRE_OWNER` | Unset (on in production, off in development) | Deny access to files with no recorded owner (uploaded before ownership tracking was enabled, or while auth was disabled). An explicit `true` or `false` always wins. |
+| `MEDIA_MAX_FILES_PER_USER` | `0` | Maximum number of stored files per user, checked on upload. `0` means no limit. Off by default; set a positive number to turn it on. With a quota on, every upload reads the metadata of each stored file. Needs a store that can list its files (memory and local); on the cloud store the quota is skipped and a warning is logged. |
+| `MEDIA_MAX_USER_STORAGE_MB` | `0` | Maximum total storage per user in megabytes, checked on upload. `0` means no limit. Off by default; set a positive number to turn it on. Same cost and store requirement as `MEDIA_MAX_FILES_PER_USER`. |
+| `MEDIA_MAX_IMAGE_PIXELS` | `50000000` | An image with more pixels than this is refused before it is stored. `0` means no limit. Needs Pillow; without it the check is skipped. |
+| `MEDIA_MAX_PDF_MB` | `10` | A larger PDF is refused with `413` before text extraction. `0` means no limit. Applies while `DOCUMENT_HANDLING=extract_text`. |
+| `MEDIA_MAX_PDF_PAGES` | `500` | A PDF with more pages is refused with `413` before text extraction. `0` means no limit. Applies while `DOCUMENT_HANDLING=extract_text`. |
+| `MEDIA_INLINE_MAX_BYTES` | `50000` | Inline base64 media in a run request larger than this is moved into the media store and replaced by a reference. `0` turns this off. |
+| `MEDIA_SWEEP_INTERVAL_SECONDS` | `3600` | Seconds between sweeps that delete files a crash left behind. Local store only. `0` turns the sweeper off. |
 | `MEDIA_CLOUD_PROVIDER` | `aws` | `aws` or `gcp`. Cloud storage only. |
 | `MEDIA_CLOUD_BUCKET` | `""` | Bucket name |
 | `MEDIA_CLOUD_REGION` | `us-east-1` | Bucket region |
@@ -222,6 +238,9 @@ See [Files and multimodal](/docs/server/files-and-multimodal) for how these fit 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `MAX_REQUEST_SIZE` | `10485760` (10MB) | Maximum request body size in bytes |
+| `IDEMPOTENCY_TTL_SECONDS` | `86400` | How long a finished run is remembered under its `Idempotency-Key`. The header is opt-in. See [idempotency keys](/docs/reference/rest-api/conventions#idempotency-keys). |
+
+Client dicts and lists (`config`, `initial_state`, `resume`, `metadata`, `filters`) also have fixed structure caps that have no setting: 64 levels of nesting, 1000 keys per object, 10000 items per list and 200000 values in all. A larger body gets 422 `VALIDATION_ERROR`.
 
 `MAX_REQUEST_SIZE` is enforced by HTTP middleware and applies to requests that declare a `Content-Length`. It does not cover WebSocket frames (bounded separately at 1 MiB per frame on `/v1/graph/live`) or chunked uploads (bounded by `MEDIA_MAX_SIZE_MB` as the body is read).
 
@@ -257,6 +276,15 @@ REDOCS_PATH=
 
 Only Gunicorn reads this variable, for example when started as `gunicorn -k uvicorn_worker.UvicornWorker tenxgraph_api.src.app.main:app`. The development server (`10xgraph dev`) does not use it.
 
+### Shutdown
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SHUTDOWN_GRACE_SECONDS` | `10` | Seconds the lifespan lets active runs finish on their own when it calls `graph.aclose()`. |
+| `SHUTDOWN_STOP_SECONDS` | `10` | Seconds to wait after the stop request; each run saves its thread INTERRUPTED. |
+| `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Seconds for the hard cancel and the background drain. |
+| `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` | `540` | Seconds the worker waits for open responses after SIGTERM before it cancels them. Read by `TenxGraphUvicornWorker`, the Gunicorn worker class of the generated image. A value that is not a positive integer falls back to `540`. Keep it below the Gunicorn `--graceful-timeout` (600 in the generated image) so the lifespan shutdown can finish before the kill. Open NDJSON streams get a final "interrupted" chunk 5 seconds before this deadline. |
+
 ---
 
 ## LLM provider variables
@@ -267,7 +295,7 @@ Set these based on the `provider` you use on your `Agent`. They are read at clie
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `AGENTFLOW_LLM_TIMEOUT` | `600.0` | Default request timeout in seconds applied to every LLM client. Must be a positive number. See [Configure Agent](/docs/guides/configure-agent#llm-call-timeout) for the programmatic API. |
+| `TENXGRAPH_LLM_TIMEOUT` | `600.0` | Default request timeout in seconds applied to every LLM client. Must be a positive number. The deprecated `AGENTFLOW_LLM_TIMEOUT` is read only when this one is unset or empty. See [Configure Agent](/docs/guides/configure-agent#llm-call-timeout) for the programmatic API. |
 
 ### OpenAI (`provider="openai"`)
 

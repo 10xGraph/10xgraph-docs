@@ -6,7 +6,7 @@ order: 150
 updated: "2026-10-27"
 faq:
   - q: Why does the generated config wait so long to shut down?
-    a: An agent run can take minutes, and Gunicorn's default 30 second graceful timeout would kill runs mid-flight on every rolling deploy. The generated files use a 600 second graceful timeout, a 660 second worker timeout, and a 660 second Kubernetes grace period.
+    a: An agent run can take minutes, and Gunicorn's default 30 second graceful timeout would kill runs mid-flight on every rolling deploy. The generated files use a 600 second graceful timeout, a 660 second worker timeout, a 660 second Compose stop grace period and a 675 second Kubernetes grace period.
   - q: Can I change the image name in k8s.yaml?
     a: Yes. The manifest uses the placeholder image registry.example.com/<service>:1.0.0. Build and push your own image, then set the image field to its version tag or digest before applying.
   - q: Does build read my 10xgraph.json?
@@ -75,7 +75,7 @@ Without `--force`, `build` stops if the Dockerfile exists. It keeps an existing 
 
 </FileTree>
 
-The Dockerfile sets `MODE=production`, `IS_DEBUG=false` and `WEB_CONCURRENCY=2`, installs `gunicorn` and `uvicorn`, removes the CLI-only files from the installed package, copies your project, drops to the non-root user `appuser` (fixed uid and gid 10001, set as `USER 10001:10001` so Kubernetes can verify it is not root), and defines a `HEALTHCHECK` that calls `/ping`. Its `CMD` runs `tenxgraph_api.src.app.main:app` under Gunicorn with `--graceful-timeout 600` and `--timeout 660`.
+The Dockerfile sets `MODE=production` and `WEB_CONCURRENCY=2`, installs `gunicorn` and `uvicorn`, removes the CLI-only files from the installed package, copies your project, drops to the non-root user `appuser` (fixed uid and gid 10001, set as `USER 10001:10001` so Kubernetes can verify it is not root), and defines a `HEALTHCHECK` that calls `/ping`. Its `CMD` runs `tenxgraph_api.src.app.main:app` under Gunicorn with the `TenxGraphUvicornWorker` class (`tenxgraph_api.src.app.uvicorn_worker.TenxGraphUvicornWorker`), `--graceful-timeout 600` and `--timeout 660`. The worker marks the app as draining on SIGTERM, so `/health/ready` answers 503 while open runs finish. `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` (default 540) sets how long uvicorn waits for open responses; see [Graceful shutdown](/docs/guides/graceful-shutdown).
 
 ## Does the image ship the CLI and the config editor?
 
@@ -117,7 +117,7 @@ A Dockerfile generated before `10xgraph-api` 0.7.0 does not have the strip step.
 
 <TabItem label="Docker Compose">
 
-The compose file defines one service with `build: .`, the production environment, the same Gunicorn command, `stop_grace_period: 600s` and `restart: unless-stopped`. It reads secrets and `ORIGINS`/`ALLOWED_HOST` from `.env` through `env_file`, so they never enter the image. Copy `.env.example` to `.env` and fill it in first.
+The compose file defines one service with `build: .`, the production environment, the same Gunicorn command, `stop_grace_period: 660s` and `restart: unless-stopped`. It reads secrets and `ORIGINS`/`ALLOWED_HOST` from `.env` through `env_file`, so they never enter the image. Copy `.env.example` to `.env` and fill it in first.
 
 ```bash
 docker compose up --build -d
@@ -137,8 +137,10 @@ The container runs with `read_only: true`, `cap_drop: [ALL]` and `no-new-privile
 docker build -t registry.example.com/my-agent:1.0 .
 docker push registry.example.com/my-agent:1.0
 kubectl create secret generic my-agent-secrets \
-  --from-literal=JWT_SECRET_KEY=... --from-literal=GOOGLE_API_KEY=...
-# edit the image, ORIGINS and ALLOWED_HOST in k8s.yaml, then:
+  --from-literal=JWT_SECRET_KEY=... --from-literal=GOOGLE_API_KEY=... \
+  --from-literal=ORIGINS=https://your-frontend.example.com \
+  --from-literal=ALLOWED_HOST=your-app.example.com
+# edit the image in k8s.yaml, then:
 kubectl apply -f k8s.yaml
 ```
 
@@ -146,7 +148,7 @@ The settings that protect running agents:
 
 | Setting | Value | Why |
 |---|---|---|
-| `terminationGracePeriodSeconds` | 660 | Longer than the 600 second Gunicorn drain |
+| `terminationGracePeriodSeconds` | 675 | Longer than the 600 second Gunicorn drain plus the 15 second `preStop` sleep, which runs inside the same period |
 | `preStop` | `sleep 15` | Lets the load balancer stop sending new requests first |
 | `readinessProbe` | `/health/ready`, every 10s | Removes the pod from rotation |
 | `livenessProbe` | `/ping`, every 30s, 5 failures | Slack enough that a busy worker is not restarted mid-run |
@@ -162,7 +164,7 @@ The settings that lock the pod down:
 | Volumes | `emptyDir` at `/tmp` (Gunicorn heartbeats) and `/app/uploads` (local media) |
 | Secrets | `envFrom` the Secret `<service>-secrets`; the pod does not start until it exists |
 
-The manifest sets `MODE`, `IS_DEBUG` and placeholder `ORIGINS` and `ALLOWED_HOST` values; everything secret comes from the Secret. Create it with `--from-literal` or a secret manager, not `--from-env-file .env`: `kubectl` keeps the quotes from a `.env` file as part of each value.
+The manifest sets `MODE`. `ORIGINS` and `ALLOWED_HOST` come from the Secret too, with everything secret; a value in the manifest would override the Secret. Create it with `--from-literal` or a secret manager, not `--from-env-file .env`: `kubectl` keeps the quotes from a `.env` file as part of each value.
 
 <Callout type="warning" title="Uploads with more than one replica">
 
@@ -197,12 +199,12 @@ For local development, `10xgraph dev` is sufficient. For shared or production us
 
 ## Production environment settings
 
-The generated files set `MODE=production` and `IS_DEBUG=false`. Add the following at runtime:
+The generated files set `MODE=production`. Add the following at runtime:
 
 | Variable | Set to | Why |
 |---|---|---|
-| `ORIGINS` | Comma-separated list of your frontend origins | `k8s.yaml` sets a placeholder; compose reads it from `.env`. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false`, and is always refused when `CORS_ALLOW_CREDENTIALS` is true |
-| `ALLOWED_HOST` | Your hostnames | Comma-separated. `k8s.yaml` sets a placeholder; compose reads it from `.env`. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false` |
+| `ORIGINS` | Comma-separated list of your frontend origins | `k8s.yaml` reads it from the Secret; compose reads it from `.env`. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false`, and is always refused when `CORS_ALLOW_CREDENTIALS` is true |
+| `ALLOWED_HOST` | Your hostnames | Comma-separated. `k8s.yaml` reads it from the Secret; compose reads it from `.env`. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false` |
 | `JWT_SECRET_KEY` | 32+ bytes, from a secret manager | Required if `auth` is `jwt`. See [Add JWT authentication](/docs/server/auth) |
 | `JWT_ALGORITHM` | `HS256` or your choice | Required with `jwt` |
 | `REDIS_URL` | Your Redis connection URL | Optional. The server falls back to it for the shared tier of the authorization ownership cache when the `redis` key in `10xgraph.json` is unset. For shared rate limiting, point `rate_limit.redis.url` at it as `${REDIS_URL}` |
@@ -218,7 +220,7 @@ Full reference is in the [configuration](/docs/reference/api-cli/configuration) 
 
 <Callout type="warning" title="CORS and credentials">
 
-Replace the placeholder `ORIGINS` and `ALLOWED_HOST` before you deploy. In production the server refuses to start with wildcard origins, a wildcard host or enabled docs paths, because `STRICT_PRODUCTION_CHECKS` is on by default. It always refuses wildcard origins while `CORS_ALLOW_CREDENTIALS` is true. These are safety checks: wildcard CORS with credentials would allow any website to read your data.
+Set `ORIGINS` and `ALLOWED_HOST` in the Secret (Kubernetes) or `.env` (compose) before you deploy. In production the server refuses to start with wildcard origins, a wildcard host or enabled docs paths, because `STRICT_PRODUCTION_CHECKS` is on by default. It always refuses wildcard origins while `CORS_ALLOW_CREDENTIALS` is true. These are safety checks: wildcard CORS with credentials would allow any website to read your data.
 
 </Callout>
 

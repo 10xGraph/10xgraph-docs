@@ -8,7 +8,7 @@ label: Observability
 updated: "2026-10-08"
 ---
 
-`GET /v1/observability/{thread_id}` returns a reconstructed trace for a run on a thread: a span tree, a flat event list, aggregated token usage, and call counts. It reads from an in-memory store that is only available outside production, so use it for development and the playground, not for production tracing.
+`GET /v1/observability/{thread_id}` returns a reconstructed trace for a run on a thread: a span tree, a flat event list, aggregated token usage, and call counts. It reads from an in-memory store that is only available outside production, so use it for development and the playground, not for production tracing. It is turned off in production mode: nothing is recorded and the response carries `enabled: false`.
 
 | Property | Value |
 | --- | --- |
@@ -189,7 +189,7 @@ Events are returned **newest first**, so a UI can render the list without revers
 
 ## Availability
 
-Traces come from an in-process telemetry store that records chunks as runs execute. It is bound **only outside production**: when `MODE=production` the store is not created and this endpoint returns an empty payload (`run_count: 0`, `run: null`) rather than an error.
+Traces come from an in-process telemetry store that records chunks as runs execute. It is bound **only outside production**: when `MODE=production` the store is never created, nothing is recorded, and this endpoint returns an empty payload (`run_count: 0`, `run: null`, `enabled: false`, `reason: "disabled_in_production"`) rather than an error. The other `reason` values are `store_unavailable` and `no_runs`.
 
 The store is in-memory and not durable, and a restart clears it. It keeps at most 200 threads, 20 runs per thread, and 2000 records per run, dropping the oldest first. Deleting a thread through the threads API also clears its traces. It is a development and playground aid, not a production observability system. For production tracing, configure OpenTelemetry (`OTEL_ENABLED`) or the `observability` block in `10xgraph.json`.
 
@@ -197,7 +197,7 @@ Both `POST /v1/graph/invoke` and `POST /v1/graph/stream` record runs. Invoke has
 
 ### Errors and empty results
 
-An unknown thread or an unknown `run_id` is not an error: the endpoint returns 200 with `run: null` (and `run_count` and `run_ids` for any runs that do exist). A missing or invalid token returns 401, and a token without `graph:read` returns 403.
+An unknown thread or an unknown `run_id` is not an error: the endpoint returns 200 with `run: null` (and `run_count` and `run_ids` for any runs that do exist). A missing or invalid token returns 401, and a token without `graph:read` returns 403. With auth on, the thread id also goes to the authorization backend, so by default a user can read traces only for their own threads.
 
 ---
 
