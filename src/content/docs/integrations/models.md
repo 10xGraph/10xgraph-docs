@@ -218,7 +218,7 @@ Here `app` is your compiled graph.
 
 Some models include explicit reasoning or thinking capabilities:
 
-`reasoning_config` is on by default with `{"effort": "medium"}`. Pass `None` or `False` to turn it off.
+`reasoning_config` is on by default at each provider's lowest effort (OpenAI `"minimal"`, Anthropic `"low"`, Google `"low"`). Pass a dict such as `{"effort": "medium"}` for more, or pass `None` or `False` to turn it off.
 
 - **OpenAI:** `effort` is sent as `reasoning_effort` (Chat Completions) or `reasoning` (Responses API).
 - **Anthropic:** `effort` becomes `thinking={"type": "adaptive"}` plus `output_config={"effort": ...}`.

@@ -35,7 +35,7 @@ def __init__(
     extra_messages: list[Message] | None = None,
     trim_context: bool = False,
     tools_tags: set[str] | None = None,
-    reasoning_config: dict[str, Any] | bool | None = {"effort": "medium"},
+    reasoning_config: dict[str, Any] | bool | None = True,
     skills: SkillConfig | None = None,
     memory: MemoryConfig | None = None,
     retry_config: RetryConfig | bool | None = True,
@@ -59,7 +59,7 @@ def __init__(
 | `trim_context` | `bool` | `False` | Trim conversation history to fit within the model's context window. |
 | `tools_tags` | `set[str] \| None` | `None` | Filter ToolNode tools by tag. Only tools with matching tags are offered to the LLM. |
 | `api_style` | `str` | `"responses"`, or `"chat"` when `base_url` is set | (via kwargs) OpenAI API style: `"chat"` (Chat Completions) or `"responses"` (Responses API). An explicit value always wins. With `"responses"` and a `base_url`, a server that rejects the Responses API is probed once, then the Agent uses Chat Completions for its lifetime. Any other value raises `ValueError`. |
-| `reasoning_config` | `dict \| bool \| None` | `{"effort": "medium"}` | Reasoning config for models supporting extended thinking. `True` enables defaults, `False` or `None` disables, a dict sets model-specific options. See [Reasoning models](#reasoning-models). |
+| `reasoning_config` | `dict \| bool \| None` | `True` | Reasoning config for models supporting extended thinking. `True` (or unset) turns reasoning on at each provider's lowest effort (OpenAI `"minimal"`, Anthropic `"low"`, Google `"low"`), `False` or `None` disables, a dict sets model-specific options. See [Reasoning models](#reasoning-models). |
 | `skills` | `SkillConfig \| None` | `None` | Agent Skills configuration per agentskills.io spec. Injects skill catalog and activation/read tools. See [`skills`](/docs/reference/python/skills). |
 | `memory` | `MemoryConfig \| None` | `None` | Long-term memory config for retrieving relevant context before each LLM call. See [Memory](#memory-augmented-agent). |
 | `retry_config` | `RetryConfig \| bool \| None` | `True` | Retry logic for transient API errors. `True` uses defaults; `False` or `None` disables; pass `RetryConfig` for tuning. See [Retry configuration](#retry-configuration). |
@@ -217,7 +217,7 @@ agent = Agent(
 
 ## Reasoning models
 
-Reasoning-capable models (for example OpenAI o-series and Gemini thinking models) are controlled with `reasoning_config`. Reasoning is on by default at medium effort:
+Reasoning-capable models (for example OpenAI o-series and Gemini thinking models) are controlled with `reasoning_config`. Reasoning is on by default at each provider's lowest effort that still reasons (OpenAI `"minimal"`, Anthropic `"low"`, Google `"low"`, which is `thinking_budget=512`). The values are in `DEFAULT_REASONING_EFFORT_BY_PROVIDER` and are resolved per request, so a fallback model on another provider gets its own value. Pass a dict such as `{"effort": "medium"}` for more:
 
 ```python
 # Enable reasoning with default effort
@@ -233,7 +233,7 @@ agent = Agent(model="o4-mini", reasoning_config={"effort": "high"})
 agent = Agent(model="gemini-2.5-pro", reasoning_config={"thinking_budget": 8000})
 ```
 
-`effort` applies to all providers, `summary` is OpenAI-only, and `thinking_budget` is Google-only and overrides `effort`. For Gemini, `effort` maps to a budget: `"low"` is 512 tokens, `"medium"` is 8192 (default), `"high"` is 24576.
+`effort` applies to all providers, `summary` is OpenAI-only, and `thinking_budget` is Google-only and overrides `effort`. For Gemini, `effort` maps to a budget: `"low"` is 512 tokens, `"medium"` is 8192, `"high"` is 24576.
 
 ---
 

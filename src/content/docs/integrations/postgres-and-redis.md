@@ -125,6 +125,7 @@ You must supply one Postgres source (`postgres_dsn` or `pg_pool`) and one Redis 
 | `redis` | Redis client | `None` | Existing `redis.asyncio.Redis` instance |
 | `redis_pool` | `ConnectionPool` | `None` | Existing Redis connection pool |
 | `redis_pool_config` | `dict` | `None` | Extra keyword arguments for the Redis pool, merged over the defaults. The pool is capped at `max_connections=50`, and a caller past the cap waits up to `timeout=5.0` seconds for a free connection. Override either key. |
+| `redis_breaker_cooldown` | `float` (kwarg) | `5.0` | Seconds to skip Redis after a connection failure. The checkpointer falls back to Postgres (or no cache) at once during the cool-down, so a Redis outage does not slow every run step. `0` disables it. |
 | `schema` | `str` | `"public"` | Postgres schema for the tables. Must match `^[a-zA-Z_][a-zA-Z0-9_]*$` |
 | `cache_ttl` | `int` (kwarg) | `86400` | Redis cache lifetime in seconds |
 | `state_history_limit` | `int` (kwarg) | `20` | State snapshots kept per thread; older ones are pruned on each durable write |

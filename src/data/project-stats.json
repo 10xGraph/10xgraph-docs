@@ -14,20 +14,20 @@
     "latest": [
       {
         "package": "10xgraph",
-        "version": "1.0.0rc1",
-        "date": "2026-10-28",
+        "version": "1.0.0rc2",
+        "date": "2026-10-30",
         "label": "core"
       },
       {
         "package": "10xgraph-api",
-        "version": "1.0.0rc1",
-        "date": "2026-10-28",
+        "version": "1.0.0rc2",
+        "date": "2026-10-30",
         "label": "API and CLI"
       },
       {
         "package": "10xgraph-client",
-        "version": "1.0.0-rc.1",
-        "date": "2026-10-28",
+        "version": "1.0.0-rc.2",
+        "date": "2026-10-30",
         "label": "TS client"
       }
     ]

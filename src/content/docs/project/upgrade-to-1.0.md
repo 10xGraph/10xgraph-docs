@@ -24,7 +24,7 @@ read [Upgrade to 0.9](/docs/project/upgrade-to-0.9) first.
 client candidate is published under the `next` dist-tag.
 
 ```bash
-pip install -U --pre "10xgraph==1.0.0rc1" "10xgraph-api==1.0.0rc1"
+pip install -U --pre "10xgraph==1.0.0rc2" "10xgraph-api==1.0.0rc2"
 npm install 10xgraph-client@next
 ```
 
@@ -52,6 +52,17 @@ npm install 10xgraph-client@next
   only if you set `reasoning_config` yourself. With a `base_url` and `api_style="responses"`, a
   server that rejects the Responses API is probed once and the Agent then stays on Chat
   Completions.
+- **Default reasoning is each provider's lowest effort.** `reasoning_config` left unset or set to
+  `True` used to mean `{"effort": "medium"}` (Google `thinking_budget=8192`). It now resolves per
+  request to OpenAI `"minimal"`, Anthropic `"low"` and Google `"low"` (`thinking_budget=512`); the
+  values are in `DEFAULT_REASONING_EFFORT_BY_PROVIDER`. Pass `{"effort": "medium"}` to keep the
+  old depth. `None` or `False` still turns reasoning off.
+- **OpenAI Responses asks for a reasoning summary and retries models without reasoning.** With
+  reasoning on and no `summary` set, the request sends `summary: "auto"`. If the reasoning came
+  from the default and the model answers 400 naming the reasoning parameter (for example
+  `gpt-4o`), the call is retried once without it. An explicit `reasoning_config` dict is never
+  dropped. With a custom `base_url`, only 404, 405 and 501 switch the Agent to Chat Completions;
+  other errors are raised.
 - **The `openai` extra is `openai>=1.93.1,<4`.** openai 3.x uses httpx2, so an `http_client`
   passed through `llm_kwargs` must be an `httpx2.AsyncClient` there.
 
@@ -92,6 +103,10 @@ npm install 10xgraph-client@next
 - **`aforget_memory` differs by store.** `QdrantStore` applies `memory_type`, `category` and
   `filters`. `Mem0Store` raises `ValueError` if any of them is passed. The `qdrant` extra needs
   `qdrant-client>=1.10.0` and a Qdrant server 1.10 or newer.
+- **`GoogleEmbedding` sends Gemini task types.** `RETRIEVAL_DOCUMENT` when storing and
+  `RETRIEVAL_QUERY` when searching (`BaseEmbedding.aembed_query`, used by `QdrantStore.asearch`).
+  Set `document_task_type` and `query_task_type` to change them, or `None` to send none. Vectors
+  stored earlier stay searchable.
 
 ### Tools and handoffs
 
@@ -154,6 +169,10 @@ npm install 10xgraph-client@next
 - **There are no default node or tool timeouts.** `node_timeout` and `tool_timeout` are off until
   you set them, and a value you set applies to both invoke and stream. Streaming runs also use
   the tool ledger now.
+- **A failing eval judge is an error, not a 0.5 score.** The LLM judge and
+  `SimulationGoalsCriterion` now report an error with the real exception message when every
+  sample fails. Reports that relied on the 0.5 placeholder will show errors until the judge
+  model and key are fixed. `aclose()` stats also include `cleanup_tasks`.
 - **Realtime tool calls are deduplicated per thread.** A call replayed after a reconnect, or repeated by a new session on the same thread, returns the recorded result and does not run the tool again. The key is the thread id, a hash of the tool name and arguments, and the provider call id. This needs a checkpointer on the session. `GeminiLiveClient` also takes `connect_timeout` (default 30 s), so a connect that hangs fails after 30 seconds. See [Tool call deduplication](/docs/reference/python/realtime#tool-call-deduplication).
 - **New opt-in LLM limits, all off by default:** `stream_idle_timeout` (per agent, `set_default_stream_idle_timeout()` or `TENXGRAPH_LLM_STREAM_IDLE_TIMEOUT`; a stalled stream raises `LLMStreamIdleTimeoutError`) and the cross-process cap on `RetryConfig` (`distributed_max_concurrent_calls` and related fields; it fails open with a WARNING when Redis is down). See [Errors and limits](/docs/concepts/errors-and-limits).
 - **`LiveAgent.arun()` raises `RuntimeError` when the same instance already runs a session.** `arealtime()` runs each connection on its own copy (`LiveAgent.new_session()`). If you call `arun()` yourself, give each concurrent session its own `new_session()`.
@@ -210,6 +229,10 @@ npm install 10xgraph-client@next
 - **The checkpointer's Redis pool is capped at 50 connections** and a caller past the cap waits up
   to 5 s for a free one, instead of opening a new connection. Raise `max_connections` or
   `timeout` through `redis_pool_config` if a busy worker needs more.
+- **`PgCheckpointer` skips Redis for a cool-down after a connection failure.** The new kwarg
+  `redis_breaker_cooldown` (seconds, default `5.0`, `0` disables) makes it use its Postgres
+  fallback at once instead of waiting for the connect timeout on every Redis call. Checkpointers
+  also gain `aput_cache_value_if_absent`; a custom checkpointer inherits a get-then-put fallback.
 - **A thread stored at a node the graph no longer has fails with `StoredNodeMissingError`**
   (`GRAPH_NODE_MISSING_001`, API 409), naming the node and the thread. After renaming a node, add
   `compile(node_aliases={"old": "new"})`. Stored state written by a newer version raises
@@ -235,6 +258,10 @@ npm install 10xgraph-client@next
   make their own ids (CopilotKit does by default) must set `"runs": {"thread_ids": "client"}`.
   The TypeScript client reads the live id into `session.threadId`, which is `string | null`
   until `session_started` arrives.
+- **Writes during a run return 409.** `PUT` and `DELETE /v1/threads/{thread_id}/state`,
+  `POST /v1/threads/{thread_id}/messages`, `DELETE` of a thread message or a thread, and
+  `POST /v1/graph/fix` are refused at once while a run holds the thread. Retry after the run ends
+  or stop it first.
 - **Client dicts and lists have size caps:** 1000 keys per object, 10000 items per list and
   200000 values in all, beside the 64-level depth cap. A larger body gets 422. The thread id
   rule now also covers the WebSocket `config.thread_id`, the live init frame and the AG-UI
@@ -371,7 +398,7 @@ The extras raise these floors. A fresh install resolves them; an existing enviro
 
 After upgrading, before sending production traffic:
 
-1. `10xgraph version` reports 1.0.0rc1 for core and the CLI.
+1. `10xgraph version` reports 1.0.0rc2 for core and the CLI.
 2. The server starts with `MODE=production` and explicit `ALLOWED_HOST` and `ORIGINS`.
 3. A new conversation without a `thread_id` succeeds, and a client-invented id for a new thread
    gets 403 (unless you set `runs.thread_ids` to `"client"`).

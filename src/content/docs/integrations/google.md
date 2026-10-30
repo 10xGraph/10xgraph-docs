@@ -260,7 +260,7 @@ config = EvalConfig(
 ## Thinking Models
 
 Gemini thinking models support extended thinking. Control it via `reasoning_config`
-(the default is `{"effort": "medium"}`). Thinking is not applied when `output_schema` is set
+(the default is effort `"low"`, which is `thinking_budget=512`; pass a dict for more). Thinking is not applied when `output_schema` is set
 or `output_type` is not text or json.
 
 ```python

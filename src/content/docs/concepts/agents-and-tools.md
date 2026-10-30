@@ -128,7 +128,10 @@ agent = Agent(
 # OFF
 reasoning_config=None
 
-# On, medium effort (default for Google: thinking_budget=8192)
+# On, lowest effort per provider (the default; Google thinking_budget=512)
+reasoning_config=True
+
+# Medium effort (Google thinking_budget=8192)
 reasoning_config={"effort": "medium"}
 
 # High effort, Google
@@ -141,7 +144,7 @@ reasoning_config={"thinking_budget": 5000}
 reasoning_config={"effort": "low", "summary": "auto"}
 ```
 
-Default is `{"effort": "medium"}`, so thinking is **on by default** for Google models.
+Default is `True`: thinking is **on by default** at each provider's lowest effort (OpenAI `"minimal"`, Anthropic `"low"`, Google `"low"`). Pass a dict for more.
 
 ---
 

@@ -98,7 +98,7 @@ stats = await graph.aclose(grace=10, stop_timeout=5, timeout=5)
 5. Background tasks (publisher events, memory writes) are drained for the rest of `timeout`, then cancelled.
 6. The checkpointer, publisher and store are released, following the resource ownership rules (`compile(owns_resources=...)`).
 
-Without arguments, the times split `compile(shutdown_timeout=...)` (default 30 seconds): 50% for `grace`, 25% for `stop_timeout`, 25% for `timeout`. The result is a stats dict with `runs` (`active`, `finished`, `stopped`, `cancelled`), `background_tasks` and one entry per released component. A second call returns `{"status": "already_closed"}`. `async with graph:` calls `aclose()` on exit.
+Without arguments, the times split `compile(shutdown_timeout=...)` (default 30 seconds): 50% for `grace`, 25% for `stop_timeout`, 25% for `timeout`. The result is a stats dict with `runs` (`active`, `finished`, `stopped`, `cancelled`), `background_tasks`, `cleanup_tasks` (cancel saves and run-marker releases that outlived their run, waited for within the drain budget) and one entry per released component. A second call returns `{"status": "already_closed"}`. `async with graph:` calls `aclose()` on exit.
 
 ### Signals
 

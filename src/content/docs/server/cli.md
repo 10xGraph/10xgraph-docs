@@ -163,9 +163,9 @@ Output example:
 
 ```
 10xgraph-api
-  Version: 1.0.0rc1
+  Version: 1.0.0rc2
 10xgraph (core)
-  Version: 1.0.0rc1
+  Version: 1.0.0rc2
 ```
 
 ### Preview animations
