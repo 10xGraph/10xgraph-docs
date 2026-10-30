@@ -61,7 +61,7 @@ WebSocket handshakes bypass the HTTP rate-limit and request-size middleware (Sta
   "websocket": {
     "max_connections": 100,
     "max_connections_per_user": 5,
-    "realtime_models": ["gemini-live-2.5-flash-preview"]
+    "realtime_models": ["gemini-3.8-live"]
   }
 }
 ```
@@ -88,7 +88,7 @@ The first frame from the client must be a JSON text frame. It configures the ses
 ```json title="init frame"
 {
   "thread_id": "session-001",
-  "model": "gemini-live-2.5-flash-preview",
+  "model": "gemini-3.8-live",
   "voice": "Puck",
   "modalities": ["AUDIO"],
   "system_prompt": "You are a terse voice assistant.",

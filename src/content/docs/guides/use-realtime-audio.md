@@ -42,7 +42,7 @@ export GEMINI_API_KEY=your-api-key
 
 ```
 
-`GOOGLE_API_KEY` also works. The library reads no model variable; the model is the string you pass to `AudioAgent` and `RealtimeConfig`. The repo examples read an optional `GEMINI_LIVE_MODEL` variable and default to `gemini-live-2.5-flash-preview`. Check Google's docs for regional availability.
+`GOOGLE_API_KEY` also works. The library reads no model variable; the model is the string you pass to `AudioAgent` and `RealtimeConfig`. The repo examples read an optional `GEMINI_LIVE_MODEL` variable and default to `gemini-3.8-live`. Check Google's docs for regional availability.
 
 For Vertex AI, pass `use_vertex_ai=True` to `AudioAgent(...)` and set `GOOGLE_CLOUD_PROJECT` (and optionally `GOOGLE_CLOUD_LOCATION`, default `us-central1`). Credentials come from Application Default Credentials. The `GOOGLE_GENAI_USE_VERTEXAI` variable is not used for realtime sessions.
 
@@ -69,7 +69,7 @@ from tenxgraph.core.realtime.base import OUTPUT_SAMPLE_RATE, RealtimeConfig
 from tenxgraph.core.realtime.queue import LiveInputQueue
 from tenxgraph.prebuilt.agent import AudioAgent
 
-MODEL = "gemini-live-2.5-flash-preview"
+MODEL = "gemini-3.8-live"
 
 # 1. Compile the agent once.
 app = AudioAgent(
@@ -136,9 +136,9 @@ def get_weather(location: str) -> str:
     return f"It is 22 degrees and sunny in {location}."
 
 app = AudioAgent(
-    "gemini-live-2.5-flash-preview",
+    "gemini-3.8-live",
     realtime_config=RealtimeConfig(
-        model="gemini-live-2.5-flash-preview",
+        model="gemini-3.8-live",
         voice="Puck",
         system_instruction="You are a helpful voice assistant. Keep answers brief.",
         input_audio_transcription=True,
@@ -248,8 +248,8 @@ def lookup_order(order_id: str) -> str:
     return f"Order {order_id} ships tomorrow."
 
 app = AudioAgent(
-    "gemini-live-2.5-flash-preview",
-    realtime_config=RealtimeConfig(model="gemini-live-2.5-flash-preview"),
+    "gemini-3.8-live",
+    realtime_config=RealtimeConfig(model="gemini-3.8-live"),
     tools=[lookup_order],
 ).compile()
 ```
@@ -378,7 +378,7 @@ from tenxgraph.core.realtime.base import RealtimeConfig
 from tenxgraph.prebuilt.agent import AudioAgent
 from tenxgraph.storage.checkpointer import InMemoryCheckpointer
 
-MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-live-2.5-flash-preview")
+MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-3.8-live")
 checkpointer = InMemoryCheckpointer()
 app = AudioAgent(
     MODEL,
@@ -399,7 +399,7 @@ export GEMINI_API_KEY=...
 First frame from the client must be a JSON object. Present fields override the agent's build-time `RealtimeConfig` for this session:
 
 ```json
-{"model": "gemini-live-2.5-flash-preview", "thread_id": "abc", "voice": "Puck"}
+{"model": "gemini-3.8-live", "thread_id": "abc", "voice": "Puck"}
 ```
 
 Two fields are limited by the server. `model` is honoured only when it is listed in `websocket.realtime_models` in `10xgraph.json`, and `tools_tags` can only narrow the agent's own tag filter. The live agent also refuses a tool call for any tool it did not advertise to the model in this session.

@@ -42,7 +42,7 @@ The session configuration, sent to the server as the first frame. Every field is
 
 | Field | Type | Description |
 |---|---|---|
-| `model` | `string` | The realtime model, e.g. `'gemini-2.5-flash-live'`. Honoured only when the server lists it in `websocket.realtime_models`; otherwise the agent's own model is used. |
+| `model` | `string` | The realtime model, e.g. `'gemini-3.8-live'`. Honoured only when the server lists it in `websocket.realtime_models`; otherwise the agent's own model is used. |
 | `thread_id` | `string` | Conversation/thread id. If omitted, the server creates one and sends it in the `session_started` event; the client stores it in `session.threadId` and reuses it for reconnects so the conversation resumes from its checkpoint. With `runs.thread_ids: server` (the default) an id you invent is refused. |
 | `voice` | `string` | Provider voice name (e.g. `'Puck'`). |
 | `modalities` | `'AUDIO' \| 'TEXT' \| ('AUDIO' \| 'TEXT')[]` | Response modality. A realtime session is single-modality; a bare string is accepted and coerced server-side. Defaults to the agent's config (usually `'AUDIO'`). |
@@ -208,7 +208,7 @@ declare function playback(pcm16: Uint8Array, sampleRate: number): void;
 declare const micChunk: Uint8Array; // PCM16 mono @ 16 kHz
 
 const session = client.realtime(
-  { model: 'gemini-2.5-flash-live', modalities: 'AUDIO' },
+  { model: 'gemini-3.8-live', modalities: 'AUDIO' },
   { reconnect: { maxAttempts: 5 } }
 );
 
@@ -232,7 +232,7 @@ session.close();
 declare const micChunk: Uint8Array; // PCM16 mono @ 16 kHz, from your capture code
 
 const session = client.realtime({
-  model: 'gemini-2.5-flash-live',
+  model: 'gemini-3.8-live',
   vad: { enabled: false },
 });
 
@@ -278,7 +278,7 @@ declare function playback(pcm16: Uint8Array, sampleRate: number): void;
 declare function appendTranscript(text: string): void;
 
 const session = client.realtime(
-  { model: 'gemini-2.5-flash-live' },
+  { model: 'gemini-3.8-live' },
   {
     onAudio: (pcm16) => playback(pcm16, 24000),
     onEvent: (e) => {

@@ -159,7 +159,7 @@ const client = new TenxGraphClient({
 let player = createPcmPlayer();              // built inside the click handler
 
 const session = client.realtime(
-  { model: 'gemini-2.5-flash-live', modalities: 'AUDIO' },
+  { model: 'gemini-3.8-live', modalities: 'AUDIO' },
   { reconnect: { enabled: false } },
 );
 

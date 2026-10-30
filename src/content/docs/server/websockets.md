@@ -161,7 +161,7 @@ Realtime is only for agents built for it: connecting to `/v1/graph/ws` with a re
 ```json
 Client → Server:
 {
-  "model": "gemini-2.5-flash-live",
+  "model": "gemini-3.8-live",
   "voice": "Puck",
   "modalities": ["AUDIO"],
   "vad": {
@@ -195,7 +195,7 @@ WebSocket behavior is controlled by keys in the `websocket` object within `10xgr
 |---|---|---|---|
 | `max_connections` | integer, null | 1000 | Hard cap on concurrent WebSocket connections (both `/v1/graph/ws` and `/v1/graph/live`) across this process. Set to `0` or `null` for unlimited. |
 | `max_connections_per_user` | integer, null | 10 | Cap on how many WebSocket connections one verified user can hold (by `user_id`). Set to `0` or `null` for unlimited. |
-| `realtime_models` | array of strings | `[]` | Models a `/v1/graph/live` client is allowed to request (for example `["gemini-2.5-flash-live"]`). Empty means clients cannot override the agent's model. |
+| `realtime_models` | array of strings | `[]` | Models a `/v1/graph/live` client is allowed to request (for example `["gemini-3.8-live"]`). Empty means clients cannot override the agent's model. |
 
 **Example:**
 
@@ -205,7 +205,7 @@ WebSocket behavior is controlled by keys in the `websocket` object within `10xgr
   "websocket": {
     "max_connections": 5000,
     "max_connections_per_user": 50,
-    "realtime_models": ["gemini-2.5-flash-live"]
+    "realtime_models": ["gemini-3.8-live"]
   }
 }
 ```
