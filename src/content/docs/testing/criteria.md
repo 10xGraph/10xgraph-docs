@@ -144,7 +144,7 @@ config = EvalConfig(
 
 These criteria send the agent's response (and optionally the context) to a language model for scoring. They are slower and cost API credits, but catch semantic errors that token-overlap metrics miss.
 
-The default judge model is `gemini-2.5-flash`. Override per criterion with `judge_model="gpt-4o"`.
+The default judge model is `gemini-2.5-flash`. Override per criterion with `judge_model="gpt-4o"`. If the judge call fails (bad key, unsupported provider, empty or invalid JSON reply), the criterion reports an error with the real exception message instead of a 0.5 score. With several samples, a sample that succeeds still counts; the error is reported when every sample failed. `SimulationGoalsCriterion` behaves the same way.
 
 ---
 

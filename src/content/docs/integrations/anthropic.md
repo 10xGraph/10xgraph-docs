@@ -125,7 +125,7 @@ agent = Agent(
 
 ## Extended thinking and reasoning
 
-Claude supports extended thinking (internal reasoning before responding) through the `reasoning_config` parameter. It is on by default with `{"effort": "medium"}`; pass `None` or `False` to turn it off:
+Claude supports extended thinking (internal reasoning before responding) through the `reasoning_config` parameter. It is on by default at effort `"low"` (the lowest); pass a dict such as `{"effort": "medium"}` for more, or pass `None` or `False` to turn it off:
 
 ```python
 agent = Agent(

@@ -190,7 +190,7 @@ Expected tables in the `public` schema (or the `schema=` you pass): `threads`, `
 
 ### Redis caching
 
-Redis acts as a hot cache in front of Postgres. `PgCheckpointer` requires a Redis connection, but the durable data lives in Postgres.
+Redis acts as a hot cache in front of Postgres. `PgCheckpointer` requires a Redis connection, but the durable data lives in Postgres. After a Redis connection failure, `PgCheckpointer` skips Redis for a short cool-down (`redis_breaker_cooldown`, 5 seconds by default, `0` disables it) and uses Postgres at once, so a Redis outage does not slow every run step.
 
 If several deployments share one Redis, set `REDIS_KEY_PREFIX` for the API (run locks, caps, ownership cache, token revocation) and `redis_key_prefix` on `PgCheckpointer` to the same value. They are two separate settings, and each prefixes only its own keys.
 

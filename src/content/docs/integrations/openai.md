@@ -247,10 +247,10 @@ cache still fires automatically when the judge prompt prefix is stable (same rub
 ## Reasoning Models
 
 Reasoning models such as `o4-mini` are controlled via `reasoning_config`. The default is
-`{"effort": "medium"}`.
+effort `"minimal"` (the lowest); pass a dict for more.
 
 ```python
-# Enable with defaults (effort="medium")
+# Enable with defaults (effort="minimal")
 agent = Agent(model="o4-mini", reasoning_config=True)
 
 # Set effort level
@@ -264,8 +264,12 @@ agent = Agent(model="o4-mini", reasoning_config=False)
 ```
 
 On Chat Completions, `effort` is sent as `reasoning_effort`; on the Responses API the whole
-dict is sent as `reasoning` (so `summary` is also allowed). Because the default is on, pass
-`reasoning_config=None` when using a model that does not accept reasoning parameters.
+dict is sent as `reasoning` (so `summary` is also allowed). When reasoning is on and you set no
+`summary`, the Responses request asks for `summary: "auto"`. If the reasoning came from the default
+and the model answers with a 400 that names the reasoning parameter (for example `gpt-4o`), the
+call is retried once without it and the model is remembered for the process. An explicit
+`reasoning_config` dict is never dropped and still raises, so pass `reasoning_config=None` for a
+model that does not accept reasoning parameters.
 
 ---
 
@@ -309,8 +313,9 @@ agent = Agent(
 
 When `base_url` is set and you do not pass `api_style`, the Agent uses Chat Completions,
 because most local servers only support it. If you pass `api_style="responses"` with a
-`base_url`, the Agent tries the Responses API on the first call. If the server rejects it,
-the Agent logs one warning and uses Chat Completions for the rest of its lifetime.
+`base_url`, the Agent tries the Responses API on the first call. If the server answers 404,
+405 or 501 (no Responses API), the Agent logs one warning and uses Chat Completions for the rest
+of its lifetime. Other errors, such as a 429 or a timeout, are raised and do not switch it.
 
 Prompt caching params (`prompt_cache_key`, `prompt_cache_retention`) have no effect on
 local servers unless the server explicitly implements them.
