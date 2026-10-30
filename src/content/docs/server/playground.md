@@ -40,6 +40,23 @@ If the browser tab does not open automatically, copy the playground URL from the
 
 `10xgraph-api` 0.7.0 opens the same playground at its previous address, `playground-463bd.web.app`. Both addresses serve the same app.
 
+## Allow the playground to reach your local server
+
+Added after 1.0.0rc2.
+
+The playground is a public HTTPS page and your server runs on your own machine. Chrome's Local Network Access feature therefore asks you for permission the first time the page calls `localhost`, and the playground makes one early request to your server so the prompt appears on the Connect page. Click Allow.
+
+Chrome keeps two separate permissions: one for your own machine (loopback addresses such as `localhost` and `127.0.0.1`, the Permissions API name `loopback-network`) and one for the local network (`local-network`). Both appear in the site settings. For `10xgraph dev` on `127.0.0.1`, the loopback one must be Allowed.
+
+If you dismissed or denied the prompt, the Connect page shows **Your browser blocked the local server**. To fix it:
+
+1. Click the site settings icon left of the address bar.
+2. Find the local network or loopback access entry and set it to Allow. Chrome may label it differently by version.
+3. Reload the page and click Try again.
+4. Check that `10xgraph dev` is still running (`curl http://127.0.0.1:8000/ping`).
+
+The server must also allow the playground origin: the API answers the browser's private-network preflight only for origins in `ORIGINS` (see [CORS](/docs/server/cors-and-security-headers#private-network-preflight-for-the-hosted-playground)). A server reached over a public HTTPS URL does not need any of this.
+
 ## Verify the playground works
 
 Once your browser opens the playground, you should land on the **Connect** page. The playground has already received your local API URL from the `backendUrl` query parameter, so the connection is usually pre-filled.

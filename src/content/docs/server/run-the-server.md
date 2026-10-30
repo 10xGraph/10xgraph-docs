@@ -52,6 +52,43 @@ The server binds to `http://127.0.0.1:8000` and restarts whenever you edit any P
 
 Flags: `--config`/`-c`, `--host`/`-H`, `--port`/`-p`, `--reload/--no-reload`, `--open/--no-open`, `--verbose`/`-v` and `--quiet`/`-q`. The commands `10xgraph api` and `10xgraph play` were removed in `10xgraph-api` 0.9.0; use `10xgraph dev`.
 
+### Run `10xgraph dev` against Docker backends
+
+Added after 1.0.0rc2.
+
+When Postgres, Redis or Qdrant run in Docker Compose and `10xgraph dev` runs on your host, the host reaches them through published ports. Publish each port on `127.0.0.1` only, so nothing else on your network can connect:
+
+```yaml
+services:
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "127.0.0.1:5432:5432"
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+```
+
+In `.env`, use `localhost` as the host, not the compose service names. `postgres`, `redis` and `qdrant` resolve only inside the Docker network, that is, for a container of the same compose project:
+
+```bash
+# On the host (10xgraph dev)
+DATABASE_URL=postgresql://<user>:<password>@localhost:5432/<database>
+REDIS_URL=redis://:<password>@localhost:6379/0
+QDRANT_URL=http://localhost:6333
+
+# Inside a container on the compose network
+# DATABASE_URL=postgresql://<user>:<password>@postgres:5432/<database>
+```
+
+If the URLs still use a service name, the [startup check](/docs/server/production-checklist#startup-check) fails at boot and names the unreachable `host:port`. See [Backend unreachable at startup](/docs/troubleshooting/api-server#issue-backend-unreachable-at-startup).
+
 ## Verify the server is running
 
 Open another terminal and ping the server to confirm it is reachable:
@@ -266,6 +303,8 @@ Confirm that:
 3. In Docker or on a VM, networking is properly configured (ensure `--host 0.0.0.0` and the port is exposed)
 
 Test with: `curl http://127.0.0.1:8000/ping`
+
+If the server itself exits at boot with `Refusing to start: ... backend(s) unreachable`, a configured Postgres, Redis or store is down or its URL is wrong. See [Backend unreachable at startup](/docs/troubleshooting/api-server#issue-backend-unreachable-at-startup).
 
 ## Next steps
 

@@ -57,6 +57,19 @@ The settings model allows extra variables, so unknown names in the environment a
 
 ---
 
+## Startup check variables
+
+Added after 1.0.0rc2.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `STARTUP_CHECKS` | `true` | Before serving, ping every configured backend and refuse to start while one stays unreachable. Applies in development and production. `false` skips the check and logs a warning. |
+| `STARTUP_CHECK_TIMEOUT_SECONDS` | `30` | Seconds the check keeps retrying an unreachable backend (with a short backoff) before it gives up, so services started together can come up in any order. Must be 0 or more. |
+
+The check covers the checkpointer's Postgres (a query plus the schema version) and its Redis cache, the API's Redis (`redis` in `10xgraph.json`, else `REDIS_URL`), the rate limiter's Redis when it has its own URL, and the memory store through `aping()`. It does not check the model provider. When a backend stays down, the server exits with a message that names each backend and its `host:port`, never credentials. See [Startup check](/docs/server/production-checklist#startup-check) and [Backend unreachable at startup](/docs/troubleshooting/api-server#issue-backend-unreachable-at-startup).
+
+---
+
 ## Security headers
 
 Applied by the security-headers middleware when `SECURITY_HEADERS_ENABLED` is true.

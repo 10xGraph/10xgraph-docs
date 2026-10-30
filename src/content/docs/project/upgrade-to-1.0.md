@@ -100,6 +100,11 @@ npm install 10xgraph-client@next
 - **Skill and memory text is no longer run through `str.format`.** Only your own
   `system_prompt` is interpolated, and a bad placeholder is logged instead of failing the run.
   Remove any reliance on `{placeholder}` expansion inside skill or memory text.
+- **`BaseStore.aping()` is now abstract (added after 1.0.0rc2).** A custom store must implement
+  `async def aping(self) -> None`: return when its backend is reachable, raise when it is not.
+  Keep it read-only and cheap, because `10xgraph-api` calls it on `/health/ready` and at
+  startup. An in-process store just returns. A store without it raises `TypeError` when
+  created. `QdrantStore`, `Mem0Store` and `InMemoryStore` implement it already.
 - **`aforget_memory` differs by store.** `QdrantStore` applies `memory_type`, `category` and
   `filters`. `Mem0Store` raises `ValueError` if any of them is passed. The `qdrant` extra needs
   `qdrant-client>=1.10.0` and a Qdrant server 1.10 or newer.
@@ -296,6 +301,19 @@ npm install 10xgraph-client@next
   This is the API's `runs.timeout`, which still defaults to 300 s in production and to no limit
   in development. Raise it, or set it to `null`. Only the core tool and node timeouts
   (`tool_timeout`, `node_timeout`) lost their defaults.
+
+### Startup check and rate limiter outages
+
+Added after 1.0.0rc2.
+
+- **The server refuses to start while a configured backend is unreachable.** At boot it pings
+  the checkpointer's Postgres and Redis, the API's Redis, the rate limiter's own Redis and the
+  store, retrying for `STARTUP_CHECK_TIMEOUT_SECONDS` (30), in development and production. A
+  wrong connection string now fails the deploy. Set `STARTUP_CHECKS=false` to skip it. See the
+  [production checklist](/docs/server/production-checklist#startup-check).
+- **A rate limiter outage with `fail_open: false` answers `503` `RATE_LIMIT_UNAVAILABLE`**
+  (with `Retry-After: 5`) instead of `429 RATE_LIMIT_EXCEEDED`. Clients that retry on 429 should
+  retry on 503 too. See [Rate limiting](/docs/server/rate-limiting).
 
 ### Auth and authorization
 

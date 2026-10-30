@@ -264,7 +264,8 @@ from tenxgraph_api.src.app.core.middleware.rate_limit.base import (
 class CustomRateLimitBackend(BaseRateLimitBackend):
     async def check(self, key: str, *, limit: int, window: int) -> RateLimitDecision:
         # Atomically count the request, then return a decision.
-        # allowed=False produces a 429 response.
+        # allowed=False produces a 429 response. Return
+        # RateLimitDecision.backend_unavailable() for a 503 when your store is down.
         return RateLimitDecision(allowed=True, remaining=limit - 1, reset_after=window)
 
     async def close(self) -> None:

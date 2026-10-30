@@ -26,7 +26,7 @@ The `rate_limit` block in `10xgraph.json` turns on a sliding-window limiter for 
 | `redis` | object or string | `null` | Redis connection for the `"redis"` backend. Either `{"url": "...", "prefix": "..."}` or a bare URL string (uses default prefix). The URL supports `$ENV_VAR` and `${ENV_VAR}` expansion. |
 | `redis.url` | string | `null` | Redis connection URL. Required for `"redis"` backend unless a Redis client is bound in InjectQ. |
 | `redis.prefix` | string | `"10xgraph:rate-limit"` | Key prefix for all Redis entries. The default changed from `"agentflow:rate-limit"` in version 0.7.0, so counters restart once on upgrade. |
-| `fail_open` | boolean | `true` | When `true`, requests are allowed if the Redis backend is unreachable (fail-open). When `false`, requests are denied (fail-closed). Only applies to `"redis"` backend. |
+| `fail_open` | boolean | `true` | When `true`, requests are allowed if the Redis backend is unreachable (fail-open). When `false`, requests are denied with `503` `RATE_LIMIT_UNAVAILABLE` (fail-closed). Only applies to `"redis"` backend. |
 
 Config load validates all values. Invalid `by`, `backend`, non-positive `requests` or `window`, `trusted_proxy_hops` < 1, invalid networks in `trusted_proxies`, or an unresolved `$ENV_VAR` in the Redis URL raise `ValueError` and prevent the server from starting. A `rate_limit` block with `enabled: false` behaves as if the block were absent.
 
@@ -72,7 +72,7 @@ Every HTTP response includes these headers:
 | `X-RateLimit-Remaining` | Requests remaining in the current window. |
 | `X-RateLimit-Reset` | Unix timestamp when the window resets. |
 | `X-RateLimit-Reset-After` | Seconds until the window resets. |
-| `Retry-After` | Present on `429` responses only; equals `X-RateLimit-Reset-After`. |
+| `Retry-After` | Present on `429` responses, equal to `X-RateLimit-Reset-After`, and on `503` `RATE_LIMIT_UNAVAILABLE` responses (`5`). |
 
 When a client exceeds the limit, the server responds with status `429 Too Many Requests` and the following body:
 
@@ -84,6 +84,22 @@ When a client exceeds the limit, the server responds with status `429 Too Many R
     "limit": 100,
     "window_seconds": 60,
     "retry_after_seconds": 12
+  },
+  "metadata": {
+    "request_id": "...",
+    "status": "error"
+  }
+}
+```
+
+When the Redis backend cannot be reached and `fail_open` is `false`, the server responds with `503 Service Unavailable` and `Retry-After: 5` instead of 429. A real limit hit stays 429. Added after 1.0.0rc2.
+
+```json
+{
+  "error": {
+    "code": "RATE_LIMIT_UNAVAILABLE",
+    "message": "Rate limiter unavailable: its backend could not be reached.",
+    "retry_after_seconds": 5
   },
   "metadata": {
     "request_id": "...",
@@ -110,7 +126,7 @@ The separate `websocket.max_connections` and `websocket.max_connections_per_user
 
 ## Custom backend
 
-Subclass `BaseRateLimitBackend` when neither built-in backend fits, for example to call an external quota service. Both methods are abstract. `check` must atomically record the request and return a `RateLimitDecision` with `allowed`, `remaining` and `reset_after` (seconds). `close` releases resources at shutdown.
+Subclass `BaseRateLimitBackend` when neither built-in backend fits, for example to call an external quota service. Both methods are abstract. `check` must atomically record the request and return a `RateLimitDecision` with `allowed`, `remaining` and `reset_after` (seconds). `close` releases resources at shutdown. A backend that cannot reach its store and must not let the request through returns `RateLimitDecision.backend_unavailable()` (optional `retry_after` seconds, default 5); the middleware answers it with the 503 above. Added after 1.0.0rc2.
 
 ```python title="my_backend.py"
 import time

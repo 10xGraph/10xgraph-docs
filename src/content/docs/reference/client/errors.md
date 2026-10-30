@@ -177,6 +177,12 @@ try {
 }
 ```
 
+### Rate limiter backend down (503)
+
+Added after 1.0.0rc2.
+
+When the server's rate-limit backend is unreachable and `fail_open` is `false`, it answers 503 with `error.code` `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5`, not 429. The client throws a `ServerError` with `statusCode` 503. Retry after a short delay, as for 429.
+
 ### ServerError
 
 `ServerError` covers status 500, 502, 503 and 504 when the error code does not match a more specific class. Its `errorCode` is the server's code, or `INTERNAL_SERVER_ERROR` when absent, and `statusCode` is the actual status.
