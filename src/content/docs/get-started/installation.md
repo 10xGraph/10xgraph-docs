@@ -111,7 +111,7 @@ The `all` extra installs every other extra at once and is useful for local devel
 Version pinning still matters. From 1.0 the public API is stable under a deprecation policy: breaking changes arrive only in a major release, after at least one minor release of deprecation. The three packages share major.minor, and patch versions are independent. While 1.0 is a release candidate, install it with `--pre`:
 
 ```bash
-pip install --pre "10xgraph==1.0.0rc1" "10xgraph-api==1.0.0rc1"
+pip install --pre "10xgraph==1.0.0rc2" "10xgraph-api==1.0.0rc2"
 ```
 
 Drop `--pre` once 1.0.0 is out. Read the [changelog](/changelog) before upgrading, and see the [upgrade guide](/docs/project/upgrade-to-1.0) if you come from 0.x.
@@ -132,9 +132,9 @@ Example output (the exact formatting and versions vary by release):
 ```text
 $ 10xgraph version
 10xgraph-api
-  Version: 1.0.0rc1
+  Version: 1.0.0rc2
 10xgraph (core)
-  Version: 1.0.0rc1
+  Version: 1.0.0rc2
 
 $ python -c "import tenxgraph; print(tenxgraph.__file__)"
 /path/to/.venv/lib/python3.12/site-packages/tenxgraph/__init__.py
@@ -193,7 +193,7 @@ If you are building a JavaScript or TypeScript application that calls the 10xGra
 npm install 10xgraph-client@next
 ```
 
-The `next` tag points at the 1.0 release candidate (`1.0.0-rc.1`); use plain `npm install 10xgraph-client` once 1.0.0 is out. The main class is `TenxGraphClient`, and the package requires Node.js 18 or newer. See the [client documentation](/docs/client) for usage.
+The `next` tag points at the 1.0 release candidate (`1.0.0-rc.2`); use plain `npm install 10xgraph-client` once 1.0.0 is out. The main class is `TenxGraphClient`, and the package requires Node.js 18 or newer. See the [client documentation](/docs/client) for usage.
 
 The client talks to a running 10xGraph API server (`10xgraph dev` locally) over HTTP, and you pass a thread ID to keep conversation history across runs. Use `10xgraph-api` 0.7.0 or newer with client 0.6.0 or newer: the client authenticates WebSockets with the `10xgraph-bearer` subprotocol, which older servers do not accept. HTTP calls work with either. See the [Quickstart](/docs/get-started/first-agent) for a complete example.
 

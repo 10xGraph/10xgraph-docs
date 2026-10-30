@@ -253,12 +253,12 @@ Multiple tags are supported; the agent can call any tool matching at least one t
 
 ## Reasoning configuration
 
-10xGraph provides a unified `reasoning_config` across all providers that support reasoning. By default, reasoning is enabled at medium effort for models that support it (like OpenAI's o-series, Google's Gemini, and Anthropic's Claude).
+10xGraph provides a unified `reasoning_config` across all providers that support reasoning. By default, reasoning is enabled at each provider's lowest effort for models that support it (OpenAI `"minimal"`, Anthropic `"low"`, Google `"low"`; pass a dict such as `{"effort": "medium"}` for more) (like OpenAI's o-series, Google's Gemini, and Anthropic's Claude).
 
 You can control reasoning mode with the `effort` key, which applies consistently across providers. Each provider translates this to its native settings. For providers without reasoning support, this parameter is safely ignored.
 
 ```python
-# Default: medium effort (ON for reasoning models)
+# Default: lowest effort per provider (ON for reasoning models)
 agent = Agent(model="gpt-4o")
 
 # High effort reasoning
@@ -282,7 +282,7 @@ agent = Agent(model="claude-opus-5", reasoning_config={"effort": "high"})
 | `effort` | OpenAI | Google `thinking_budget` | Anthropic |
 |---|---|---|---|
 | `"low"` | Low effort | 512 | Adaptive (conservative) |
-| `"medium"` (default) | Medium effort | 8192 | Adaptive (balanced) |
+| `"medium"` | Medium effort | 8192 | Adaptive (balanced) |
 | `"high"` | High effort | 24576 | Adaptive (thorough) |
 
 When you pass `effort`, Google's equivalent `thinking_budget` is computed automatically. The `summary` key (OpenAI-only) controls how extended thinking is summarized in the response.
@@ -614,7 +614,7 @@ Agent(
     extra_messages: list[Message] | None = None,
     trim_context: bool = False,
     tools_tags: set[str] | None = None,
-    reasoning_config: dict | bool | None = {"effort": "medium"},
+    reasoning_config: dict | bool | None = True,
     skills: SkillConfig | None = None,
     memory: MemoryConfig | None = None,
     retry_config: RetryConfig | bool | None = True,

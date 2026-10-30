@@ -349,7 +349,7 @@ The server maps exceptions to responses in `tenxgraph_api/src/app/core/exception
 
 A `429` is not a core exception either. The server returns it when the `rate_limit` window is used up (`error.code` `RATE_LIMIT_EXCEEDED`, with a `Retry-After` header) or when one user has more than `runs.max_concurrent_per_user` runs in flight (standard body, code `HTTPException`, no `Retry-After`).
 
-In production the message of a 5xx response is replaced by a generic text and the real error goes to the server log. Messages of 4xx `HTTPException` errors are kept. Handled 4xx errors are logged at `WARNING` with no traceback, and 5xx errors at `ERROR` with the traceback, so alert rules for 4xx traffic must match `WARNING` (`10xgraph-api` 1.0.0rc1). A missing checkpointer answers `503` (`Checkpointer is not configured`), a thread state update with a bad `context` answers `422`, and a message id missing from a thread answers `404`.
+In production the message of a 5xx response is replaced by a generic text and the real error goes to the server log. Messages of 4xx `HTTPException` errors are kept. Handled 4xx errors are logged at `WARNING` with no traceback, and 5xx errors at `ERROR` with the traceback, so alert rules for 4xx traffic must match `WARNING` (`10xgraph-api` 1.0.0rc2). A missing checkpointer answers `503` (`Checkpointer is not configured`), a thread state update with a bad `context` answers `422`, and a message id missing from a thread answers `404`.
 
 A `409` with the message `thread is busy` is not a core exception. The server returns it when another run is still active on the thread after 30 seconds. It uses the standard error body (`error.code` `HTTPException`), not the `state_conflict` shape.
 

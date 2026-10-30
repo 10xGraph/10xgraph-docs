@@ -178,6 +178,10 @@ embedding = GoogleEmbedding(
 | `model` | `str` | `"gemini-embedding-001"` | Google embedding model to use. |
 | `api_key` | `str \| None` | None | Google API key. Reads from `GOOGLE_API_KEY` or `GEMINI_API_KEY` env vars if not provided. |
 | `output_dimensionality` | `int \| None` | None | Optional: reduce output dimension. Some models support this. |
+| `document_task_type` | `str \| None` | `"RETRIEVAL_DOCUMENT"` | Gemini task type sent when embedding text to store. `None` sends none. |
+| `query_task_type` | `str \| None` | `"RETRIEVAL_QUERY"` | Gemini task type sent when embedding a search query (`aembed_query`). `None` sends none. |
+
+`BaseEmbedding.aembed_query` embeds a search query and defaults to `aembed` for providers without a query task type; `QdrantStore.asearch` uses it. Vectors stored before task types were sent stay searchable.
 
 **Raises:** `ImportError` if `google-genai` is not installed. `ValueError` if no key is found. `dimension` returns `output_dimensionality` when set, `3072` for `gemini-embedding-001`, and `768` for other models.
 

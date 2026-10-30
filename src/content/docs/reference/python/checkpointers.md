@@ -81,7 +81,7 @@ message = await checkpointer.aupdate_message_metadata(
 )
 ```
 
-Optional, non-abstract async methods also exist on the base class, for example `aput_checkpoint`, `aput_cache_value`, `aget_cache_value`, `arequest_stop` and `aget_thread_owner`. Backends override them as needed.
+Optional, non-abstract async methods also exist on the base class, for example `aput_checkpoint`, `aput_cache_value`, `aput_cache_value_if_absent` (set a cache value only if the key is missing: Redis `SET NX`, one SQLite statement, in-memory under its lock; the base class falls back to get-then-put), `aget_cache_value`, `arequest_stop` and `aget_thread_owner`. Backends override them as needed.
 
 ### Stop requests and active runs
 
@@ -182,6 +182,7 @@ The constructor takes the connection arguments below as named parameters; the re
 | `redis_pool` | `ConnectionPool \| None` | `None` | Pre-created Redis connection pool. |
 | `redis_pool_config` | `dict \| None` | `None` | Config passed to the Redis pool if creating a new one. Merged over the defaults: a bounded `BlockingConnectionPool` with `max_connections=50` and `timeout=5.0` (seconds a caller waits for a free connection), plus Redis socket timeouts (5 s connect, 10 s read). Override any key. |
 | `schema` | `str` | `"public"` | PostgreSQL schema name where checkpointer tables live. Must match `^[a-zA-Z_][a-zA-Z0-9_]*$`, otherwise `ValueError`. |
+| `redis_breaker_cooldown` (kwarg) | `float` | `5.0` | Seconds to skip Redis after a Redis connection failure. During the cool-down `PgCheckpointer` takes its usual fallback (Postgres, or no cache) at once instead of waiting for the connect timeout on every Redis call. `0` disables the circuit breaker. A cache entry whose invalidation was skipped is deleted when Redis is reachable again. |
 | `cache_ttl` (kwarg) | `int` | `86400` | Redis cache TTL in seconds (24 hours). |
 | `state_history_limit` (kwarg) | `int` | `20` | Number of historical state snapshots to retain per thread. |
 | `release_resources` (kwarg) | `bool` | `False` | On `arelease()`, close the Postgres and Redis resources even if you passed them in. By default only resources the checkpointer created itself are closed. |

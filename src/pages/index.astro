@@ -24,7 +24,7 @@ const faq = [
   },
   {
     q: "Is the API server production-ready?",
-    a: "Yes. 10xScale runs its own AI products on it. Each part of running agents in production has its own options, and most of them are a key in 10xgraph.json or an environment variable. You tune production behavior without touching your agent code.\n\nSecurity: authentication is JWT or your own BaseAuth class. Authorization is owner-only threads, allow-all, or your own backend. MODE=production refuses to start with wildcard CORS plus credentials, rejects JWT secrets shorter than 32 bytes, and turns off the /docs pages by default. Security headers are on by default. The production template adds a prompt-injection validator and lifecycle validators that run before invoke, after each step and on error.\n\nReliability: tool calls are replay-safe after a crash, and versioned state writes stop two runs from overwriting each other. Node and tool timeouts stop a hung call from holding a worker. Thread state is cached in Redis and stored durably in PostgreSQL, so threads survive restarts.\n\nScale: rate limits use a sliding window keyed by IP, by user or globally, and they are stored in memory, in Redis so every worker shares them, or in your own backend. The server runs Gunicorn with Uvicorn workers, and you can run several instances behind a load balancer as long as they share PostgreSQL and Redis. WebSocket connection limits, upload size limits and allowed file types are configurable.\n\nDeployment and operations: 10xgraph build writes a Dockerfile, docker-compose.yml and a Kubernetes manifest. The manifest's grace period and probe timeouts let in-flight agent runs finish during a rolling deploy. 10xgraph audit checks the environment and config before you ship, and it exits with code 1 on failure, so it can gate CI. Every response carries an X-Request-ID, and you can send errors to Sentry, traces to OpenTelemetry, and runs to Logfire or LangSmith.\n\nThe core is at 1.0.0rc1, the 1.0 release candidate, so pin your versions and read the changelog when you upgrade."
+    a: "Yes. 10xScale runs its own AI products on it. Each part of running agents in production has its own options, and most of them are a key in 10xgraph.json or an environment variable. You tune production behavior without touching your agent code.\n\nSecurity: authentication is JWT or your own BaseAuth class. Authorization is owner-only threads, allow-all, or your own backend. MODE=production refuses to start with wildcard CORS plus credentials, rejects JWT secrets shorter than 32 bytes, and turns off the /docs pages by default. Security headers are on by default. The production template adds a prompt-injection validator and lifecycle validators that run before invoke, after each step and on error.\n\nReliability: tool calls are replay-safe after a crash, and versioned state writes stop two runs from overwriting each other. Node and tool timeouts stop a hung call from holding a worker. Thread state is cached in Redis and stored durably in PostgreSQL, so threads survive restarts.\n\nScale: rate limits use a sliding window keyed by IP, by user or globally, and they are stored in memory, in Redis so every worker shares them, or in your own backend. The server runs Gunicorn with Uvicorn workers, and you can run several instances behind a load balancer as long as they share PostgreSQL and Redis. WebSocket connection limits, upload size limits and allowed file types are configurable.\n\nDeployment and operations: 10xgraph build writes a Dockerfile, docker-compose.yml and a Kubernetes manifest. The manifest's grace period and probe timeouts let in-flight agent runs finish during a rolling deploy. 10xgraph audit checks the environment and config before you ship, and it exits with code 1 on failure, so it can gate CI. Every response carries an X-Request-ID, and you can send errors to Sentry, traces to OpenTelemetry, and runs to Logfire or LangSmith.\n\nThe core is at 1.0.0rc2, the 1.0 release candidate, so pin your versions and read the changelog when you upgrade."
   },
   {
     q: "How does the server handle authentication and multi-user isolation?",
@@ -80,7 +80,7 @@ const jsonLd = [
     "description": "10xGraph is an open-source Python framework for production multi-agent AI. You write the agent, and 10xGraph generates the production server around it: authentication, scoped access control, owner-only threads, rate limits, and Docker and Kubernetes deployment. Memory has two tiers, with hot data in a Redis cache and cold data in PostgreSQL. MIT licensed, made by 10xScale.",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Linux, macOS, Windows",
-    "softwareVersion": "1.0.0rc1",
+    "softwareVersion": "1.0.0rc2",
     "programmingLanguage": "Python",
     "license": "https://opensource.org/licenses/MIT",
     "url": "https://10xgraph.com/",
@@ -179,11 +179,11 @@ const jsonLd = [
       <div>
         <h2 id="what">What is 10xGraph?</h2>
         <p class="def">10xGraph is an open-source Python framework for production multi-agent AI. You write the agent, and 10xGraph generates the production server around it: authentication, scoped access control, owner-only threads, rate limits, and Docker and Kubernetes deployment. Memory has two tiers, with hot data in a Redis cache and cold data in PostgreSQL. MIT licensed, made by 10xScale.</p>
-        <p class="fresh">Updated October 2026 · v1.0.0rc1 · <a href="/docs/concepts">Read the concepts</a></p>
+        <p class="fresh">Updated October 2026 · v1.0.0rc2 · <a href="/docs/concepts">Read the concepts</a></p>
       </div>
       <dl class="facts">
         <div><dt>License</dt><dd>MIT, including the API server and CLI. Use it commercially, self-host it, fork it.</dd></div>
-        <div><dt>Runtime</dt><dd>Python 3.12+. Core 1.0.0rc1, API and CLI 1.0.0rc1, TypeScript client 1.0.0-rc.1.</dd></div>
+        <div><dt>Runtime</dt><dd>Python 3.12+. Core 1.0.0rc2, API and CLI 1.0.0rc2, TypeScript client 1.0.0-rc.2.</dd></div>
         <div><dt>Memory</dt><dd>Hot: active thread state cached in Redis and read first. Cold: full history in PostgreSQL with versioned writes.</dd></div>
         <div><dt>Dependencies</dt><dd>No LangChain. Dependency injection through InjectQ.</dd></div>
       </dl>
