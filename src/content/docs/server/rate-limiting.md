@@ -190,6 +190,8 @@ container = InjectQ()
 container.bind_instance(BaseRateLimitBackend, MyRateLimitBackend())
 ```
 
+When your backend cannot reach its store and the request must not pass, return `RateLimitDecision.backend_unavailable()` instead of a plain denial. The middleware then answers `503` with `RATE_LIMIT_UNAVAILABLE` (see [What clients see when the backend is down](#what-clients-see-when-the-backend-is-down)). It takes an optional `retry_after` in seconds (default 5). Backends that return only allow or deny keep working unchanged. Added after 1.0.0rc2.
+
 Bind the instance under `BaseRateLimitBackend`: that is the key the server looks up. If `backend` is `"custom"` and nothing is bound there, startup fails.
 
 Then in `10xgraph.json`:
@@ -345,7 +347,27 @@ Every response also includes these headers so clients can track their quota:
 | `X-RateLimit-Remaining` | Requests remaining in the current window |
 | `X-RateLimit-Reset` | Unix timestamp for the window reset |
 | `X-RateLimit-Reset-After` | Seconds until the window resets |
-| `Retry-After` | Seconds to wait before retrying (only on `429`) |
+| `Retry-After` | Seconds to wait before retrying (only on `429` and `503`) |
+
+### What clients see when the backend is down
+
+With the Redis backend and `fail_open: false`, a Redis outage denies requests with `503 Service Unavailable`, not 429, so clients can tell an outage from a limit hit. The response carries `Retry-After: 5`:
+
+```json
+{
+  "error": {
+    "code": "RATE_LIMIT_UNAVAILABLE",
+    "message": "Rate limiter unavailable: its backend could not be reached.",
+    "retry_after_seconds": 5
+  },
+  "metadata": {
+    "request_id": "abc123",
+    "status": "error"
+  }
+}
+```
+
+A real limit hit stays `429 RATE_LIMIT_EXCEEDED`. With `fail_open: true` requests pass during the outage. The Redis backend logs a traceback for the first error of an outage and one line for each error after it. Clients that retried on 429 should retry on 503 too. Added after 1.0.0rc2.
 
 Clients can check `X-RateLimit-Remaining` before sending the next request to avoid hitting the limit, and use `Retry-After` to back off intelligently.
 

@@ -66,6 +66,8 @@ curl -i http://127.0.0.1:8000/health/ready
 | `503` | At least one check is `fail`. `status` is `not_ready`. The checkpointer check fails when the database schema version is below what the code expects (an upgrade whose migration has not run). |
 | `503` | The server is shutting down. `status` is `draining` and `checks` is empty. No component is checked. |
 
+The server runs the same checks once at boot (the [startup check](/docs/server/production-checklist#startup-check)). There an unreachable backend stops the server from starting; here it only turns readiness to 503, so traffic stops until the backend returns. Added after 1.0.0rc2.
+
 Once the process gets SIGTERM, the server marks itself as draining. Readiness answers `503` from then on, so the load balancer stops sending new requests while open runs finish. `/ping` stays `200` until the process exits.
 
 The response is a plain JSON object, not the standard `data` and `metadata` envelope.

@@ -39,6 +39,30 @@ The playground is hosted externally. `10xgraph dev` does not run a separate loca
 - test that URL with `curl http://127.0.0.1:8000/ping` (use your own host and port)
 - verify the browser URL contains the correct `backendUrl`
 
+## Issue: "Your browser blocked the local server"
+
+Added after 1.0.0rc2.
+
+**Symptoms**
+
+- the Connect page shows **Your browser blocked the local server**
+- or the connection fails with `Connection failed ... (network or CORS)`
+- the browser console shows `Permission was denied for this request to access the `loopback` address space`
+- `curl http://127.0.0.1:8000/ping` works from the terminal
+
+**Cause**
+
+Chrome's Local Network Access blocks a public page (`https://play.10xgraph.com`) from calling your machine until you allow it. Chrome has two separate permissions, one for your own machine (loopback: `localhost`, `127.0.0.1`; Permissions API name `loopback-network`) and one for the local network (`local-network`). For `10xgraph dev` on `127.0.0.1` the loopback one must be Allowed.
+
+**Fix**
+
+1. Click the site settings icon left of the address bar.
+2. Set the local network or loopback access entry to Allow. Chrome may label it differently by version; both permissions show in the site settings.
+3. Reload the playground and click Try again.
+4. If it still fails, confirm the playground origin is in the server's `ORIGINS`. The API answers the private-network preflight only for listed origins.
+
+See [Allow the playground to reach your local server](/docs/server/playground#allow-the-playground-to-reach-your-local-server).
+
 ## Issue: playground loads but requests fail silently
 
 **Symptoms**

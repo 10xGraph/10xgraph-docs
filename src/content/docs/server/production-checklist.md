@@ -30,6 +30,7 @@ With `MODE=production`, the server does these for you. You do not configure them
 - Scopes graph introspection (`GET /v1/graph`, `/v1/graph/tools`, `/v1/graph:StateSchema`) to callers with the `graph:read` scope, unless you set `graph_introspection` to `"open"`.
 - Defaults authorization to ownership, so each user reaches only their own threads.
 - Turns debug mode off.
+- Pings every configured backend at boot and refuses to start while one is unreachable (see [Startup check](#startup-check)). Added after 1.0.0rc2.
 - Ships a hardened image when you use `10xgraph build`: non-root user, Gunicorn with `TenxGraphUvicornWorker` and long graceful timeouts, health check on `/ping`. On SIGTERM `/health/ready` answers 503 while open runs finish.
 
 For why these matter, see the [security model](/docs/production/security-model) and [scaling and reliability](/docs/production/scaling).
@@ -188,6 +189,14 @@ Expected tables in the `public` schema (or the `schema=` you pass): `threads`, `
 
 `/health/ready` answers 503 while the database schema version is below what the code expects, so a pod started before its migration ran stays out of rotation.
 
+### Startup check
+
+At boot the server pings every backend it is configured to use, in development and production: the checkpointer's Postgres (a query and the schema version) and its Redis cache, the API's Redis (run limits, ownership cache, token revocation), the rate limiter's Redis when it has its own URL, and the memory store through `aping()`. It retries with a short backoff for `STARTUP_CHECK_TIMEOUT_SECONDS` (30 by default), so containers started together can come up in any order. If a backend is still down, the server exits with a message naming each backend and its `host:port` (no credentials). A broken connection string therefore fails the deploy instead of the first request, and the orchestrator restarts the container until the backends are up.
+
+`STARTUP_CHECKS=false` skips the check. It runs the same probes as `/health/ready`, with a different outcome: at startup an unreachable backend stops the server, while at runtime `/health/ready` answers 503 so the load balancer stops sending traffic until the backend returns. See [Ping and health](/docs/reference/rest-api/ping#get-healthready).
+
+Added after 1.0.0rc2.
+
 ### Redis caching
 
 Redis acts as a hot cache in front of Postgres. `PgCheckpointer` requires a Redis connection, but the durable data lives in Postgres. After a Redis connection failure, `PgCheckpointer` skips Redis for a short cool-down (`redis_breaker_cooldown`, 5 seconds by default, `0` disables it) and uses Postgres at once, so a Redis outage does not slow every run step.
@@ -329,6 +338,8 @@ for i in {1..5}; do
 done
 # After threshold, requests should return 429 Too Many Requests
 ```
+
+With `fail_open` set to `false` and the Redis backend unreachable, the API answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead of 429. See [Rate limiting](/docs/server/rate-limiting). Added after 1.0.0rc2.
 
 ## 8. Proxy buffering and request handling
 
@@ -500,6 +511,7 @@ curl http://127.0.0.1:8000/ping
 | One worker sees state, another does not | Workers are not sharing the same backend | Point all instances at the same Postgres and Redis |
 | CORS requests are blocked | `ORIGINS` does not include the client domain | Add the domain to `ORIGINS`. A public API can set `ORIGINS=*` with `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false` |
 | `409 thread is busy` on a thread | Another run is still active, and the 30 s wait ran out | Wait for the run to end, use `on_busy: "cancel"`, or use one thread per conversation |
+| Server exits at boot with `Refusing to start: ... backend(s) unreachable` | A configured Postgres, Redis or store did not answer within `STARTUP_CHECK_TIMEOUT_SECONDS` | Fix the URL or start the backend. `STARTUP_CHECKS=false` skips the check |
 | Rate limiting not working | No `rate_limit` block, or Redis is down (with `fail_open` true, requests pass) | Verify `rate_limit.redis.url` and Redis connectivity |
 
 ## Related pages

@@ -140,9 +140,12 @@ class PineconeStore(BaseStore):
     async def aupdate(self, config, memory_id, content, metadata=None, **kwargs): ...
     async def adelete(self, config, memory_id, **kwargs): ...
     async def aforget_memory(self, config, **kwargs): ...
+    async def aping(self) -> None: ...   # raise if the backend is unreachable; read-only and cheap
 
 compiled = graph.compile(store=PineconeStore())
 ```
+
+`aping` is abstract: a store that does not implement it raises `TypeError` when created. Return when the backend is reachable and raise otherwise; an in-process store just returns. `10xgraph-api` calls it for `/health/ready` and at startup. Added after 1.0.0rc2.
 
 ### BaseEmbedding: custom embedding model
 

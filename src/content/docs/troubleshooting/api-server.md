@@ -47,6 +47,37 @@ flowchart TD
 - test the graph import manually: `python -c "from graph.react import app; print(app)"`
 - verify required provider keys and dependencies are installed before startup
 
+### Issue: backend unreachable at startup
+
+Added after 1.0.0rc2.
+
+**Symptoms**
+
+- the server exits at boot after about 30 seconds (`STARTUP_CHECK_TIMEOUT_SECONDS`) with a message like:
+
+```text
+Refusing to start: 1 configured backend(s) unreachable after 30s:
+  - redis (127.0.0.1:6399): ConnectionError: Connection refused
+Start Redis/Postgres/Qdrant, or set STARTUP_CHECKS=false to skip this check.
+```
+
+- the checkpointer line can name two hosts, for example `checkpointer (postgres db:5432, redis cache:6379)`
+- earlier log lines say `Startup check: ... is unreachable (attempt N)` while it retries
+
+**Likely causes**
+
+- the backend is not running or not published on the host and port named in the message
+- running `10xgraph dev` on the host with `.env` URLs that use Docker service names (`postgres`, `redis`, `qdrant`), which resolve only inside the Docker network
+- a wrong password, port or database in the connection string. The message shows `host:port` only, never credentials
+
+**Fix**
+
+- start the backend, or correct the URL. For Docker backends and `10xgraph dev` on the host, publish the ports on `127.0.0.1` and use `localhost` in `.env` (see [Run `10xgraph dev` against Docker backends](/docs/server/run-the-server#run-10xgraph-dev-against-docker-backends))
+- raise `STARTUP_CHECK_TIMEOUT_SECONDS` if the backends are slow to come up
+- `STARTUP_CHECKS=false` skips the check; use it only when you accept that a down backend shows up at the first request instead
+- with `10xgraph dev` (reload on), the reloader keeps waiting for a file change after the failure; fix the cause and save a file, or restart the command
+- in production the orchestrator restarts the container until the backends are up. The same checks run behind `/health/ready`, which answers 503 at runtime while a backend is down
+
 ### Issue: `RuntimeError: Refusing to start: the following routes are not protected`
 
 **Symptoms**
@@ -289,7 +320,26 @@ Two different limits answer 429:
 - wait for the `Retry-After` interval, or for a running request to finish, then retry
 - raise `rate_limit.requests` or `runs.max_concurrent_per_user` in `10xgraph.json` if the traffic is legitimate
 - set `trusted_proxies` when the server sits behind a proxy
+- a rate limiter whose Redis is down answers `503 RATE_LIMIT_UNAVAILABLE` (not 429) when `fail_open` is `false`; see the entry below
 - on the TypeScript client this is a plain `TenxGraphError` with `statusCode` 429; see [Error handling](/docs/client/error-handling#rate-limits-429)
+
+### Issue: `503 RATE_LIMIT_UNAVAILABLE`
+
+Added after 1.0.0rc2.
+
+**Symptoms**
+
+- requests fail with status `503`, `error.code` `RATE_LIMIT_UNAVAILABLE`, the message `Rate limiter unavailable: its backend could not be reached.` and `Retry-After: 5`
+
+**Cause**
+
+`rate_limit.fail_open` is `false` and the rate limiter's backend (Redis) is unreachable. This is an outage, not a limit hit; a real limit hit stays `429 RATE_LIMIT_EXCEEDED`.
+
+**Fix**
+
+- restore the Redis the rate limiter uses (`rate_limit.redis.url`) and retry after `Retry-After`
+- clients that retry on 429 should retry on 503 too
+- set `fail_open` to `true` to let requests through during an outage. `/ping` and `/health/ready` are never rate limited
 
 ### Issue: the error message is generic in production
 

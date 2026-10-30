@@ -66,6 +66,8 @@ volumes:
 
 Start them with `docker compose up -d`.
 
+If you run `10xgraph dev` on the host, publish the ports on `127.0.0.1` (`"127.0.0.1:5432:5432"`) and use `localhost`, not the service name, in your connection URLs. The server's startup check fails at boot otherwise. See [Run `10xgraph dev` against Docker backends](/docs/server/run-the-server#run-10xgraph-dev-against-docker-backends).
+
 ## Create a checkpointer and resume a thread
 
 Pass the checkpointer to `compile`, then invoke the graph with the same `thread_id` to continue a conversation. The tables are created on first use, so no manual migration step is needed for a new database.
