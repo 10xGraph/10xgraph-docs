@@ -195,7 +195,7 @@ For local development, `10xgraph dev` is sufficient. For shared or production us
 
 - **Persistence required:** Set a durable checkpointer (for example `PgCheckpointer`), by passing it to `graph.compile(checkpointer=...)` in your graph code (the `checkpointer` key in `10xgraph.json` is not read). In-memory checkpointing loses all threads on restart.
 - **Multiple instances:** Use a shared durable checkpointer and a shared store (if using long-term memory). Each instance must access the same database backend.
-- **Rate limiting across instances:** Use the `redis` rate-limit backend (the memory backend counts per process and is not shared).
+- **Shared state across instances:** Set `redis` (or `REDIS_URL`) so the API's cache store is shared. It holds the run locks, caps, idempotency state, ownership cache, token revocation and rate-limit counters. The in-memory store counts per process and is not shared.
 
 ## Production environment settings
 
@@ -207,7 +207,7 @@ The generated files set `MODE=production`. Add the following at runtime:
 | `ALLOWED_HOST` | Your hostnames | Comma-separated. `k8s.yaml` reads it from the Secret; compose reads it from `.env`. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false` |
 | `JWT_SECRET_KEY` | 32+ bytes, from a secret manager | Required if `auth` is `jwt`. See [Add JWT authentication](/docs/server/auth) |
 | `JWT_ALGORITHM` | `HS256` or your choice | Required with `jwt` |
-| `REDIS_URL` | Your Redis connection URL | Optional. The server falls back to it for the shared tier of the authorization ownership cache when the `redis` key in `10xgraph.json` is unset. For shared rate limiting, point `rate_limit.redis.url` at it as `${REDIS_URL}` |
+| `REDIS_URL` | Your Redis connection URL | Optional. The server uses it for its shared cache store when the `redis` and `cache_store` keys in `10xgraph.json` are unset. Without any of them the cache store is in-memory and per process |
 | `WEB_CONCURRENCY` | Workers per container | Default 2. Tune for your CPU and load |
 
 For durable persistence and distributed deployments, also configure:

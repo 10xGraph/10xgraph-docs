@@ -195,6 +195,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 ```
 
+### Check that the checkpointer is reachable
+
+Every checkpointer has `await checkpointer.aping()`. It returns when the backends answer and raises when they do not. For `PgCheckpointer` it runs `SELECT 1`, checks that the schema version is not older than the code expects, and pings Redis. It never creates the schema, so call `asetup()` first. The API server calls it at startup and on `/health/ready`. A custom `BaseCheckpointer` must implement it (abstract since 1.0.0rc4); see [Checkpointers](/docs/reference/python/checkpointers#aping).
+
 ### Multi-user isolation
 
 By default, `PgCheckpointer` treats `user_id` as an **ownership boundary**. Threads, state, messages, and the [tool ledger](/docs/concepts/replay-safe-tools) are scoped to the authenticated user, so even if an attacker knows another user's `thread_id`, they cannot read, write, or delete it. This is critical in multi-tenant deployments.

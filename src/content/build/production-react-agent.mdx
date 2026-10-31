@@ -17,7 +17,7 @@ faq:
   - q: Can I use OpenAI or Claude instead of Gemini?
     a: Yes. Change the model and provider arguments of ReactAgent, for example provider="openai" or provider="anthropic", and install the matching extra (openai or anthropic) instead of google-genai. The tools, graph and server stay the same.
   - q: Do I need Redis running for local development?
-    a: REDIS_URL must be set, because graph/agent.py reads it, but the server starts without a reachable Redis. The rate limiter fails open by default, which means it logs the error and lets requests through, and without DATABASE_URL the in-memory checkpointer is used.
+    a: REDIS_URL must be set, because graph/agent.py reads it. The production template also turns on token_revocation, which keeps its entries in the Redis cache store, so with an unreachable Redis the server refuses to boot (set STARTUP_CHECKS=false to skip the check, or remove token_revocation while you develop). Without a reachable Redis and without that setting the server logs one warning and starts. Without DATABASE_URL the in-memory checkpointer is used.
   - q: Why do the tools raise exceptions instead of returning an error message?
     a: A raised exception stops the tool and marks the result as failed. The model gets a generic failure with a reference id, and the full message goes to the server log, so internal details never reach the model or the customer. A returned dictionary treats the keys error, status, is_error and success as result metadata and removes them, so an error returned that way never reaches the model either. To give the model a message it can pass on, return it as a plain string.
 ---
@@ -32,7 +32,7 @@ flowchart LR
     A --> M[MAIN: the model]
     M -->|tool call| T[TOOL: lookup_order, refund_order]
     T --> M
-    A <--> R[(Redis: hot state, rate limits)]
+    A <--> R[(Redis: hot state, cache store)]
     A <--> P[(Postgres: every thread)]
 ```
 
@@ -47,7 +47,7 @@ pip install "10xgraph[google-genai,pg_checkpoint]" "10xgraph-api[jwt,redis]"
 10xgraph init --yes --template production --auth jwt --rate-limit redis
 ```
 
-The template writes a working agent with JWT auth, thread ownership checks and a Redis rate limit already set in `10xgraph.json`:
+The template writes a working agent with JWT auth, thread ownership checks and a Redis cache store (`"redis": "${REDIS_URL}"`) and a rate limit already set in `10xgraph.json`:
 
 <FileTree>
 
@@ -195,7 +195,8 @@ load_dotenv()
 # 10xgraph.json points "injectq" here. Anything bound in it is shared with the server.
 container = InjectQ.get_instance()
 
-# One Redis client for the rate limiter and the checkpointer's hot cache.
+# One Redis client for the checkpointer's hot cache. The API opens its own
+# connection for its cache store from "redis" in 10xgraph.json.
 redis = Redis.from_url(os.environ["REDIS_URL"])
 container.bind_instance("redis", redis)
 
@@ -234,7 +235,7 @@ async def build_app() -> CompiledGraph:
 `ReactAgent` builds the loop for you: a `MAIN` node that calls the model and a `TOOL` node that runs the tools it asks for, until the model answers without a tool call. The rest is production plumbing:
 
 - **`build_app` is async on purpose.** `PgCheckpointer` creates its tables only when `asetup()` is called. The server accepts an async factory as the agent entry point and awaits it at startup, so setup runs on the server's own event loop.
-- **One Redis client, shared.** The rate limiter looks for a client bound as `"redis"` before creating its own, and `PgCheckpointer` takes the same client for its cache.
+- **Two Redis uses, one server.** `PgCheckpointer` takes the Redis client you pass for its hot cache. The API opens its own connection for its cache store (rate limits, run locks, caps, token revocation) from `"redis": "${REDIS_URL}"` in `10xgraph.json`.
 - **Replays skip finished tools.** With `PgCheckpointer`, a tool call that completed before a crash is recorded, and the resumed run returns the recorded result instead of calling it again. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
 - **Context stays bounded.** The context manager keeps the last 20 user messages in the prompt; the full history stays in the checkpointer.
 
@@ -245,7 +246,6 @@ Point the server at the factory and rate-limit per user instead of per IP. In `1
   "agent": "graph.agent:build_app", // [!code highlight]
   "rate_limit": {
     "enabled": true,
-    "backend": "redis",
     "requests": 100,
     "window": 60,
     "by": "user" // [!code highlight]

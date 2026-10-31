@@ -61,7 +61,7 @@ Scaffold a new agent project.
 | `--name` | inferred | Agent name, required only when it cannot be inferred |
 | `--template` | `quick-start` | `quick-start` or `production` |
 | `--auth` | prompt | Production only: `none`, `jwt` or `custom` |
-| `--rate-limit` | prompt | Production only: `none`, `memory` or `redis` |
+| `--rate-limit` | prompt | Production only: `none`, `memory` or `redis`. `redis` turns rate limiting on with a Redis cache store (`"redis": "${REDIS_URL}"`); `memory` turns it on without Redis |
 | `--yes`, `-y` | off | Accept recommended defaults |
 | `--non-interactive` | off | Fail instead of prompting |
 | `--dry-run` | off | Preview without writing files |
@@ -184,7 +184,7 @@ Read-only environment check: Python version, installed packages, core evaluation
 
 ## revoke
 
-Revoke one token or all of a user's tokens. It writes to the same Redis the server reads, so the revocation reaches every worker at once and the server needs no restart. It needs `"token_revocation": "redis"` in `10xgraph.json`.
+Revoke one token or all of a user's tokens. It builds the configured cache store the same way the server does (`cache_store`, else `redis`, else `REDIS_URL`) and writes to it, so with a shared store the revocation reaches every worker at once and the server needs no restart. Turn the check on with `"token_revocation": true` in `10xgraph.json`. The command refuses with an error when the cache store is `InMemoryCacheStore`, because a separate process cannot reach another process's memory.
 
 ```bash
 10xgraph revoke (--user USER_ID | --jti JTI) [--before EPOCH] [--expires-at EPOCH] [--redis-url URL] [--config FILE]
@@ -196,10 +196,10 @@ Revoke one token or all of a user's tokens. It writes to the same Redis the serv
 | `--jti` | unset | Revoke the one token with this `jti` claim |
 | `--before` | unset | With `--user`: revoke tokens issued at or before this epoch time |
 | `--expires-at` | unset | With `--jti`: the token's `exp` (epoch seconds), to drop the entry |
-| `--redis-url` | `REDIS_URL`, then the `redis` key in `10xgraph.json` | Redis to write to |
+| `--redis-url` | unset | Redis URL to write to, in place of the configured cache store |
 | `--config`, `-c` | `10xgraph.json` | Config file |
 
-Pass exactly one of `--user` and `--jti`. Without a Redis URL from any of the three sources, the command fails.
+Pass exactly one of `--user` and `--jti`. With no shared cache store configured (no `cache_store`, `redis` or `REDIS_URL`) and no `--redis-url`, the command fails.
 
 ## config
 

@@ -4,19 +4,19 @@ description: How to enable and configure the built-in sliding-window rate limite
 section: "API server"
 group: "Security"
 order: 70
-updated: "2026-10-27"
+updated: "2026-10-31"
 faq:
   - question: Do I need rate limiting in development?
     answer: "In development, you can run without limits. In any production environment, rate limiting protects your infrastructure from both accidental overuse and abuse."
   - question: How much does Redis add to the setup?
-    answer: "The limiter reuses a Redis client already bound in the InjectQ container (under `redis`, `redis_client` or `Redis`). Otherwise it needs `rate_limit.redis.url` and opens its own connection."
-  - question: What happens if Redis is unreachable?
-    answer: "With `fail_open: true` (the default), requests pass through; with `fail_open: false`, requests are denied. Choose based on whether uptime matters more than protection."
+    answer: "Set `redis` in `10xgraph.json` or `REDIS_URL` in the environment. The rate limiter then shares the API's cache store with the run locks and caps. There is no separate rate-limit Redis setting."
+  - question: What happens if the cache store is unreachable?
+    answer: "With `fail_open: true` (the default), requests pass through; with `fail_open: false`, requests are denied with 503 `RATE_LIMIT_UNAVAILABLE`. Choose based on whether uptime matters more than protection."
 ---
 
 Rate limiting protects your API from overuse and abuse by enforcing a ceiling on how many requests a client can make within a time window. Without it, a single user or malicious actor can consume all your infrastructure resources and degrade service for everyone. The 10xGraph API server includes a built-in sliding-window rate limiter that you enable with a few lines of configuration.
 
-By default, the 10xGraph API accepts unlimited requests. This guide shows how to enable the rate limiter, choose a backend suitable for your deployment, and handle edge cases like proxy headers and WebSocket connections.
+By default, the 10xGraph API accepts unlimited requests. This guide shows how to enable the rate limiter, choose where the counters live, and handle edge cases like proxy headers and WebSocket connections.
 
 Rate limits and run caps are part of how the server scales safely; see [scaling and reliability](/docs/production/scaling) and the [security model](/docs/production/security-model).
 
@@ -26,11 +26,11 @@ The rate limiter is HTTP middleware that executes before your graph logic runs o
 
 The limiter uses a **sliding-window algorithm**, not fixed time buckets. This means the window rolls with each request: a client with a limit of 100 requests per 60 seconds can send 100 requests in the first 30 seconds, then nothing until 60 seconds have passed, then 100 more. This prevents bursts that would succeed with a simple bucket-based counter.
 
-Three backends are available: **memory** for development, **Redis** for production deployments, and **custom** if you need to store counters somewhere else. Your choice depends on how many workers you run and whether you prioritize simplicity or distributed enforcement.
+The counters live in the API's **cache store**, the same one that holds the run locks and caps. There is no separate rate-limit backend. With a Redis URL set (`redis` in `10xgraph.json` or `REDIS_URL`) every worker shares the counters; without one they live in each process. To keep counters somewhere else, supply your own cache store (see [Bring your own backend](/docs/server/bring-your-own-backend)).
 
-## Method 1: In-memory backend (development / single process)
+## Single process (development)
 
-The simplest setup stores counters in the process memory. It works with a single Uvicorn worker and requires no extra dependencies.
+With no Redis URL the counters live in process memory. It works with a single Uvicorn worker and needs no extra dependencies.
 
 **Update `10xgraph.json`:**
 
@@ -39,7 +39,6 @@ The simplest setup stores counters in the process memory. It works with a single
   "agent": "graph.react:app",
   "rate_limit": {
     "enabled": true,
-    "backend": "memory",
     "requests": 100,
     "window": 60,
     "by": "ip",
@@ -73,19 +72,15 @@ curl -i http://localhost:8000/v1/graph/invoke \
 # Returns: 429 Too Many Requests
 ```
 
-<aside class="callout callout-warning" role="note"><p class="callout-title">The memory backend logs a warning, and it means it</p>
+<aside class="callout callout-warning" role="note"><p class="callout-title">In-memory counters are per process</p>
 
-Selecting `"backend": "memory"` logs this at startup:
-
-> Rate limiting uses the in-memory backend. It counts per process, so with N workers the real limit is requests x N and it resets on every worker restart.
-
-Counters live in process memory. Run four workers and the real limit is `400` per window, not `100`, and a rolling restart resets everything. Use Redis for anything with more than one worker.
+With the in-memory cache store the counters live in process memory. Run four workers and the real limit is `400` per window, not `100`, and a rolling restart resets everything. Use a Redis cache store for anything with more than one worker.
 
 </aside>
 
-## Method 2: Redis backend (production / multi-process)
+## Several workers or servers (production)
 
-When you run multiple Uvicorn workers, containers, or servers, each process would have its own in-memory counter. Use Redis to store counters centrally so the limit is enforced across the whole deployment.
+When you run multiple Uvicorn workers, containers, or servers, each process would have its own counter. Point the API at Redis so the limit is enforced across the whole deployment. The same Redis also shares the run locks, caps, idempotency state and token revocation.
 
 ### Install the Redis extra
 
@@ -98,18 +93,14 @@ pip install "10xgraph-api[redis]"
 ```json
 {
   "agent": "graph.react:app",
+  "redis": "${REDIS_URL}",
   "rate_limit": {
     "enabled": true,
-    "backend": "redis",
     "requests": 1000,
     "window": 60,
     "by": "ip",
     "trusted_proxy_headers": true,
     "exclude_paths": ["/ping", "/metrics", "/docs", "/redocs", "/openapi.json"],
-    "redis": {
-      "url": "${RATE_LIMIT_REDIS_URL}",
-      "prefix": "10xgraph:rate-limit"
-    },
     "fail_open": true
   }
 }
@@ -119,12 +110,14 @@ pip install "10xgraph-api[redis]"
 
 ```bash
 # .env
-RATE_LIMIT_REDIS_URL=redis://localhost:6379/0
+REDIS_URL=redis://localhost:6379/0
 ```
 
-The `${RATE_LIMIT_REDIS_URL}` placeholder is expanded from the environment at startup. Never commit Redis credentials into `10xgraph.json`.
+The `${REDIS_URL}` placeholder is expanded from the environment at startup. Never commit Redis credentials into `10xgraph.json`. You can also drop the `redis` key: the server reads `REDIS_URL` on its own. Valkey, Dragonfly and KeyDB work the same way, through the URL.
 
-**How it works:** The Redis backend uses a Lua script with sorted sets to atomically check and record a request in one operation. This prevents concurrent requests from slipping past the configured limit. Each request adds a timestamp to a sorted set; older entries are automatically cleaned up by the script, and Redis evicts idle keys using TTL.
+**How it works:** The Redis cache store uses a Lua script with sorted sets to atomically check and record a request in one operation. This prevents concurrent requests from slipping past the configured limit. Each request adds a slot that expires when the window ends; Redis evicts idle keys using TTL.
+
+The rate-limit counters use their own Redis key namespace (`10xgraph:ratelimit2`). When you upgrade from an earlier release the counters reset once.
 
 **Verify it works:** Set up Redis, update your config, restart the server, and load-test from multiple processes:
 
@@ -142,72 +135,29 @@ ab -n 2000 -c 50 http://localhost:8000/v1/graph/invoke
 
 <aside class="callout callout-tip" role="note"><p class="callout-title">Atomic enforcement</p>
 
-The Redis backend uses a Lua script with sorted sets. The check and the recording happen as one atomic Redis operation, which prevents concurrent requests from slipping past the configured limit. Even with thousands of concurrent clients, no request will leak through.
+The check and the recording happen as one atomic Redis operation, which prevents concurrent requests from slipping past the configured limit. A denied request adds nothing to the counter. Even with thousands of concurrent clients, no request will leak through.
 
 </aside>
 
-## Method 3: Custom backend
+## Another store
 
-Implement `BaseRateLimitBackend` when you want to store counters somewhere else: a SQL database, a distributed cache, or an external rate-limit service.
-
-```python
-# graph/rate_limit.py
-from tenxgraph_api.src.app.core.middleware.rate_limit import (
-    BaseRateLimitBackend,
-    RateLimitDecision,
-)
-
-class MyRateLimitBackend(BaseRateLimitBackend):
-    async def check(self, key: str, *, limit: int, window: int) -> RateLimitDecision:
-        # Replace with your real logic
-        # key: the client identifier (IP, user, or "global")
-        # limit: the configured request limit
-        # window: the time window in seconds
-        allowed = True
-        remaining = limit - 1
-        reset_after = window
-        return RateLimitDecision(
-            allowed=allowed,
-            remaining=remaining,
-            reset_after=reset_after,
-        )
-
-    async def close(self) -> None:
-        # Release any resources (connections, file handles)
-        return None
-```
-
-Register it in your InjectQ container and set `backend` to `"custom"`:
-
-```python
-# graph/__init__.py
-from injectq import InjectQ
-from tenxgraph_api.src.app.core.middleware.rate_limit import BaseRateLimitBackend
-
-from graph.rate_limit import MyRateLimitBackend
-
-container = InjectQ()
-container.bind_instance(BaseRateLimitBackend, MyRateLimitBackend())
-```
-
-When your backend cannot reach its store and the request must not pass, return `RateLimitDecision.backend_unavailable()` instead of a plain denial. The middleware then answers `503` with `RATE_LIMIT_UNAVAILABLE` (see [What clients see when the backend is down](#what-clients-see-when-the-backend-is-down)). It takes an optional `retry_after` in seconds (default 5). Backends that return only allow or deny keep working unchanged. Added after 1.0.0rc2.
-
-Bind the instance under `BaseRateLimitBackend`: that is the key the server looks up. If `backend` is `"custom"` and nothing is bound there, startup fails.
-
-Then in `10xgraph.json`:
+The `rate_limit.backend` and `rate_limit.redis` keys and the `BaseRateLimitBackend` class were removed in 1.0.0rc4; a config that still sets them stops with an error that names `cache_store`. To keep the counters in something other than Redis, implement `BaseCacheStore` and select it with `"cache_store": "module:attr"`:
 
 ```json
 {
-  "injectq": "graph:container",
+  "cache_store": "graph.cache:store",
   "rate_limit": {
     "enabled": true,
-    "backend": "custom",
     "requests": 200,
     "window": 60,
     "by": "ip"
   }
 }
 ```
+
+The rate limiter uses the store's timed slots: each request takes a slot that is never released and expires after the window. See [Bring your own backend](/docs/server/bring-your-own-backend) for the contract and the test suite.
+
+When the store raises an error, the limiter follows `fail_open` (see [What clients see when the cache store is down](#what-clients-see-when-the-cache-store-is-down)).
 
 ## Identity modes
 
@@ -245,7 +195,7 @@ Enforces a single limit for the entire service. Use this when you want to contro
 
 ## WebSocket handshakes count too
 
-Rate limiting is HTTP middleware, and Starlette runs middleware only for HTTP scopes. WebSocket handshakes would otherwise bypass the limiter entirely. The API server therefore re-applies the rate-limit check at WebSocket handshake time, against the **same backend and the same bucket** as REST requests.
+Rate limiting is HTTP middleware, and Starlette runs middleware only for HTTP scopes. WebSocket handshakes would otherwise bypass the limiter entirely. The API server therefore re-applies the rate-limit check at WebSocket handshake time, against the **same cache store and the same bucket** as REST requests.
 
 Opening a socket costs one request from the client's quota. When the quota is exhausted the handshake is refused before `accept()` with WebSocket close code `1013` (Try Again Later), not with an HTTP `429`.
 
@@ -262,7 +212,6 @@ If your API runs behind nginx, a load balancer, or a cloud gateway, the real cli
 ```json
 {
   "rate_limit": {
-    "backend": "redis",
     "requests": 1000,
     "window": 60,
     "by": "ip",
@@ -349,9 +298,9 @@ Every response also includes these headers so clients can track their quota:
 | `X-RateLimit-Reset-After` | Seconds until the window resets |
 | `Retry-After` | Seconds to wait before retrying (only on `429` and `503`) |
 
-### What clients see when the backend is down
+### What clients see when the cache store is down
 
-With the Redis backend and `fail_open: false`, a Redis outage denies requests with `503 Service Unavailable`, not 429, so clients can tell an outage from a limit hit. The response carries `Retry-After: 5`:
+With `fail_open: false`, a cache store outage (for example Redis) denies requests with `503 Service Unavailable`, not 429, so clients can tell an outage from a limit hit. The response carries `Retry-After: 5`:
 
 ```json
 {
@@ -367,7 +316,7 @@ With the Redis backend and `fail_open: false`, a Redis outage denies requests wi
 }
 ```
 
-A real limit hit stays `429 RATE_LIMIT_EXCEEDED`. With `fail_open: true` requests pass during the outage. The Redis backend logs a traceback for the first error of an outage and one line for each error after it. Clients that retried on 429 should retry on 503 too. Added after 1.0.0rc2.
+A real limit hit stays `429 RATE_LIMIT_EXCEEDED`. With `fail_open: true` requests pass during the outage. The limiter logs a traceback for the first error of an outage and one line for each error after it. Clients that retried on 429 should retry on 503 too. Added in 1.0.0rc3.
 
 Clients can check `X-RateLimit-Remaining` before sending the next request to avoid hitting the limit, and use `Retry-After` to back off intelligently.
 
@@ -375,11 +324,11 @@ Clients can check `X-RateLimit-Remaining` before sending the next request to avo
 
 **I still get unlimited requests even though I configured a limit.**
 
-Verify that `10xgraph.json` has a `rate_limit` block with `"enabled"` not set to `false` and that you restarted the server after editing the file. Check the startup logs for rate-limit configuration messages. If the backend is Redis, ensure the connection is working: a backend error with `fail_open: true` allows all requests.
+Verify that `10xgraph.json` has a `rate_limit` block with `"enabled"` not set to `false` and that you restarted the server after editing the file. Check the startup logs for rate-limit configuration messages. If you use Redis, ensure the connection is working: a cache store error with `fail_open: true` allows all requests.
 
 **Different workers seem to have different limits.**
 
-You are using the memory backend with multiple workers. Each process maintains its own counters, so the real limit is `requests × workers`. Switch to Redis backend for consistent enforcement across workers.
+You are using the in-memory cache store with multiple workers. Each process maintains its own counters, so the real limit is `requests × workers`. Set `redis` or `REDIS_URL` for consistent enforcement across workers.
 
 **The proxy's real IP is not being recognized.**
 
@@ -391,7 +340,7 @@ They should appear on every response, including successful ones. If missing, che
 
 ## See also
 
-- [Rate Limiting reference](/docs/reference/api-cli/rate-limiting) for the full field reference and backend comparison table
+- [Rate Limiting reference](/docs/reference/api-cli/rate-limiting) for the full field reference
 - [10xgraph.json configuration](/docs/reference/api-cli/configuration) for all configuration keys
-- [Environment variables](/docs/reference/api-cli/environment) for how to set Redis URLs and other settings
+- [Environment variables](/docs/reference/api-cli/environment) for how to set `REDIS_URL` and other settings
 - [Authentication](/docs/server/auth) for how to enable user-based rate limiting

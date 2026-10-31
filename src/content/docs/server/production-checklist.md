@@ -13,7 +13,7 @@ faq:
   - question: "Can I use in-memory checkpointing in production?"
     answer: "No. InMemoryCheckpointer loses all state on restart and cannot be shared across instances. Use PgCheckpointer for all production deployments."
   - question: "Do I have to use Redis?"
-    answer: "PgCheckpointer requires a Redis connection (redis_url, a redis_pool or a redis instance) in addition to Postgres; Redis is its cache and Postgres is the durable store. Redis is also what the Redis rate-limit backend uses."
+    answer: "PgCheckpointer requires a Redis connection (redis_url, a redis_pool or a redis instance) in addition to Postgres; Redis is its cache and Postgres is the durable store. The API itself uses Redis as its cache store (run locks and caps, idempotency, ownership cache, token revocation, rate-limit counters) when you set `redis` or `REDIS_URL`; without it those live in each process."
 ---
 
 Deploying 10xGraph to production requires hardening your API server for security, reliability, and scale. This checklist walks through every critical setting, from runtime mode to persistence topology to horizontal scaling, with verification steps to confirm each piece is working before traffic arrives.
@@ -30,7 +30,7 @@ With `MODE=production`, the server does these for you. You do not configure them
 - Scopes graph introspection (`GET /v1/graph`, `/v1/graph/tools`, `/v1/graph:StateSchema`) to callers with the `graph:read` scope, unless you set `graph_introspection` to `"open"`.
 - Defaults authorization to ownership, so each user reaches only their own threads.
 - Turns debug mode off.
-- Pings every configured backend at boot and refuses to start while one is unreachable (see [Startup check](#startup-check)). Added after 1.0.0rc2.
+- Pings every configured backend at boot and refuses to start while one is unreachable (see [Startup check](#startup-check)). Added in 1.0.0rc3.
 - Ships a hardened image when you use `10xgraph build`: non-root user, Gunicorn with `TenxGraphUvicornWorker` and long graceful timeouts, health check on `/ping`. On SIGTERM `/health/ready` answers 503 while open runs finish.
 
 For why these matter, see the [security model](/docs/production/security-model) and [scaling and reliability](/docs/production/scaling).
@@ -191,17 +191,19 @@ Expected tables in the `public` schema (or the `schema=` you pass): `threads`, `
 
 ### Startup check
 
-At boot the server pings every backend it is configured to use, in development and production: the checkpointer's Postgres (a query and the schema version) and its Redis cache, the API's Redis (run limits, ownership cache, token revocation), the rate limiter's Redis when it has its own URL, and the memory store through `aping()`. It retries with a short backoff for `STARTUP_CHECK_TIMEOUT_SECONDS` (30 by default), so containers started together can come up in any order. If a backend is still down, the server exits with a message naming each backend and its `host:port` (no credentials). A broken connection string therefore fails the deploy instead of the first request, and the orchestrator restarts the container until the backends are up.
+At boot the server calls `aping()` on the checkpointer (Postgres, the schema version and its Redis cache), on the store when one is bound, and on the API's cache store. It retries with a short backoff for `STARTUP_CHECK_TIMEOUT_SECONDS` (30 by default), so containers started together can come up in any order. The checkpointer and the store are fatal: if one is still down, the server exits with a message naming each backend and its endpoint (no credentials). The cache store is fatal only when a fail-closed feature uses it: `token_revocation` is on, or `rate_limit` is on with `fail_open` set to `false`. Otherwise the server logs one WARNING that the cache store is unreachable and that locks and caps fall back to per process, and starts anyway. A broken connection string therefore fails the deploy instead of the first request, and the orchestrator restarts the container until the backends are up.
 
-`STARTUP_CHECKS=false` skips the check. It runs the same probes as `/health/ready`, with a different outcome: at startup an unreachable backend stops the server, while at runtime `/health/ready` answers 503 so the load balancer stops sending traffic until the backend returns. See [Ping and health](/docs/reference/rest-api/ping#get-healthready).
+A leftover `REDIS_URL` no longer blocks boot when nothing you configured needs it. Before 1.0.0rc4 it did.
 
-Added after 1.0.0rc2.
+`STARTUP_CHECKS=false` skips the check. It runs the same probes as `/health/ready`, with a different outcome: at startup an unreachable checkpointer or store stops the server, while at runtime `/health/ready` answers 503 so the load balancer stops sending traffic until the backend returns. See [Ping and health](/docs/reference/rest-api/ping#get-healthready).
+
+Added in 1.0.0rc3.
 
 ### Redis caching
 
 Redis acts as a hot cache in front of Postgres. `PgCheckpointer` requires a Redis connection, but the durable data lives in Postgres. After a Redis connection failure, `PgCheckpointer` skips Redis for a short cool-down (`redis_breaker_cooldown`, 5 seconds by default, `0` disables it) and uses Postgres at once, so a Redis outage does not slow every run step.
 
-If several deployments share one Redis, set `REDIS_KEY_PREFIX` for the API (run locks, caps, ownership cache, token revocation) and `redis_key_prefix` on `PgCheckpointer` to the same value. They are two separate settings, and each prefixes only its own keys.
+If several deployments share one Redis, set `REDIS_KEY_PREFIX` for the API (run locks and caps, idempotency, ownership cache, token revocation, rate limiting) and `redis_key_prefix` on `PgCheckpointer` to the same value. They are two separate settings, and each prefixes only its own keys.
 
 ```bash
 REDIS_URL=redis://redis.internal:6379/0
@@ -216,11 +218,11 @@ redis-cli -u redis://redis.internal:6379/0 ping
 
 ### One run per thread
 
-The server runs one graph run at a time on a thread. With Redis configured, the lock is shared across all instances, so two replicas cannot run the same thread at once. Without Redis, the lock is per process and does not stop two replicas from running one thread together. A second run waits up to 30 seconds, then gets `409` (`thread is busy`). The lock expires on its own if a worker dies. If Redis is unreachable, runs proceed without the lock and the error is logged. See [Invoke and stream](/docs/server/invoke-and-stream#one-run-per-thread).
+The server runs one graph run at a time on a thread. With a shared cache store configured (Redis), the lock is shared across all instances, so two replicas cannot run the same thread at once. Without one, the lock is per process and does not stop two replicas from running one thread together. A second run waits up to 30 seconds, then gets `409` (`thread is busy`). The lock expires on its own if a worker dies. If the cache store is unreachable, runs proceed without the lock and the error is logged. See [Invoke and stream](/docs/server/invoke-and-stream#one-run-per-thread).
 
 ### Warnings you may see
 
-The server logs a WARNING at startup in production, or when `WEB_CONCURRENCY` is above 1, if the checkpointer is `InMemoryCheckpointer` or `SqliteCheckpointer` (threads live in one process) or if no Redis is configured (run locks, caps and in-memory rate limits count per process). `compile()` logs a WARNING when you give it no checkpointer and it falls back to in-memory, and a graph logs one WARNING per graph on its first run with no `user_id`. These are your call; use `PgCheckpointer` with Redis for more than one process.
+The server logs a WARNING at startup in production, or when `WEB_CONCURRENCY` is above 1, if the checkpointer is `InMemoryCheckpointer` or `SqliteCheckpointer` (threads live in one process) or if the cache store is in-memory (run locks, caps and rate limits count per process, and token revocations only reach the process that received them). `compile()` logs a WARNING when you give it no checkpointer and it falls back to in-memory, and a graph logs one WARNING per graph on its first run with no `user_id`. These are your call; use `PgCheckpointer` with Redis for more than one process.
 
 ### Topology diagram
 
@@ -304,16 +306,13 @@ Enable rate limiting to protect against abuse and unintended traffic spikes:
     "enabled": true,
     "requests": 100,
     "window": 60,
-    "by": "ip",
-    "backend": "redis",
-    "redis": {
-      "url": "redis://redis.internal:6379/1"
-    }
-  }
+    "by": "ip"
+  },
+  "redis": "${REDIS_URL}"
 }
 ```
 
-This allows 100 requests per IP address per 60-second window. Use a separate Redis database (`/1`) to isolate rate limit data from the checkpointer cache.
+This allows 100 requests per IP address per 60-second window. The counters live in the API's cache store, so set `redis` (or `REDIS_URL`) to share them across replicas. They use their own key namespace, separate from the checkpointer cache.
 
 `/ping` is always excluded from rate limiting. Add other paths with `exclude_paths`:
 
@@ -339,7 +338,7 @@ done
 # After threshold, requests should return 429 Too Many Requests
 ```
 
-With `fail_open` set to `false` and the Redis backend unreachable, the API answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead of 429. See [Rate limiting](/docs/server/rate-limiting). Added after 1.0.0rc2.
+With `fail_open` set to `false` and the cache store unreachable, the API answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead of 429. See [Rate limiting](/docs/server/rate-limiting). Added in 1.0.0rc3.
 
 ## 8. Proxy buffering and request handling
 
@@ -511,8 +510,8 @@ curl http://127.0.0.1:8000/ping
 | One worker sees state, another does not | Workers are not sharing the same backend | Point all instances at the same Postgres and Redis |
 | CORS requests are blocked | `ORIGINS` does not include the client domain | Add the domain to `ORIGINS`. A public API can set `ORIGINS=*` with `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false` |
 | `409 thread is busy` on a thread | Another run is still active, and the 30 s wait ran out | Wait for the run to end, use `on_busy: "cancel"`, or use one thread per conversation |
-| Server exits at boot with `Refusing to start: ... backend(s) unreachable` | A configured Postgres, Redis or store did not answer within `STARTUP_CHECK_TIMEOUT_SECONDS` | Fix the URL or start the backend. `STARTUP_CHECKS=false` skips the check |
-| Rate limiting not working | No `rate_limit` block, or Redis is down (with `fail_open` true, requests pass) | Verify `rate_limit.redis.url` and Redis connectivity |
+| Server exits at boot with `Refusing to start: ... backend(s) unreachable` | A configured Postgres, store, or (with `token_revocation` or a fail-closed `rate_limit`) cache store did not answer within `STARTUP_CHECK_TIMEOUT_SECONDS` | Fix the URL or start the backend. `STARTUP_CHECKS=false` skips the check |
+| Rate limiting not working | No `rate_limit` block, or Redis is down (with `fail_open` true, requests pass) | Verify the `redis` key or `REDIS_URL` and Redis connectivity |
 
 ## Related pages
 

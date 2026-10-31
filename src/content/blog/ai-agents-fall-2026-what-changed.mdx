@@ -651,9 +651,9 @@ If EU users talk to your support agent, the disclosure is a product requirement 
   "env": ".env",
   "auth": "jwt",
   "authorization": "ownership",
+  "redis": "${REDIS_URL}",
   "rate_limit": {
     "enabled": true,
-    "backend": "redis",
     "requests": 100,
     "window": 60,
     "by": "user"

@@ -42,7 +42,7 @@ If the browser tab does not open automatically, copy the playground URL from the
 
 ## Allow the playground to reach your local server
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 The playground is a public HTTPS page and your server runs on your own machine. Chrome's Local Network Access feature therefore asks you for permission the first time the page calls `localhost`, and the playground makes one early request to your server so the prompt appears on the Connect page. Click Allow.
 

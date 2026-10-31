@@ -405,9 +405,10 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
   },
   "authorization": "ownership",
   "injectq": "graph.agent:container",
+  "redis": "${REDIS_URL}",
+  "token_revocation": true,
   "rate_limit": {
     "enabled": true,
-    "backend": "redis",
     "requests": 100,
     "window": 60,
     "by": "ip",
@@ -426,7 +427,9 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
 | `thread_name_generator` | Always | `null` for quick-start, `graph.thread_name_generator:MyNameGenerator` for production |
 | `authorization` | Production with jwt or custom | `"ownership"`: a thread is accessible only to its owner. Other values are `"allow_all"` or a `module:attribute` backend. |
 | `injectq` | Production | `graph.agent:container` (see the warning below) |
-| `rate_limit` | Production with a rate-limit backend | `enabled`, `backend`, `requests`, `window`, `by`, `trusted_proxy_headers`, `exclude_paths` |
+| `redis` | Production | `${REDIS_URL}`: the Redis cache store the API shares between workers |
+| `token_revocation` | Production | `true` |
+| `rate_limit` | Production with rate limiting | `enabled`, `requests`, `window`, `by`, `trusted_proxy_headers`, `exclude_paths` |
 
 Defaults come from the prompts or flags: 100 requests per 60 seconds, counted `ip` (interactive mode also offers `global`), with `trusted_proxy_headers` true only if you say you are behind a reverse proxy. Keys such as `test`, `evaluation`, `remote_tools` and `store` are not written for production, though you can add them yourself. There is no `checkpointer` key to set: the server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The quick-start template adds none of these either. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
 

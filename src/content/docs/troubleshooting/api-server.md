@@ -49,20 +49,21 @@ flowchart TD
 
 ### Issue: backend unreachable at startup
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 **Symptoms**
 
 - the server exits at boot after about 30 seconds (`STARTUP_CHECK_TIMEOUT_SECONDS`) with a message like:
 
 ```text
-Refusing to start: 1 configured backend(s) unreachable after 30s:
-  - redis (127.0.0.1:6399): ConnectionError: Connection refused
-Start Redis/Postgres/Qdrant, or set STARTUP_CHECKS=false to skip this check.
+Refusing to start: 1 backend(s) unreachable after 30s:
+  - cache (RedisCacheStore, from REDIS_URL, 127.0.0.1:6399, required by token_revocation): ConnectionError: Connection refused
+Start the backend, fix its URL, or set STARTUP_CHECKS=false to skip this check.
 ```
 
-- the checkpointer line can name two hosts, for example `checkpointer (postgres db:5432, redis cache:6379)`
+- each line names the component (`checkpointer`, `store` or `cache`) and its class, for example `checkpointer (PgCheckpointer)`. The cache line also names where the setting came from (`from REDIS_URL`, `from redis in 10xgraph.json` or `from cache_store ...`) and the feature that needs it (`required by token_revocation` or `required by rate_limit.fail_open=false`)
 - earlier log lines say `Startup check: ... is unreachable (attempt N)` while it retries
+- only the checkpointer, the store and (when `token_revocation` is on, or `rate_limit` is on with `fail_open` set to `false`) the cache store stop the boot. With any other setup an unreachable cache store logs one WARNING and the server starts, with locks and caps per process. A leftover `REDIS_URL` therefore no longer blocks a server that does not need it (changed in 1.0.0rc4)
 
 **Likely causes**
 
@@ -76,7 +77,7 @@ Start Redis/Postgres/Qdrant, or set STARTUP_CHECKS=false to skip this check.
 - raise `STARTUP_CHECK_TIMEOUT_SECONDS` if the backends are slow to come up
 - `STARTUP_CHECKS=false` skips the check; use it only when you accept that a down backend shows up at the first request instead
 - with `10xgraph dev` (reload on), the reloader keeps waiting for a file change after the failure; fix the cause and save a file, or restart the command
-- in production the orchestrator restarts the container until the backends are up. The same checks run behind `/health/ready`, which answers 503 at runtime while a backend is down
+- in production the orchestrator restarts the container until the backends are up. The same checks run behind `/health/ready`, which answers 503 at runtime while the checkpointer or store is down (and the cache store, when a fail-closed feature uses it)
 
 ### Issue: `RuntimeError: Refusing to start: the following routes are not protected`
 
@@ -325,7 +326,7 @@ Two different limits answer 429:
 
 ### Issue: `503 RATE_LIMIT_UNAVAILABLE`
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 **Symptoms**
 
@@ -333,11 +334,11 @@ Added after 1.0.0rc2.
 
 **Cause**
 
-`rate_limit.fail_open` is `false` and the rate limiter's backend (Redis) is unreachable. This is an outage, not a limit hit; a real limit hit stays `429 RATE_LIMIT_EXCEEDED`.
+`rate_limit.fail_open` is `false` and the API's cache store (Redis by default) raised an error. This is an outage, not a limit hit; a real limit hit stays `429 RATE_LIMIT_EXCEEDED`.
 
 **Fix**
 
-- restore the Redis the rate limiter uses (`rate_limit.redis.url`) and retry after `Retry-After`
+- restore the cache store (the Redis from the `redis` key or `REDIS_URL`) and retry after `Retry-After`
 - clients that retry on 429 should retry on 503 too
 - set `fail_open` to `true` to let requests through during an outage. `/ping` and `/health/ready` are never rate limited
 

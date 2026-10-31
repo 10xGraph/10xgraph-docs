@@ -40,7 +40,7 @@ The stack runs with one `docker compose up`: the 10xGraph API server, an nginx-s
 | Retrieval | `QdrantStore`, collection `docs_kb` | Vector similarity search over doc chunks |
 | API server | 10xGraph API server (`10xgraph-api`), gunicorn with uvicorn workers | Loads `graph.agent:app`, exposes `/v1/graph/stream`, threads and `/ping` |
 | Thread storage | `PgCheckpointer`: Postgres 16 plus Redis 7 | Durable thread state (Postgres) and a fast cache (Redis) |
-| Rate limiting | Redis backend, configured in `10xgraph.json` | 60 requests per 60 seconds per IP |
+| Rate limiting | Shared through the Redis cache store (`"redis": "${REDIS_URL}"` in `10xgraph.json`) | 60 requests per 60 seconds per IP |
 | Frontend | React 19, Vite 6, `10xgraph-client`, served by nginx | Chat, thread list, source display |
 | Ingest job | `ingest.py` | Chunks `backend/data/*` and writes the chunks to Qdrant |
 
@@ -363,11 +363,6 @@ Every chunk is stored with `source` and `title` metadata, which `search_docs` la
 
 ```json
     "enabled": true,
-    "backend": "redis",
-    "redis": {
-      "url": "${REDIS_URL}",
-      "prefix": "docs-assistant:rate-limit"
-    },
     "requests": 60,
     "window": 60,
     "by": "ip",
@@ -735,13 +730,9 @@ if __name__ == "__main__":
   "ag_ui": {
     "enabled": false
   },
+  "redis": "${REDIS_URL}",
   "rate_limit": {
     "enabled": true,
-    "backend": "redis",
-    "redis": {
-      "url": "${REDIS_URL}",
-      "prefix": "docs-assistant:rate-limit"
-    },
     "requests": 60,
     "window": 60,
     "by": "ip",
@@ -1715,7 +1706,7 @@ The demo is set up for one command, not for the open internet. These are the cha
 
 - **Auth.** `10xgraph.json` ships with `"auth": null`. For production set `"auth": "jwt"`, set `JWT_SECRET_KEY` and `JWT_ALGORITHM`, and pass `authToken` to `TenxGraphClient` in `frontend/src/client.ts`. Thread ownership is then enforced per user. Use `"auth": {"method": "custom", "path": "module:Class"}` for your own identity provider.
 - **Mode and CORS.** Compose sets `MODE: development`. The image itself defaults to `MODE=production`, which refuses wildcard `ORIGINS` and `ALLOWED_HOST`. Remove the `MODE` override and set both to your real domain.
-- **Redis rate limiting.** Already enabled with the Redis backend, 60 requests per 60 seconds per IP. Switch `"by"` to `"user"` once auth is on, and set `trusted_proxy_headers` when running behind a load balancer.
+- **Redis rate limiting.** Already enabled through the Redis cache store, 60 requests per 60 seconds per IP. Switch `"by"` to `"user"` once auth is on, and set `trusted_proxy_headers` when running behind a load balancer.
 - **Postgres and Redis.** Compose runs both with a demo password (`docs`). Replace the password, point `POSTGRES_DSN` and `REDIS_URL` at managed instances if you have them, and do not publish the Postgres, Redis or Qdrant ports.
 - **Graceful shutdown.** The server drains in-flight runs on SIGTERM, then calls `aclose()` on the compiled graph. Keep your orchestrator's grace period at least 600 seconds (`stop_grace_period` here, `terminationGracePeriodSeconds` on Kubernetes).
 - **Workers.** Tune `WEB_CONCURRENCY` (default 2) to your CPU and memory.

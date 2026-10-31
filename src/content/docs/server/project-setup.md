@@ -189,9 +189,10 @@ Init builds your config from your answers, not a static template. Examples:
   "authorization": "ownership",
   "thread_name_generator": "graph.thread_name_generator:MyNameGenerator",
   "injectq": "graph.agent:container",
+  "redis": "${REDIS_URL}",
+  "token_revocation": true,
   "rate_limit": {
     "enabled": true,
-    "backend": "redis",
     "requests": 100,
     "window": 60,
     "by": "ip",

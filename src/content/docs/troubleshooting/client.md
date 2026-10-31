@@ -72,7 +72,7 @@ A `TenxGraphError` with `statusCode` 429 means the server refused the call to li
 - **Rate limit.** `errorCode` is `RATE_LIMIT_EXCEEDED` and the message ends with `Retry after <n>s.` The server also sent a `Retry-After` header, but the client does not keep response headers on the error, so read the seconds from the message.
 - **Per-user run cap.** One user has `runs.max_concurrent_per_user` runs in flight (default 10). `errorCode` is `HTTPException` and there is no `Retry-After`. Wait for a run to finish, for example close streams you no longer read.
 
-A related case is `503` with `errorCode` `RATE_LIMIT_UNAVAILABLE`: the server's rate-limit backend is unreachable and `fail_open` is `false`. It is an outage, not a limit hit; retry after about 5 seconds. Added after 1.0.0rc2.
+A related case is `503` with `errorCode` `RATE_LIMIT_UNAVAILABLE`: the server's cache store (where the rate limiter keeps its counters) raised an error and `fail_open` is `false`. It is an outage, not a limit hit; retry after about 5 seconds. Added in 1.0.0rc3.
 
 The client does not retry 429 on its own. Back off in your app (see [Error handling](/docs/client/error-handling#rate-limits-429)). If every user hits the limit at once from behind a proxy, the server is counting the proxy's IP: set `trusted_proxies` on the server ([API server troubleshooting](/docs/troubleshooting/api-server)).
 
@@ -283,7 +283,7 @@ These codes appear in error responses the client surfaces as typed errors. The f
 | `STORAGE_NOT_FOUND_000` | The thread or stored resource does not exist. | Check the `thread_id` and that a checkpointer is enabled. |
 | `STORAGE_TRANSIENT_000` | A temporary storage failure, such as an unreachable database. | Retry after a short delay. |
 | `VALIDATION_ERROR` | The request body failed validation (HTTP 422). | Check the message format and `config` shape against [Invoke and stream](/docs/client/invoke-agent). |
-| `RATE_LIMIT_UNAVAILABLE` | The rate limiter's backend is unreachable and `fail_open` is `false` (HTTP 503, `Retry-After: 5`). Added after 1.0.0rc2. | Retry after a short delay and restore the server's rate-limit Redis. See [Fix 429 responses](#fix-429-responses). |
+| `RATE_LIMIT_UNAVAILABLE` | The rate limiter's backend is unreachable and `fail_open` is `false` (HTTP 503, `Retry-After: 5`). Added in 1.0.0rc3. | Retry after a short delay and restore the server's rate-limit Redis. See [Fix 429 responses](#fix-429-responses). |
 | `RATE_LIMIT_EXCEEDED` | The server's rate limit is used up (HTTP 429). Arrives as a plain `TenxGraphError`, not a typed subclass. | Wait for the `Retry-After` interval, which the message also states, then retry. See [Fix 429 responses](#fix-429-responses). |
 
 ## Related pages

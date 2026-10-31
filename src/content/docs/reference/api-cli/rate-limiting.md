@@ -1,11 +1,11 @@
 ---
 title: Rate Limiting
 seoTitle: "rate_limit configuration reference"
-description: "Complete reference for the rate_limit block in 10xgraph.json: the backends, limits, and every option for throttling requests to the 10xGraph API server."
+description: "Complete reference for the rate_limit block in 10xgraph.json: the cache store, limits, and every option for throttling requests to the 10xGraph API server."
 section: Reference
 group: "CLI and configuration"
 order: 450
-updated: "2026-10-27"
+updated: "2026-10-31"
 ---
 
 The `rate_limit` block in `10xgraph.json` turns on a sliding-window limiter for the API server. It counts REST requests, WebSocket handshakes and WebSocket graph runs against one bucket per client. The limiter is off unless the block exists; this page lists every option, header and error.
@@ -15,7 +15,6 @@ The `rate_limit` block in `10xgraph.json` turns on a sliding-window limiter for 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | boolean | `true` | Enable the rate limiter when the `rate_limit` block exists. Set to `false` to temporarily disable without removing the block. |
-| `backend` | string | `"memory"` | Counter storage: `"memory"`, `"redis"`, or `"custom"`. |
 | `requests` | integer | `100` | Maximum requests allowed per window. Must be positive. |
 | `window` | integer | `60` | Window size in seconds. Must be positive. |
 | `by` | string | `"ip"` | Bucket key: `"ip"` (client address), `"user"` (authenticated user ID), or `"global"` (whole service). See [Bucket keys](#bucket-keys). |
@@ -23,12 +22,11 @@ The `rate_limit` block in `10xgraph.json` turns on a sliding-window limiter for 
 | `trusted_proxy_headers` | boolean | `false` | Honor the `X-Forwarded-For` header to extract the client IP. Only enable behind a proxy you control. |
 | `trusted_proxy_hops` | integer | `1` | Number of proxies (counted from the right of `X-Forwarded-For`) that your infrastructure operates. Requires `trusted_proxy_headers: true`. Must be >= 1. |
 | `trusted_proxies` | array | `[]` | IP addresses or CIDR ranges your proxies connect from. When set, `X-Forwarded-For` is honored only for requests from these networks. |
-| `redis` | object or string | `null` | Redis connection for the `"redis"` backend. Either `{"url": "...", "prefix": "..."}` or a bare URL string (uses default prefix). The URL supports `$ENV_VAR` and `${ENV_VAR}` expansion. |
-| `redis.url` | string | `null` | Redis connection URL. Required for `"redis"` backend unless a Redis client is bound in InjectQ. |
-| `redis.prefix` | string | `"10xgraph:rate-limit"` | Key prefix for all Redis entries. The default changed from `"agentflow:rate-limit"` in version 0.7.0, so counters restart once on upgrade. |
-| `fail_open` | boolean | `true` | When `true`, requests are allowed if the Redis backend is unreachable (fail-open). When `false`, requests are denied with `503` `RATE_LIMIT_UNAVAILABLE` (fail-closed). Only applies to `"redis"` backend. |
+| `fail_open` | boolean | `true` | When `true`, requests are allowed if the cache store raises an error (fail-open). When `false`, requests are denied with `503` `RATE_LIMIT_UNAVAILABLE` (fail-closed). |
 
-Config load validates all values. Invalid `by`, `backend`, non-positive `requests` or `window`, `trusted_proxy_hops` < 1, invalid networks in `trusted_proxies`, or an unresolved `$ENV_VAR` in the Redis URL raise `ValueError` and prevent the server from starting. A `rate_limit` block with `enabled: false` behaves as if the block were absent.
+The counters are kept in the API's cache store, not in this block. Set `redis` in `10xgraph.json` (or `REDIS_URL`) to share them between workers, or `cache_store` for your own store. The keys `backend` and `redis` inside `rate_limit` were removed in 1.0.0rc4: they stop the server with an error that names `cache_store`. The Redis keys moved to the `10xgraph:ratelimit2` namespace, so counters reset once at upgrade.
+
+Config load validates all values. Invalid `by`, non-positive `requests` or `window`, `trusted_proxy_hops` < 1, invalid networks in `trusted_proxies` raise `ValueError` and prevent the server from starting. A `rate_limit` block with `enabled: false` behaves as if the block were absent.
 
 ## Bucket keys
 
@@ -92,7 +90,7 @@ When a client exceeds the limit, the server responds with status `429 Too Many R
 }
 ```
 
-When the Redis backend cannot be reached and `fail_open` is `false`, the server responds with `503 Service Unavailable` and `Retry-After: 5` instead of 429. A real limit hit stays 429. Added after 1.0.0rc2.
+When the cache store raises an error and `fail_open` is `false`, the server responds with `503 Service Unavailable` and `Retry-After: 5` instead of 429. A real limit hit stays 429. Added in 1.0.0rc3.
 
 ```json
 {
@@ -110,80 +108,33 @@ When the Redis backend cannot be reached and `fail_open` is `false`, the server 
 
 ## WebSocket handshakes and graph runs
 
-WebSocket handshakes bypass HTTP middleware, so the server re-applies the same check when a client connects to `/v1/graph/ws` or `/v1/graph/live`. A handshake counts like an HTTP request against the same bucket and backend. If the bucket is full, the handshake is rejected with close code `1013` (Try Again Later) and the reason `Rate limit exceeded`.
+WebSocket handshakes bypass HTTP middleware, so the server re-applies the same check when a client connects to `/v1/graph/ws` or `/v1/graph/live`. A handshake counts like an HTTP request against the same bucket and cache store. If the bucket is full, the handshake is rejected with close code `1013` (Try Again Later) and the reason `Rate limit exceeded`.
 
 Each graph run sent over an open `/v1/graph/ws` connection also counts against the bucket. When the bucket is full, the connection stays open, the run is skipped, and the server sends an `error` stream event whose data holds `reason` (`Rate limit exceeded. Retry after <n>s.`) and `retry_after_seconds`.
 
-The separate `websocket.max_connections` and `websocket.max_connections_per_user` caps (in the `websocket` block of `10xgraph.json`) are enforced by the same handshake guard and also reject with close code `1013`. They are shared by all workers when Redis is configured and per process otherwise.
+The separate `websocket.max_connections` and `websocket.max_connections_per_user` caps (in the `websocket` block of `10xgraph.json`) are enforced by the same handshake guard and also reject with close code `1013`. They are shared by all workers when a shared cache store is configured and per process otherwise.
 
-## Backend comparison
+## Cache store
 
-| Backend | Use case |
+The limiter takes one slot per request from the API's cache store (`BaseCacheStore.acquire`); the slot is never released and expires after `window` seconds. A denied call adds nothing, so a client over its limit does not extend its own penalty.
+
+| Cache store | Use case |
 |---|---|
-| `memory` | Development, tests, single-process deployments. Counters are in-process memory and reset when the worker restarts. With N workers, the effective limit is `requests x N`. A startup warning is logged. |
-| `redis` | Production multi-worker deployments (Gunicorn/Uvicorn), Docker, Kubernetes. Counters are shared across all workers. Respects `fail_open` for backend outages. |
-| `custom` | Custom storage backends, external quota services, or non-standard enforcement logic. Implement `BaseRateLimitBackend` and bind an instance in InjectQ. Startup fails with `ValueError` if none is bound. |
+| `InMemoryCacheStore` | Development, tests, single-process deployments. Counters are in-process memory and reset when the worker restarts. With N workers, the effective limit is `requests x N`. It keeps at most 50,000 slot keys and evicts the least recently used. This is the default when no Redis URL or `cache_store` is set. |
+| `RedisCacheStore` | Production multi-worker deployments (Gunicorn/Uvicorn), Docker, Kubernetes. Counters are shared across all workers. Chosen by `redis` in `10xgraph.json` or `REDIS_URL`. Valkey, Dragonfly and KeyDB work through the same URL. |
+| Your own | A store that does not speak the Redis protocol. Implement `BaseCacheStore` and set `"cache_store": "module:attr"`. See [Bring your own backend](/docs/server/bring-your-own-backend). |
 
-## Custom backend
-
-Subclass `BaseRateLimitBackend` when neither built-in backend fits, for example to call an external quota service. Both methods are abstract. `check` must atomically record the request and return a `RateLimitDecision` with `allowed`, `remaining` and `reset_after` (seconds). `close` releases resources at shutdown. A backend that cannot reach its store and must not let the request through returns `RateLimitDecision.backend_unavailable()` (optional `retry_after` seconds, default 5); the middleware answers it with the 503 above. Added after 1.0.0rc2.
-
-```python title="my_backend.py"
-import time
-
-from tenxgraph_api.src.app.core.middleware.rate_limit import (
-    BaseRateLimitBackend,
-    RateLimitDecision,
-)
-
-
-class FixedWindowBackend(BaseRateLimitBackend):
-    """Single-process fixed-window counter, shown as the smallest working example."""
-
-    def __init__(self) -> None:
-        self._windows: dict[str, tuple[float, int]] = {}
-
-    async def check(self, key: str, *, limit: int, window: int) -> RateLimitDecision:
-        now = time.monotonic()
-        start, count = self._windows.get(key, (now, 0))
-        if now - start >= window:
-            start, count = now, 0  # window expired: start a new one
-        count += 1
-        self._windows[key] = (start, count)
-        reset_after = max(1, int(start + window - now))
-        return RateLimitDecision(
-            allowed=count <= limit,
-            remaining=max(0, limit - count),
-            reset_after=reset_after,
-        )
-
-    async def close(self) -> None:
-        self._windows.clear()
-```
-
-Set `"backend": "custom"` in `10xgraph.json`, then bind an instance under the `BaseRateLimitBackend` type in the InjectQ container the server uses (see the `injectq` key in the [configuration reference](/docs/reference/api-cli/configuration)).
-
-```python title="container.py"
-from injectq import InjectQ
-
-from my_backend import FixedWindowBackend
-from tenxgraph_api.src.app.core.middleware.rate_limit import BaseRateLimitBackend
-
-container = InjectQ.get_instance()
-# The server resolves the backend by this type at startup
-container.bind_instance(BaseRateLimitBackend, FixedWindowBackend())
-```
+Removed in 1.0.0rc4: `BaseRateLimitBackend`, `MemoryRateLimitBackend`, `RedisRateLimitBackend`, and the `rate_limit.backend` and `rate_limit.redis` keys. A cache store signals an outage by raising; `fail_open` decides what happens next.
 
 ## Examples
 
-Minimal configuration with in-memory backend and default limits:
+Minimal configuration with the in-memory cache store and default limits:
 
 ```json
 {
   "agent": "graph.react:app",
   "rate_limit": {
     "enabled": true,
-    "backend": "memory",
     "requests": 100,
     "window": 60,
     "by": "ip",
@@ -192,14 +143,14 @@ Minimal configuration with in-memory backend and default limits:
 }
 ```
 
-Production setup with Redis, user-based limiting, trusted proxies:
+Production setup with a Redis cache store, user-based limiting, trusted proxies:
 
 ```json
 {
   "agent": "graph.react:app",
+  "redis": "${REDIS_URL}",
   "rate_limit": {
     "enabled": true,
-    "backend": "redis",
     "requests": 1000,
     "window": 60,
     "by": "user",
@@ -207,10 +158,6 @@ Production setup with Redis, user-based limiting, trusted proxies:
     "trusted_proxy_hops": 1,
     "trusted_proxies": ["10.0.0.0/8"],
     "exclude_paths": ["/ping", "/docs", "/redocs"],
-    "redis": {
-      "url": "${RATE_LIMIT_REDIS_URL}",
-      "prefix": "10xgraph:rate-limit"
-    },
     "fail_open": false
   }
 }
@@ -219,10 +166,10 @@ Production setup with Redis, user-based limiting, trusted proxies:
 With the `.env` file:
 
 ```bash
-RATE_LIMIT_REDIS_URL=redis://localhost:6379/0
+REDIS_URL=redis://localhost:6379/0
 ```
 
-The `${RATE_LIMIT_REDIS_URL}` value is expanded from the environment when the config loads. To use the Redis backend, install the optional dependency:
+The `${REDIS_URL}` value is expanded from the environment when the config loads. To use Redis, install the optional dependency:
 
 ```bash
 pip install "10xgraph-api[redis]"

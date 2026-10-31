@@ -25,12 +25,12 @@ flowchart LR
   LB --> W2[API worker]
   LB --> W3[API worker]
   W1 & W2 & W3 --> PG[(Postgres: durable state)]
-  W1 & W2 & W3 --> R[(Redis: cache, locks, caps)]
+  W1 & W2 & W3 --> R[(Cache store: Redis by default; locks, caps, revocation)]
   W1 & W2 & W3 --> V[(Vector store: long-term memory)]
   W1 & W2 & W3 --> M[(Media store)]
 ```
 
-Workers hold no conversation state between requests. They hold caches (a short-lived thread-ownership cache) and, without Redis, per-process counters, which is why Redis matters once you run more than one worker. See [Scaling and reliability](/docs/production/scaling) for exactly what each Redis feature shares.
+Workers hold no conversation state between requests. They hold caches (a short-lived thread-ownership cache) and, with the in-memory cache store, per-process counters, which is why a shared cache store (Redis by default) matters once you run more than one worker. See [Scaling and reliability](/docs/production/scaling) for exactly what it shares, and [Bring your own backend](/docs/server/bring-your-own-backend) for replacing it.
 
 ## The request path
 
@@ -42,7 +42,7 @@ This is the order a request travels, outermost layer first. The middleware order
 | 2 | Request id | Adds `X-Request-ID` and `X-Timestamp` to every response. |
 | 3 | Security headers | Adds HSTS, frame, content-type and CSP headers when `SECURITY_HEADERS_ENABLED` is on. |
 | 4 | Trusted host | Rejects Host headers outside `ALLOWED_HOST`. `/ping` and `/health/ready` skip this check so probes on `localhost` or a pod IP still work. |
-| 5 | Rate limit | Runs only when `rate_limit` is set in `10xgraph.json`. Backend is memory, Redis or custom. |
+| 5 | Rate limit | Runs only when `rate_limit` is set in `10xgraph.json`. Counters live in the API's cache store (in-memory, Redis or your own). |
 | 6 | Request size | Rejects bodies over `MAX_REQUEST_SIZE`. The upload route gets room for `MEDIA_MAX_SIZE_MB`. |
 | 7 | Gzip | Compresses responses over 1000 bytes, except `/v1/graph/stream`, which must send data as it is produced. |
 | 8 | Route guard | `RequirePermission` authenticates the caller (JWT or your `BaseAuth`), checks token revocation if configured, then asks the authorization backend. The default `ownership` backend lets a thread be read or run only by its owner. A foreign thread is a 403 before the graph is touched. |

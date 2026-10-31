@@ -20,7 +20,7 @@ If you run a multi-tenant product on an agent framework, the question a security
 
 ## Layer 1: identity comes from the token, nowhere else
 
-Authentication runs before anything else. With `"auth": "jwt"`, `JwtAuth` requires `exp` on every token and a `user_id` that is a non-empty string or a whole number; anything else is a 401. When `JWT_ISSUER` or `JWT_AUDIENCE` is set, `iss` and `aud` are required and checked as well. Scope claims must have the right type, or the request gets a 401. Revoked tokens are rejected when you configure `token_revocation`, and a backend failure there fails closed with a 503.
+Authentication runs before anything else. With `"auth": "jwt"`, `JwtAuth` requires `exp` on every token and a `user_id` that is a non-empty string or a whole number; anything else is a 401. When `JWT_ISSUER` or `JWT_AUDIENCE` is set, `iss` and `aud` are required and checked as well. Scope claims must have the right type, or the request gets a 401. Revoked tokens are rejected when you configure `token_revocation`, and a cache store failure there fails closed with a 503.
 
 The verified `user_id` is the only identity the server uses. A `user`, `user_id` or `authz` key in the request config is dropped, and state or message content is never read for identity. Your tools get the verified identity through dependency injection.
 
@@ -57,7 +57,7 @@ If you write your own `AuthorizationBackend`, `isolation_scope()` defaults to `"
 
 ## Layer 6: ownership is cached, and deletes are handled
 
-Resolving the owner on every request would cost a database call each time. Ownership never changes, so the server caches it: an in-process LRU (L1, 30 seconds by default) and, when Redis is configured, a shared tier (L2, one hour by default). When a thread is deleted, the cache entry is evicted and a tombstone is left for one L1 TTL, in L1 and in Redis. Without it, another worker that still cached the old owner could let someone else recreate the deleted id and inherit a stale record. The tombstone window is why multi-worker deployments should configure Redis: with only the in-process tier the tombstone exists on the worker that handled the delete.
+Resolving the owner on every request would cost a database call each time. Ownership never changes, so the server caches it: an in-process LRU (L1, 30 seconds by default) and, when a shared cache store is configured (Redis by default), a shared tier (L2, one hour by default). When a thread is deleted, the cache entry is evicted and a tombstone is left for one L1 TTL, in L1 and in the cache store. Without it, another worker that still cached the old owner could let someone else recreate the deleted id and inherit a stale record. The tombstone window is why multi-worker deployments should configure a shared cache store: with only the in-process tier the tombstone exists on the worker that handled the delete.
 
 ## Check it yourself
 

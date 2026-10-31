@@ -44,11 +44,13 @@ The envelope comes from the server's `success_response` helper. `data` holds the
 
 ## GET /health/ready
 
-The readiness probe. `/ping` says the process is alive; `/health/ready` says the server can do its job. It checks, concurrently and each with a 2 second limit:
+The readiness probe. `/ping` says the process is alive; `/health/ready` says the server can do its job. It calls `aping()` on each component, concurrently and each with a 2 second limit:
 
-- **checkpointer**: the component's own `readiness_check()` if it has one, otherwise a `SELECT 1` on the PgCheckpointer pool plus a ping of its Redis cache, or a read-only owner lookup for other checkpointers.
-- **redis**: a ping of the configured Redis (`redis` in `10xgraph.json` or `REDIS_URL`).
-- **store**: the store's own `readiness_check()`, or its `aping()` / `ping()` method.
+- **checkpointer**: `aping()` of the checkpointer. For `PgCheckpointer` that is a `SELECT 1`, a check that the schema version is not older than the code expects, and a ping of its Redis cache. It never creates the schema.
+- **store**: `aping()` of the store, when one is bound.
+- **cache**: `aping()` of the API's cache store (Redis, or your own `BaseCacheStore`). It is reported always, but it fails readiness only when a fail-closed feature uses it: `token_revocation` is on, or `rate_limit` is on with `fail_open` set to `false`. For everything else (locks, caps, idempotency, the ownership cache) a cache store outage is reported and the server keeps taking traffic.
+
+The key `cache` replaced `redis` in 1.0.0rc4.
 
 A component that is not configured, or has nothing to check, is left out of the response. The endpoint is public, so it returns only `ok` or `fail` per component and logs the reason on the server. Results are cached for 3 seconds and concurrent callers share one check, so a flood of probes does not become a flood of database round trips.
 
@@ -57,16 +59,16 @@ curl -i http://127.0.0.1:8000/health/ready
 ```
 
 ```json title="Response (200)"
-{ "status": "ready", "checks": { "checkpointer": "ok", "redis": "ok" } }
+{ "status": "ready", "checks": { "checkpointer": "ok", "cache": "ok" } }
 ```
 
 | Status | Meaning |
 | --- | --- |
-| `200` | Every configured component is reachable. `status` is `ready`. |
-| `503` | At least one check is `fail`. `status` is `not_ready`. The checkpointer check fails when the database schema version is below what the code expects (an upgrade whose migration has not run). |
+| `200` | Every component is reachable (or only the cache store is down and no fail-closed feature uses it). `status` is `ready`. |
+| `503` | A required check is `fail`. `status` is `not_ready`. The checkpointer check fails when the database schema version is below what the code expects (an upgrade whose migration has not run). |
 | `503` | The server is shutting down. `status` is `draining` and `checks` is empty. No component is checked. |
 
-The server runs the same checks once at boot (the [startup check](/docs/server/production-checklist#startup-check)). There an unreachable backend stops the server from starting; here it only turns readiness to 503, so traffic stops until the backend returns. Added after 1.0.0rc2.
+The server runs the same checks once at boot (the [startup check](/docs/server/production-checklist#startup-check)). There an unreachable checkpointer or store stops the server from starting (so does the cache store, when a fail-closed feature uses it); here it only turns readiness to 503, so traffic stops until the backend returns. Added in 1.0.0rc3.
 
 Once the process gets SIGTERM, the server marks itself as draining. Readiness answers `503` from then on, so the load balancer stops sending new requests while open runs finish. `/ping` stays `200` until the process exits.
 
@@ -81,7 +83,7 @@ The response is a plain JSON object, not the standard `data` and `metadata` enve
 Three pieces of middleware also skip `/ping` and `/health/ready` on purpose, because orchestrator probes would otherwise restart healthy containers:
 
 - **Trusted host check.** Probes call `localhost` or the pod IP, which are not in `ALLOWED_HOST`. The host check is skipped for these two probe paths only.
-- **Rate limiting.** `/ping` and `/health/ready` are always excluded, so a rate-limit backend outage (for example Redis) does not fail the probe. The production template also lists it in `rate_limit.exclude_paths`.
+- **Rate limiting.** `/ping` and `/health/ready` are always excluded, so a cache store outage (for example Redis) does not fail the probe through the rate limiter. The production template also lists it in `rate_limit.exclude_paths`.
 - **Authentication.** No token is needed.
 
 ---

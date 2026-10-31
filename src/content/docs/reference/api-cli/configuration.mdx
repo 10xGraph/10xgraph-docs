@@ -30,7 +30,9 @@ Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: th
 | `store` | string or null | none | Import path of a `BaseStore` for long-term memory |
 | `checkpointer` | string or null | none | Not applied by the API server. If set, the server logs a warning and ignores it. Pass the checkpointer to `compile()` |
 | `thread_name_generator` | string or null | none | Import path of a thread name generator |
-| `redis` | string or null | none | Redis URL for the shared ownership cache. Falls back to `REDIS_URL` |
+| `redis` | string or null | none | Redis URL for the API's cache store (run locks and caps, idempotency, ownership cache, token revocation, rate limiting). Falls back to `REDIS_URL`. `$VAR` and `${VAR}` are expanded |
+| `cache_store` | string or null | none | `module:attr` of a `BaseCacheStore` instance or zero-argument factory. Wins over `redis` and `REDIS_URL`. See [Bring your own backend](/docs/server/bring-your-own-backend) |
+| `token_revocation` | boolean or object | `false` | Refuse revoked tokens. `true`, or `{"enabled": true, "token_lifetime": <seconds>, "user_ttl": <seconds>}`. `user_ttl` defaults to 30 days; `null` keeps entries forever. Entries live in the cache store. The old values `"redis"`, `"memory"` and `"module:attr"` were removed in 1.0.0rc4 and stop startup with an error that names `cache_store` |
 | `remote_tools` | array | `[]` | Schemas of tools that run in the client |
 | `runs` | object | built-in defaults | Who names threads, which client input reaches the graph, and run limits |
 | `rate_limit` | object | absent (off) | Request rate limiting |
@@ -120,7 +122,7 @@ Set these when a tool or node trusts a value such as `role` or `plan` from state
 
 ### max_concurrent_per_user
 
-Caps the HTTP graph runs (invoke, stream and AG-UI) one verified user may have in flight at once. The count is shared by all workers when Redis is configured (`redis` key or `REDIS_URL`) and kept per process otherwise. Over the cap the request gets `429`. `0` or `null` means no cap. Requests without a verified user (auth off) are not capped. The value must be a non-negative integer.
+Caps the HTTP graph runs (invoke, stream and AG-UI) one verified user may have in flight at once. The count is shared by all workers when a shared cache store is configured (`redis` key, `REDIS_URL` or `cache_store`) and kept per process otherwise. Over the cap the request gets `429`. `0` or `null` means no cap. Requests without a verified user (auth off) are not capped. The value must be a non-negative integer.
 
 ### timeout
 
@@ -137,25 +139,22 @@ Rate limiting applies to REST requests. `/ping` is always excluded. Set `"enable
 | Key | Type | Default | Purpose |
 |---|---|---|---|
 | `enabled` | boolean | `true` | Turn limiting on or off |
-| `backend` | string | `memory` | `memory`, `redis` or `custom` (bind a `BaseRateLimitBackend` in InjectQ) |
 | `requests` | integer | `100` | Requests allowed per window. Must be above 0 |
 | `window` | integer | `60` | Window length in seconds. Must be above 0 |
 | `by` | string | `ip` | Count per `ip`, `user` or `global` |
 | `exclude_paths` | array | `[]` | Extra paths to skip |
-| `redis` | object or string | none | `{"url": "...", "prefix": "..."}` or a URL string. `$VAR` and `${VAR}` are expanded |
-| `redis.prefix` | string | `10xgraph:rate-limit` | Redis key prefix |
-| `fail_open` | boolean | `true` | Allow requests when the backend errors. `false` denies them |
+| `fail_open` | boolean | `true` | Allow requests when the cache store errors. `false` denies them with `503` `RATE_LIMIT_UNAVAILABLE` |
 | `trusted_proxy_headers` | boolean | `false` | Honour `X-Forwarded-For`. Only behind a proxy you control |
 | `trusted_proxy_hops` | integer | `1` | Proxies you control, counted from the right of `X-Forwarded-For`. At least 1 |
 | `trusted_proxies` | array | `[]` | IPs or CIDR ranges your proxies connect from. Others cannot spoof the header |
 
-The `memory` backend counts per process, so with N workers the real limit is `requests` times N and it resets on restart. Use `redis` for any multi-worker deployment.
+The counters live in the API's cache store. With the in-memory store they count per process, so with N workers the real limit is `requests` times N and it resets on restart. Set `redis` (or `REDIS_URL`) for any multi-worker deployment. The keys `rate_limit.backend` and `rate_limit.redis` were removed in 1.0.0rc4 and stop startup with an error that names `cache_store`.
 
 ## websocket, ag_ui and observability
 
 | Key | Type | Default | Purpose |
 |---|---|---|---|
-| `websocket.max_connections` | integer or null | `1000` | Concurrent connections. Shared by all workers when Redis is configured, per process otherwise. `0` or `null` means unlimited |
+| `websocket.max_connections` | integer or null | `1000` | Concurrent connections. Shared by all workers when a shared cache store is configured, per process otherwise. `0` or `null` means unlimited |
 | `websocket.max_connections_per_user` | integer or null | `10` | Per verified user. `0` or `null` means unlimited |
 | `websocket.realtime_models` | array of strings | `[]` | Models a `/v1/graph/live` client may request |
 | `ag_ui.enabled` | boolean | `false` | Mounts `POST /v1/ag-ui`. Needs the `ag-ui` extra |
@@ -214,18 +213,17 @@ The server reads configuration from environment variables, which are listed in f
   "authorization": "ownership",
   "injectq": "graph.agent:container",
   "store": null,
-  "redis": "redis://localhost:6379/0",
+  "redis": "${REDIS_URL}",
+  "token_revocation": true,
   "thread_name_generator": "graph.thread_name_generator:MyNameGenerator",
   "rate_limit": {
     "enabled": true,
-    "backend": "redis",
     "requests": 100,
     "window": 60,
     "by": "user",
     "trusted_proxy_headers": true,
     "trusted_proxy_hops": 1,
     "exclude_paths": ["/docs"],
-    "redis": { "url": "${REDIS_URL}", "prefix": "myapp:rate-limit" },
     "fail_open": true
   },
   "websocket": { "max_connections": 500, "max_connections_per_user": 5 },

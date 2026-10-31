@@ -24,7 +24,7 @@ You write the agent. `10xgraph-api` turns it into an HTTP service with JWT auth,
 10xgraph init --template production --auth jwt --rate-limit redis --provider openai --yes
 ```
 
-`--rate-limit` takes `none`, `memory` or `redis`. Use `memory` for a first run without Redis; the Redis backend is the one that is shared between workers.
+`--rate-limit` takes `none`, `memory` or `redis`. `redis` turns rate limiting on with a Redis cache store (`"redis": "${REDIS_URL}"`), which is shared between workers. `memory` turns it on without Redis, so the counters live in each process; use it for a first run.
 
 The command writes the project into the current folder. The files you will touch:
 
@@ -35,18 +35,18 @@ The command writes the project into the current folder. The files you will touch
 | `.env.example` | `MODE="production"`, `ORIGINS`, `ALLOWED_HOST`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `REDIS_URL`, `OPENAI_API_KEY`, empty `DOCS_PATH` |
 | `tests/`, `evals/` | A starter test and a starter eval file |
 
-The rate limit section of `10xgraph.json` as generated:
+The Redis, token revocation and rate limit sections of `10xgraph.json` as generated:
 
 ```json
+"redis": "${REDIS_URL}",
+"token_revocation": true,
 "rate_limit": {
   "enabled": true,
-  "backend": "redis",
   "requests": 100,
   "window": 60,
   "by": "ip",
   "trusted_proxy_headers": false,
-  "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"],
-  "redis": { "url": "${REDIS_URL}" }
+  "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
 }
 ```
 

@@ -6,7 +6,7 @@ section: Reference
 group: "CLI and configuration"
 order: 440
 label: Authentication
-updated: "2026-10-27"
+updated: "2026-10-31"
 ---
 
 By default, the 10xGraph API accepts all requests without authentication (suitable for local development). For production, configure either JWT or a custom `BaseAuth` backend to verify identity, and optionally set authorization rules via `AuthorizationBackend` to control what authenticated users may do.
@@ -77,7 +77,7 @@ Other claims (`roles`, `scopes`, `email`, custom fields) are passed through to `
 Two claims are also read by the server:
 
 - `scope` (a space-separated string, as in OAuth) and `scopes` (a list of strings, or a space-separated string). Both are merged into one set of scope names, and a scope matches only by its exact name. `graph:invoke_admin` does not grant `graph:invoke`. A token with neither claim is not scope-restricted. A token with `scope` set to an empty string is restricted to no scopes at all. A scope claim of the wrong type (a number, an object, or a list that holds non-strings) is rejected with 401.
-- `jti`, the token ID. When `token_revocation` is set in `10xgraph.json`, a revoked `jti` is refused. The check runs even when `user_id` is missing or unusual.
+- `jti`, the token ID. When `token_revocation` is on in `10xgraph.json`, a revoked `jti` is refused. The check runs even when `user_id` is missing or unusual. See [Token revocation](#token-revocation).
 
 ### Rotating the signing key
 
@@ -257,7 +257,7 @@ Decision table:
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Ownership requires a checkpointer that tracks owners</p>
 
-Ownership comes from `BaseCheckpointer.aget_thread_owner`. `PgCheckpointer`, SQLite, and the in-memory checkpointer implement it; the base class raises `NotImplementedError`. The backend fails closed: with no checkpointer, or one that cannot resolve owners, thread requests are denied, and with ownership active the server refuses to start. The server uses the checkpointer passed to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. The in-memory checkpointer records owners only when explicitly writing a thread, so ownership is the production default (with Postgres) but development defaults to `DefaultAuthorizationBackend`.
+Ownership comes from `BaseCheckpointer.aget_thread_owner`. `PgCheckpointer`, SQLite, and the in-memory checkpointer implement it; the base class raises `NotImplementedError`. A custom checkpointer must also implement the abstract `aping()` (since 1.0.0rc4); see [Bring your own backend](/docs/server/bring-your-own-backend). The backend fails closed: with no checkpointer, or one that cannot resolve owners, thread requests are denied, and with ownership active the server refuses to start. The server uses the checkpointer passed to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. The in-memory checkpointer records owners only when explicitly writing a thread, so ownership is the production default (with Postgres) but development defaults to `DefaultAuthorizationBackend`.
 
 </aside>
 
@@ -268,11 +268,27 @@ Ownership is immutable, so it is cached by `ThreadOwnershipResolver` for scalabi
 | Tier | Details |
 |---|---|
 | L1 | In-process LRU: 10,000 entries per worker, 30 s TTL |
-| L2 | Optional shared Redis client (owner entries under `af:authz:owner:id:<thread_id>`, kept for 1 hour; a delete removes the entry and leaves a "just deleted" marker under `af:authz:owner:tomb:<thread_id>` for 30 seconds, so the id cannot be claimed while another worker still caches the old owner; Redis errors degrade to database lookup and never fail the request) |
+| L2 | Optional shared tier in the API's cache store (owner entries under `af:authz:owner:id:<thread_id>`, kept for 1 hour; a delete removes the entry and leaves a "just deleted" marker under `af:authz:owner:tomb:<thread_id>` for 30 seconds, so the id cannot be claimed while another worker still caches the old owner; cache store errors degrade to database lookup and never fail the request) |
 
-Negative results are not cached (a missing thread could be created by a later request). The L2 tier is wired from `redis` in `10xgraph.json`, falling back to `REDIS_URL`. When neither is set or the `redis` package is not installed, L1 only is used and a warning is logged at startup.
+Negative results are not cached (a missing thread could be created by a later request). The L2 tier is the API's cache store: `cache_store` in `10xgraph.json`, else `redis`, else `REDIS_URL`. With the in-memory cache store the L2 tier is local to the process, so it adds nothing over L1.
 
-Cache eviction happens on thread delete via `CheckpointerService.delete_thread`. A custom caching backend should implement `evict(thread_id)` (returns the resolver's `evict` coroutine or `None`) and `aclose()` (closes any client on shutdown).
+Cache eviction happens on thread delete via `CheckpointerService.delete_thread`. A custom authorization backend should implement `evict(thread_id)` (returns the resolver's `evict` coroutine or `None`) and `aclose()`.
+
+### Token revocation
+
+Revoke a token (by `jti`) or all of a user's tokens with `10xgraph revoke`. The revocations live in the API's cache store, so with Redis they reach every worker at once and the server needs no restart. Turn the check on in `10xgraph.json`:
+
+```json
+{
+  "auth": "jwt",
+  "redis": "${REDIS_URL}",
+  "token_revocation": true
+}
+```
+
+`token_revocation` is `true`, `false`, or an object: `{"enabled": true, "token_lifetime": <seconds>, "user_ttl": <seconds>}`. `user_ttl` is how long a per-user cutoff is kept and defaults to 30 days; `null` keeps entries forever. The old values `"redis"`, `"memory"` and `"module:attr"`, and the `TokenRevocationBackend` class, were removed in 1.0.0rc4 and now stop startup with an error that names `cache_store`.
+
+Revocation fails closed: if the cache store raises an error, requests that need the check answer `503`. With an in-memory cache store in production, or `WEB_CONCURRENCY` above 1, the server warns that revocations only reach this process; set `redis` or `REDIS_URL`, or a shared `cache_store`.
 
 ### Custom authorization backend
 

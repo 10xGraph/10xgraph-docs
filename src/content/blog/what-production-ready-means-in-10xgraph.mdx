@@ -64,7 +64,7 @@ The short version: you build the agent, and the server owns the request surface,
 - A thread runs one request at a time. A second request waits up to 30 seconds, then gets 409 "thread is busy". `on_busy: "cancel"` stops the running one instead.
 - A model turn runs at most 10 tool calls at once (`runs.max_parallel_tool_calls`).
 
-**Config:** `rate_limit` (by `ip`, `user` or `global`, memory or Redis backend) is off until you add it to `10xgraph.json`. `websocket.max_connections` and `websocket.max_connections_per_user` cap sockets.
+**Config:** `rate_limit` (by `ip`, `user` or `global`) is off until you add it to `10xgraph.json`. Its counters live in the API's cache store, in memory or in Redis (`redis` or `REDIS_URL`). `websocket.max_connections` and `websocket.max_connections_per_user` cap sockets.
 
 **You still must:** add rate limiting, and set `trusted_proxies` to the real number of proxy hops. Streaming runs have no per-node or per-tool deadlines, only the run timeout.
 
@@ -96,7 +96,7 @@ The short version: you build the agent, and the server owns the request surface,
 
 **Default:** `10xgraph build` writes a Dockerfile that runs Gunicorn as a non-root user, and with flags a `docker-compose.yml` and `k8s.yaml`. `GET /ping` is liveness and `GET /health/ready` is readiness. Workers hold no conversation state; it lives in the checkpointer. With Redis configured, the ownership cache, run caps and thread locks are shared across workers.
 
-**Config:** `10xgraph build --docker-compose --k8s`, `redis` or `REDIS_URL`, `rate_limit.backend: "redis"`.
+**Config:** `10xgraph build --docker-compose --k8s`, `redis` or `REDIS_URL` (or `cache_store` for your own `BaseCacheStore`), `token_revocation: true`.
 
 **You still must:** terminate TLS at your load balancer or ingress, run two or more instances if you need availability, and size your database.
 

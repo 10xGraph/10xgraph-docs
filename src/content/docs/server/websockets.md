@@ -32,7 +32,7 @@ Both endpoints use the same credential methods as REST APIs. The bearer token ca
 
 At the WebSocket handshake, the server verifies the token. Before every graph run on `/v1/graph/ws` (the client can send several messages on one socket), the token is verified again: if it expires or is revoked between runs, the server sends an error chunk and closes the socket with code 1008.
 
-On `/v1/graph/live` there is no run boundary, so the token is checked again after the init frame and then every 30 seconds for as long as the session lasts. The checks cover expiry and revocation, and they fail closed: if the revocation backend cannot answer, the token counts as revoked. When a check fails, the server sends a fatal `session_expired` error event and closes the socket with code 1008. Reconnect with a fresh token.
+On `/v1/graph/live` there is no run boundary, so the token is checked again after the init frame and then every 30 seconds for as long as the session lasts. The checks cover expiry and revocation, and they fail closed: if the cache store that holds revocations cannot answer, the token counts as revoked. When a check fails, the server sends a fatal `session_expired` error event and closes the socket with code 1008. Reconnect with a fresh token.
 
 **Setting the subprotocol** (if using `10xgraph-bearer`): offer two subprotocols, the sentinel first and the raw token second.
 
@@ -127,7 +127,7 @@ The server runs one graph run at a time on a thread, and each run on the socket 
 {"event": "error", "data": {"reason": "thread is busy"}}
 ```
 
-To stop the running run and take its place, add `"on_busy": "cancel"` to the frame (the default is `"wait"`). New threads are locked as soon as their id exists. When Redis is configured, the lock is shared across processes. `/v1/graph/live` is not covered.
+To stop the running run and take its place, add `"on_busy": "cancel"` to the frame (the default is `"wait"`). New threads are locked as soon as their id exists. When a shared cache store is configured, the lock is shared across processes. `/v1/graph/live` is not covered.
 
 ### Request limits and error text
 
@@ -210,7 +210,7 @@ WebSocket behavior is controlled by keys in the `websocket` object within `10xgr
 }
 ```
 
-In a multi-worker deployment (Gunicorn + Uvicorn), these limits are global when `redis` (or `REDIS_URL`) is configured: all workers and replicas count their sockets in Redis, so `max_connections: 1000` means 1000 in total. Slots held by a worker that dies expire on their own, and a Redis error lets the connection through (logged). Without Redis, each process counts its own sockets, so 4 workers with `max_connections: 1000` can hold 4000.
+In a multi-worker deployment (Gunicorn + Uvicorn), these limits are global when a shared cache store is configured (`redis`, `REDIS_URL` or `cache_store`): all workers and replicas count their sockets in it, so `max_connections: 1000` means 1000 in total. Slots held by a worker that dies expire on their own, and a cache store error lets the connection through (logged). Without a shared store, each process counts its own sockets, so 4 workers with `max_connections: 1000` can hold 4000.
 
 ## Close codes
 

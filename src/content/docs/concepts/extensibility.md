@@ -12,7 +12,7 @@ faq:
   - q: "Can I extend multiple base classes in the same graph?"
     a: "Yes. You can extend a checkpointer for storage, a publisher for events, and an authorization backend all in the same graph. They compose independently."
   - q: "Which base classes go in compile() vs 10xgraph.json?"
-    a: "Checkpointer, store and media_store go in compile(). Context manager, publisher and ID generator go in the StateGraph constructor. Auth, authorization and thread_name_generator are set in 10xgraph.json; a custom rate-limit backend is bound in the InjectQ container."
+    a: "Checkpointer, store and media_store go in compile(). Context manager, publisher and ID generator go in the StateGraph constructor. Auth, authorization, thread_name_generator and cache_store are set in 10xgraph.json."
 ---
 
 10xGraph's major components are built on abstract base classes. Extend any of them to swap storage backends, auth mechanisms, LLM providers, ID schemes, rate limiting, or event routing. Your graph logic stays unchanged. This page explains the pattern and shows when and how to extend each.
@@ -37,7 +37,7 @@ flowchart TB
   subgraph "API / Server"
     BAUTH[BaseAuth]
     BAUTHZ[AuthorizationBackend]
-    BRL[BaseRateLimitBackend]
+    BCS[BaseCacheStore]
     TNG[ThreadNameGenerator]
     BID[BaseIDGenerator]
   end
@@ -49,7 +49,7 @@ flowchart TB
   end
   YOUR[Your Subclass] -->|extend any| BCP & BS & BE & BMS
   YOUR -->|extend any| BA & BC & BCM
-  YOUR -->|extend any| BAUTH & BAUTHZ & BRL & TNG & BID
+  YOUR -->|extend any| BAUTH & BAUTHZ & BCS & TNG & BID
   YOUR -->|extend any| BP & BV & BCR & BR
 ```
 
@@ -57,7 +57,7 @@ flowchart TB
 |---|---|---|
 | `BaseAgent` | `tenxgraph/core/graph/base_agent.py` | `execute()`, `_call_llm()` |
 | `BaseContextManager` | `tenxgraph/core/state/base_context.py` | `trim_context()`, `atrim_context()` |
-| `BaseCheckpointer` | `tenxgraph/storage/checkpointer/base_checkpointer.py` | Async state, cache, message and thread methods |
+| `BaseCheckpointer` | `tenxgraph/storage/checkpointer/base_checkpointer.py` | Async state, cache, message and thread methods, and `aping()` |
 | `BaseStore` | `tenxgraph/storage/store/base_store.py` | `astore()`, `asearch()`, `aget()`, `aget_all()`, `aupdate()`, `adelete()`, `aforget_memory()` |
 | `BaseEmbedding` | `tenxgraph/storage/store/embedding/base_embedding.py` | `aembed()`, `aembed_batch()`, `dimension` |
 | `BaseMediaStore` | `tenxgraph/storage/media/storage/base.py` | `store()`, `retrieve()`, `delete()`, `exists()` |
@@ -67,7 +67,7 @@ flowchart TB
 | `BaseIDGenerator` | `tenxgraph/utils/id_generator.py` | `id_type`, `generate()` |
 | `BaseAuth` | `tenxgraph_api/src/app/core/auth/base_auth.py` | `authenticate(request, response, credential)` |
 | `AuthorizationBackend` | `tenxgraph_api/src/app/core/auth/authorization.py` | `authorize(user, resource, action, resource_id=None, **context)` |
-| `BaseRateLimitBackend` | `tenxgraph_api/src/app/core/middleware/rate_limit/base.py` | `check(key, limit, window)`, `close()` |
+| `BaseCacheStore` | `tenxgraph_api/src/app/core/cache_store/base.py` | `aping()`, `now()`, `acquire()`, `renew()`, `release()`, `get()`, `set()`, `delete()` |
 | `ThreadNameGenerator` | `tenxgraph_api/src/app/utils/thread_name_generator.py` | `generate_name(messages)` |
 | `BaseCriterion` | `tenxgraph/qa/evaluation/criteria/base.py` | `async evaluate(actual, expected)` |
 | `BaseReporter` | `tenxgraph/qa/evaluation/reporters/base.py` | `generate(report, output_dir=None)` |
@@ -97,7 +97,7 @@ flowchart LR
 
 ### BaseCheckpointer: conversational state
 
-A checkpointer persists your graph's state and thread history to a backend. You extend `BaseCheckpointer` when your deployment requires a specific database (DynamoDB for AWS shops, Firestore for Google Cloud, or something custom like a legacy oracle system). All of the async methods below are abstract, so a subclass must implement every one; the synchronous wrappers (`put_state()` and similar) are provided by the base class.
+A checkpointer persists your graph's state and thread history to a backend. You extend `BaseCheckpointer` when your deployment requires a specific database (DynamoDB for AWS shops, Firestore for Google Cloud, or something custom like a legacy oracle system). All of the async methods below are abstract (`aping()` since 1.0.0rc4), so a subclass must implement every one; the synchronous wrappers (`put_state()` and similar) are provided by the base class.
 
 ```python
 from tenxgraph.storage.checkpointer.base_checkpointer import BaseCheckpointer
@@ -112,6 +112,7 @@ class DynamoCheckpointer(BaseCheckpointer):
     async def arelease(self) -> None: ...                                # close connections
 
     # Cache, messages and thread metadata
+    async def aping(self) -> None: ...                                   # raise if the backend is unreachable; read-only and cheap
     async def aput_state_cache(self, config, state) -> None: ...         # hot-path write cache
     async def aget_state_cache(self, config) -> AgentState | None: ...   # hot-path read cache
     async def aput_messages(self, config, messages, metadata=None) -> None: ...  # store messages
@@ -145,7 +146,7 @@ class PineconeStore(BaseStore):
 compiled = graph.compile(store=PineconeStore())
 ```
 
-`aping` is abstract: a store that does not implement it raises `TypeError` when created. Return when the backend is reachable and raise otherwise; an in-process store just returns. `10xgraph-api` calls it for `/health/ready` and at startup. Added after 1.0.0rc2.
+`aping` is abstract: a store that does not implement it raises `TypeError` when created. Return when the backend is reachable and raise otherwise; an in-process store just returns. `10xgraph-api` calls it for `/health/ready` and at startup. Added in 1.0.0rc3.
 
 ### BaseEmbedding: custom embedding model
 
@@ -310,7 +311,7 @@ class PrefixedIDGenerator(BaseIDGenerator):
 
 ## API and server extension
 
-Server-layer ABCs are wired via `10xgraph.json` (or the InjectQ container for rate-limit backends), with no code changes to the server required. You extend these to enforce your deployment's security policies, integrate custom identity systems, or implement rate limiting specific to your infrastructure.
+Server-layer ABCs are wired via `10xgraph.json` (), with no code changes to the server required. You extend these to enforce your deployment's security policies, integrate custom identity systems, or keep the API's shared state in your own store.
 
 ### BaseAuth
 
@@ -339,22 +340,25 @@ class RBACBackend(AuthorizationBackend):
 
 For simple role-to-scope mapping, you do not need a class. Set `authorization` to an RBAC config block (`{"backend": "rbac", "roles": {...}}`). The built-in `"ownership"` selector gives owner-only threads with no code, and `"allow_all"` permits any authenticated user.
 
-### BaseRateLimitBackend
+### BaseCacheStore
 
-You extend `BaseRateLimitBackend` when you need rate limiting with custom logic: tiered limits based on user tier, graceful degradation, or integration with an external rate limiter service.
+The API keeps everything it shares between workers in one `BaseCacheStore`: the per-thread run lock, run and WebSocket caps, idempotency, the ownership cache, token revocation and rate-limit counters. `RedisCacheStore` is the default when you set `redis` or `REDIS_URL` (Valkey, Dragonfly and KeyDB work through the URL); `InMemoryCacheStore` is the fallback for one process. You extend `BaseCacheStore` when the shared state has to live in something that does not speak the Redis protocol.
 
 ```python
-from tenxgraph_api.src.app.core.middleware.rate_limit.base import (
-    BaseRateLimitBackend,
-    RateLimitDecision,
-)
+from tenxgraph_api import BaseCacheStore, SlotResult
 
-class RedisClusterRateLimiter(BaseRateLimitBackend):
-    async def check(self, key: str, *, limit: int, window: int) -> RateLimitDecision: ...
-    async def close(self) -> None: ...
+class MyCacheStore(BaseCacheStore):
+    async def aping(self) -> None: ...
+    async def now(self) -> float: ...
+    async def acquire(self, key: str, limit: int, ttl: float) -> SlotResult: ...
+    async def renew(self, key: str, slot_id: str, ttl: float) -> bool: ...
+    async def release(self, key: str, slot_id: str) -> None: ...
+    async def get(self, key: str) -> bytes | None: ...
+    async def set(self, key: str, value: bytes, ttl: float | None, mode: str = "always") -> bool: ...
+    async def delete(self, key: str) -> None: ...
 ```
 
-The `check` method returns a `RateLimitDecision(allowed, remaining, reset_after)` (import it from the same `base` module). Bind an instance of your backend in the InjectQ container and set `backend: custom`; there is no import-path key for rate-limit backends.
+The contract is strict (atomic `acquire`, TTLs never dropped early, no eviction). The full rules, a skeleton and the contract test suite are on [Bring your own backend](/docs/server/bring-your-own-backend). The `BaseRateLimitBackend` and `TokenRevocationBackend` classes and the `ConcurrencyLimiter` were removed in 1.0.0rc4; `BaseCacheStore` replaces all three.
 
 ### ThreadNameGenerator
 
@@ -368,31 +372,18 @@ class DatePrefixNameGenerator(ThreadNameGenerator):
         return f"{date.today()}: {messages[0][:30]}"
 ```
 
-Wire any of these in `10xgraph.json`. Auth, authorization, and thread naming each have a dedicated top-level key. Custom rate-limit backends are bound in the InjectQ container instead:
+Wire any of these in `10xgraph.json`. Auth, authorization, thread naming and the cache store each have a dedicated top-level key:
 
 ```json
 {
   "auth": { "method": "custom", "path": "auth.my_auth:ApiKeyAuth" },
   "authorization": "auth.my_auth:RBACBackend",
   "thread_name_generator": "services.naming:DatePrefixNameGenerator",
-  "rate_limit": {
-    "enabled": true,
-    "backend": "custom",
-    "requests": 100,
-    "window": 60
-  }
+  "cache_store": "services.cache:store"
 }
 ```
 
-The string format for class references is `module.path:ClassName` (dot-separated module path, colon, then the class or instance name). For the custom rate-limit backend, bind it in the module your injectq key points to:
-
-```python
-from injectq import InjectQ
-from tenxgraph_api.src.app.core.middleware.rate_limit.base import BaseRateLimitBackend
-
-container = InjectQ.get_instance()
-container.bind_instance(BaseRateLimitBackend, RedisClusterRateLimiter())
-```
+The string format for class references is `module.path:ClassName` (dot-separated module path, colon, then the class or instance name). `cache_store` accepts an instance or a zero-argument factory (a class or function) that returns one.
 
 ---
 

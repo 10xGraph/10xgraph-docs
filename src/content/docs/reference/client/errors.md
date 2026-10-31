@@ -179,9 +179,9 @@ try {
 
 ### Rate limiter backend down (503)
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
-When the server's rate-limit backend is unreachable and `fail_open` is `false`, it answers 503 with `error.code` `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5`, not 429. The client throws a `ServerError` with `statusCode` 503. Retry after a short delay, as for 429.
+When the server's cache store is unreachable and `fail_open` is `false`, it answers 503 with `error.code` `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5`, not 429. The client throws a `ServerError` with `statusCode` 503. Retry after a short delay, as for 429.
 
 ### ServerError
 

@@ -54,6 +54,12 @@ The container serves plain HTTP. The server sets security headers and can emit H
 
 What to do: terminate TLS at your load balancer or ingress, set `ALLOWED_HOST` and `ORIGINS`, and if you use client IP rate limiting behind a proxy, set `rate_limit.trusted_proxies`. See [CORS and security headers](/docs/server/cors-and-security-headers) and [Kubernetes](/docs/server/kubernetes).
 
+## The default cache store is per process
+
+Without `redis`, `REDIS_URL` or `cache_store`, the API keeps its run locks, caps, idempotency state, rate-limit counters and token revocations in the memory of one process (`InMemoryCacheStore`). With more than one worker or replica those do not add up: a revocation reaches only one process, and caps multiply by the worker count. The store also caps its memory, so under heavy churn it evicts the least recently used rate-limit and cache entries (never run leases or revocations).
+
+What to do: set `redis` or `REDIS_URL` (or your own `cache_store`) for any multi-worker deployment, and run Redis with `maxmemory-policy` set to `noeviction` or a `volatile-*` policy. See [Bring your own backend](/docs/server/bring-your-own-backend).
+
 ## Data retention and backups
 
 Threads, messages and uploaded files stay until something deletes them. Deleting a thread or message also releases the files it referenced, but 10xGraph sets no retention period and does not back up your database.

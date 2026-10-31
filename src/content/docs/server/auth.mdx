@@ -4,7 +4,7 @@ description: "Enable JWT or custom auth, enforce thread ownership, and protect y
 section: "API server"
 group: "Security"
 order: 60
-updated: "2026-10-27"
+updated: "2026-10-31"
 faq:
   - q: "Which claims must my JWT contain?"
     a: "Every token needs `exp` (expiration) and `user_id` claims. If you set JWT_ISSUER or JWT_AUDIENCE, the token must also carry matching `iss` or `aud` claims. A token without `user_id` is rejected with status 401, code `INVALID_TOKEN`."
@@ -141,7 +141,7 @@ If you leave `authorization` unset, the default depends on `MODE`: ownership whe
 
 A custom `AuthorizationBackend` also isolates users by default: its `isolation_scope()` returns `"owner"`, so each user sees only their own threads and memories. A backend that wants shared data returns `"none"`. The built-in `allow_all` shares data, and `ownership` and `rbac` isolate it.
 
-Ownership is looked up through the checkpointer's `aget_thread_owner` method. The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. That checkpointer must be able to name thread owners: `PgCheckpointer`, `InMemoryCheckpointer` and the SQLite checkpointer do, and a custom `BaseCheckpointer` must implement `aget_thread_owner`. With auth on, the server refuses to boot if there is no checkpointer or its `aget_thread_owner` is not implemented, and at request time ownership fails closed (thread requests are denied). Use a durable checkpointer such as `PgCheckpointer` so owners survive restarts. For high-concurrency workloads, set `redis` in `10xgraph.json` (or `REDIS_URL` in your environment) to cache ownership lookups across workers:
+Ownership is looked up through the checkpointer's `aget_thread_owner` method. The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. That checkpointer must be able to name thread owners: `PgCheckpointer`, `InMemoryCheckpointer` and the SQLite checkpointer do, and a custom `BaseCheckpointer` must implement `aget_thread_owner` and `aping()` (a read-only, cheap check that the backend answers; the server calls it for the startup check and `/health/ready`). With auth on, the server refuses to boot if there is no checkpointer or its `aget_thread_owner` is not implemented, and at request time ownership fails closed (thread requests are denied). Use a durable checkpointer such as `PgCheckpointer` so owners survive restarts. For high-concurrency workloads, set `redis` in `10xgraph.json` (or `REDIS_URL` in your environment) to cache ownership lookups across workers (the API's cache store holds the shared tier; see [Bring your own backend](/docs/server/bring-your-own-backend)):
 
 ```jsonc title="10xgraph.json"
 {

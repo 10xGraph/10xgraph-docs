@@ -347,7 +347,7 @@ The server maps exceptions to responses in `tenxgraph_api/src/app/core/exception
 | `StateFormatVersionError` | 500 (message says to upgrade) |
 | `ResumeValidationError` | 422 |
 
-`RATE_LIMIT_UNAVAILABLE` is a `503` from the rate limiter, not a core exception: the `rate_limit` backend could not be reached and `fail_open` is `false`. It carries `Retry-After: 5`. The code `RATE_LIMIT_EXCEEDED` (429) stays for a real limit hit. Added after 1.0.0rc2.
+`RATE_LIMIT_UNAVAILABLE` is a `503` from the rate limiter, not a core exception: the cache store behind the rate limiter raised an error and `fail_open` is `false`. It carries `Retry-After: 5`. The code `RATE_LIMIT_EXCEEDED` (429) stays for a real limit hit. Added in 1.0.0rc3.
 
 A `429` is not a core exception either. The server returns it when the `rate_limit` window is used up (`error.code` `RATE_LIMIT_EXCEEDED`, with a `Retry-After` header) or when one user has more than `runs.max_concurrent_per_user` runs in flight (standard body, code `HTTPException`, no `Retry-After`).
 

@@ -43,7 +43,7 @@ pip install "10xgraph[google-genai,pg_checkpoint,qdrant]" "10xgraph-api[jwt,redi
 10xgraph init --yes --template production --auth jwt --rate-limit redis
 ```
 
-The production template writes `10xgraph.json` with JWT auth, `"authorization": "ownership"` and a Redis rate limit. Two changes matter for this guide. Point the agent at an async factory (step 2), add a store (step 3), and rate-limit by user instead of by address, so one noisy customer cannot spend another customer's quota:
+The production template writes `10xgraph.json` with JWT auth, `"authorization": "ownership"`, a Redis cache store and a rate limit. Two changes matter for this guide. Point the agent at an async factory (step 2), add a store (step 3), and rate-limit by user instead of by address, so one noisy customer cannot spend another customer's quota:
 
 ```json title="10xgraph.json"
 {
@@ -51,13 +51,12 @@ The production template writes `10xgraph.json` with JWT auth, `"authorization": 
   "auth": "jwt",
   "authorization": "ownership",
   "store": "graph.memory:store", // [!code ++]
+  "redis": "${REDIS_URL}",
   "rate_limit": {
     "enabled": true,
-    "backend": "redis",
     "requests": 100,
     "window": 60,
-    "by": "user", // [!code highlight]
-    "redis": { "url": "${REDIS_URL}" }
+    "by": "user" // [!code highlight]
   }
 }
 ```
@@ -186,7 +185,7 @@ store = QdrantStore(embedding=HashEmbedding(), path=":memory:")
   "agent": "agent:app",
   "auth": "jwt",
   "store": "agent:store",
-  "rate_limit": { "enabled": true, "backend": "memory", "requests": 8, "window": 60, "by": "user" }
+  "rate_limit": { "enabled": true, "requests": 8, "window": 60, "by": "user" }
 }
 ```
 
@@ -282,7 +281,7 @@ x-ratelimit-remaining: 0
  "limit":8,"window_seconds":60,"retry_after_seconds":47}}
 ```
 
-Alice, in the same minute, still got 200, because the bucket is per user. In your real config use the Redis backend: the memory backend counts per process, so with several workers the real limit is the number of workers times the limit. The server prints a warning at startup to say so.
+Alice, in the same minute, still got 200, because the bucket is per user. In your real config set `"redis": "${REDIS_URL}"`: without it the in-memory cache store counts per process, so with several workers the real limit is the number of workers times the limit. The server prints a warning at startup to say so.
 
 ## What this guide covers, and what you still own
 
