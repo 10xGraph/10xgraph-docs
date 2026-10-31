@@ -194,7 +194,7 @@ Before scaling, understand how 10xgraph handles distributed state:
 
 1. **Shared checkpointer is mandatory.** All replicas must read and write to the same Postgres and Redis. If they do not, the same thread will resolve differently depending on which pod answers, causing data loss. Use `PgCheckpointer` in production (see [Set up checkpointing](/docs/guides/set-up-checkpointing)).
 
-   Set `redis` (or `REDIS_URL`) as well so the API's cache store is shared: the run locks, caps, idempotency state, token revocations and rate-limit counters all live there. The in-memory store is per pod.
+   Set `"cache_store": {"type": "redis"}` (and `REDIS_URL`, or a `cache_store.url`) as well so the API's cache store is shared: the run locks, caps, idempotency state, token revocations and rate-limit counters all live there. The in-memory store is per pod.
 
 2. **Threads are not sticky.** State lives in the checkpointer, not in the pod. You do not need (and should not use) session affinity. A client can invoke a thread on any replica.
 

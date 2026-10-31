@@ -10,6 +10,16 @@ updated: "2026-10-27"
 
 You build the agent in Python. `10xgraph-api` serves it with authentication, per-user thread isolation, rate limits, durable state, replay-safe tools and Docker and Kubernetes files. A tool that finished before a crash is not run twice on replay. This section takes you from an empty folder to a secured, running server.
 
+## How you work with 10xGraph
+
+| Step | Command | What happens |
+|---|---|---|
+| 1 | `10xgraph init` | Scaffolds a project. It asks three questions: name, template and provider. |
+| 2 | `10xgraph dev` | Starts the API server on `127.0.0.1:8000` and opens the playground in your browser. Chat with your agent and inspect threads and runs. No frontend to write. |
+| 3 | `10xgraph config` | Opens a browser editor for every server setting in `10xgraph.json`. |
+
+Later, `10xgraph build` writes the Docker and Kubernetes files for deployment. Details are in [Playground](/docs/server/playground).
+
 ## Secure by the third step
 
 The quickstart server starts open so you can try it. Step 3 turns on JWT, and you watch the server return 401 without a token and 403 when a second user reads the first user's thread. With auth configured, the server also turns on owner-only thread access, so you do not write that code. [Security in five minutes](/docs/get-started/security-in-five-minutes) is the page; it needs one config key and two environment variables.

@@ -18,6 +18,16 @@ faq:
 
 You build the agent. Served with `10xgraph-api`, it gets authentication, per-user thread isolation, rate limits, durable state, replay-safe tools and Docker and Kubernetes deploy files, without you writing that layer. 10xGraph (formerly Agentflow) is an open-source Python framework for production multi-agent AI.
 
+## How you work with 10xGraph
+
+The `10xgraph` command comes with `10xgraph-api`. Three commands take you from an empty folder to a running agent you can chat with, with no frontend to write.
+
+1. `10xgraph init` scaffolds a project. It asks three questions: name, template and provider.
+2. `10xgraph dev` starts the API server on `127.0.0.1:8000` and opens the playground in your browser. Chat with your agent, and inspect its threads and runs.
+3. `10xgraph config` opens a browser editor for every server setting in `10xgraph.json`.
+
+When you are ready to deploy, `10xgraph build` writes the Dockerfile, and with flags a docker-compose.yml and a Kubernetes manifest. Pass `--no-open` to `10xgraph dev` if you want the server without the browser tab. See [Playground](/docs/server/playground).
+
 ## Your path
 
 1. [Quickstart](/docs/get-started/first-agent): build an agent and serve it in ten minutes.

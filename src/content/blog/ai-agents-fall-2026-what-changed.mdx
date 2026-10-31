@@ -651,12 +651,9 @@ If EU users talk to your support agent, the disclosure is a product requirement 
   "env": ".env",
   "auth": "jwt",
   "authorization": "ownership",
-  "redis": "${REDIS_URL}",
-  "rate_limit": {
-    "enabled": true,
-    "requests": 100,
-    "window": 60,
-    "by": "user"
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {"enabled": true, "requests": 100, "window": 60, "by": "user"}
   }
 }
 ```
@@ -685,7 +682,7 @@ Neither deal changes anything on day one. Both are a reminder that a gateway, a 
 10xGraph's API server is part of the open-source install. A production project with auth, rate limits, validators, evals and tests is one command:
 
 ```bash title="Terminal"
-10xgraph init --template production --auth jwt --rate-limit redis --name support-agent --yes
+10xgraph init --template production --name support-agent --yes
 10xgraph dev --no-open             # local server on http://127.0.0.1:8000
 10xgraph build --docker-compose --k8s
 ```

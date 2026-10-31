@@ -21,32 +21,36 @@ You write the agent. `10xgraph-api` turns it into an HTTP service with JWT auth,
 ## 1. Scaffold the production template
 
 ```bash
-10xgraph init --template production --auth jwt --rate-limit redis --provider openai --yes
+10xgraph init --template production --auth jwt --provider openai --yes
 ```
 
-`--rate-limit` takes `none`, `memory` or `redis`. `redis` turns rate limiting on with a Redis cache store (`"redis": "${REDIS_URL}"`), which is shared between workers. `memory` turns it on without Redis, so the counters live in each process; use it for a first run.
+The production template turns on a Redis cache store (read from `REDIS_URL`), rate limiting and token revocation. The counters are shared between workers. For a first run without Redis, pass `--cache-store memory`; the counters then live in each process.
 
 The command writes the project into the current folder. The files you will touch:
 
 | File | What it holds |
 |---|---|
-| `10xgraph.json` | `"agent": "graph.agent:app"`, `"auth": "jwt"`, `"authorization": "ownership"`, the `rate_limit` block, `websocket` and `ag_ui` both off |
+| `10xgraph.json` | `"agent": "graph.agent:app"`, `"auth": "jwt"`, `"authorization": "ownership"`, the `cache_store` block, `id_generator`, `websocket` and `ag_ui` both off |
 | `graph/agent.py` | A `ReactAgent` compiled with a checkpointer |
 | `.env.example` | `MODE="production"`, `ORIGINS`, `ALLOWED_HOST`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `REDIS_URL`, `OPENAI_API_KEY`, empty `DOCS_PATH` |
 | `tests/`, `evals/` | A starter test and a starter eval file |
 
-The Redis, token revocation and rate limit sections of `10xgraph.json` as generated:
+The ID generator and cache store (rate limit and token revocation) sections of `10xgraph.json` as generated:
 
 ```json
-"redis": "${REDIS_URL}",
-"token_revocation": true,
-"rate_limit": {
-  "enabled": true,
-  "requests": 100,
-  "window": 60,
-  "by": "ip",
-  "trusted_proxy_headers": false,
-  "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
+"id_generator": "uuid",
+"cache_store": {
+  "type": "redis",
+  "rate_limit": {
+    "enabled": true,
+    "requests": 100,
+    "window": 60,
+    "by": "user",
+    "trusted_proxy_headers": false,
+    "fail_open": false,
+    "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
+  },
+  "token_revocation": true
 }
 ```
 

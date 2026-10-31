@@ -13,7 +13,7 @@ faq:
   - question: "Can I use in-memory checkpointing in production?"
     answer: "No. InMemoryCheckpointer loses all state on restart and cannot be shared across instances. Use PgCheckpointer for all production deployments."
   - question: "Do I have to use Redis?"
-    answer: "PgCheckpointer requires a Redis connection (redis_url, a redis_pool or a redis instance) in addition to Postgres; Redis is its cache and Postgres is the durable store. The API itself uses Redis as its cache store (run locks and caps, idempotency, ownership cache, token revocation, rate-limit counters) when you set `redis` or `REDIS_URL`; without it those live in each process."
+    answer: "PgCheckpointer requires a Redis connection (redis_url, a redis_pool or a redis instance) in addition to Postgres; Redis is its cache and Postgres is the durable store. The API itself uses Redis as its cache store (run locks and caps, idempotency, ownership cache, token revocation, rate-limit counters) when `cache_store.type` is `redis`; without it those live in each process."
 ---
 
 Deploying 10xGraph to production requires hardening your API server for security, reliability, and scale. This checklist walks through every critical setting, from runtime mode to persistence topology to horizontal scaling, with verification steps to confirm each piece is working before traffic arrives.
@@ -191,9 +191,9 @@ Expected tables in the `public` schema (or the `schema=` you pass): `threads`, `
 
 ### Startup check
 
-At boot the server calls `aping()` on the checkpointer (Postgres, the schema version and its Redis cache), on the store when one is bound, and on the API's cache store. It retries with a short backoff for `STARTUP_CHECK_TIMEOUT_SECONDS` (30 by default), so containers started together can come up in any order. The checkpointer and the store are fatal: if one is still down, the server exits with a message naming each backend and its endpoint (no credentials). The cache store is fatal only when a fail-closed feature uses it: `token_revocation` is on, or `rate_limit` is on with `fail_open` set to `false`. Otherwise the server logs one WARNING that the cache store is unreachable and that locks and caps fall back to per process, and starts anyway. A broken connection string therefore fails the deploy instead of the first request, and the orchestrator restarts the container until the backends are up.
+At boot the server calls `aping()` on the checkpointer (Postgres, the schema version and its Redis cache), on the store when one is bound, and on the API's cache store. It retries with a short backoff for `STARTUP_CHECK_TIMEOUT_SECONDS` (30 by default), so containers started together can come up in any order. The checkpointer and the store are fatal: if one is still down, the server exits with a message naming each backend and its endpoint (no credentials). The cache store is fatal only when a fail-closed feature uses it: `cache_store.token_revocation` is on (with auth), or `cache_store.rate_limit` is on with `fail_open` set to `false`. Otherwise the server logs one WARNING that the cache store is unreachable and that locks and caps fall back to per process, and starts anyway. A broken connection string therefore fails the deploy instead of the first request, and the orchestrator restarts the container until the backends are up.
 
-A leftover `REDIS_URL` no longer blocks boot when nothing you configured needs it. Before 1.0.0rc4 it did.
+A leftover `REDIS_URL` never blocks boot: it only matters to a `cache_store` of type `redis` with no `url`.
 
 `STARTUP_CHECKS=false` skips the check. It runs the same probes as `/health/ready`, with a different outcome: at startup an unreachable checkpointer or store stops the server, while at runtime `/health/ready` answers 503 so the load balancer stops sending traffic until the backend returns. See [Ping and health](/docs/reference/rest-api/ping#get-healthready).
 
@@ -302,27 +302,26 @@ Enable rate limiting to protect against abuse and unintended traffic spikes:
 
 ```json
 {
-  "rate_limit": {
-    "enabled": true,
-    "requests": 100,
-    "window": 60,
-    "by": "ip"
-  },
-  "redis": "${REDIS_URL}"
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {"enabled": true, "requests": 100, "window": 60, "by": "ip"}
+  }
 }
 ```
 
-This allows 100 requests per IP address per 60-second window. The counters live in the API's cache store, so set `redis` (or `REDIS_URL`) to share them across replicas. They use their own key namespace, separate from the checkpointer cache.
+This allows 100 requests per IP address per 60-second window. The counters live in the API's cache store, so set `cache_store.type` to `redis` to share them across replicas. They use their own key namespace, separate from the checkpointer cache.
 
 `/ping` is always excluded from rate limiting. Add other paths with `exclude_paths`:
 
 ```json
 {
-  "rate_limit": {
-    "enabled": true,
-    "requests": 100,
-    "window": 60,
-    "exclude_paths": ["/metrics"]
+  "cache_store": {
+    "rate_limit": {
+      "enabled": true,
+      "requests": 100,
+      "window": 60,
+      "exclude_paths": ["/metrics"]
+    }
   }
 }
 ```
@@ -358,7 +357,7 @@ client_max_body_size 50m;
 proxy_buffering off;
 ```
 
-Behind a proxy, every request appears to come from the proxy's address. For per-IP rate limiting to see real client IPs, set `trusted_proxy_headers` in the `rate_limit` block of `10xgraph.json` (see [Rate limiting](/docs/server/rate-limiting)). Only enable it when the proxy sets `X-Forwarded-For`.
+Behind a proxy, every request appears to come from the proxy's address. For per-IP rate limiting to see real client IPs, set `trusted_proxy_headers` in the `cache_store.rate_limit` block of `10xgraph.json` (see [Rate limiting](/docs/server/rate-limiting)). Only enable it when the proxy sets `X-Forwarded-For`.
 
 ## 9. Media storage and file uploads
 
@@ -510,8 +509,8 @@ curl http://127.0.0.1:8000/ping
 | One worker sees state, another does not | Workers are not sharing the same backend | Point all instances at the same Postgres and Redis |
 | CORS requests are blocked | `ORIGINS` does not include the client domain | Add the domain to `ORIGINS`. A public API can set `ORIGINS=*` with `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false` |
 | `409 thread is busy` on a thread | Another run is still active, and the 30 s wait ran out | Wait for the run to end, use `on_busy: "cancel"`, or use one thread per conversation |
-| Server exits at boot with `Refusing to start: ... backend(s) unreachable` | A configured Postgres, store, or (with `token_revocation` or a fail-closed `rate_limit`) cache store did not answer within `STARTUP_CHECK_TIMEOUT_SECONDS` | Fix the URL or start the backend. `STARTUP_CHECKS=false` skips the check |
-| Rate limiting not working | No `rate_limit` block, or Redis is down (with `fail_open` true, requests pass) | Verify the `redis` key or `REDIS_URL` and Redis connectivity |
+| Server exits at boot with `Refusing to start: ... backend(s) unreachable` | A configured Postgres, store, or (with `cache_store.token_revocation` or a fail-closed `cache_store.rate_limit`) cache store did not answer within `STARTUP_CHECK_TIMEOUT_SECONDS` | Fix the URL or start the backend. `STARTUP_CHECKS=false` skips the check |
+| Rate limiting not working | No `cache_store.rate_limit` block, or Redis is down (with `fail_open` true, requests pass) | Verify `cache_store.type` is `redis`, its `url` or `REDIS_URL`, and Redis connectivity |
 
 ## Related pages
 

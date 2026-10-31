@@ -342,7 +342,7 @@ For simple role-to-scope mapping, you do not need a class. Set `authorization` t
 
 ### BaseCacheStore
 
-The API keeps everything it shares between workers in one `BaseCacheStore`: the per-thread run lock, run and WebSocket caps, idempotency, the ownership cache, token revocation and rate-limit counters. `RedisCacheStore` is the default when you set `redis` or `REDIS_URL` (Valkey, Dragonfly and KeyDB work through the URL); `InMemoryCacheStore` is the fallback for one process. You extend `BaseCacheStore` when the shared state has to live in something that does not speak the Redis protocol.
+The API keeps everything it shares between workers in one `BaseCacheStore`: the per-thread run lock, run and WebSocket caps, idempotency, the ownership cache, token revocation and rate-limit counters. `RedisCacheStore` is used when `cache_store.type` is `redis` (Valkey, Dragonfly and KeyDB work through the URL); `InMemoryCacheStore` is the default for one process. You extend `BaseCacheStore` when the shared state has to live in something that does not speak the Redis protocol.
 
 ```python
 from tenxgraph_api import BaseCacheStore, SlotResult

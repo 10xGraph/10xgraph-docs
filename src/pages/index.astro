@@ -172,6 +172,20 @@ const jsonLd = [
   </div>
 </section>
 
+<!-- CLI PATH -->
+<section aria-labelledby="cli-path">
+  <div class="wrap">
+    <span class="kicker">The CLI</span>
+    <h2 id="cli-path" style="margin-bottom:20px">Three commands from empty folder to a chat with your agent</h2>
+    <div class="cfg">
+      <div class="cfg-head"><span>command</span><span>what happens</span></div>
+      <div class="cfg-row"><code>10xgraph init</code><div><b>Scaffold a project.</b> Three questions: name, template and provider.</div></div>
+      <div class="cfg-row"><code>10xgraph dev</code><div><b>Start the server and open the playground.</b> The API runs on 127.0.0.1:8000 and the playground opens in your browser. Chat with your agent and inspect threads and runs. No frontend to write.</div></div>
+      <div class="cfg-row"><code>10xgraph config</code><div><b>Edit every server setting</b> in a browser editor.</div></div>
+    </div>
+  </div>
+</section>
+
 <!-- WHAT IS -->
 <section aria-labelledby="what">
   <div class="wrap">
@@ -210,7 +224,7 @@ const jsonLd = [
           <div class="cfg-head"><span>10xgraph.json key</span><span>what you get</span></div>
           <div class="cfg-row"><code>"auth": "jwt"</code><div><b>JWT authentication</b> on every endpoint, or plug in your own auth class.</div></div>
           <div class="cfg-row"><code>"authorization": "ownership"</code><div><b>Owner-only threads.</b> A thread is readable only by the user who created it.</div></div>
-          <div class="cfg-row"><code>"rate_limit": &#123; "backend": "redis" &#125;</code><div><b>Rate limiting</b> shared across workers, or in memory for one process.</div></div>
+          <div class="cfg-row"><code>"rate_limit": &#123; "enabled": true &#125;</code><div><b>Rate limiting</b> shared across workers through Redis, or in memory for one process.</div></div>
           <div class="cfg-row"><code>build --docker-compose --k8s</code><div><b>Deployment files:</b> Dockerfile, docker-compose.yml and a Kubernetes Deployment and Service.</div></div>
           <div class="cfg-row"><code>POST /v1/graph/stream</code><div><b>Streaming</b> over SSE, plus WebSocket and a realtime audio endpoint.</div></div>
         </div>

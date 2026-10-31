@@ -145,11 +145,9 @@ The AG-UI endpoint counts against the global `rate_limit` configuration like any
 
 ```json
 {
-  "redis": "${REDIS_URL}",
-  "rate_limit": {
-    "enabled": true,
-    "requests": 100,
-    "window": 60
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {"enabled": true, "requests": 100, "window": 60}
   }
 }
 ```

@@ -48,9 +48,8 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
 {
   "agent": "graph.agent:get_compiled_graph",
   "auth": "jwt",
-  "rate_limit": {
-    "requests": 100,
-    "window": 60
+  "cache_store": {
+    "rate_limit": {"requests": 100, "window": 60}
   }
 }
 ```
@@ -65,15 +64,17 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
   "authorization": "auth.agent_auth:MyAuthorizationBackend",
   "injectq": "graph.agent:container",
   "store": "services.store:my_store",
-  "redis": "${REDIS_URL}",
-  "token_revocation": true,
   "thread_name_generator": "services.naming:MyNameGenerator",
-  "rate_limit": {
-    "requests": 1000,
-    "window": 60,
-    "by": "ip",
-    "trusted_proxy_headers": true,
-    "exclude_paths": ["/ping", "/docs"]
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {
+      "requests": 1000,
+      "window": 60,
+      "by": "ip",
+      "trusted_proxy_headers": true,
+      "exclude_paths": ["/ping", "/docs"]
+    },
+    "token_revocation": true
   }
 }
 ```
@@ -87,9 +88,9 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
 | `checkpointer` | module:path | Accepted in the file, but the server does not load it. Pass the checkpointer to `compile(checkpointer=...)` in your graph module instead. |
 | `injectq` | module:path | Points to an `InjectQ` container instance. |
 | `store` | module:path | Loads your `BaseStore` for long-term memory. |
-| `redis` | URL string | Redis URL. The ownership authorization cache uses it as a shared cache tier. |
-| `thread_name_generator` | module:path | Loads your `ThreadNameGenerator` class or instance. |
-| `rate_limit` | object | Rate limiting config (see below). |
+| `id_generator` | name \| module:path | `uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or your `BaseIDGenerator`. |
+| `thread_name_generator` | name \| module:path | `random` (default), `first_message`, `none`, or your `ThreadNameGenerator` class or instance. |
+| `cache_store` | object | The cache store (`type`, `url`, `path`) plus `rate_limit` and `token_revocation` (see below). The ownership authorization cache uses it as a shared cache tier. |
 
 **Starting the server:**
 
@@ -207,23 +208,25 @@ Override by setting `authorization` to a `module:attr` path, a built-in name (`"
 
 ## Rate limiting
 
-Rate limiting keeps its counters in the API's cache store, the same store that holds the run locks and caps. There is no separate rate-limit backend. Set `redis` (or `REDIS_URL`) to share the counters between workers, or `cache_store` to supply your own `BaseCacheStore`.
+Rate limiting keeps its counters in the API's cache store, the same store that holds the run locks and caps. There is no separate rate-limit backend. The `rate_limit` object sits inside `cache_store`. Set `"type": "redis"` to share the counters between workers (Redis from `cache_store.url` or `REDIS_URL`), or `"type": "custom"` with a `path` to supply your own `BaseCacheStore`.
 
 ```json
 {
-  "redis": "${REDIS_URL}",
-  "rate_limit": {
-    "requests": 100,
-    "window": 60,
-    "by": "ip",
-    "trusted_proxy_headers": true,
-    "fail_open": false,
-    "exclude_paths": ["/ping"]
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {
+      "requests": 100,
+      "window": 60,
+      "by": "ip",
+      "trusted_proxy_headers": true,
+      "fail_open": false,
+      "exclude_paths": ["/ping"]
+    }
   }
 }
 ```
 
-Without a Redis URL the counters live in each process, so use `redis` when you run several workers.
+With the default `memory` type the counters live in each process, so use `redis` when you run several workers.
 
 | Config key | Default | Purpose |
 |---|---|---|
@@ -235,7 +238,7 @@ Without a Redis URL the counters live in each process, so use `redis` when you r
 | `fail_open` | true | Allow requests if the cache store errors. `false` answers 503 `RATE_LIMIT_UNAVAILABLE`. |
 | `exclude_paths` | `[]` | Paths exempt from rate limiting. |
 
-The keys `rate_limit.backend` and `rate_limit.redis` and the `BaseRateLimitBackend` class were removed in 1.0.0rc4. To store counters somewhere other than Redis, implement `BaseCacheStore`; see [Bring your own backend](/docs/server/bring-your-own-backend).
+To store counters somewhere other than Redis, implement `BaseCacheStore`; see [Bring your own backend](/docs/server/bring-your-own-backend).
 
 ## Publishers
 

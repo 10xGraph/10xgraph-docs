@@ -134,7 +134,7 @@ app.invoke(
 
 ```bash
 pip install "10xgraph[google-genai,pg_checkpoint]" 10xgraph-api llama-index
-10xgraph init --yes --template production --auth jwt --rate-limit redis
+10xgraph init --yes --template production --auth jwt
 10xgraph dev --host 0.0.0.0 --port 8000 --no-open
 10xgraph build --docker-compose --k8s
 ```

@@ -29,13 +29,11 @@ Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: th
 | `injectq` | string or null | none | Import path of an InjectQ container |
 | `store` | string or null | none | Import path of a `BaseStore` for long-term memory |
 | `checkpointer` | string or null | none | Not applied by the API server. If set, the server logs a warning and ignores it. Pass the checkpointer to `compile()` |
-| `thread_name_generator` | string or null | none | Import path of a thread name generator |
-| `redis` | string or null | none | Redis URL for the API's cache store (run locks and caps, idempotency, ownership cache, token revocation, rate limiting). Falls back to `REDIS_URL`. `$VAR` and `${VAR}` are expanded |
-| `cache_store` | string or null | none | `module:attr` of a `BaseCacheStore` instance or zero-argument factory. Wins over `redis` and `REDIS_URL`. See [Bring your own backend](/docs/server/bring-your-own-backend) |
-| `token_revocation` | boolean or object | `false` | Refuse revoked tokens. `true`, or `{"enabled": true, "token_lifetime": <seconds>, "user_ttl": <seconds>}`. `user_ttl` defaults to 30 days; `null` keeps entries forever. Entries live in the cache store. The old values `"redis"`, `"memory"` and `"module:attr"` were removed in 1.0.0rc4 and stop startup with an error that names `cache_store` |
+| `thread_name_generator` | string or null | `random` | `random`, `first_message`, `none` or a `module:attr` path. See [thread_name_generator](#thread_name_generator) |
+| `id_generator` | string or null | graph's own | `uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or a `module:attr` path. See [id_generator](#id_generator) |
+| `cache_store` | object or null | in-memory | One object that holds the cache store and what it backs: `type`, `url`, `path`, `rate_limit`, `token_revocation`. See [cache_store](#cache_store) |
 | `remote_tools` | array | `[]` | Schemas of tools that run in the client |
 | `runs` | object | built-in defaults | Who names threads, which client input reaches the graph, and run limits |
-| `rate_limit` | object | absent (off) | Request rate limiting |
 | `websocket` | object | built-in caps | WebSocket connection limits |
 | `media` | object | `{"delete_with_thread": true}` | Uploaded-file lifecycle |
 | `ag_ui` | object | disabled | AG-UI protocol endpoint |
@@ -43,7 +41,45 @@ Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: th
 | `test` | object | absent | Defaults for `10xgraph test` |
 | `evaluation` | object | absent | Defaults for `10xgraph eval` |
 
-Import paths use `module:attribute`. Unknown top-level keys are kept in the file but ignored.
+Import paths use `module:attribute`. Unknown top-level keys are kept in the file but ignored, except `redis`, `rate_limit` and `token_revocation`: those do not exist at the top level and stop the load with an error that says they belong inside `cache_store`.
+
+For what each key does when it is absent, and what `10xgraph init` writes, see [What is on by default](/docs/server/configure#what-is-on-by-default).
+
+### thread_name_generator
+
+| Value | Meaning |
+|---|---|
+| `"random"` or absent | A random name. This is the default |
+| `"first_message"` | The user's first message, whitespace collapsed, cut to at most 60 characters on a word boundary. A random name when the message has no text |
+| `"none"` | Threads stay unnamed but are saved |
+| `"module:attr"` | A `ThreadNameGenerator` subclass or instance. It receives the user's messages first, then the replies |
+
+The server saves every generated name in the background after the run.
+
+### id_generator
+
+| Value | Meaning |
+|---|---|
+| absent | The graph keeps the generator it was compiled with |
+| `"uuid"`, `"hex"`, `"short"`, `"int"`, `"bigint"`, `"timestamp"` | The matching built-in generator |
+| `"snowflake"` | `SnowFlakeIdGenerator`. Needs the `snowflakekit` extra and reads the `SNOWFLAKE_*` environment variables |
+| `"module:attr"` | A `BaseIDGenerator` instance, subclass or zero-argument factory |
+
+The server binds the generator for the loaded graph, so new thread ids, message ids and memory ids all come from it. It refuses to boot when the graph code also sets a generator (`StateGraph(id_generator=...)`), and when a `PgCheckpointer`'s `id_type` cannot hold the ids the generator makes. Pick one place to set it. See [Configure the ID generator](/docs/guides/configure-id-generator).
+
+### cache_store
+
+One object. The cache store holds the run locks and caps, idempotency state, the ownership cache, token revocation and rate-limit counters.
+
+| Key | Type | Default | Purpose |
+|---|---|---|---|
+| `type` | string | `memory` | `memory` (per process), `redis` or `custom`. Absent `cache_store` or `type` is `memory` |
+| `url` | string | empty | Type `redis` only. Empty uses the `REDIS_URL` environment variable. A set value wins, as a literal or `$VAR` / `${VAR}` (an unset variable is a config error), so the cache store can use a different Redis than the checkpointer. Valkey, Dragonfly and KeyDB work too |
+| `path` | string | none | Type `custom` only, required. `module:attr` of a `BaseCacheStore` instance or zero-argument factory. See [Bring your own backend](/docs/server/bring-your-own-backend) |
+| `rate_limit` | object | absent (off) | Request rate limiting. See [rate_limit](#rate_limit) |
+| `token_revocation` | boolean or object | `false` | Refuse revoked tokens. `true`, or `{"enabled": true, "token_lifetime": <seconds>, "user_ttl": <seconds>}`. `user_ttl` defaults to 30 days; `null` keeps entries forever. Needs auth. A string value is a config error |
+
+`REDIS_URL` alone never selects Redis; only `type: "redis"` does. Type `redis` without the `redis` package refuses to boot (`pip install "10xgraph-api[redis]"`). Unknown keys inside `cache_store` are config errors that list the valid ones.
 
 ### auth
 
@@ -122,7 +158,7 @@ Set these when a tool or node trusts a value such as `role` or `plan` from state
 
 ### max_concurrent_per_user
 
-Caps the HTTP graph runs (invoke, stream and AG-UI) one verified user may have in flight at once. The count is shared by all workers when a shared cache store is configured (`redis` key, `REDIS_URL` or `cache_store`) and kept per process otherwise. Over the cap the request gets `429`. `0` or `null` means no cap. Requests without a verified user (auth off) are not capped. The value must be a non-negative integer.
+Caps the HTTP graph runs (invoke, stream and AG-UI) one verified user may have in flight at once. The count is shared by all workers when a shared cache store is configured (`cache_store.type` `redis` or `custom`) and kept per process otherwise. Over the cap the request gets `429`. `0` or `null` means no cap. Requests without a verified user (auth off) are not capped. The value must be a non-negative integer.
 
 ### timeout
 
@@ -134,7 +170,7 @@ Caps how many tool calls one model turn may run at once. The server puts it into
 
 ## rate_limit
 
-Rate limiting applies to REST requests. `/ping` is always excluded. Set `"enabled": false` to keep the block without enforcing it.
+`cache_store.rate_limit` turns on rate limiting for REST requests. `/ping` is always excluded. Set `"enabled": false` to keep the block without enforcing it.
 
 | Key | Type | Default | Purpose |
 |---|---|---|---|
@@ -148,7 +184,7 @@ Rate limiting applies to REST requests. `/ping` is always excluded. Set `"enable
 | `trusted_proxy_hops` | integer | `1` | Proxies you control, counted from the right of `X-Forwarded-For`. At least 1 |
 | `trusted_proxies` | array | `[]` | IPs or CIDR ranges your proxies connect from. Others cannot spoof the header |
 
-The counters live in the API's cache store. With the in-memory store they count per process, so with N workers the real limit is `requests` times N and it resets on restart. Set `redis` (or `REDIS_URL`) for any multi-worker deployment. The keys `rate_limit.backend` and `rate_limit.redis` were removed in 1.0.0rc4 and stop startup with an error that names `cache_store`.
+The counters live in the API's cache store. With the in-memory store they count per process, so with N workers the real limit is `requests` times N and it resets on restart. Set `cache_store.type` to `redis` for any multi-worker deployment. Unknown keys inside `rate_limit` are config errors that list the valid ones.
 
 ## websocket, ag_ui and observability
 
@@ -213,18 +249,21 @@ The server reads configuration from environment variables, which are listed in f
   "authorization": "ownership",
   "injectq": "graph.agent:container",
   "store": null,
-  "redis": "${REDIS_URL}",
-  "token_revocation": true,
-  "thread_name_generator": "graph.thread_name_generator:MyNameGenerator",
-  "rate_limit": {
-    "enabled": true,
-    "requests": 100,
-    "window": 60,
-    "by": "user",
-    "trusted_proxy_headers": true,
-    "trusted_proxy_hops": 1,
-    "exclude_paths": ["/docs"],
-    "fail_open": true
+  "thread_name_generator": "first_message",
+  "id_generator": "uuid",
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {
+      "enabled": true,
+      "requests": 100,
+      "window": 60,
+      "by": "user",
+      "trusted_proxy_headers": true,
+      "trusted_proxy_hops": 1,
+      "exclude_paths": ["/docs"],
+      "fail_open": true
+    },
+    "token_revocation": true
   },
   "websocket": { "max_connections": 500, "max_connections_per_user": 5 },
   "ag_ui": { "enabled": false },

@@ -727,21 +727,18 @@ if __name__ == "__main__":
   "env": "../.env",
   "auth": null,
   "remote_tools": [],
-  "ag_ui": {
-    "enabled": false
-  },
-  "redis": "${REDIS_URL}",
-  "rate_limit": {
-    "enabled": true,
-    "requests": 60,
-    "window": 60,
-    "by": "ip",
-    "fail_open": true,
-    "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
-  },
-  "test": {
-    "path": "tests",
-    "coverage": false
+  "ag_ui": {"enabled": false},
+  "test": {"path": "tests", "coverage": false},
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {
+      "enabled": true,
+      "requests": 60,
+      "window": 60,
+      "by": "ip",
+      "fail_open": true,
+      "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
+    }
   }
 }
 ```

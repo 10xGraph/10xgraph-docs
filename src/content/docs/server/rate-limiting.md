@@ -9,7 +9,7 @@ faq:
   - question: Do I need rate limiting in development?
     answer: "In development, you can run without limits. In any production environment, rate limiting protects your infrastructure from both accidental overuse and abuse."
   - question: How much does Redis add to the setup?
-    answer: "Set `redis` in `10xgraph.json` or `REDIS_URL` in the environment. The rate limiter then shares the API's cache store with the run locks and caps. There is no separate rate-limit Redis setting."
+    answer: "Set `cache_store.type` to `redis` in `10xgraph.json`, with `REDIS_URL` in the environment or a `cache_store.url`. The rate limiter then shares the API's cache store with the run locks and caps. There is no separate rate-limit Redis setting."
   - question: What happens if the cache store is unreachable?
     answer: "With `fail_open: true` (the default), requests pass through; with `fail_open: false`, requests are denied with 503 `RATE_LIMIT_UNAVAILABLE`. Choose based on whether uptime matters more than protection."
 ---
@@ -26,23 +26,25 @@ The rate limiter is HTTP middleware that executes before your graph logic runs o
 
 The limiter uses a **sliding-window algorithm**, not fixed time buckets. This means the window rolls with each request: a client with a limit of 100 requests per 60 seconds can send 100 requests in the first 30 seconds, then nothing until 60 seconds have passed, then 100 more. This prevents bursts that would succeed with a simple bucket-based counter.
 
-The counters live in the API's **cache store**, the same one that holds the run locks and caps. There is no separate rate-limit backend. With a Redis URL set (`redis` in `10xgraph.json` or `REDIS_URL`) every worker shares the counters; without one they live in each process. To keep counters somewhere else, supply your own cache store (see [Bring your own backend](/docs/server/bring-your-own-backend)).
+The counters live in the API's **cache store**, the same one that holds the run locks and caps. There is no separate rate-limit backend. With `cache_store.type` set to `redis` every worker shares the counters; with the default `memory` type they live in each process. The `rate_limit` object sits inside `cache_store`. To keep counters somewhere else, supply your own cache store (see [Bring your own backend](/docs/server/bring-your-own-backend)).
 
 ## Single process (development)
 
-With no Redis URL the counters live in process memory. It works with a single Uvicorn worker and needs no extra dependencies.
+With no `cache_store` (the in-memory store) the counters live in process memory. It works with a single Uvicorn worker and needs no extra dependencies.
 
 **Update `10xgraph.json`:**
 
 ```json
 {
   "agent": "graph.react:app",
-  "rate_limit": {
-    "enabled": true,
-    "requests": 100,
-    "window": 60,
-    "by": "ip",
-    "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
+  "cache_store": {
+    "rate_limit": {
+      "enabled": true,
+      "requests": 100,
+      "window": 60,
+      "by": "ip",
+      "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
+    }
   }
 }
 ```
@@ -93,15 +95,17 @@ pip install "10xgraph-api[redis]"
 ```json
 {
   "agent": "graph.react:app",
-  "redis": "${REDIS_URL}",
-  "rate_limit": {
-    "enabled": true,
-    "requests": 1000,
-    "window": 60,
-    "by": "ip",
-    "trusted_proxy_headers": true,
-    "exclude_paths": ["/ping", "/metrics", "/docs", "/redocs", "/openapi.json"],
-    "fail_open": true
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {
+      "enabled": true,
+      "requests": 1000,
+      "window": 60,
+      "by": "ip",
+      "trusted_proxy_headers": true,
+      "exclude_paths": ["/ping", "/metrics", "/docs", "/redocs", "/openapi.json"],
+      "fail_open": true
+    }
   }
 }
 ```
@@ -113,11 +117,11 @@ pip install "10xgraph-api[redis]"
 REDIS_URL=redis://localhost:6379/0
 ```
 
-The `${REDIS_URL}` placeholder is expanded from the environment at startup. Never commit Redis credentials into `10xgraph.json`. You can also drop the `redis` key: the server reads `REDIS_URL` on its own. Valkey, Dragonfly and KeyDB work the same way, through the URL.
+The `${REDIS_URL}` placeholder is expanded from the environment at startup. Never commit Redis credentials into `10xgraph.json`. Leave out `url` and the server reads `REDIS_URL` on its own; set `"url": "${REDIS_URL}"` to say so in the file. `REDIS_URL` alone never turns Redis on: `"type": "redis"` does. Valkey, Dragonfly and KeyDB work the same way, through the URL.
 
 **How it works:** The Redis cache store uses a Lua script with sorted sets to atomically check and record a request in one operation. This prevents concurrent requests from slipping past the configured limit. Each request adds a slot that expires when the window ends; Redis evicts idle keys using TTL.
 
-The rate-limit counters use their own Redis key namespace (`10xgraph:ratelimit2`). When you upgrade from an earlier release the counters reset once.
+The rate-limit counters use their own Redis key namespace (`10xgraph:ratelimit2`).
 
 **Verify it works:** Set up Redis, update your config, restart the server, and load-test from multiple processes:
 
@@ -141,16 +145,14 @@ The check and the recording happen as one atomic Redis operation, which prevents
 
 ## Another store
 
-The `rate_limit.backend` and `rate_limit.redis` keys and the `BaseRateLimitBackend` class were removed in 1.0.0rc4; a config that still sets them stops with an error that names `cache_store`. To keep the counters in something other than Redis, implement `BaseCacheStore` and select it with `"cache_store": "module:attr"`:
+To keep the counters in something other than Redis, implement `BaseCacheStore` and select it with `"type": "custom"` and a `path`:
 
 ```json
 {
-  "cache_store": "graph.cache:store",
-  "rate_limit": {
-    "enabled": true,
-    "requests": 200,
-    "window": 60,
-    "by": "ip"
+  "cache_store": {
+    "type": "custom",
+    "path": "graph.cache:store",
+    "rate_limit": {"enabled": true, "requests": 200, "window": 60, "by": "ip"}
   }
 }
 ```
@@ -165,7 +167,9 @@ When the store raises an error, the limiter follows `fail_open` (see [What clien
 
 ```json
 {
-  "rate_limit": { "requests": 100, "window": 60, "by": "ip" }
+  "cache_store": {
+    "rate_limit": {"requests": 100, "window": 60, "by": "ip"}
+  }
 }
 ```
 
@@ -175,7 +179,9 @@ Limits requests by client IP address. This is the default and works well when yo
 
 ```json
 {
-  "rate_limit": { "requests": 100, "window": 60, "by": "user" }
+  "cache_store": {
+    "rate_limit": {"requests": 100, "window": 60, "by": "user"}
+  }
 }
 ```
 
@@ -187,7 +193,9 @@ Requests with no authenticated user fall back to an `ip:<address>` bucket, so an
 
 ```json
 {
-  "rate_limit": { "requests": 5000, "window": 60, "by": "global" }
+  "cache_store": {
+    "rate_limit": {"requests": 5000, "window": 60, "by": "global"}
+  }
 }
 ```
 
@@ -211,12 +219,14 @@ If your API runs behind nginx, a load balancer, or a cloud gateway, the real cli
 
 ```json
 {
-  "rate_limit": {
-    "requests": 1000,
-    "window": 60,
-    "by": "ip",
-    "trusted_proxy_headers": true,
-    "trusted_proxy_hops": 1
+  "cache_store": {
+    "rate_limit": {
+      "requests": 1000,
+      "window": 60,
+      "by": "ip",
+      "trusted_proxy_headers": true,
+      "trusted_proxy_hops": 1
+    }
   }
 }
 ```
@@ -249,8 +259,10 @@ Add monitoring, health-check, and documentation paths to `exclude_paths` so they
 
 ```json
 {
-  "rate_limit": {
-    "exclude_paths": ["/ping", "/metrics", "/docs", "/redocs", "/openapi.json"]
+  "cache_store": {
+    "rate_limit": {
+      "exclude_paths": ["/ping", "/metrics", "/docs", "/redocs", "/openapi.json"]
+    }
   }
 }
 ```
@@ -259,12 +271,11 @@ Health checks (`/ping`) are excluded automatically and do not need to be listed.
 
 ## Disabling rate limiting
 
-Remove the `rate_limit` block (or set it to `null`) to disable the middleware entirely:
+Remove the `cache_store.rate_limit` block (or set it to `null`) to disable the middleware entirely:
 
 ```json
 {
-  "agent": "graph.react:app",
-  "rate_limit": null
+  "agent": "graph.react:app"
 }
 ```
 
@@ -324,11 +335,11 @@ Clients can check `X-RateLimit-Remaining` before sending the next request to avo
 
 **I still get unlimited requests even though I configured a limit.**
 
-Verify that `10xgraph.json` has a `rate_limit` block with `"enabled"` not set to `false` and that you restarted the server after editing the file. Check the startup logs for rate-limit configuration messages. If you use Redis, ensure the connection is working: a cache store error with `fail_open: true` allows all requests.
+Verify that `10xgraph.json` has a `cache_store.rate_limit` block with `"enabled"` not set to `false` and that you restarted the server after editing the file. Check the startup logs for rate-limit configuration messages. If you use Redis, ensure the connection is working: a cache store error with `fail_open: true` allows all requests.
 
 **Different workers seem to have different limits.**
 
-You are using the in-memory cache store with multiple workers. Each process maintains its own counters, so the real limit is `requests × workers`. Set `redis` or `REDIS_URL` for consistent enforcement across workers.
+You are using the in-memory cache store with multiple workers. Each process maintains its own counters, so the real limit is `requests × workers`. Set `cache_store.type` to `redis` for consistent enforcement across workers.
 
 **The proxy's real IP is not being recognized.**
 

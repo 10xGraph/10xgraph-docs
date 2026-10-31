@@ -8,7 +8,7 @@ label: Ping
 updated: "2026-10-27"
 ---
 
-`GET /ping` is the health check of the 10xGraph API server. It needs no authentication, reads no state, and returns a constant `pong` inside the standard response envelope. Use it to confirm that the process is up and accepting HTTP requests. `GET /health/ready` is the readiness probe: it also checks the checkpointer, Redis and the store.
+`GET /ping` is the health check of the 10xGraph API server. It needs no authentication, reads no state, and returns a constant `pong` inside the standard response envelope. Use it to confirm that the process is up and accepting HTTP requests. `GET /health/ready` is the readiness probe: it also checks the checkpointer, the store and the cache store.
 
 ---
 
@@ -48,9 +48,7 @@ The readiness probe. `/ping` says the process is alive; `/health/ready` says the
 
 - **checkpointer**: `aping()` of the checkpointer. For `PgCheckpointer` that is a `SELECT 1`, a check that the schema version is not older than the code expects, and a ping of its Redis cache. It never creates the schema.
 - **store**: `aping()` of the store, when one is bound.
-- **cache**: `aping()` of the API's cache store (Redis, or your own `BaseCacheStore`). It is reported always, but it fails readiness only when a fail-closed feature uses it: `token_revocation` is on, or `rate_limit` is on with `fail_open` set to `false`. For everything else (locks, caps, idempotency, the ownership cache) a cache store outage is reported and the server keeps taking traffic.
-
-The key `cache` replaced `redis` in 1.0.0rc4.
+- **cache**: `aping()` of the API's cache store (Redis, or your own `BaseCacheStore`). It is reported always, but it fails readiness only when a fail-closed feature uses it: `cache_store.token_revocation` is on (with auth), or `cache_store.rate_limit` is on with `fail_open` set to `false`. For everything else (locks, caps, idempotency, the ownership cache) a cache store outage is reported and the server keeps taking traffic.
 
 A component that is not configured, or has nothing to check, is left out of the response. The endpoint is public, so it returns only `ok` or `fail` per component and logs the reason on the server. Results are cached for 3 seconds and concurrent callers share one check, so a flood of probes does not become a flood of database round trips.
 
@@ -68,7 +66,7 @@ curl -i http://127.0.0.1:8000/health/ready
 | `503` | A required check is `fail`. `status` is `not_ready`. The checkpointer check fails when the database schema version is below what the code expects (an upgrade whose migration has not run). |
 | `503` | The server is shutting down. `status` is `draining` and `checks` is empty. No component is checked. |
 
-The server runs the same checks once at boot (the [startup check](/docs/server/production-checklist#startup-check)). There an unreachable checkpointer or store stops the server from starting (so does the cache store, when a fail-closed feature uses it); here it only turns readiness to 503, so traffic stops until the backend returns. Added in 1.0.0rc3.
+The server runs the same checks once at boot (the [startup check](/docs/server/production-checklist#startup-check)). There an unreachable checkpointer or store stops the server from starting (so does the cache store, when a fail-closed feature uses it); here it only turns readiness to 503, so traffic stops until the backend returns.
 
 Once the process gets SIGTERM, the server marks itself as draining. Readiness answers `503` from then on, so the load balancer stops sending new requests while open runs finish. `/ping` stays `200` until the process exits.
 
@@ -133,7 +131,7 @@ healthcheck:
 
 ## What it does not check
 
-`/ping` proves the HTTP server is alive. It does not call the database, Redis, the checkpointer or the model provider. `/health/ready` checks the checkpointer, Redis and the store, but not the model provider, so a green probe does not mean a graph run will succeed. For that, run a smoke test that invokes the graph after each deploy.
+`/ping` proves the HTTP server is alive. It does not call the database, Redis, the checkpointer or the model provider. `/health/ready` checks the checkpointer, the store and the cache store, but not the model provider, so a green probe does not mean a graph run will succeed. For that, run a smoke test that invokes the graph after each deploy.
 
 ## Related
 

@@ -210,7 +210,7 @@ WebSocket behavior is controlled by keys in the `websocket` object within `10xgr
 }
 ```
 
-In a multi-worker deployment (Gunicorn + Uvicorn), these limits are global when a shared cache store is configured (`redis`, `REDIS_URL` or `cache_store`): all workers and replicas count their sockets in it, so `max_connections: 1000` means 1000 in total. Slots held by a worker that dies expire on their own, and a cache store error lets the connection through (logged). Without a shared store, each process counts its own sockets, so 4 workers with `max_connections: 1000` can hold 4000.
+In a multi-worker deployment (Gunicorn + Uvicorn), these limits are global when a shared cache store is configured (`cache_store` of type `redis` or `custom`): all workers and replicas count their sockets in it, so `max_connections: 1000` means 1000 in total. Slots held by a worker that dies expire on their own, and a cache store error lets the connection through (logged). Without a shared store, each process counts its own sockets, so 4 workers with `max_connections: 1000` can hold 4000.
 
 ## Close codes
 
@@ -258,11 +258,13 @@ If you use the `trusted_proxy_headers` setting in `rate_limit`, the server reads
 ```json
 {
   "agent": "graph:app",
-  "rate_limit": {
-    "enabled": true,
-    "by": "ip",
-    "trusted_proxy_headers": true,
-    "trusted_proxy_hops": 1
+  "cache_store": {
+    "rate_limit": {
+      "enabled": true,
+      "by": "ip",
+      "trusted_proxy_headers": true,
+      "trusted_proxy_hops": 1
+    }
   }
 }
 ```

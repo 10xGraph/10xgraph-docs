@@ -237,7 +237,7 @@ You will create two Python files: one that defines the agent, and one that runs 
    INFO: Uvicorn running on http://127.0.0.1:8000
    ```
 
-   The server listens on `127.0.0.1:8000` by default. Without `--no-open`, `10xgraph dev` also opens the hosted playground, and it reloads when your files change. Use `--host 0.0.0.0` to accept connections from other machines and `--port` to use a different port. The server needs the same provider API key in its environment, so run it from the shell where you exported the key.
+   The server listens on `127.0.0.1:8000` by default. Plain `10xgraph dev` also opens the playground in your browser, so you can chat with the agent, browse its threads and inspect runs without writing any frontend. This step uses `--no-open` to start the server only, and you call it with curl next. Either way, the server reloads when your files change. Use `--host 0.0.0.0` to accept connections from other machines and `--port` to use a different port. The server needs the same provider API key in its environment, so run it from the shell where you exported the key.
 
 5. **Call the agent over HTTP**
 

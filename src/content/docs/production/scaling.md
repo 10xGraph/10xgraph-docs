@@ -20,7 +20,7 @@ You scale a served 10xGraph agent by running more stateless API workers behind a
 
 ## What the cache store shares across workers
 
-The API keeps its shared state in one `BaseCacheStore`. Set the `redis` key in `10xgraph.json` or `REDIS_URL` to use `RedisCacheStore` (Valkey, Dragonfly and KeyDB work through the same URL), or set `cache_store` to your own class. With none of them set the store is `InMemoryCacheStore`, in one process. See [Bring your own backend](/docs/server/bring-your-own-backend). The tables below say "Redis" for the shared case.
+The API keeps its shared state in one `BaseCacheStore`. Set `cache_store.type` to `redis` in `10xgraph.json` to use `RedisCacheStore` (the URL comes from `cache_store.url` or `REDIS_URL`; Valkey, Dragonfly and KeyDB work through the same URL), or to `custom` with a `path` to your own class. With no `cache_store` the store is `InMemoryCacheStore`, in one process; `REDIS_URL` alone does not select Redis. See [Bring your own backend](/docs/server/bring-your-own-backend). The tables below say "Redis" for the shared case.
 
 | Feature | With Redis | Without Redis (per process) |
 |---|---|---|
@@ -30,7 +30,7 @@ The API keeps its shared state in one `BaseCacheStore`. Set the `redis` key in `
 | Per-user run cap (`runs.max_concurrent_per_user`) | Leases shared by all workers. | Counted per process: up to `limit x workers`. |
 | WebSocket caps (`websocket.max_connections`, `max_connections_per_user`) | Shared through the same lease limiter. | Counted per process. |
 | Idempotency (running lease and stored records) | Shared, so a retry on another worker sees the first request. | Seen only by the worker that handled the first request. |
-| Token revocation | `"token_revocation": true`: a revoked token is refused on every worker. | A revocation reaches only the process that holds it, and the server warns about it in production or when `WEB_CONCURRENCY` is above 1. `10xgraph revoke` refuses to run against an in-memory store. |
+| Token revocation | `cache_store.token_revocation: true`: a revoked token is refused on every worker. | A revocation reaches only the process that holds it, and the server warns about it in production or when `WEB_CONCURRENCY` is above 1. `10xgraph revoke` refuses to run against an in-memory store. |
 
 The leases expire on their own, so a crashed worker cannot hold a thread or a user's slots forever.
 

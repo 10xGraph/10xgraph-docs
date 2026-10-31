@@ -112,7 +112,7 @@ The server loads your container at startup and makes it the global instance. You
 
 ## Generate readable thread names
 
-New threads are assigned UUIDs by default. To give them human-readable names instead, set `thread_name_generator` to a `module:ClassName` path. The server calls this generator when a new thread is created:
+`thread_name_generator` takes `random` (the default, also when the key is unset), `first_message` (the user's first message, whitespace collapsed, cut to at most 60 characters on a word boundary), `none` (threads stay unnamed but are saved) or a `module:attr` path to your own generator. The server saves every generated name after the run. To write your own, subclass `ThreadNameGenerator`. It gets the user's messages first, then the replies:
 
 ```python
 # graph/thread_name_generator.py
@@ -131,6 +131,8 @@ class MyThreadNameGenerator(ThreadNameGenerator):
 }
 ```
 
+To pick a built-in choice, set `"thread_name_generator": "first_message"`.
+
 Thread names appear in logs, dashboards, and the `/v1/threads` API response, making it easier to identify conversations at a glance.
 
 ## Enable authentication and authorization
@@ -141,7 +143,8 @@ These features have their own guides and require coordination:
 |---|---|---|
 | `auth` | [Authentication](/docs/server/auth) | Who can call the server (JWT, custom) |
 | `authorization` | [Authentication](/docs/server/auth) | Who can access each thread (ownership, RBAC) |
-| `rate_limit` | [Rate limiting](/docs/server/rate-limiting) | How many requests per window |
+| `cache_store.rate_limit` | [Rate limiting](/docs/server/rate-limiting) | How many requests per window |
+| `cache_store.token_revocation` | [Authentication](/docs/server/auth) | Refuse tokens you revoked |
 
 A minimally secured production config looks like this:
 
@@ -150,38 +153,67 @@ A minimally secured production config looks like this:
   "agent": "graph.react:app",
   "auth": "jwt",
   "authorization": "ownership",
-  "redis": "${REDIS_URL}",
-  "token_revocation": true,
-  "rate_limit": {
-    "enabled": true,
-    "requests": 100,
-    "window": 60,
-    "by": "user"
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {
+      "enabled": true,
+      "requests": 100,
+      "window": 60,
+      "by": "user"
+    },
+    "token_revocation": true
   }
 }
 ```
 
 - `"auth": "jwt"` requires `JWT_SECRET_KEY` (at least 32 characters; shorter keys are rejected in production) and `JWT_ALGORITHM` (for example `HS256`) in the environment. See [Authentication](/docs/server/auth) for custom auth.
 - `"authorization": "ownership"` makes threads private to their creator. With the default `runs.thread_ids` of `"server"`, it also refuses thread ids the server did not create (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)). With `allow_all`, any authenticated user who knows a thread ID can read it.
-- The top-level `redis` key gives the API a Redis cache store, which shares the rate limit (and the run locks, caps and revocations) across all replicas. Without it the counters live in each process, so three replicas allow three times the configured limit, which is unsuitable for production.
+- `"cache_store": {"type": "redis"}` gives the API a Redis cache store, which shares the rate limit (and the run locks, caps and revocations) across all replicas. Without it the counters live in each process, so three replicas allow three times the configured limit, which is unsuitable for production.
 
 ## Choose the cache store
 
-The API keeps everything it shares between workers in one **cache store**: the per-thread run lock, run and WebSocket caps, idempotency state, the ownership cache, token revocation and rate-limit counters. Pick it with these settings; the first one set wins:
+The API keeps everything it shares between workers in one **cache store**: the per-thread run lock, run and WebSocket caps, idempotency state, the ownership cache, token revocation and rate-limit counters. One `cache_store` object picks it and also holds the two settings the store backs, `rate_limit` and `token_revocation`:
 
-1. `"cache_store": "module:attr"`: your own `BaseCacheStore` (an instance or a zero-argument factory). See [Bring your own backend](/docs/server/bring-your-own-backend).
-2. `"redis": "redis://..."`: `RedisCacheStore` on that URL.
-3. `REDIS_URL` in the environment: the same.
-4. Otherwise `InMemoryCacheStore`, which is correct for one process only.
+| Key | Meaning |
+|---|---|
+| `type` | `memory` (default, also when `cache_store` or `type` is absent), `redis` or `custom`. |
+| `url` | Type `redis` only, optional. Empty uses the `REDIS_URL` environment variable. A value you set wins, as a literal or `${VAR}`, so the cache store can use a different Redis than the checkpointer. |
+| `path` | Type `custom` only, required. A `module:attr` path to your `BaseCacheStore` (an instance or a zero-argument factory). See [Bring your own backend](/docs/server/bring-your-own-backend). |
+| `rate_limit` | The rate limit object. See [Rate limiting](/docs/server/rate-limiting). |
+| `token_revocation` | `true`, `false` or an object. See [Authentication](/docs/server/auth). |
 
 ```json
 {
   "agent": "graph.react:app",
-  "redis": "${REDIS_URL}"
+  "cache_store": {
+    "type": "redis",
+    "url": "${CACHE_REDIS_URL}"
+  }
 }
 ```
 
-The server logs one INFO line at boot that names the store and where the choice came from. Valkey, Dragonfly and KeyDB work through the Redis URL. With an in-memory store, each replica keeps its own locks, caps and view of which user owns each thread, so use a shared store once you run more than one worker. The rate limiter no longer has a Redis URL of its own; `rate_limit.redis` and `rate_limit.backend` were removed in 1.0.0rc4.
+Leave out `url` to read `REDIS_URL`. `REDIS_URL` alone never selects Redis: a setup with no `cache_store` uses the in-memory store even when the variable is set. Top-level `redis`, `rate_limit` and `token_revocation` keys do not exist; a config that has one stops at load with an error that says where the setting goes.
+
+The server logs one INFO line at boot that names the store and the config key it came from. Valkey, Dragonfly and KeyDB work through the Redis URL. With an in-memory store, each replica keeps its own locks, caps and view of which user owns each thread, so use a shared store once you run more than one worker.
+
+## What is on by default
+
+This table shows what each setting does when its key is absent from `10xgraph.json`, and what `10xgraph init` writes for each template.
+
+| Setting | Key absent | Quick Start template | Production template |
+|---|---|---|---|
+| Auth | Off: every request is accepted | `null` (off) | `jwt` |
+| Authorization | `ownership` when auth is set or `MODE=production`, otherwise `allow_all` | not written | `ownership` |
+| Cache store | In-memory, per process | not written (in-memory) | `type: redis`, URL from `REDIS_URL` |
+| Rate limiting | Off | off | on: 100 requests per 60 seconds, by user, `fail_open` false |
+| Token revocation | Off | off | on |
+| ID generator | The graph's own generator | not written | `uuid` |
+| Thread naming | `random`: new threads get a random name, saved | `null` (random) | a generator class file in `graph/` that you edit |
+| WebSocket | Routes `/v1/graph/ws` and `/v1/graph/live` mounted; a warning if no WebSocket library is installed | `enabled: false` | `enabled: false` unless you pass `--websocket` |
+| AG-UI | Off | `enabled: false` | `enabled: false` |
+| Startup checks | On: checkpointer and store are fatal if unreachable; the cache store is fatal only with token revocation on (and auth set) or a rate limit with `fail_open` false, otherwise one warning | same | same |
+
+Set `STARTUP_CHECKS=false` to skip the startup check. `10xgraph config` edits every row. See the [production checklist](/docs/server/production-checklist#startup-check) for the startup check and `/health/ready`.
 
 ## Set test and evaluation defaults
 
@@ -252,7 +284,7 @@ The `websocket` key manages connection limits for `/v1/graph/ws` (streaming) and
 - `realtime_client_overrides` lists the session options a `/v1/graph/live` client may set in its init frame: any of `voice`, `modalities`, `vad` and `system_prompt`. The default is `["voice", "modalities", "vad"]`. `system_prompt` replaces the agent's instructions, so list it only when every caller is trusted to rewrite them.
 - `enabled` set to `false` leaves `/v1/graph/ws` and `/v1/graph/live` out of the app.
 
-When a shared cache store is configured (`redis`, `REDIS_URL` or `cache_store`), the connection caps are shared by all workers and replicas. Without one, each process counts its own connections, so the real cap is the limit times the number of workers. If a worker dies, its slots expire on their own. If the cache store is unreachable, the server allows the connection and logs the error.
+When a shared cache store is configured (`cache_store` of type `redis` or `custom`), the connection caps are shared by all workers and replicas. Without one, each process counts its own connections, so the real cap is the limit times the number of workers. If a worker dies, its slots expire on their own. If the cache store is unreachable, the server allows the connection and logs the error.
 
 ## Limit concurrent runs per user
 
@@ -285,14 +317,14 @@ The default is `"scoped"` when `MODE=production` and `"open"` otherwise. With au
 
 A client can send a `config` object with a run, and your nodes and tools can read its keys. The server drops these keys from client config before the graph sees them (no error is returned): `authz`, `user`, `user_id`, `remote_tools`, `ag_ui`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection`, and any key that starts with `_`. Identity comes from the verified token, never from config. To narrow the rest, list allowed keys in `runs.config_keys` and `runs.state_keys`. See [Invoke and stream](/docs/server/invoke-and-stream).
 
-## Environment variable expansion in Redis URLs
+## Environment variable expansion in the cache store URL
 
-The `redis` key supports environment variable expansion. Both `$VAR` and `${VAR}` forms work:
+`cache_store.url` supports environment variable expansion. Both `$VAR` and `${VAR}` forms work:
 
 ```json
 {
   "agent": "graph.react:app",
-  "redis": "${REDIS_URL}"
+  "cache_store": { "type": "redis", "url": "${REDIS_URL}" }
 }
 ```
 
@@ -339,16 +371,18 @@ A typical prod config (see production checklist below):
   "auth": "jwt",
   "authorization": "ownership",
   "store": "graph.dependencies:store",
-  "redis": "${REDIS_URL}",
-  "token_revocation": true,
-  "rate_limit": {
-    "enabled": true,
-    "requests": 100,
-    "window": 60,
-    "by": "user",
-    "trusted_proxy_headers": true,
-    "trusted_proxy_hops": 1,
-    "fail_open": true
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {
+      "enabled": true,
+      "requests": 100,
+      "window": 60,
+      "by": "user",
+      "trusted_proxy_headers": true,
+      "trusted_proxy_hops": 1,
+      "fail_open": true
+    },
+    "token_revocation": true
   }
 }
 ```
@@ -371,7 +405,7 @@ If `authorization` is unset, the server uses `ownership` whenever auth is config
 
 ### 4. Use a shared cache store with multiple replicas
 
-The in-memory cache store counts per process, so with three workers you allow three times the configured limit. With multiple replicas, set `"redis": "${REDIS_URL}"` and ensure all replicas point to the same Redis instance. Also set `trusted_proxy_hops` correctly: it counts from the right of the `X-Forwarded-For` header, so the value must match how many proxies sit in front of your server. Set it too high and a client can forge its own address to bypass limits.
+The in-memory cache store counts per process, so with three workers you allow three times the configured limit. With multiple replicas, set `"cache_store": {"type": "redis"}` and ensure all replicas point to the same Redis instance. Also set `trusted_proxy_hops` correctly: it counts from the right of the `X-Forwarded-For` header, so the value must match how many proxies sit in front of your server. Set it too high and a client can forge its own address to bypass limits.
 
 ### 5. Wire observability
 
@@ -415,7 +449,7 @@ Finally, verify that persistence survives a restart: start a thread by invoking 
 | `AttributeError: module has no attribute` | `graph.react:app` expects an `app` variable in the `graph/react.py` file. Check the name and that it is a compiled graph. |
 | Checkpointer connection fails | The Postgres DSN is correct and the database is reachable. Test: `psql <dsn>`. The Redis URL is reachable: `redis-cli -u <url> ping`. |
 | `JWT_SECRET_KEY and JWT_ALGORITHM must be set` | Export both variables, or set `"env": ".env"` and add them there. The secret needs at least 32 characters. |
-| Rate limiting not working on multi-replica setup | Set `redis` (or `REDIS_URL`) so the cache store is shared. Ensure all replicas point to the same Redis instance. |
+| Rate limiting not working on multi-replica setup | Set `"cache_store": {"type": "redis"}` (with `REDIS_URL` set, or a `url`) so the cache store is shared. Ensure all replicas point to the same Redis instance. |
 | Threads visible to users who did not create them | Set `"authorization": "ownership"` or implement a custom `AuthorizationBackend`. Check that all replicas use the same setting. |
 
 For a complete list of configuration keys, defaults, and types, see the [configuration reference](/docs/reference/api-cli/configuration).

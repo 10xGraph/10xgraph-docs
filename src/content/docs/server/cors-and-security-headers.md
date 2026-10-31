@@ -202,9 +202,8 @@ The rate limiter explicitly checks the `trusted_proxy_headers` setting in `10xgr
 
 ```json
 {
-  "rate_limit": {
-    "by": "ip",
-    "trusted_proxy_headers": true
+  "cache_store": {
+    "rate_limit": {"by": "ip", "trusted_proxy_headers": true}
   }
 }
 ```

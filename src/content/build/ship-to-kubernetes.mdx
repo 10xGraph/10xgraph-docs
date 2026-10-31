@@ -41,10 +41,10 @@ flowchart LR
 mkdir shop-support && cd shop-support
 python -m venv .venv && source .venv/bin/activate
 pip install "10xgraph[google-genai,pg_checkpoint]" "10xgraph-api[jwt,redis]"
-10xgraph init --yes --template production --auth jwt --rate-limit redis --name shop-support
+10xgraph init --yes --template production --name shop-support
 ```
 
-That writes `10xgraph.json` (JWT auth, `ownership` authorization, a Redis cache store from `${REDIS_URL}`, token revocation on, and a rate limit at 100 requests per 60 seconds per IP, with the counters shared through that Redis), a `graph/` package with a sample weather agent, tests and evals. Build the Docker image only after two edits.
+That writes `10xgraph.json` (JWT auth, `ownership` authorization, a Redis cache store that reads `REDIS_URL`, token revocation on, and a rate limit at 100 requests per 60 seconds per user, with the counters shared through that Redis), a `graph/` package with a sample weather agent, tests and evals. Build the Docker image only after two edits.
 
 First, the generated Dockerfile installs exactly the `dependencies` in `pyproject.toml`, so list the Postgres extra there:
 
@@ -176,7 +176,7 @@ healthy
 
 The image builds, runs as uid 10001 on a read-only root, and starts with all capabilities dropped. `/ping` stays 200 while `/health/ready` is 503 because Redis cannot be reached. That split is what the manifest relies on. Readiness fails, so the pod is taken out of the Service and receives no new requests. Liveness still passes, so Kubernetes does not restart a pod that is merely waiting for a dependency. The unauthenticated request got 401, because every route except `/ping` and `/health/ready` needs a token. Stop and remove the container with `docker rm -f shop`.
 
-This transcript comes from a 0.9.0 image. With 1.0.0rc4 the server also refuses to boot when the cache store is unreachable and token revocation is on (the production template turns it on), the readiness key is `cache` instead of `redis`, and `STARTUP_CHECKS=false` skips the boot check if you want to see the probes alone.
+This transcript comes from a 0.9.0 image. With the current server it also refuses to boot when the cache store is unreachable and token revocation is on (the production template turns it on), the readiness key is `cache` instead of `redis`, and `STARTUP_CHECKS=false` skips the boot check if you want to see the probes alone.
 
 The full Compose file with Postgres and Redis passed `docker compose config`. I did not start it, and I did not run the app against a real Postgres.
 
@@ -214,7 +214,7 @@ kubectl scale deployment shop-support --replicas=5
 
 Three things change when you go past one process:
 
-- **Use a shared cache store.** Set `redis` (or `REDIS_URL`). The in-memory store counts per process, so the real rate limit is the limit times the number of workers, and token revocations reach only one process. The server warns about it at startup.
+- **Use a shared cache store.** Set `"cache_store": {"type": "redis"}` (with `REDIS_URL` set, or a `url`). The in-memory store counts per process, so the real rate limit is the limit times the number of workers, and token revocations reach only one process. The server warns about it at startup.
 - **Set load balancer idle timeouts above your longest streaming run.** The pod's grace period is 660 seconds, but a proxy that cuts idle connections at 60 seconds will still break a stream.
 - **One run per thread.** A second request to a thread that is busy waits up to 30 seconds and then gets 409. With a Redis cache store configured, that lock is shared by all replicas.
 

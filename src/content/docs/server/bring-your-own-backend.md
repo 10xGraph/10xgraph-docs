@@ -9,7 +9,7 @@ label: Bring your own backend
 updated: "2026-10-31"
 faq:
   - question: "Do I need a custom cache store to use Valkey, Dragonfly or KeyDB?"
-    answer: "No. They speak the Redis protocol, so point `redis` in 10xgraph.json (or REDIS_URL) at them and RedisCacheStore works. Write a BaseCacheStore only for a store that does not speak the Redis protocol."
+    answer: "No. They speak the Redis protocol, so set `cache_store.type` to `redis` and point `cache_store.url` (or REDIS_URL) at them and RedisCacheStore works. Write a BaseCacheStore only for a store that does not speak the Redis protocol."
   - question: "Which Redis eviction policy is safe?"
     answer: "noeviction or a volatile-* policy. Any other policy can drop a lock or a revocation before its TTL, which lets two workers run the same thread."
   - question: "Can the server start if the cache store is down?"
@@ -18,7 +18,7 @@ faq:
 
 A 10xGraph server keeps its state in three places, and each one is an abstract class you can replace. This page lists them, shows how to select a custom one, and documents the rules a replacement must keep. The default for each is enough for most deployments; read on when your infrastructure is different, for example a database the built-in classes do not cover.
 
-Valkey, Dragonfly and KeyDB speak the Redis protocol, so you do not need any of this for them: point the Redis URL at the server and the built-in classes work.
+Valkey, Dragonfly and KeyDB speak the Redis protocol, so you do not need any of this for them: set `cache_store.type` to `redis` and point its URL at the server, and the built-in classes work.
 
 ## The three classes
 
@@ -50,17 +50,21 @@ The checkpointer, store and media store are passed to `compile()` in your graph 
 app = graph.compile(checkpointer=MyCheckpointer(), store=MyStore())
 ```
 
-The cache store is the one backend chosen in `10xgraph.json`. The first of these that is set wins:
+The cache store is the one backend chosen by the `cache_store` object in `10xgraph.json`. Its `type` picks the store:
 
-1. `"cache_store": "module:attr"`: a `BaseCacheStore` instance, or a zero-argument factory (a class or function) that returns one.
-2. `"redis": "redis://..."`: `RedisCacheStore` on that URL. The value supports `${VAR}`.
-3. `REDIS_URL` in the environment: the same.
-4. Otherwise `InMemoryCacheStore`.
+1. `"memory"` (the default, also when `cache_store` is absent): `InMemoryCacheStore`, correct for one process only.
+2. `"redis"`: `RedisCacheStore`. `url` is optional: empty uses the `REDIS_URL` environment variable, and a value you set (a literal or `${VAR}`) wins.
+3. `"custom"`: your own store. `path` is a `module:attr` path to a `BaseCacheStore` instance, or a zero-argument factory (a class or function) that returns one.
+
+`REDIS_URL` alone never selects Redis.
 
 ```json title="10xgraph.json"
 {
   "agent": "graph.agent:app",
-  "cache_store": "graph.cache:store"
+  "cache_store": {
+    "type": "custom",
+    "path": "graph.cache:store"
+  }
 }
 ```
 
@@ -70,7 +74,7 @@ from my_company.cache import MyCacheStore
 store = MyCacheStore("https://cache.internal")
 ```
 
-The server logs one INFO line at boot that names the store and where the choice came from, for example `Cache store: RedisCacheStore (from REDIS_URL, localhost:6379)`. A store can add its own endpoint to that line by implementing `describe()`, which returns a string such as `host:port` and never credentials.
+The server logs one INFO line at boot that names the store and the config key it came from, for example `Cache store: RedisCacheStore (cache_store.url, localhost:6379)`. A store can add its own endpoint to that line by implementing `describe()`, which returns a string such as `host:port` and never credentials.
 
 ## The `aping()` rules
 
@@ -82,7 +86,7 @@ All three classes use the same pattern:
 
 `PgCheckpointer.aping()` is the reference: it runs `SELECT 1`, raises `RuntimeError` when the recorded schema version is older than the code expects, and pings its own Redis. It never creates the schema; the server runs `asetup()` at boot.
 
-`aping()` is abstract on `BaseCheckpointer` (since 1.0.0rc4), `BaseStore` (since 1.0.0rc3) and `BaseCacheStore`. A subclass without it raises `TypeError` when created.
+`aping()` is abstract on `BaseCheckpointer`, `BaseStore` and `BaseCacheStore`. A subclass without it raises `TypeError` when created.
 
 What a failed ping does:
 
@@ -90,7 +94,7 @@ What a failed ping does:
 |---|---|---|
 | Checkpointer | Yes | Yes |
 | Store (when one is bound) | Yes | Yes |
-| Cache store | Only when a fail-closed feature uses it: `token_revocation` is on, or `rate_limit` is on with `fail_open` set to `false` | Under the same rule |
+| Cache store | Only when a fail-closed feature uses it: `cache_store.token_revocation` is on, or `cache_store.rate_limit` is on with `fail_open` set to `false` | Under the same rule |
 
 When the cache store is down and no fail-closed feature uses it, the server logs one WARNING and starts, with locks and caps per process. The readiness response then reports `"cache": "fail"` and still answers `200`. See [Ping and health](/docs/reference/rest-api/ping#get-healthready) and the [startup check](/docs/server/production-checklist#startup-check).
 
@@ -131,7 +135,7 @@ Keys arrive as `"<feature>:<id>"`, for example `concurrency:runs:thread:42`. The
 
 ### Built-in stores
 
-`RedisCacheStore` uses Lua scripts on sorted sets for the slots, `SET` with `PX` for values, and a small script for `if_greater`. It applies `REDIS_KEY_PREFIX` and keeps the Redis key layouts of earlier releases, except for the rate limiter, which moved to the `10xgraph:ratelimit2` namespace in 1.0.0rc4 (counters reset once on upgrade). Its connection limits come from the `REDIS_*` settings; see the [environment reference](/docs/reference/api-cli/environment).
+`RedisCacheStore` uses Lua scripts on sorted sets for the slots, `SET` with `PX` for values, and a small script for `if_greater`. It applies `REDIS_KEY_PREFIX` and keeps the Redis key layouts of earlier releases, except for the rate limiter, which uses the `10xgraph:ratelimit2` namespace.Its connection limits come from the `REDIS_*` settings; see the [environment reference](/docs/reference/api-cli/environment).
 
 `InMemoryCacheStore` keeps everything in one process. It is correct for a single worker and wrong for several: locks, caps and revocations do not cross processes. To bound memory it caps slot keys at 50,000 and plain values at 10,000 and evicts the least recently used entry at the cap, with a warning. That is its one exception to "TTLs are never dropped early". It never evicts lease keys (`concurrency:`) or revocation keys (`revoked:`) while they are live, so a lock or a revoked token cannot disappear.
 
@@ -196,7 +200,7 @@ class MyCacheStore(BaseCacheStore):
         ...
 ```
 
-Select it with `"cache_store": "my_company.cache:store"` as shown above. `store` can be an instance or a function that takes no arguments and returns one.
+Select it with `"cache_store": {"type": "custom", "path": "my_company.cache:store"}` as shown above. `store` can be an instance or a function that takes no arguments and returns one.
 
 ## Test it with the contract suite
 
@@ -228,10 +232,6 @@ await run_cache_store_contract(lambda: MyCacheStore("https://cache.internal"))
 ## Custom checkpointers and stores
 
 A custom `BaseCheckpointer` implements every abstract async method, including `aping()`, and `aget_thread_owner` when auth is on. A custom `BaseStore` implements its methods and `aping()`. Both are passed to `compile()`. The method lists are in the [checkpointer reference](/docs/reference/python/checkpointers#writing-a-custom-checkpointer) and the [store reference](/docs/reference/python/memory-stores), and [Extension points](/docs/concepts/extensibility) shows where every extension class is wired.
-
-## What changed in 1.0.0rc4
-
-`BaseCacheStore` replaced `ConcurrencyLimiter`, `TokenRevocationBackend` and `BaseRateLimitBackend`. Those classes, `"token_revocation": "redis" | "memory" | "module:attr"` and the `rate_limit.backend` and `rate_limit.redis` keys are gone, with no aliases. See [Upgrade to 1.0](/docs/project/upgrade-to-1.0#from-100rc3-to-100rc4).
 
 ## See also
 

@@ -147,11 +147,24 @@ Ownership is looked up through the checkpointer's `aget_thread_owner` method. Th
 {
   "auth": "jwt",
   "authorization": "ownership",
-  "redis": "redis://localhost:6379"
+  "cache_store": {"type": "redis", "url": "redis://localhost:6379"}
 }
 ```
 
 Ownership is immutable and cached (in-process L1 + optional Redis L2), so after the first lookup a check is an in-memory hit, not a database round-trip per request.
+
+## Revoke tokens
+
+With auth on, set `cache_store.token_revocation` to `true` and the server refuses revoked tokens (401, code `REVOKED_TOKEN`). Revocations live in the cache store, so use `"type": "redis"` for them to reach every worker. Revoke from the command line with `10xgraph revoke --user USER_ID` or `--jti JTI`; the command writes to the cache store the server uses and refuses when that store is in-memory.
+
+```json title="10xgraph.json"
+{
+  "auth": "jwt",
+  "cache_store": {"type": "redis", "token_revocation": true}
+}
+```
+
+If the cache store is unreachable, the server refuses to boot and requests that need the check answer 503. See [Token revocation](/docs/reference/api-cli/auth#token-revocation) for the object form.
 
 ## Custom authentication
 

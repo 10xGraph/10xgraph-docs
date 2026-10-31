@@ -66,7 +66,7 @@ WebSocket handshakes bypass the HTTP rate-limit and request-size middleware (Sta
 }
 ```
 
-A missing key gets the default above. Set a key to `0` or `null` for unlimited. The counters are shared by all workers when Redis is configured (`redis` key or `REDIS_URL`) and per process otherwise, so without Redis size them per worker. `realtime_models` is covered under the init frame.
+A missing key gets the default above. Set a key to `0` or `null` for unlimited. The counters are shared by all workers when a shared cache store is configured (`cache_store.type` `redis` or `custom`) and per process otherwise, so without Redis size them per worker. `realtime_models` is covered under the init frame.
 
 ---
 

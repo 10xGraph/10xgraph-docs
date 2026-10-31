@@ -370,7 +370,6 @@ app = agent.compile()
   "auth": null,
   "injectq": null,
   "store": null,
-  "redis": null,
   "thread_name_generator": null
 }
 ```
