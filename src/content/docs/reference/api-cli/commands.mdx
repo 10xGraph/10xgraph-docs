@@ -48,25 +48,46 @@ Wherever a command takes `--config` with the default `10xgraph.json`, it uses `a
 
 ## init
 
-Scaffold a new agent project.
+Scaffold a new agent project. Interactive `init` asks three questions: the agent name, the template (Quick Start or Production) and the AI provider. Everything else comes from the template.
 
 ```bash
 10xgraph init [--path DIR] [--template quick-start|production] [options]
 ```
+
+**Quick Start** writes a minimal config with auth off and no `cache_store`.
+
+**Production** writes the recommended setup without asking:
+
+- `"auth": "jwt"` and `"authorization": "ownership"`
+- `"id_generator": "uuid"`
+- `"cache_store"` with `"type": "redis"` (no `url`, so Redis comes from `REDIS_URL`), a `rate_limit` of 100 requests per 60 seconds by user with `fail_open` false, and `token_revocation` on
+- WebSocket and AG-UI off
+
+The summary lists these choices, and the next steps point to `10xgraph config` for full control (WebSocket, AG-UI, ID generator, thread naming and every other setting).
+
+The flags are overrides for scripts:
 
 | Option | Default | Purpose |
 |---|---|---|
 | `--path`, `-p` | `.` | Directory to initialize |
 | `--force`, `-f` | off | Overwrite existing files |
 | `--name` | inferred | Agent name, required only when it cannot be inferred |
-| `--template` | `quick-start` | `quick-start` or `production` |
-| `--auth` | prompt | Production only: `none`, `jwt` or `custom` |
-| `--rate-limit` | prompt | Production only: `none`, `memory` or `redis` |
-| `--yes`, `-y` | off | Accept recommended defaults |
+| `--template` | prompt | `quick-start` or `production` |
+| `--provider` | prompt | `google`, `openai` or `anthropic` |
+| `--auth` | `jwt` | Production only: `none`, `jwt` or `custom` |
+| `--cache-store` | `redis` | Production only: `memory` or `redis` |
+| `--rate-limit` / `--no-rate-limit` | on | Production only: add or leave out `cache_store.rate_limit` |
+| `--token-revocation` / `--no-token-revocation` | on with auth | Production only: add or leave out `cache_store.token_revocation`. Ignored with `--auth none` |
+| `--websocket` / `--no-websocket` | off | Write `websocket.enabled` |
+| `--yes`, `-y` | off | Accept the defaults without prompting |
 | `--non-interactive` | off | Fail instead of prompting |
 | `--dry-run` | off | Preview without writing files |
 
-`--auth` and `--rate-limit` require `--template production`.
+Quick Start ignores `--auth`, `--cache-store`, `--rate-limit` and `--token-revocation`. Example for a script:
+
+```bash
+10xgraph init --yes --template production --name shop-support --provider openai --cache-store redis
+```
 
 ## dev
 
@@ -184,7 +205,7 @@ Read-only environment check: Python version, installed packages, core evaluation
 
 ## revoke
 
-Revoke one token or all of a user's tokens. It writes to the same Redis the server reads, so the revocation reaches every worker at once and the server needs no restart. It needs `"token_revocation": "redis"` in `10xgraph.json`.
+Revoke one token or all of a user's tokens. It builds the configured cache store the same way the server does (`cache_store`) and writes to it, so with a shared store the revocation reaches every worker at once and the server needs no restart. Turn the check on with `"token_revocation": true` inside `cache_store` in `10xgraph.json`. The command refuses with an error when the cache store is `InMemoryCacheStore`, because a separate process cannot reach another process's memory.
 
 ```bash
 10xgraph revoke (--user USER_ID | --jti JTI) [--before EPOCH] [--expires-at EPOCH] [--redis-url URL] [--config FILE]
@@ -196,10 +217,10 @@ Revoke one token or all of a user's tokens. It writes to the same Redis the serv
 | `--jti` | unset | Revoke the one token with this `jti` claim |
 | `--before` | unset | With `--user`: revoke tokens issued at or before this epoch time |
 | `--expires-at` | unset | With `--jti`: the token's `exp` (epoch seconds), to drop the entry |
-| `--redis-url` | `REDIS_URL`, then the `redis` key in `10xgraph.json` | Redis to write to |
+| `--redis-url` | unset | Redis URL to write to, in place of the configured cache store |
 | `--config`, `-c` | `10xgraph.json` | Config file |
 
-Pass exactly one of `--user` and `--jti`. Without a Redis URL from any of the three sources, the command fails.
+Pass exactly one of `--user` and `--jti`. With no shared cache store configured (`cache_store` absent or type `memory`) and no `--redis-url`, the command fails.
 
 ## config
 
@@ -214,6 +235,18 @@ Edit and validate `10xgraph.json` in a browser UI. The file is created on first 
 | `--config`, `-c` | `10xgraph.json` | File to edit |
 | `--port`, `-p` | `0` (any free port) | Editor port |
 | `--open / --no-open` | on | Open the default browser |
+
+The editor groups every key in a sidebar:
+
+| Group | Pages |
+|---|---|
+| Get running | Core |
+| Before production | Authentication, Authorization, Cache store (rate limiting, token revocation), Observability, Graph introspection |
+| Runs and streaming | Runs, WebSocket, AG-UI, Remote tools, Media |
+| Project wiring | Checkpointer, ID generation, Thread naming, Memory store, Dependency injection |
+| Developer tools | Test, Evaluation |
+
+The Cache store page starts with three type cards (Memory, Redis, Custom). Under them, the Rate limiting and Token revocation tabs each have an on/off switch and the fields for that setting. The editor validates with the same parsers as the server and writes a `.bak` of the previous file on save.
 
 ## demo
 

@@ -8,11 +8,11 @@ label: Initialize a Project
 updated: "2026-10-27"
 faq:
   - q: "What is the difference between Quick Start and Production templates?"
-    a: "Quick Start generates a minimal graph with 10xgraph.json and environment template. Production adds tests, evaluations, auth stubs, rate limiting, and a full project structure for team deployment."
+    a: "Quick Start generates a minimal graph with 10xgraph.json and environment template. Production adds tests, evaluations, auth stubs, and a full project structure, and writes the recommended config: JWT auth, ownership authorization, a UUID ID generator, a Redis cache store with rate limiting and token revocation."
   - q: "Can I change the template or auth choice after scaffolding?"
     a: "Yes, re-run 10xgraph init with --force to regenerate, or edit 10xgraph.json directly. See server/configure for full config reference."
-  - q: "When should I choose Redis rate limiting instead of Memory?"
-    a: "Memory-based rate limiting works for single instances only. Use Redis when running multiple server replicas or containers that need shared counters."
+  - q: "When should I choose a memory cache store instead of Redis?"
+    a: "A memory cache store works for single instances only. Use Redis when running multiple server replicas or containers that need shared counters, locks and token revocation."
 ---
 
 `10xgraph init` scaffolds a new agent project from an interactive questionnaire or command-line flags. It creates a working graph, configuration file, and optional test/evaluation stubs tailored to your deployment model (Quick Start for development, Production for teams and deployment).
@@ -33,7 +33,7 @@ Navigate to an empty directory and run:
 10xgraph init
 ```
 
-The command asks for the agent name and template, and for the Production template also the authentication and rate limiting options (listed below). It then prints a summary and creates the files.
+The command asks three questions: the agent name, the template and the AI provider. It then prints a summary of what it wrote and creates the files. The Production template does not ask about auth or rate limiting; it writes the recommended setup (see [How 10xgraph.json is generated](#how-10xgraphjson-is-generated)). The next steps point to `10xgraph config` for full control.
 
 To scaffold in a specific directory without entering it:
 
@@ -46,10 +46,10 @@ To scaffold in a specific directory without entering it:
 For CI pipelines or scripted setup, provide all arguments upfront:
 
 ```bash
-10xgraph init --name MyWeatherBot --template production --auth jwt --rate-limit redis
+10xgraph init --yes --name MyWeatherBot --template production --provider openai --cache-store redis
 ```
 
-Passing `--yes` or `--non-interactive` skips all prompts. Any value you omit takes its default (`quick-start` template, auth `none`, rate limiting `none`). Auth and rate-limiting options are only valid with `--template production`.
+Passing `--yes` or `--non-interactive` skips all prompts. Any value you omit takes its default (`quick-start` template, and for Production the recommended setup). The auth, cache store, rate limit and token revocation flags are only valid with `--template production`.
 
 ### Flags reference
 
@@ -58,8 +58,12 @@ Passing `--yes` or `--non-interactive` skips all prompts. Any value you omit tak
 | `--path` | `-p` | Directory path | `.` | Project root |
 | `--name` | | String | Directory name of `--path`, or `MyAgent` for `.` | Agent name and display label |
 | `--template` | | `quick-start` \| `production` | Prompted, or `quick-start` with `--yes` / `--non-interactive` | Dev (`quick-start`) or team/deployment mode |
-| `--auth` | | `none` \| `jwt` \| `custom` | Prompted, or `none` | Requires `--template production` |
-| `--rate-limit` | | `none` \| `memory` \| `redis` | Prompted, or `none` | Requires `--template production`. The interactive prompt appears only when auth is not `none` |
+| `--provider` | | `google` \| `openai` \| `anthropic` | Prompted | AI provider for the starter agent |
+| `--auth` | | `none` \| `jwt` \| `custom` | `jwt` | Requires `--template production` |
+| `--cache-store` | | `memory` \| `redis` | `redis` | Requires `--template production` |
+| `--rate-limit` / `--no-rate-limit` | | Flag | On | Adds or leaves out `cache_store.rate_limit` |
+| `--token-revocation` / `--no-token-revocation` | | Flag | On with auth | Adds or leaves out `cache_store.token_revocation`. Ignored with `--auth none` |
+| `--websocket` / `--no-websocket` | | Flag | Off | Writes `websocket.enabled` |
 | `--force` | `-f` | Flag | Off | Overwrite existing files (careful: replaces graph code) |
 | `--dry-run` | | Flag | Off | Print files that would be created; do not write anything |
 | `--yes` | `-y` | Flag | Off | Accept the recommended defaults and do not prompt |
@@ -101,7 +105,7 @@ cp .env.example .env
 
 ### Production template
 
-Complete project structure with auth, rate limiting, tests, and evaluations:
+Complete project structure with auth, a cache store, tests, and evaluations:
 
 ```
 .pre-commit-config.yaml
@@ -141,7 +145,7 @@ evals/
 
 - **pyproject.toml**: Declares your project as a package. Enables `pip install -e .` (editable), integrates `ruff`/`mypy`/`pytest` config, and ensures repeatable environments.
 - **graph/state.py**: Custom state schema (inherits from `AgentState`). Extend it as your agent's state grows.
-- **graph/thread_name_generator.py**: Generates human-readable thread names (e.g. "Thoughtful Salamander") instead of UUIDs.
+- **graph/thread_name_generator.py**: A thread name generator that `thread_name_generator` in `10xgraph.json` points at. Edit it, or switch the key to `random` or `first_message`.
 - **graph/tools/**: Custom agent tools as decorated functions.
 - **graph/validators/**: Lifecycle validators (before invoke, after step, on error) and validation manager.
 - **auth/agent_auth.py**: Custom authentication logic (only scaffolded when `--auth custom`). Implement `BaseAuth` subclass.
@@ -179,7 +183,7 @@ Init builds your config from your answers, not a static template. Examples:
 }
 ```
 
-**Production with JWT and Redis rate limiting:**
+**Production (the default for `--template production`):**
 
 ```json
 {
@@ -189,20 +193,30 @@ Init builds your config from your answers, not a static template. Examples:
   "authorization": "ownership",
   "thread_name_generator": "graph.thread_name_generator:MyNameGenerator",
   "injectq": "graph.agent:container",
-  "rate_limit": {
-    "enabled": true,
-    "backend": "redis",
-    "requests": 100,
-    "window": 60,
-    "by": "ip",
-    "trusted_proxy_headers": false,
-    "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
+  "id_generator": "uuid",
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {
+      "enabled": true,
+      "requests": 100,
+      "window": 60,
+      "by": "user",
+      "trusted_proxy_headers": false,
+      "fail_open": false,
+      "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
+    },
+    "token_revocation": true
   },
-  "ag_ui": {"enabled": false}
+  "ag_ui": {"enabled": false},
+  "websocket": {"enabled": false}
 }
 ```
 
-For full details on every config key, see `/docs/server/configure`.
+The cache store has no `url`, so Redis comes from the `REDIS_URL` environment variable. The block also holds the `test` and `evaluation` defaults.
+
+**Production with `--auth none`:** the same file with `"auth": null`, no `authorization` and no token revocation.
+
+For full details on every config key, see `/docs/server/configure`. To see what each key does when it is absent, see [What is on by default](/docs/server/configure#what-is-on-by-default).
 
 ## Overwrite and force flags
 
@@ -230,18 +244,12 @@ Lists files that would be created and exits without modifying the filesystem.
 10xgraph init
 ```
 
-Asks:
+Asks three questions:
 1. **Agent name?** (default: `MyAgent`)
 2. **Quick Start or Production?** (default: Quick Start)
-3. **[Production only] Authentication type?** (default: `none`)
-   - Offers: None, JWT, Custom
-4. **[Production only, if auth != none] Rate limiting?** (default: `none`)
-   - Offers: None, Memory Based, Redis Based
-5. **[If rate limiting selected] Max requests per window?** (default: `100`)
-6. **[If rate limiting selected] Window size (seconds)?** (default: `60`)
-7. **[If rate limiting selected] Count requests per?** (default: Per IP)
-   - Offers: Per IP, Global
-8. **[If rate limiting selected] Behind a reverse proxy?** (default: `No`)
+3. **AI provider?** (Google, OpenAI or Anthropic)
+
+Nothing else is asked. Production writes the recommended config and lists it in the summary. Run `10xgraph config` afterwards to change WebSocket, AG-UI, the ID generator, thread naming and every other setting.
 
 ### Non-interactive with defaults
 
@@ -249,12 +257,12 @@ Asks:
 10xgraph init --yes
 ```
 
-Uses all defaults: agent name inferred from directory, Quick Start template, no auth, no rate limiting.
+Uses all defaults: agent name inferred from directory, Quick Start template, no auth, no cache store.
 
 ### Non-interactive with explicit arguments
 
 ```bash
-10xgraph init --name WeatherBot --template production --auth jwt --rate-limit memory
+10xgraph init --yes --name WeatherBot --template production --auth jwt --cache-store memory
 ```
 
 Does not prompt; an invalid value fails with an error.
@@ -331,13 +339,13 @@ The graph module didn't load when the server started. Check:
 
 **"Invalid template" or "Invalid auth mode"**
 
-You passed an unrecognized value to `--template`, `--auth`, or `--rate-limit`. Valid values:
+You passed an unrecognized value to `--template`, `--auth`, or `--cache-store`. Valid values:
 
 - `--template`: `quick-start`, `production`
 - `--auth`: `none`, `jwt`, `custom`
-- `--rate-limit`: `none`, `memory`, `redis`
+- `--cache-store`: `memory`, `redis`
 
-Auth and rate-limit flags only work with `--template production`.
+Auth, cache store, rate-limit and token-revocation flags only work with `--template production`.
 
 **Agent name contains special characters**
 

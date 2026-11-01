@@ -46,13 +46,13 @@ Each command accepts `--help` to show its full options. Detailed flags and param
 
 ### Create a new project
 
-Start with `10xgraph init` to scaffold your agent project. The command prompts for setup type (Quick Start or Production), and for production projects also prompts for authentication and rate-limiting configuration.
+Start with `10xgraph init` to scaffold your agent project. The command asks three questions: the agent name, the template (Quick Start or Production) and the AI provider. Production writes the recommended setup without asking: JWT auth, ownership authorization, a UUID ID generator, and a Redis cache store (reads `REDIS_URL`) with rate limiting and token revocation. WebSocket and AG-UI stay off.
 
 ```bash
 10xgraph init
 ```
 
-The scaffold generates a `10xgraph.json` configuration file, graph code, and optional evals and tests. Every prompt has a matching flag, so the same scaffold can be reproduced in CI or by coding agents without interaction:
+The scaffold generates a `10xgraph.json` configuration file, graph code, and optional evals and tests. Every question has a matching flag, and flags such as `--auth`, `--cache-store`, `--rate-limit` and `--token-revocation` override parts of the Production setup, so the same scaffold can be reproduced in CI or by coding agents without interaction:
 
 ```bash
 10xgraph init --name MyAgent --template production --auth jwt --yes --non-interactive
@@ -122,6 +122,8 @@ See [Deployment guide](/docs/server/deploy) for more.
 10xgraph config --port 8765 --no-open  # Use a custom port, don't open browser
 ```
 
+The sidebar groups the pages as Get running, Before production (Authentication, Authorization, Cache store, Observability, Graph introspection), Runs and streaming, Project wiring (Checkpointer, ID generation, Thread naming, Memory store, Dependency injection) and Developer tools. The Cache store page holds the type (Memory, Redis, Custom) and the Rate limiting and Token revocation tabs. See the [command reference](/docs/reference/api-cli/commands#config).
+
 The editor is loopback-only for security. See [Configure the server](/docs/server/configure) for the full configuration schema.
 
 ### Verify the environment
@@ -163,9 +165,9 @@ Output example:
 
 ```
 10xgraph-api
-  Version: 1.0.0rc2
+  Version: 1.0.0rc4
 10xgraph (core)
-  Version: 1.0.0rc2
+  Version: 1.0.0rc4
 ```
 
 ### Preview animations

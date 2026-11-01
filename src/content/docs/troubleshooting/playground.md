@@ -41,7 +41,7 @@ The playground is hosted externally. `10xgraph dev` does not run a separate loca
 
 ## Issue: "Your browser blocked the local server"
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 **Symptoms**
 

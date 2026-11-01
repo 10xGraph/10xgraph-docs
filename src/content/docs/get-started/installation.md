@@ -111,7 +111,7 @@ The `all` extra installs every other extra at once and is useful for local devel
 Version pinning still matters. From 1.0 the public API is stable under a deprecation policy: breaking changes arrive only in a major release, after at least one minor release of deprecation. The three packages share major.minor, and patch versions are independent. While 1.0 is a release candidate, install it with `--pre`:
 
 ```bash
-pip install --pre "10xgraph==1.0.0rc2" "10xgraph-api==1.0.0rc2"
+pip install --pre "10xgraph==1.0.0rc4" "10xgraph-api==1.0.0rc4"
 ```
 
 Drop `--pre` once 1.0.0 is out. Read the [changelog](/changelog) before upgrading, and see the [upgrade guide](/docs/project/upgrade-to-1.0) if you come from 0.x.
@@ -132,9 +132,9 @@ Example output (the exact formatting and versions vary by release):
 ```text
 $ 10xgraph version
 10xgraph-api
-  Version: 1.0.0rc2
+  Version: 1.0.0rc4
 10xgraph (core)
-  Version: 1.0.0rc2
+  Version: 1.0.0rc4
 
 $ python -c "import tenxgraph; print(tenxgraph.__file__)"
 /path/to/.venv/lib/python3.12/site-packages/tenxgraph/__init__.py

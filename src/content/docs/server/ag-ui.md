@@ -141,19 +141,13 @@ With `allow_client_tools: false`, only tools declared in `remote_tools` are offe
 
 ### Rate limiting
 
-The AG-UI endpoint counts against the global `rate_limit` configuration like any other route. In production with multiple replicas, use the Redis backend:
+The AG-UI endpoint counts against the global `rate_limit` configuration like any other route. In production with multiple replicas, give the API a Redis cache store so the counters are shared:
 
 ```json
 {
-  "rate_limit": {
-    "enabled": true,
-    "backend": "redis",
-    "requests": 100,
-    "window": 60,
-    "redis": {
-      "url": "redis://localhost:6379/0",
-      "prefix": "10xgraph:rate-limit"
-    }
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {"enabled": true, "requests": 100, "window": 60}
   }
 }
 ```

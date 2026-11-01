@@ -14,7 +14,7 @@ faq:
     answer: "See the Playground Troubleshooting page for detailed diagnosis steps, including how to verify your API is running, check the backendUrl, and inspect browser and API logs."
 ---
 
-The 10xGraph playground is a hosted web application that lets you test your agent interactively during development. Run `10xgraph dev` to start your API and open the playground in one command. The playground connects to your local API over the network, so you can see messages, trace execution, inspect state, and debug tools in real time without writing any client code.
+`10xgraph dev` starts your API server and opens the playground in your browser, so you can chat with your agent and inspect its threads and runs without building a frontend. The 10xGraph playground is a hosted web application that lets you test your agent interactively during development. Pass `--no-open` to start the server without opening the browser. The playground connects to your local API over the network, so you can see messages, trace execution, inspect state, and debug tools in real time without writing any client code.
 
 ## Prerequisites
 
@@ -42,7 +42,7 @@ If the browser tab does not open automatically, copy the playground URL from the
 
 ## Allow the playground to reach your local server
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 The playground is a public HTTPS page and your server runs on your own machine. Chrome's Local Network Access feature therefore asks you for permission the first time the page calls `localhost`, and the playground makes one early request to your server so the prompt appears on the Connect page. Click Allow.
 

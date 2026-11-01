@@ -20,7 +20,7 @@ Serving your graph with `10xgraph-api` gives you these guarantees without code i
 | Ownership isolation | In production (and whenever auth is on) a thread is readable and writable only by its creator; a foreign `invoke` is rejected with 403 before the model runs. | [Thread ownership](/docs/server/auth) |
 | Scoped authorization | Per-route scopes, and a boot-time route guard that refuses to start if any non-public route has no permission check. | [Authorization scopes](/docs/guides/authorization-scopes) |
 | Input rules | Request size limit, client messages limited to the `user` role, built-in state fields not writable, `current_node` and state values validated. | [Invoke and stream](/docs/server/invoke-and-stream), [CORS and security headers](/docs/server/cors-and-security-headers) |
-| Rate limits and run caps | Sliding-window limits (memory or Redis) and a per-run timeout (300 s by default in production). | [Rate limiting](/docs/server/rate-limiting) |
+| Rate limits and run caps | Sliding-window limits (counters in the cache store: memory or Redis) and a per-run timeout (300 s by default in production). | [Rate limiting](/docs/server/rate-limiting) |
 | Production mode | `MODE=production` validates itself at startup, turns off `/docs`, and hides 5xx error text. | [Production checklist](/docs/server/production-checklist) |
 | Durable state | Threads, state and messages go through your checkpointer; with `PgCheckpointer` they survive restarts and are shared across replicas. | [Backup and restore](/docs/server/backup-and-restore), [Kubernetes](/docs/server/kubernetes) |
 | Deploy files | `10xgraph build` writes a hardened Dockerfile and optional Compose and Kubernetes files. | [Deploy](/docs/server/deploy) |

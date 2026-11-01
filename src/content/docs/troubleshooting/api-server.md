@@ -49,20 +49,21 @@ flowchart TD
 
 ### Issue: backend unreachable at startup
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 **Symptoms**
 
 - the server exits at boot after about 30 seconds (`STARTUP_CHECK_TIMEOUT_SECONDS`) with a message like:
 
 ```text
-Refusing to start: 1 configured backend(s) unreachable after 30s:
-  - redis (127.0.0.1:6399): ConnectionError: Connection refused
-Start Redis/Postgres/Qdrant, or set STARTUP_CHECKS=false to skip this check.
+Refusing to start: 1 backend(s) unreachable after 30s:
+  - cache (RedisCacheStore, cache_store.url, 127.0.0.1:6399, required by token_revocation): ConnectionError: Connection refused
+Start the backend, fix its URL, or set STARTUP_CHECKS=false to skip this check.
 ```
 
-- the checkpointer line can name two hosts, for example `checkpointer (postgres db:5432, redis cache:6379)`
+- each line names the component (`checkpointer`, `store` or `cache`) and its class, for example `checkpointer (PgCheckpointer)`. The cache line also names where the setting came from (`cache_store.url` or `cache_store.path ...`) and the feature that needs it (`required by token_revocation` or `required by rate_limit.fail_open=false`)
 - earlier log lines say `Startup check: ... is unreachable (attempt N)` while it retries
+- only the checkpointer, the store and (when `cache_store.token_revocation` is on, or `cache_store.rate_limit` is on with `fail_open` set to `false`) the cache store stop the boot. With any other setup an unreachable cache store logs one WARNING and the server starts, with locks and caps per process. A leftover `REDIS_URL` therefore never blocks a server that does not need it
 
 **Likely causes**
 
@@ -76,7 +77,7 @@ Start Redis/Postgres/Qdrant, or set STARTUP_CHECKS=false to skip this check.
 - raise `STARTUP_CHECK_TIMEOUT_SECONDS` if the backends are slow to come up
 - `STARTUP_CHECKS=false` skips the check; use it only when you accept that a down backend shows up at the first request instead
 - with `10xgraph dev` (reload on), the reloader keeps waiting for a file change after the failure; fix the cause and save a file, or restart the command
-- in production the orchestrator restarts the container until the backends are up. The same checks run behind `/health/ready`, which answers 503 at runtime while a backend is down
+- in production the orchestrator restarts the container until the backends are up. The same checks run behind `/health/ready`, which answers 503 at runtime while the checkpointer or store is down (and the cache store, when a fail-closed feature uses it)
 
 ### Issue: `RuntimeError: Refusing to start: the following routes are not protected`
 
@@ -312,20 +313,20 @@ A `1008` accompanied by an `error` event with `code: "not_live"` or `"not_author
 
 Two different limits answer 429:
 
-- the `rate_limit` window: the response carries `Retry-After` (seconds) and `X-RateLimit-*` headers. Behind a reverse proxy, every client may share one bucket if `trusted_proxies` is not set (see the `X-Forwarded-For` entry below)
+- the `cache_store.rate_limit` window: the response carries `Retry-After` (seconds) and `X-RateLimit-*` headers. Behind a reverse proxy, every client may share one bucket if `trusted_proxies` is not set (see the `X-Forwarded-For` entry below)
 - the per-user run cap `runs.max_concurrent_per_user` (default 10): one verified user already has that many invoke, stream or AG-UI runs in flight. The body is the standard error envelope with code `HTTPException` and there is no `Retry-After` header
 
 **Fix**
 
 - wait for the `Retry-After` interval, or for a running request to finish, then retry
-- raise `rate_limit.requests` or `runs.max_concurrent_per_user` in `10xgraph.json` if the traffic is legitimate
+- raise `cache_store.rate_limit.requests` or `runs.max_concurrent_per_user` in `10xgraph.json` if the traffic is legitimate
 - set `trusted_proxies` when the server sits behind a proxy
 - a rate limiter whose Redis is down answers `503 RATE_LIMIT_UNAVAILABLE` (not 429) when `fail_open` is `false`; see the entry below
 - on the TypeScript client this is a plain `TenxGraphError` with `statusCode` 429; see [Error handling](/docs/client/error-handling#rate-limits-429)
 
 ### Issue: `503 RATE_LIMIT_UNAVAILABLE`
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 **Symptoms**
 
@@ -333,11 +334,11 @@ Added after 1.0.0rc2.
 
 **Cause**
 
-`rate_limit.fail_open` is `false` and the rate limiter's backend (Redis) is unreachable. This is an outage, not a limit hit; a real limit hit stays `429 RATE_LIMIT_EXCEEDED`.
+`cache_store.rate_limit.fail_open` is `false` and the API's cache store (Redis by default) raised an error. This is an outage, not a limit hit; a real limit hit stays `429 RATE_LIMIT_EXCEEDED`.
 
 **Fix**
 
-- restore the Redis the rate limiter uses (`rate_limit.redis.url`) and retry after `Retry-After`
+- restore the cache store (the Redis from `cache_store.url` or `REDIS_URL`) and retry after `Retry-After`
 - clients that retry on 429 should retry on 503 too
 - set `fail_open` to `true` to let requests through during an outage. `/ping` and `/health/ready` are never rate limited
 
@@ -466,7 +467,7 @@ For more details, see [Checkpointing and threads](/docs/concepts/checkpointing-a
 
 **Cause**
 
-Rate limiting ignores `X-Forwarded-For` unless you opt in. `rate_limit.trusted_proxy_headers` defaults to `false`, so behind a proxy every client appears to share the proxy's IP.
+Rate limiting ignores `X-Forwarded-For` unless you opt in. `cache_store.rate_limit.trusted_proxy_headers` defaults to `false`, so behind a proxy every client appears to share the proxy's IP.
 
 **Fix**
 
@@ -474,15 +475,17 @@ Enable the option in `10xgraph.json` only when the app sits behind a proxy you c
 
 ```json
 {
-  "rate_limit": {
-    "trusted_proxy_headers": true,
-    "trusted_proxy_hops": 1,
-    "trusted_proxies": ["10.0.0.0/8"]
+  "cache_store": {
+    "rate_limit": {
+      "trusted_proxy_headers": true,
+      "trusted_proxy_hops": 1,
+      "trusted_proxies": ["10.0.0.0/8"]
+    }
   }
 }
 ```
 
-`trusted_proxies` takes the IPs or CIDR ranges the proxy connects from. `X-Forwarded-For` is ignored for any other source. See [Configure the server](/docs/server/configure) for the full `rate_limit` block.
+`trusted_proxies` takes the IPs or CIDR ranges the proxy connects from. `X-Forwarded-For` is ignored for any other source. See [Configure the server](/docs/server/configure) for the full `cache_store.rate_limit` block.
 
 ### Issue: requests time out only in production
 

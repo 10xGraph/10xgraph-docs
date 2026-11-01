@@ -51,9 +51,14 @@ The methods below are abstract and must be implemented by a subclass:
 | `aget_thread` | `async (config) -> ThreadInfo \| None` | Get thread metadata. |
 | `alist_threads` | `async (config, search=None, offset=None, limit=None) -> list[ThreadInfo]` | List threads. |
 | `aclean_thread` | `async (config) -> Any \| None` | Delete a thread and its state and messages. |
+| `aping` | `async () -> None` | Return when the checkpointer's backends are reachable and usable, raise when they are not. Must be read-only (no writes, no table creation) and cheap, because the API server calls it on every readiness probe and at startup. An in-process checkpointer just returns. Abstract since 1.0.0rc4: a subclass without it raises `TypeError` when created. |
 | `arelease` | `async () -> Any \| None` | Release resources (close pools and connections). |
 
 `alist_messages` and `alist_threads` apply `offset` and `limit` in the backend (in SQL on SQLite and Postgres). A negative `offset` or `limit` raises `ValueError`, and a `limit` above `MAX_LIST_LIMIT` (1000, in `tenxgraph.storage.checkpointer.base_checkpointer`) is lowered to it. With no `limit` (`None` or `0`) the whole list is returned, so code that reads a full thread, such as realtime history loading, still works.
+
+### `aping`
+
+`aping()` is the connectivity check. The API server calls it at startup and on `/health/ready`, so it must be read-only and cheap. `InMemoryCheckpointer.aping()` just returns, `SqliteCheckpointer.aping()` runs `SELECT 1`, and `PgCheckpointer.aping()` runs `SELECT 1`, compares the recorded schema version with the one the code expects (a `RuntimeError` that names both when it is older), and pings its Redis cache directly, so an outage is reported and the circuit breaker stays unchanged. It never creates the schema: the server runs `asetup()` at boot. Added in 1.0.0rc4.
 
 ### Sync wrappers
 
@@ -285,6 +290,9 @@ class DynamoDBCheckpointer(BaseCheckpointer):
 
     async def aclear_state(self, config: dict) -> Any:
         ...
+
+    async def aping(self) -> None:
+        ...  # raise if DynamoDB cannot be reached; read-only and cheap
 
     async def aput_state_cache(self, config: dict, state: AgentState) -> Any:
         ...  # in-memory dict, no external call

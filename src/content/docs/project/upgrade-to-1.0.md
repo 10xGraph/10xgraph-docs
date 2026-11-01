@@ -6,7 +6,7 @@ description: Migration guide from 10xgraph 0.10, 10xgraph-api 0.9 and 10xgraph-c
 section: Project
 order: 20
 label: Upgrade to 1.0
-updated: "2026-10-29"
+updated: "2026-10-31"
 ---
 
 1.0 is the release where the public API is stable under a deprecation policy. The core
@@ -24,7 +24,7 @@ read [Upgrade to 0.9](/docs/project/upgrade-to-0.9) first.
 client candidate is published under the `next` dist-tag.
 
 ```bash
-pip install -U --pre "10xgraph==1.0.0rc2" "10xgraph-api==1.0.0rc2"
+pip install -U --pre "10xgraph==1.0.0rc4" "10xgraph-api==1.0.0rc4"
 npm install 10xgraph-client@next
 ```
 
@@ -38,6 +38,76 @@ npm install 10xgraph-client@next
 - Patch numbers are independent. A patch is only a bug or security fix.
 - A new feature means all three packages release the next `X.Y.0` together.
 - A public API is removed only in a major release, after at least one minor of deprecation.
+
+---
+
+## From 1.0.0rc3 to 1.0.0rc4
+
+The API's shared state (run locks and caps, idempotency, the ownership cache, token revocation
+and rate limiting) now lives behind one class, `BaseCacheStore`, configured by one `cache_store`
+object in `10xgraph.json`: `type` (`memory`, `redis` or `custom`), `url`, `path`, `rate_limit` and
+`token_revocation`. The old extension points are removed with no aliases. A top-level `redis`,
+`rate_limit` or `token_revocation` key, or a removed value, stops the server at load with an
+error that says where the setting goes.
+
+| Old | New |
+|---|---|
+| `ConcurrencyLimiter` (and its Redis and memory variants) | `BaseCacheStore`; the run lock, run caps, WebSocket caps and idempotency use its timed slots. Nothing to configure. |
+| `TokenRevocationBackend` (with its in-memory and Redis variants) and `build_token_revocation` | `BaseCacheStore`. Revocations are kept in the cache store. |
+| `BaseRateLimitBackend`, `MemoryRateLimitBackend`, `RedisRateLimitBackend` | `BaseCacheStore`. Rate limiting takes timed slots from the cache store. |
+| Top-level `rate_limit` | `cache_store.rate_limit` |
+| Top-level `token_revocation`, or `"token_revocation": "redis"`, `"memory"` or `"module:attr"` | `cache_store.token_revocation`: `true`, or `{"enabled": true, "token_lifetime": <seconds>, "user_ttl": <seconds>}`. `user_ttl` defaults to 30 days; `null` keeps entries forever. |
+| `rate_limit.backend` (`memory`, `redis`, `custom`) | `cache_store.type` (`memory`, `redis`, `custom`). With `custom`, set `cache_store.path`. |
+| `rate_limit.redis` (`url`, `prefix`) and top-level `"redis": "${REDIS_URL}"` | `cache_store.type` `redis` and, optionally, `cache_store.url`. Empty `url` reads `REDIS_URL`. |
+| Top-level `"cache_store": "module:attr"` | `"cache_store": {"type": "custom", "path": "module:attr"}` |
+| `REDIS_URL` alone selecting Redis | Set `"cache_store": {"type": "redis"}`. `REDIS_URL` alone no longer selects it. |
+
+Other changes:
+
+- **`BaseCheckpointer.aping()` is now abstract (core).** A custom checkpointer must implement
+  `async def aping(self) -> None`: return when its backends are reachable and usable, raise when
+  they are not. Keep it read-only and cheap, because the server calls it on `/health/ready` and
+  at startup. An in-process checkpointer just returns. A checkpointer without it raises
+  `TypeError` when created. `InMemoryCheckpointer`, `SqliteCheckpointer` and `PgCheckpointer`
+  implement it. `PgCheckpointer.aping()` never creates the schema.
+- **Choosing the cache store.** Only `cache_store.type` picks it: `memory` (the default),
+  `redis` or `custom`. The server logs one INFO line at boot that names the store and the config
+  key it came from. Valkey, Dragonfly and KeyDB work through the Redis URL.
+- **The startup check and `/health/ready` only call `aping()`.** The cache store stops the boot,
+  and fails readiness, only when a fail-closed feature uses it: `cache_store.token_revocation` is on,
+  or `cache_store.rate_limit` is on with `fail_open` set to `false`. Otherwise an unreachable cache store logs
+  one WARNING and the server starts. This fixes a bug in rc3 where a leftover `REDIS_URL` blocked
+  boot for a setup that needed no Redis. The `/health/ready` keys are `checkpointer`, `store` and
+  `cache`; the key `redis` is gone. Update probes or monitors that read it.
+- **Failure behaviour.** Run locks, caps, idempotency and the ownership cache fail open. Token
+  revocation fails closed (503). Rate limiting follows `cache_store.rate_limit.fail_open` (default `true`;
+  `false` answers 503 `RATE_LIMIT_UNAVAILABLE` with `Retry-After: 5`).
+- **Rate-limit counters reset once.** The Redis keys moved to the `10xgraph:ratelimit2`
+  namespace. Other Redis key layouts are unchanged, so a rolling deploy shares locks between old
+  and new pods.
+- **An in-memory cache store with token revocation warns.** In production, or with
+  `WEB_CONCURRENCY` above 1, the server warns that revocations only reach this process.
+- **`10xgraph revoke` builds the configured cache store** the same way as the server (the
+  `--redis-url` override stays) and refuses with a clear error when it is `InMemoryCacheStore`.
+- **`10xgraph init` asks only the agent name, template and AI provider.** Production writes
+  `"auth": "jwt"`, `"authorization": "ownership"`, `"id_generator": "uuid"` and
+  `"cache_store": {"type": "redis", "rate_limit": {...}, "token_revocation": true}` (no `url`:
+  Redis reads `REDIS_URL`). Quick Start writes no `cache_store`. The flags `--auth`,
+  `--cache-store`, `--rate-limit`, `--token-revocation` and `--websocket` override parts of it.
+- **New keys.** `id_generator` (`uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake`
+  or `module:attr`) and `thread_name_generator` (`random`, `first_message`, `none` or
+  `module:attr`). With `thread_name_generator` unset, new threads are now named (randomly) and
+  the name is saved. See the [configuration reference](/docs/reference/api-cli/configuration).
+
+Migration steps:
+
+1. Move `rate_limit` and `token_revocation` inside `cache_store`, replace `token_revocation`
+   strings with `true` or an object, and delete `rate_limit.backend` and `rate_limit.redis`.
+2. Replace the top-level `redis` key with `"cache_store": {"type": "redis"}` (add `url` to use a
+   different Redis than `REDIS_URL`) if you ran with more than one worker.
+3. Implement `aping()` on any custom checkpointer. Port a custom rate-limit or revocation backend
+   to `BaseCacheStore`; see [Bring your own backend](/docs/server/bring-your-own-backend).
+4. Update monitors that read `checks.redis` from `/health/ready` to read `checks.cache`.
 
 ---
 
@@ -100,7 +170,7 @@ npm install 10xgraph-client@next
 - **Skill and memory text is no longer run through `str.format`.** Only your own
   `system_prompt` is interpolated, and a bad placeholder is logged instead of failing the run.
   Remove any reliance on `{placeholder}` expansion inside skill or memory text.
-- **`BaseStore.aping()` is now abstract (added after 1.0.0rc2).** A custom store must implement
+- **`BaseStore.aping()` is now abstract (added in 1.0.0rc3).** A custom store must implement
   `async def aping(self) -> None`: return when its backend is reachable, raise when it is not.
   Keep it read-only and cheap, because `10xgraph-api` calls it on `/health/ready` and at
   startup. An in-process store just returns. A store without it raises `TypeError` when
@@ -304,7 +374,7 @@ npm install 10xgraph-client@next
 
 ### Startup check and rate limiter outages
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 - **The server refuses to start while a configured backend is unreachable.** At boot it pings
   the checkpointer's Postgres and Redis, the API's Redis, the rate limiter's own Redis and the
@@ -416,7 +486,7 @@ The extras raise these floors. A fresh install resolves them; an existing enviro
 
 After upgrading, before sending production traffic:
 
-1. `10xgraph version` reports 1.0.0rc2 for core and the CLI.
+1. `10xgraph version` reports 1.0.0rc4 for core and the CLI.
 2. The server starts with `MODE=production` and explicit `ALLOWED_HOST` and `ORIGINS`.
 3. A new conversation without a `thread_id` succeeds, and a client-invented id for a new thread
    gets 403 (unless you set `runs.thread_ids` to `"client"`).

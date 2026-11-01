@@ -54,7 +54,7 @@ Flags: `--config`/`-c`, `--host`/`-H`, `--port`/`-p`, `--reload/--no-reload`, `-
 
 ### Run `10xgraph dev` against Docker backends
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 When Postgres, Redis or Qdrant run in Docker Compose and `10xgraph dev` runs on your host, the host reaches them through published ports. Publish each port on `127.0.0.1` only, so nothing else on your network can connect:
 
@@ -304,7 +304,7 @@ Confirm that:
 
 Test with: `curl http://127.0.0.1:8000/ping`
 
-If the server itself exits at boot with `Refusing to start: ... backend(s) unreachable`, a configured Postgres, Redis or store is down or its URL is wrong. See [Backend unreachable at startup](/docs/troubleshooting/api-server#issue-backend-unreachable-at-startup).
+If the server itself exits at boot with `Refusing to start: ... backend(s) unreachable`, a configured Postgres, store or cache store (Redis) is down or its URL is wrong. See [Backend unreachable at startup](/docs/troubleshooting/api-server#issue-backend-unreachable-at-startup).
 
 ## Next steps
 

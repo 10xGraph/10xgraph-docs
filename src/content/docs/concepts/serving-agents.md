@@ -48,10 +48,8 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
 {
   "agent": "graph.agent:get_compiled_graph",
   "auth": "jwt",
-  "rate_limit": {
-    "backend": "memory",
-    "requests": 100,
-    "window": 60
+  "cache_store": {
+    "rate_limit": {"requests": 100, "window": 60}
   }
 }
 ```
@@ -66,16 +64,17 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
   "authorization": "auth.agent_auth:MyAuthorizationBackend",
   "injectq": "graph.agent:container",
   "store": "services.store:my_store",
-  "redis": "redis://localhost:6379",
   "thread_name_generator": "services.naming:MyNameGenerator",
-  "rate_limit": {
-    "backend": "redis",
-    "requests": 1000,
-    "window": 60,
-    "by": "ip",
-    "trusted_proxy_headers": true,
-    "exclude_paths": ["/ping", "/docs"],
-    "redis": {"url": "redis://localhost:6379"}
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {
+      "requests": 1000,
+      "window": 60,
+      "by": "ip",
+      "trusted_proxy_headers": true,
+      "exclude_paths": ["/ping", "/docs"]
+    },
+    "token_revocation": true
   }
 }
 ```
@@ -89,9 +88,9 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
 | `checkpointer` | module:path | Accepted in the file, but the server does not load it. Pass the checkpointer to `compile(checkpointer=...)` in your graph module instead. |
 | `injectq` | module:path | Points to an `InjectQ` container instance. |
 | `store` | module:path | Loads your `BaseStore` for long-term memory. |
-| `redis` | URL string | Redis URL. The ownership authorization cache uses it as a shared cache tier. |
-| `thread_name_generator` | module:path | Loads your `ThreadNameGenerator` class or instance. |
-| `rate_limit` | object | Rate limiting config (see below). |
+| `id_generator` | name \| module:path | `uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or your `BaseIDGenerator`. |
+| `thread_name_generator` | name \| module:path | `random` (default), `first_message`, `none`, or your `ThreadNameGenerator` class or instance. |
+| `cache_store` | object | The cache store (`type`, `url`, `path`) plus `rate_limit` and `token_revocation` (see below). The ownership authorization cache uses it as a shared cache tier. |
 
 **Starting the server:**
 
@@ -209,88 +208,37 @@ Override by setting `authorization` to a `module:attr` path, a built-in name (`"
 
 ## Rate limiting
 
-Rate limiting is pluggable via `BaseRateLimitBackend`. Two backends are built in (`memory` and `redis`); set `backend` to `custom` to supply your own.
+Rate limiting keeps its counters in the API's cache store, the same store that holds the run locks and caps. There is no separate rate-limit backend. The `rate_limit` object sits inside `cache_store`. Set `"type": "redis"` to share the counters between workers (Redis from `cache_store.url` or `REDIS_URL`), or `"type": "custom"` with a `path` to supply your own `BaseCacheStore`.
 
 ```json
 {
-  "rate_limit": {
-    "backend": "memory",
-    "requests": 100,
-    "window": 60,
-    "by": "ip",
-    "trusted_proxy_headers": true,
-    "fail_open": false,
-    "exclude_paths": ["/ping"]
-  }
-}
-```
-
-The memory backend counts per process, so use `redis` when you run several workers.
-
-| Config key | Default | Purpose |
-|---|---|---|
-| `enabled` | true | Set `false` to turn rate limiting off. |
-| `backend` | `memory` | `memory` (single-worker dev), `redis` (multi-worker), or `custom` (a `BaseRateLimitBackend` bound in InjectQ). |
-| `requests` | 100 | Requests allowed per window. |
-| `window` | 60 | Time window in seconds. |
-| `by` | `ip` | `ip` (per client IP), `user`, or `global` (all callers share one limit). |
-| `trusted_proxy_headers` | false | Honor `X-Forwarded-For` when true. |
-| `fail_open` | true | Allow requests if the backend is unreachable. |
-| `exclude_paths` | `[]` | Paths exempt from rate limiting. |
-
-For the `redis` backend, add a `redis` key with the connection URL:
-
-```json
-{
-  "rate_limit": {
-    "backend": "redis",
-    "redis": {
-      "url": "redis://localhost:6379",
-      "prefix": "ratelimit:"
+  "cache_store": {
+    "type": "redis",
+    "rate_limit": {
+      "requests": 100,
+      "window": 60,
+      "by": "ip",
+      "trusted_proxy_headers": true,
+      "fail_open": false,
+      "exclude_paths": ["/ping"]
     }
   }
 }
 ```
 
-**Custom backend:**
+With the default `memory` type the counters live in each process, so use `redis` when you run several workers.
 
-```python
-# services/rate_limit.py
-from tenxgraph_api.src.app.core.middleware.rate_limit.base import (
-    BaseRateLimitBackend,
-    RateLimitDecision,
-)
+| Config key | Default | Purpose |
+|---|---|---|
+| `enabled` | true | Set `false` to turn rate limiting off. |
+| `requests` | 100 | Requests allowed per window. |
+| `window` | 60 | Time window in seconds. |
+| `by` | `ip` | `ip` (per client IP), `user`, or `global` (all callers share one limit). |
+| `trusted_proxy_headers` | false | Honor `X-Forwarded-For` when true. |
+| `fail_open` | true | Allow requests if the cache store errors. `false` answers 503 `RATE_LIMIT_UNAVAILABLE`. |
+| `exclude_paths` | `[]` | Paths exempt from rate limiting. |
 
-class CustomRateLimitBackend(BaseRateLimitBackend):
-    async def check(self, key: str, *, limit: int, window: int) -> RateLimitDecision:
-        # Atomically count the request, then return a decision.
-        # allowed=False produces a 429 response. Return
-        # RateLimitDecision.backend_unavailable() for a 503 when your store is down.
-        return RateLimitDecision(allowed=True, remaining=limit - 1, reset_after=window)
-
-    async def close(self) -> None:
-        ...
-```
-
-Set `"backend": "custom"` in `rate_limit`, and register the backend through the container that `injectq` points to:
-
-```json
-{
-  "injectq": "graph.agent:container",
-  "rate_limit": {"backend": "custom", "requests": 100, "window": 60}
-}
-```
-
-Then in your graph module:
-
-```python
-from injectq import InjectQ
-from services.rate_limit import CustomRateLimitBackend
-from tenxgraph_api.src.app.core.middleware.rate_limit.base import BaseRateLimitBackend
-
-container = InjectQ.get_instance()
-container.bind_instance(BaseRateLimitBackend, CustomRateLimitBackend())
-```
+To store counters somewhere other than Redis, implement `BaseCacheStore`; see [Bring your own backend](/docs/server/bring-your-own-backend).
 
 ## Publishers
 
@@ -429,7 +377,7 @@ ORIGINS=https://example.com,https://app.example.com
 | Variable | Default | Purpose |
 |---|---|---|
 | `MODE` | `development` | `production` or `prod` enables security checks; `development`, `dev` and `local` are the other values. Anything else stops startup |
-| `REDIS_URL` | none | Redis connection used by server components such as the ownership cache |
+| `REDIS_URL` | none | Redis connection for the API's cache store (locks, caps, idempotency, ownership cache, token revocation, rate limiting) |
 | `JWT_SECRET_KEY` | none | Required for JWT auth; use 32+ random chars |
 | `SENTRY_DSN` | none | Sentry error tracking |
 | `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing |

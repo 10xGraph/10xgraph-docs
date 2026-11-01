@@ -23,6 +23,8 @@ Most agent frameworks stop at the graph. The moment you want real users, you sta
 
 **10xGraph's claim is simple: you build the agent, and 10xGraph builds the production server around it.** The server is secure by default, scales horizontally, and is ready to deploy. Every part of it is replaceable when the default does not fit your stack.
 
+The server, the `10xgraph` CLI and a ready-made playground come with it. `10xgraph dev` starts the server and opens the playground in your browser, so your first run needs no frontend code.
+
 This page backs each part of that claim with what the server actually does, so you can judge it before you adopt it.
 
 ## What you write, what you get
@@ -60,7 +62,7 @@ Then run `10xgraph dev` locally, or `10xgraph build --docker-compose --k8s` for 
 | Memory APIs | Save, search, update and forget long-term memories under `/v1/store` |
 | File uploads | Upload, download and signed URLs under `/v1/files`, with size and type limits |
 | AG-UI | `POST /v1/ag-ui` for CopilotKit and other AG-UI clients (opt-in) |
-| Health | `/ping` for liveness, `/health/ready` for readiness (checks checkpointer, Redis and store) |
+| Health | `/ping` for liveness, `/health/ready` for readiness (checks checkpointer, store and cache store) |
 | Security | Auth, scoped authorization, owner-only threads, token revocation, rate limits, security headers, size limits |
 | Deployment | Hardened Dockerfile, Docker Compose file, Kubernetes manifest |
 | Tooling | Playground, config editor, `test`, `eval` and `audit` commands |
@@ -117,8 +119,9 @@ Defaults are there to get you to production quickly, not to lock you in. Each pa
 |---|---|---|---|
 | Authentication | Off, or built-in JWT | Any identity provider or API keys | Subclass `BaseAuth`; `"auth": {"method": "custom", "path": "auth.my_auth:MyAuth"}` |
 | Authorization | Owner-only threads | Role-based access, or your own rules | `{"backend": "rbac", ...}` or subclass `AuthorizationBackend` and set `"authorization": "module:Class"` |
-| Token revocation | Off | Redis, memory or your own store | `"token_revocation": "redis"` or a `TokenRevocationBackend` |
-| Rate limiting | Off | Memory, Redis or a custom backend | `rate_limit` block; `"backend": "custom"` with a `BaseRateLimitBackend` bound in your container |
+| Token revocation | Off | Kept in the API's cache store (Redis, memory or your own) | `"token_revocation": true` plus `redis` or `cache_store` |
+| Rate limiting | Off | Counters in the API's cache store (memory, Redis or your own) | `rate_limit` block plus `redis` or `"cache_store": "module:attr"` |
+| Shared state (locks, caps, idempotency) | One process | Redis, Valkey, Dragonfly, KeyDB or your own `BaseCacheStore` | `redis`, `REDIS_URL` or `cache_store`; see [Bring your own backend](/docs/server/bring-your-own-backend) |
 | Persistence | In-memory checkpointer | Postgres + Redis, SQLite or your own | Pass it to `compile(checkpointer=...)` |
 | Long-term memory | None | Qdrant, Mem0 or your own `BaseStore` | `"store": "module:instance"` |
 | Events and tracing | None | Console, Redis, Kafka, RabbitMQ, OTel, Logfire, LangSmith | Bind a publisher, or use the `observability` block |

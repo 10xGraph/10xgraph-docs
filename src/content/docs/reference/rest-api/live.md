@@ -41,7 +41,7 @@ The older `agentflow-bearer` sentinel is still accepted until 2.0.
 
 An authentication or authorization failure closes the handshake with code `1008` before `accept()`.
 
-The token is not trusted for the whole session. The server checks it again after the init frame and then every 30 seconds. Each check covers expiry and revocation (`token_revocation`), and it fails closed: a revocation backend that cannot answer counts as revoked. When a check fails, the server sends a fatal `session_expired` error event and closes the socket with code `1008`. The client must reconnect with a fresh token.
+The token is not trusted for the whole session. The server checks it again after the init frame and then every 30 seconds. Each check covers expiry and revocation (`token_revocation`), and it fails closed: a cache store that cannot answer the revocation check counts as revoked. When a check fails, the server sends a fatal `session_expired` error event and closes the socket with code `1008`. The client must reconnect with a fresh token.
 
 ---
 
@@ -66,7 +66,7 @@ WebSocket handshakes bypass the HTTP rate-limit and request-size middleware (Sta
 }
 ```
 
-A missing key gets the default above. Set a key to `0` or `null` for unlimited. The counters are shared by all workers when Redis is configured (`redis` key or `REDIS_URL`) and per process otherwise, so without Redis size them per worker. `realtime_models` is covered under the init frame.
+A missing key gets the default above. Set a key to `0` or `null` for unlimited. The counters are shared by all workers when a shared cache store is configured (`cache_store.type` `redis` or `custom`) and per process otherwise, so without Redis size them per worker. `realtime_models` is covered under the init frame.
 
 ---
 

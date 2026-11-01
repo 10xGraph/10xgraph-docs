@@ -59,14 +59,14 @@ The settings model allows extra variables, so unknown names in the environment a
 
 ## Startup check variables
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `STARTUP_CHECKS` | `true` | Before serving, ping every configured backend and refuse to start while one stays unreachable. Applies in development and production. `false` skips the check and logs a warning. |
 | `STARTUP_CHECK_TIMEOUT_SECONDS` | `30` | Seconds the check keeps retrying an unreachable backend (with a short backoff) before it gives up, so services started together can come up in any order. Must be 0 or more. |
 
-The check covers the checkpointer's Postgres (a query plus the schema version) and its Redis cache, the API's Redis (`redis` in `10xgraph.json`, else `REDIS_URL`), the rate limiter's Redis when it has its own URL, and the memory store through `aping()`. It does not check the model provider. When a backend stays down, the server exits with a message that names each backend and its `host:port`, never credentials. See [Startup check](/docs/server/production-checklist#startup-check) and [Backend unreachable at startup](/docs/troubleshooting/api-server#issue-backend-unreachable-at-startup).
+The check calls `aping()` on the checkpointer (Postgres, its schema version and its Redis cache), on the store when one is bound, and on the API's cache store. It does not check the model provider. The checkpointer and the store are fatal when they stay down. The cache store is fatal only when a fail-closed feature uses it (`cache_store.token_revocation` on with auth, or `cache_store.rate_limit` on with `fail_open` set to `false`); otherwise the server logs one warning and starts. When the server exits, the message names each backend and its endpoint, never credentials. See [Startup check](/docs/server/production-checklist#startup-check) and [Backend unreachable at startup](/docs/troubleshooting/api-server#issue-backend-unreachable-at-startup).
 
 ---
 
@@ -139,22 +139,22 @@ Both must be set when `10xgraph.json` has `"auth": "jwt"`; the config load raise
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `REDIS_URL` | `null` | Redis connection URL, for example `redis://localhost:6379/0` |
+| `REDIS_URL` | `null` | Redis connection URL, for example `redis://localhost:6379/0`. Feeds `cache_store` of type `redis` when it has no `url`. Not read by the API in any other case |
 | `REDIS_SOCKET_TIMEOUT` | `5.0` | Seconds a Redis call may take before it fails, so a Redis that stops answering does not hang the request. `0` turns the timeout off. |
 | `REDIS_CONNECT_TIMEOUT` | `5.0` | Seconds to wait when opening a Redis connection. `0` turns it off. |
 | `REDIS_MAX_CONNECTIONS` | `50` | Pool size of each Redis client the API opens. `0` means no bound. |
 | `REDIS_POOL_TIMEOUT` | `5.0` | Seconds a request waits for a free pooled connection. `0` means no timeout. |
-| `REDIS_KEY_PREFIX` | `""` | Put in front of every key the API writes to Redis (run locks and caps, ownership cache, token revocation), so two deployments sharing one Redis cannot read each other's entries. The core checkpointer has its own `redis_key_prefix` option for its cache keys. To separate a whole deployment, set both to the same value. |
+| `REDIS_KEY_PREFIX` | `""` | Put in front of every key the API writes to Redis (run locks and caps, idempotency, ownership cache, token revocation, rate limiting), so two deployments sharing one Redis cannot read each other's entries. The core checkpointer has its own `redis_key_prefix` option for its cache keys. To separate a whole deployment, set both to the same value. |
 | `REDIS_HEALTH_CHECK_INTERVAL` | `30.0` | Seconds between health checks of an idle connection. `0` turns them off. |
 
-The `REDIS_*` limits apply to every Redis client the API opens: run locks and caps, rate limiting, token revocation, the ownership cache and the readiness probe.
+The `REDIS_*` limits apply to the Redis client behind the API's cache store (`RedisCacheStore`).
 
-`REDIS_URL` is **optional everywhere**. Two things use it:
+`REDIS_URL` is **optional everywhere**. The API reads it only when `cache_store` has `"type": "redis"` and no `url` (or a `url` such as `${REDIS_URL}` that expands it). `REDIS_URL` alone never selects Redis: with no `cache_store` the API uses the in-memory store even when the variable is set. A `cache_store.url` you set wins over the variable, so the cache store can use a different Redis than your checkpointer. The server logs one INFO line at boot that names the store and the config key it came from.
 
-- **The ownership authorization cache (L2).** The `ownership` and `rbac` backends resolve their Redis URL from the `redis` key in `10xgraph.json` first, falling back to `REDIS_URL`. With neither set, or with the `redis` package not installed, the cache runs in-process only (L1) and the server logs a warning at startup. Nothing breaks; each worker just pays its own first lookup per thread.
-- **`PgCheckpointer`.** It requires a Redis connection (`redis_url`, `redis_pool` or `redis`) as the hot cache in front of Postgres; constructing it without one raises `ValueError`. It does not read `REDIS_URL` itself, so pass the URL to its constructor. The durable data lives in Postgres.
+- **The cache store.** `RedisCacheStore` shares run locks, run and WebSocket caps, idempotency, the ownership cache (L2), token revocation and rate limiting between workers. With the in-memory type they live in each process. Valkey, Dragonfly and KeyDB work through the same URL.
+- **`PgCheckpointer`.** It requires a Redis connection (`redis_url`, `redis_pool` or `redis`) as the hot cache in front of Postgres; constructing it without one raises `ValueError`. It does not read `REDIS_URL` itself, so pass the URL to its constructor in your own code, for example `redis_url=os.environ["REDIS_URL"]`. The durable data lives in Postgres.
 
-The rate limiter does **not** read `REDIS_URL`. Configure its connection under `rate_limit.redis.url` in `10xgraph.json`.
+The rate limiter has no Redis setting of its own; it uses the cache store.
 
 ---
 

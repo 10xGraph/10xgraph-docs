@@ -8,7 +8,7 @@ label: Overview
 updated: "2026-10-28"
 ---
 
-This section covers 10xGraph as a project: who maintains it, how releases are announced, how to report a security problem, where to get help and how to contribute. It is MIT licensed, maintained by 10xScale, and at the 1.0 release candidate stage (1.0.0rc2, 2026-10-30) after its October 2026 rename from Agentflow.
+This section covers 10xGraph as a project: who maintains it, how releases are announced, how to report a security problem, where to get help and how to contribute. It is MIT licensed, maintained by 10xScale, and at the 1.0 release candidate stage (1.0.0rc4, 2026-10-31) after its October 2026 rename from Agentflow.
 
 ## Start here
 

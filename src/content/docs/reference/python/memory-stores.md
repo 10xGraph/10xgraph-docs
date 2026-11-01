@@ -373,12 +373,12 @@ Abstract base class that every store backend implements. Every method takes a `c
 | `adelete` | `async (config, memory_id, **kwargs) -> Any` | Delete a memory by ID. |
 | `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. `QdrantStore` also narrows by the keyword arguments `memory_type`, `category` and `filters` (combined with AND; a `filters` value that is not a string, integer or boolean raises `ValueError`). `Mem0Store` can delete only by user, so it raises `ValueError` when any of the three is passed. |
 | `asetup` | `async () -> Any` | Create the collection or other backing resources. Implemented by `QdrantStore`; the base class raises `NotImplementedError`. |
-| `aping` | `async () -> None` | Abstract. Return when the store's backend is reachable, raise when it is not. Must be read-only and cheap, because a server may call it on every readiness probe. An in-process store just returns. `10xgraph-api` calls it for `/health/ready` and at startup. A custom store that does not implement it raises `TypeError` when created. Added after 1.0.0rc2. |
+| `aping` | `async () -> None` | Abstract. Return when the store's backend is reachable, raise when it is not. Must be read-only and cheap, because a server may call it on every readiness probe. An in-process store just returns. `10xgraph-api` calls it for `/health/ready` and at startup. A custom store that does not implement it raises `TypeError` when created. Added in 1.0.0rc3. |
 | `arelease` | `async () -> None` | Release connections. Not abstract, but the base implementation raises `NotImplementedError`; `Mem0Store` overrides it. |
 
 There is no bulk `abatch_store`; call `astore` in a loop or with `asyncio.gather`.
 
-`QdrantStore.aping()` lists the collections on the server, `Mem0Store.aping()` lists the collections of its vector store, and `InMemoryStore.aping()` returns at once. Added after 1.0.0rc2.
+`QdrantStore.aping()` lists the collections on the server, `Mem0Store.aping()` lists the collections of its vector store, and `InMemoryStore.aping()` returns at once. Added in 1.0.0rc3.
 
 ### Sync wrappers
 

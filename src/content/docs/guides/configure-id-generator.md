@@ -43,6 +43,8 @@ All are imported from `tenxgraph.utils.id_generator` or the top-level `tenxgraph
 
 ## Quick start: use a built-in generator
 
+When you serve the graph with the API server, you can instead set `"id_generator"` in `10xgraph.json` (`uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or a `module:attr` path). Set it in one place only: the server refuses to boot when the graph code also sets a generator, or when a `PgCheckpointer` `id_type` cannot hold the ids. See the [configuration reference](/docs/reference/api-cli/configuration#id_generator).
+
 To replace the default UUID generator, pass `id_generator` to `StateGraph()`:
 
 ```python

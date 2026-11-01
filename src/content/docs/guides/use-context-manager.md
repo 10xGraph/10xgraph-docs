@@ -258,6 +258,7 @@ Context reduced to 8 messages; cumulative summary length=450 chars
 | Tool results disappear from responses | `remove_tool_msgs=True` is too aggressive for your use case. | Set `remove_tool_msgs=False` (default) or keep tool results in `keep_recent`. |
 | `SummaryContextManager` fails silently | The summarization model or API key is misconfigured. | Check logs with `logging.getLogger("tenxgraph.state.summary")` set to `DEBUG`. Verify your API key and model name. |
 | Summary gets very long over time | Each summarization appends to the previous summary, accumulating length. | Lower `max_messages` to trigger summarization more often, or increase `keep_recent` to retain more recent context. |
+| 400 "Invalid `signature` in `thinking` block" with Claude | Trimming or summarizing removed messages that Claude's signed thinking blocks were bound to. | Pass `thinking` with `block_binding` and the beta header to the `Agent`. See [Context managers and thinking signatures](/docs/integrations/anthropic#context-managers-and-thinking-signatures). |
 
 ## Run it in production
 

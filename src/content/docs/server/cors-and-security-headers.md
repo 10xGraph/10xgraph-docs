@@ -54,7 +54,7 @@ export CORS_ALLOW_CREDENTIALS="true"
 
 ### Private-network preflight for the hosted playground
 
-Added after 1.0.0rc2.
+Added in 1.0.0rc3.
 
 When a public page such as `https://play.10xgraph.com` calls a server on `localhost`, Chrome first sends a preflight with `Access-Control-Request-Private-Network`. The API answers it with `Access-Control-Allow-Private-Network: true`, but only for an origin listed in `ORIGINS`. For any other origin the preflight is refused as before and the header is not sent. The browser also asks the user for permission; see [Allow the playground to reach your local server](/docs/server/playground#allow-the-playground-to-reach-your-local-server).
 
@@ -202,9 +202,8 @@ The rate limiter explicitly checks the `trusted_proxy_headers` setting in `10xgr
 
 ```json
 {
-  "rate_limit": {
-    "by": "ip",
-    "trusted_proxy_headers": true
+  "cache_store": {
+    "rate_limit": {"by": "ip", "trusted_proxy_headers": true}
   }
 }
 ```

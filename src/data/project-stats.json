@@ -9,19 +9,19 @@
   },
   "releases": {
     "year": 2026,
-    "thisYear": 70,
-    "total": 100,
+    "thisYear": 72,
+    "total": 102,
     "latest": [
       {
         "package": "10xgraph",
-        "version": "1.0.0rc2",
-        "date": "2026-10-30",
+        "version": "1.0.0rc4",
+        "date": "2026-10-31",
         "label": "core"
       },
       {
         "package": "10xgraph-api",
-        "version": "1.0.0rc2",
-        "date": "2026-10-30",
+        "version": "1.0.0rc4",
+        "date": "2026-10-31",
         "label": "API and CLI"
       },
       {
