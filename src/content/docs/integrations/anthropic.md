@@ -144,6 +144,39 @@ Anthropic signs each `thinking` block and returns `redacted_thinking` blocks for
 
 Other providers never receive these blocks. A message saved before 1.0 has no signature, so its thinking is not replayed to Anthropic. See [`ReasoningBlock`](/docs/reference/python/messages#reasoningblock).
 
+### Context managers and thinking signatures
+
+Claude binds each signed thinking block to everything before it: the system prompt, the tools and the earlier messages. 10xGraph replays stored thinking blocks unchanged, so when a context manager removes or replaces earlier messages (`MessageContextManager` trimming old turns, `SummaryContextManager` replacing them with a summary, or `remove_tool_msgs=True` removing tool rounds), the kept blocks no longer verify. Changing the system prompt, for example a date line that changes each day, has the same effect. Anthropic then rejects the next request:
+
+```
+Error code: 400 - invalid_request_error: messages.1.content.2: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to "drop_block". Content that preceded this block when it was created is missing from this request, starting at `messages.0`.
+```
+
+The check is enforced by default for Anthropic accounts created on or after 2026-08-31 (Claude Fable 5.1, Opus 5.5, Sonnet 5.5). Older accounts are not enforced unless the request sets the field below.
+
+No 10xGraph code change is needed. `Agent` (and `ReactAgent`, which forwards them) sends unknown keyword arguments straight to `client.messages.create`, and `reasoning_config` keeps a `thinking` value you pass (effort still comes from `reasoning_config`):
+
+```python
+agent = Agent(
+    model="claude-sonnet-5-5",
+    reasoning_config={"effort": "high"},
+    trim_context=True,
+    # Trimming or summarizing old turns invalidates Claude's stored thinking signatures.
+    # drop_block tells the API to skip those blocks instead of returning a 400.
+    thinking={"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}},
+    extra_headers={"anthropic-beta": "thinking-binding-controls-2026-08-01"},
+)
+```
+
+Pass the context manager to `StateGraph(context_manager=...)` as usual. Caveats:
+
+- The header and the field go together. The field without the header is its own 400 (`block_binding: Extra inputs are not permitted`).
+- Claude only. These arguments are sent to whatever provider the `Agent` uses, so do not set them for OpenAI or Google models, or when `fallback_models` includes a non-Claude model.
+- Thinking must be on. Sonnet 5.5's `"between_tools"` thinking type rejects `block_binding`.
+- The beta is offered on the Claude API, Claude Platform on AWS, Vertex AI and Bedrock, but only the direct Claude API was verified with 10xGraph. On Bedrock the beta is sent as an `anthropic_beta` body field rather than a header (not verified with 10xGraph).
+- Effect: the model loses its earlier reasoning for the turns that were kept. Their text and tool calls stay, and new turns think normally.
+- Avoid trimming in the middle of a tool round. `SummaryContextManager` with `trim_context=True` can, because its trigger counts messages or tokens, and the call in progress then loses its reasoning.
+
 ## Token limits and defaults
 
 The Anthropic Messages API requires `max_tokens` on every request. 10xGraph provides sensible defaults that depend on the execution mode:
@@ -235,6 +268,7 @@ For the direct Claude API, you need at least one credential source to resolve. 1
 | `ValueError: Unsupported anthropic_backend` | Typo or unsupported backend name | Use `None` (direct API), `"vertex"`, or `"bedrock"` |
 | `ValueError: Anthropic provider doesn't support output_type=...` | Invalid output type | Use `"text"` or `"json"` only |
 | `401 Unauthorized` | Invalid or missing API key | Set `ANTHROPIC_API_KEY` or provide credentials for your backend |
+| 400 "Invalid `signature` in `thinking` block. The block is bound to a different conversation" | A context manager removed or replaced earlier messages (or the system prompt changed), so stored thinking signatures no longer verify | Set `block_binding` and the beta header on the `Agent`. See [Context managers and thinking signatures](/docs/integrations/anthropic#context-managers-and-thinking-signatures) |
 | `Error: model not found` | Model name typo or not available in your region | Check the model name and ensure it is available in your backend region |
 
 ## Next steps

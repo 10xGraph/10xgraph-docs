@@ -166,6 +166,8 @@ async def extract_decision(state: CustomState) -> CustomState:
 
 Now even if the message history is trimmed to 10 messages, `state.decisions_made` and `state.user_profile` remain available to nodes downstream.
 
+**Claude with thinking on:** removing or replacing earlier messages invalidates the signed thinking blocks Claude has stored, and Anthropic can reject the next request with a 400. A one-line fix on the `Agent` avoids it. See [Context managers and thinking signatures](/docs/integrations/anthropic#context-managers-and-thinking-signatures).
+
 ## Context managers and the checkpointer
 
 The context manager runs on `state` before the Agent calls the model, and again when a run finishes, just before the state is saved. So the saved state is already reduced:
