@@ -44,6 +44,8 @@ const cleanPath = Astro.url.pathname.replace(/\.html$/, '').replace(/\/index$/, 
 const canonical = new URL(cleanPath, Astro.site).toString();
 // Shared social card (logo lockup on the dark brand background) until pages get their own.
 const ogImage = new URL('/og-default.png', Astro.site).toString();
+// Google Analytics 4 measurement ID (G-XXXXXXXXXX), set at build time. No ID, no tag.
+const gaId = import.meta.env.PUBLIC_GA_ID;
 ---
 <!doctype html>
 <html lang="en" data-theme="dark">
@@ -107,6 +109,18 @@ const ogImage = new URL('/og-default.png', Astro.site).toString();
     <link rel="preload" href={bodyFont} as="font" type="font/woff2" crossorigin />
 
     {jsonLd.length > 0 && <script type="application/ld+json" set:html={JSON.stringify(jsonLd.length === 1 ? jsonLd[0] : jsonLd)} />}
+
+    {gaId && (
+      <>
+        <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${gaId}`}></script>
+        <script is:inline define:vars={{ gaId }}>
+          window.dataLayer = window.dataLayer || [];
+          function gtag() { dataLayer.push(arguments); }
+          gtag('js', new Date());
+          gtag('config', gaId);
+        </script>
+      </>
+    )}
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>

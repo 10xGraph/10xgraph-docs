@@ -34,6 +34,9 @@ jobs:
         run: npm ci
 
       - name: Build site
+        env:
+          # Google Analytics 4 measurement ID; public (it ships in every page), so not a secret.
+          PUBLIC_GA_ID: G-C902XCTMKD
         run: npm run build
 
       - name: Deploy to Cloudflare Pages
