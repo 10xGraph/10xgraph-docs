@@ -56,7 +56,7 @@ Long-term storage of facts, documents, or user preferences, retrieved by semanti
 - Retrieved by similarity search ("what do I know about this user?")
 - Requires embedding the information at write time
 
-**In 10xGraph:** implemented via the store abstraction (`BaseStore`), with `QdrantStore` and `Mem0Store` as backends.
+**In 10xGraph:** implemented via the store abstraction (`BaseStore`), with `PgVectorStore` and `QdrantStore` as backends.
 
 ## Implementing episodic memory (thread persistence)
 

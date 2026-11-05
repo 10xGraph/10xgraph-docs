@@ -45,7 +45,7 @@ def sensitive_operation(*, config):
 When you run over the API server with auth enabled, `get_authz()` always returns a dict with three keys:
 
 - `user_id`: The authenticated caller's identity.
-- `scope`: The data isolation policy (`"owner"` or `"none"`).
+- `scope`: The data isolation policy: `"owner"`, `"none"` or a list of column names such as `["org_id"]`.
 - `scopes`: A list of resource:action permissions the caller holds.
 
 When no auth is configured, `get_authz()` returns `None`, and all scopes are implicitly allowed. If auth is on but the identity carries no scopes and the backend defines none, the block is stamped with an empty `scopes` list and `has_scope()` returns `False` for every scope.
@@ -154,10 +154,10 @@ Combining `user_id` with a checkpointer that supports owner-only access (like `P
 
 ## Understand isolation scope
 
-The `isolation_scope` returned by `isolation_scope()` tells you (and the storage layer) which data-isolation policy is in effect. A custom `AuthorizationBackend` that does not override its own `isolation_scope()` method gets `"owner"`. Return `"none"` from the backend only when users should share data:
+The `isolation_scope` returned by `isolation_scope(config)` tells you (and the storage layer) which data-isolation policy is in effect: `"owner"`, `"none"` or a list of columns. A custom `AuthorizationBackend` chooses it per request in `isolation_scope(self, user)`; one that does not override the method gets `"owner"`. Return `"none"` from the backend only when users should share data, and a list such as `["org_id"]` to scope by tenant columns. An unknown scope (for example the typo `"owners"`) raises `ValueError` instead of weakening isolation:
 
 ```python
-from tenxgraph.core.authz import isolation_scope, SCOPE_OWNER, SCOPE_NONE
+from tenxgraph.core.authz import Isolation, isolation_scope
 
 def authorize_thread_access(thread_id: str, user_id: str, config):
     """Apply custom per-thread access control based on the isolation policy.
@@ -168,21 +168,25 @@ def authorize_thread_access(thread_id: str, user_id: str, config):
     """
     policy = isolation_scope(config)
     
-    if policy == SCOPE_OWNER:
+    if policy == Isolation.OWNER:
         # Owner-only: validate that thread_id is owned by user_id.
         owner = get_thread_owner(thread_id)  # Your storage backend
         if owner != user_id:
             raise PermissionError(f"Thread {thread_id} is owned by {owner}, not {user_id}")
-    elif policy == SCOPE_NONE:
+    elif policy == Isolation.NONE:
         # No isolation: any authenticated user can access.
+        pass
+    elif isinstance(policy, list):
+        # A column list such as ["org_id"]: match the caller's values on those columns.
         pass
     else:
         # No policy set; each layer applies its own default.
         pass
 ```
 
-- `SCOPE_OWNER` (`"owner"`): Data is scoped to the caller's `user_id`. The checkpointer filters rows; your code should too.
-- `SCOPE_NONE` (`"none"`): No scoping. All authenticated users see all data.
+- `Isolation.OWNER` (`"owner"`): Data is scoped to the caller's `user_id` and every declared tenant column. The checkpointer filters rows; your code should too. `SCOPE_OWNER` is kept as an alias.
+- `Isolation.NONE` (`"none"`): No scoping. All authenticated users see all data. `SCOPE_NONE` is kept as an alias.
+- A list of column names (`user_id` and tenant columns): rows must match the caller's values on exactly those columns. Use `isolation_columns(config, tenant_columns)` to resolve any scope to the columns it picks. See [Multi-tenant data](/docs/guides/multi-tenant-data#isolation-scopes).
 - `None`: No policy is set. Storage backends (like `PgCheckpointer`) fall back to their own `enforce_user_isolation` setting.
 
 In practice, the checkpointer and store already respect the isolation policy, so you rarely need to call `isolation_scope()` directly. Use it when your code implements custom data filtering or when you want to log what policy is active.
@@ -290,7 +294,7 @@ When a request reaches the API server, the `RequirePermission` dependency (in th
 1. **Authenticate**: Extract and verify the bearer token (JWT or custom `BaseAuth`). Decode claims to get `user_id`, `roles`, `scopes`, etc.
 2. **Check scopes**: Call the authorization backend's `scopes_for(user)` (for example `RoleBasedAuthorizationBackend` maps roles to scopes), falling back to the identity's `scope` and `scopes` claims (read as exact names). If scopes are declared, verify that the required scope (e.g., `"graph:invoke"` for a POST to `/v1/graph/invoke`) is granted.
 3. **Check object access**: Call `authorize(user, resource, action, resource_id)` to enforce object-level rules (e.g., ownership checks).
-4. **Build and stamp authz**: Call `build_authz(user_id, scope=isolation_policy, scopes=granted_scopes)` and place it in `user["authz"]`. This overwrites anything the client sent, it is non-hijackable.
+4. **Build and stamp authz**: Call `build_authz(user_id, scope=isolation_policy, scopes=granted_scopes)`, where `isolation_policy` comes from `isolation_scope(user)` on the backend, and place it in `user["authz"]`. This overwrites anything the client sent, it is non-hijackable.
 5. **Place in config**: Every service (graph execution, checkpointer, store) copies `user` into `config["user"]`, so the authz block reaches your code.
 
 This flow is defined in `tenxgraph_api/src/app/core/auth/permissions.py`. For details on configuring backends, see `/docs/server/auth`.

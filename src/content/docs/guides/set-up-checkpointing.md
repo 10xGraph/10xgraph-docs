@@ -161,6 +161,10 @@ PgCheckpointer(
     state_history_limit: int = 20,          # How many prior state snapshots to keep per thread
     enforce_user_isolation: bool = True,    # Scope state by user_id (multi-tenant safety)
     release_resources: bool = False,        # Close pools/clients on release()
+    tenant_columns: Any = None,             # Columns on threads that isolate data, e.g. {"org_id": "uuid"}
+    extra_columns: Any = None,              # Your own data columns on threads, e.g. {"plan": "text"}
+    row_level_security: bool = False,       # Also enforce tenant columns with Postgres RLS
+    ddl_lock_timeout: float | None = 10.0,  # Seconds setup DDL waits for a table lock (None waits)
 )
 ```
 
@@ -228,6 +232,32 @@ checkpointer = PgCheckpointer(
 Isolation is only meaningful if a real `user_id` reaches the checkpointer. The API server derives `user_id` from the authenticated caller and falls back to `"anonymous"` when no auth is configured. To enable per-user isolation on the server, set [`"auth": "jwt"`](/docs/server/auth) (or another auth backend) in your `10xgraph.json`. The checkpointer's `enforce_user_isolation` and the server's `authorization` backend (RBAC, ownership, etc.) are independent and complementary: the first controls *whose rows* a caller can touch; the second controls *whether* they may act at all.
 
 </aside>
+
+`asetup()` waits at most `ddl_lock_timeout` seconds for a table lock on each DDL statement. If another transaction holds the table longer, it raises `tenxgraph.storage.columns.SetupLockTimeoutError` instead of hanging; retry once that transaction ends. Setup reads the catalog first and runs no DDL for what is already in place, so a restart takes no lock. Missing indexes on an existing table are built with `CREATE INDEX CONCURRENTLY`, and an invalid leftover index from a failed build is dropped and rebuilt on the next setup.
+
+### Tenant and extra columns
+
+For several organizations or projects in one database, declare columns on the `threads` table that you own:
+
+```python
+checkpointer = PgCheckpointer(
+    postgres_dsn="...",
+    redis_url="...",
+    tenant_columns={"org_id": "uuid", "project_id": "text"},
+    extra_columns={"plan": "text"},
+)
+```
+
+- **Tenant columns** isolate data like `user_id` does. A caller's isolation scope (chosen by your authorization backend) decides which of `user_id` and the tenant columns a thread must match. Required on thread creation by default; types are `text`, `bigint`, `integer` or `uuid`.
+- **Extra columns** carry your own data (any Postgres type) and can be filtered with `alist_threads(config, filters=...)` and `GET /v1/threads?filters=`.
+- Values are set when the thread is created, never change, and come **only from `config["user"]`**, which your auth class fills. Never read them from request config, metadata, state or model output.
+- Every query that touches a thread (threads, states, messages, tool executions) is filtered through the thread row. `aget_thread_scope(thread_id)` returns the thread's `user_id` and tenant values for authorization checks.
+- `asetup()` adds the columns (schema version 6) and a B-tree index for each. Threads created before a tenant column existed hold `NULL` there and are hidden from scopes that pick it until you backfill them.
+- Declare the same tenant columns on `PgVectorStore`. `compile()` refuses a mismatch under `MODE=production` unless you pass `allow_tenant_mismatch=True`.
+- `InMemoryCheckpointer` and `SqliteCheckpointer` raise if you pass these options.
+- The names `authz`, `scope`, `scopes`, `role` and `roles` cannot be column names.
+
+Native row-level security, the full `BaseAuth` example, isolation scopes and the filter reference are in [Multi-tenant data](/docs/guides/multi-tenant-data).
 
 ### State history retention
 

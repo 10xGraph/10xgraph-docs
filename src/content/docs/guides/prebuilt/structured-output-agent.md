@@ -161,7 +161,7 @@ Compile parameters:
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `checkpointer` | `BaseCheckpointer \| None` | `None` | Persistence backend. Saves and restores conversation state per thread. `None` uses an `InMemoryCheckpointer`. Examples: `InMemoryCheckpointer()` for dev, `PgCheckpointer(...)` for production. |
-| `store` | `BaseStore \| None` | `None` | Long-term cross-thread storage. Used by memory tools and retrieval-augmented generation. Examples: `QdrantStore(...)`, `Mem0Store(...)`. |
+| `store` | `BaseStore \| None` | `None` | Long-term cross-thread storage. Used by memory tools and retrieval-augmented generation. Examples: `PgVectorStore(...)`, `QdrantStore(...)`. |
 | `interrupt_before` | `list[str] \| None` | `None` | Node names to pause before (e.g., `["GENERATE"]`). When paused, the run saves state and awaits `resume()` or a new message. |
 | `interrupt_after` | `list[str] \| None` | `None` | Node names to pause after. Useful for human approval steps. |
 | `callback_manager` | `CallbackManager` | default (empty) | Lifecycle hooks and invoke callbacks for observability. |

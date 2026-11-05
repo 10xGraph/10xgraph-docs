@@ -26,7 +26,7 @@ For how durable state supports restarts and multiple replicas, see [scaling and 
 | --- | --- | --- | --- |
 | **Postgres** | Threads, state, messages, tool-execution ledger, schema version | Yes | **Yes** |
 | **Redis** | Hot cache of recent state, default TTL 24h | No | No |
-| **Vector store** (Qdrant, Mem0) | Long-term memories | Yes, in that system | Yes, with that system's own tooling |
+| **Vector store** (PgVectorStore, Qdrant) | Long-term memories | PgVectorStore: yes, in your Postgres (back it up like any table). Qdrant: in that system | Yes, with the database's or that system's own tooling |
 | **Media store** | Uploaded files | Depends on backend | Yes, if local disk |
 
 ## The cache and the version guard
@@ -216,7 +216,7 @@ DELETE FROM threads WHERE user_id = 'user-123';
 Then handle related data outside Postgres:
 
 1. **Redis:** Deleting a thread through the checkpointer clears its cache entry. If you delete rows with SQL, remove the cached keys yourself or flush the cache.
-2. **Vector store:** Delete the user's memories from Qdrant or Mem0 using that system's API.
+2. **Vector store:** Delete the user's memories with `store.aforget_memory(...)` (or `POST /v1/store/memories/forget`), or with that system's own tooling for Qdrant.
 3. **Media store:** Delete uploaded files from cloud storage or local disk.
 
 These deletions are not transactional with Postgres, so implement a retry strategy for media deletion.

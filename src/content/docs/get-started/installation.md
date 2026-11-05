@@ -96,8 +96,8 @@ Beyond model providers, optional extras unlock advanced features:
 | `pg_checkpoint` | asyncpg, redis (production durable state) | Production deployments with durable state |
 | `mcp` | fastmcp, mcp | Tools served by Model Context Protocol servers |
 | `sqlite_checkpoint` | aiosqlite | Single-machine persistence without PostgreSQL or Redis |
+| `pgvector` | asyncpg, pgvector (PostgreSQL 14 or newer, pgvector extension 0.7.0 or newer on the server) | Long-term memory and RAG in Postgres with `PgVectorStore`, next to `PgCheckpointer` |
 | `qdrant` | qdrant-client 1.10 or newer (Qdrant server 1.10 or newer) | Long-term semantic memory and retrieval |
-| `mem0` | mem0ai | Managed vector memory store |
 | `kafka` | aiokafka | Stream execution events to Apache Kafka |
 | `rabbitmq` | aio-pika | Stream execution events to RabbitMQ |
 | `redis` | redis | Streaming and pub/sub without the checkpointer |
@@ -105,6 +105,8 @@ Beyond model providers, optional extras unlock advanced features:
 | `logfire` | logfire | Send traces to Logfire |
 | `images` | Pillow | Image handling in multimodal messages |
 | `langsmith` | langsmith | Send traces to LangSmith |
+
+`pip install "10xgraph[pgvector]"` adds only the Python packages. The pgvector extension itself must exist in your database (`CREATE EXTENSION vector;`, which `PgVectorStore.asetup()` tries for you). A text-only store (`embedding=None`) does not need it. See [How to use PgVectorStore](/docs/guides/use-pgvector-store).
 
 The `all` extra installs every other extra at once and is useful for local development and CI, but pin specific versions before shipping to production.
 

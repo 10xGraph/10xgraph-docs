@@ -1,7 +1,7 @@
 ---
 title: Memory stores
 seoTitle: "Memory stores API reference (Python)"
-description: "Reference for BaseStore, QdrantStore, Mem0Store, embedding classes, MemoryConfig, the agent memory system prompt and store factories."
+description: "Reference for BaseStore, PgVectorStore, QdrantStore, embedding classes, MemoryConfig, the agent memory system prompt and store factories."
 section: Reference
 group: "Python library"
 order: 220
@@ -9,7 +9,7 @@ label: Memory stores
 updated: "2026-10-27"
 ---
 
-A memory store keeps facts, preferences and past interactions across conversation threads, so an agent can recall them later. This page documents the `tenxgraph.storage.store` API: embeddings, `QdrantStore`, `Mem0Store`, memory configuration, retrieval helpers and factories. A checkpointer, by contrast, saves state within one thread.
+A memory store keeps facts, preferences and past interactions across conversation threads, so an agent can recall them later. This page documents the `tenxgraph.storage.store` API: embeddings, `PgVectorStore`, `QdrantStore`, memory configuration, retrieval helpers and factories. A checkpointer, by contrast, saves state within one thread.
 
 For the concepts and a walkthrough, see [Long-term memory](/docs/concepts/memory-and-store) and [Use a memory store](/docs/guides/use-memory-store).
 
@@ -17,7 +17,7 @@ For the concepts and a walkthrough, see [Long-term memory](/docs/concepts/memory
 
 ```python
 from tenxgraph.storage.store import (
-    BaseStore, QdrantStore, Mem0Store,
+    BaseStore, PgVectorStore, QdrantStore,
     MemoryConfig, AgentMemoryConfig, UserMemoryConfig,
     get_agent_memory_system_prompt,
 )
@@ -36,8 +36,8 @@ Install the dependencies for the backends you use:
 ```bash
 pip install openai              # OpenAIEmbedding
 pip install google-genai        # GoogleEmbedding
+pip install "10xgraph[pgvector]"  # PgVectorStore (asyncpg, pgvector; Postgres 14+, pgvector extension 0.7.0+)
 pip install "10xgraph[qdrant]"  # QdrantStore (qdrant-client >= 1.10)
-pip install "10xgraph[mem0]"    # Mem0Store (mem0ai)
 ```
 
 ---
@@ -60,10 +60,11 @@ pip install "10xgraph[mem0]"    # Mem0Store (mem0ai)
 
 | Value | Description |
 |---|---|
-| `SIMILARITY` | Vector similarity search. The default in `asearch`. |
+| `SIMILARITY` | Vector similarity search. The default of `PgVectorStore` and `QdrantStore` when nothing else is set. |
+| `TEXT` | Keyword / full-text search. Supported by `PgVectorStore` only; `QdrantStore` raises `ValueError`. |
 | `TEMPORAL` | Time-ordered retrieval, most recent first. |
 | `RELEVANCE` | Relevance scoring combining recency and similarity. |
-| `HYBRID` | Combines similarity and temporal signals. |
+| `HYBRID` | Vector similarity and full-text rank fused with Reciprocal Rank Fusion in `PgVectorStore`; `QdrantStore` raises `ValueError`. |
 | `GRAPH_TRAVERSAL` | Navigates a knowledge graph to find connected memories. |
 
 ### `DistanceMetric`
@@ -197,10 +198,11 @@ Primary configuration object for `Agent(..., memory=...)`. A `str` retrieval mod
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `store` | `BaseStore \| None` | None | The memory store (QdrantStore, Mem0Store, etc.). Required if memory is enabled. |
+| `store` | `BaseStore \| None` | None | The memory store (PgVectorStore, QdrantStore, etc.). Required if memory is enabled. |
 | `retrieval_mode` | `ReadMode \| str` | `ReadMode.POSTLOAD` | How memories are retrieved: `NO_RETRIEVAL`, `PRELOAD`, or `POSTLOAD`. |
 | `limit` | `int` | 5 | Maximum number of memories to retrieve per search. |
 | `score_threshold` | `float` | 0.0 | Minimum similarity score for a memory to be returned. 0.0 = no threshold. |
+| `retrieval_strategy` | `RetrievalStrategy \| str \| None` | None | Search strategy for every scope. `None` uses the store's own setting. A scope's own `retrieval_strategy` wins over this one, and an explicit `asearch` argument wins over both. |
 | `max_tokens` | `int \| None` | None | Optional token budget for retrieved memory context. |
 | `inject_system_prompt` | `bool` | True | Whether to include memory system instructions in the model's system prompt. |
 | `config` | `dict[str, Any]` | {} | Application-defined config passed to store methods. |
@@ -242,6 +244,7 @@ Configuration for user-scoped long-term memory. The model can both search and wr
 | `category` | `str` | `"general"` | Default memory category when storing. |
 | `limit` | `int \| None` | None | Max memories to retrieve. If None, uses the parent config limit. |
 | `score_threshold` | `float \| None` | None | Min similarity score, must not be negative. If None, uses the parent config threshold. |
+| `retrieval_strategy` | `RetrievalStrategy \| str \| None` | None | Search strategy for this scope. If None, uses the parent config's, then the store's. |
 | `config` | `dict[str, Any]` | {} | Optional config dict passed to store calls. |
 | `collection` | `str \| Callable[[dict], str] \| None` | None | Collection for this scope: a name, or a function of the run config. Always wins over any other collection. See [Collections](#collections). |
 | `user_id` | `str \| None` | None | User identifier for scoping. Blank strings are rejected. |
@@ -258,6 +261,7 @@ Configuration for agent/app-scoped long-term memory. The model can search but no
 | `category` | `str` | `"general"` | Default memory category. |
 | `limit` | `int \| None` | None | Max memories to retrieve. |
 | `score_threshold` | `float \| None` | None | Min similarity score. |
+| `retrieval_strategy` | `RetrievalStrategy \| str \| None` | None | Search strategy for this scope. If None, uses the parent config's, then the store's. |
 | `collection` | `str \| Callable[[dict], str] \| None` | None | Collection for this scope: a name, or a function of the run config. Always wins. See [Collections](#collections). |
 | `config` | `dict[str, Any]` | {} | Optional config dict. |
 | `agent_id` | `str \| None` | None | Agent identifier for scoping. |
@@ -285,7 +289,7 @@ await store.astore(
 )
 ```
 
-With only an `app_id`, use `{"user_id": system_user_id(app_id), "app_id": app_id}`. `QdrantStore` filters search by `user_id`, `memory_type` and `category` and ignores `agent_id`, `app_id` and `thread_id`; the per-agent owner is what keeps agents apart. `Mem0Store` also scopes by `app_id`.
+With only an `app_id`, use `{"user_id": system_user_id(app_id), "app_id": app_id}`. `QdrantStore` filters search by `user_id`, `memory_type` and `category` and ignores `agent_id`, `app_id` and `thread_id`; the per-agent owner is what keeps agents apart.
 
 ---
 
@@ -366,19 +370,19 @@ Abstract base class that every store backend implements. Every method takes a `c
 | Method | Signature | Description |
 |---|---|---|
 | `astore` | `async (config, content, memory_type=EPISODIC, category="general", metadata=None, **kwargs) -> str` | Add a memory. Returns the memory ID. |
-| `asearch` | `async (config, query, memory_type=None, category=None, limit=10, score_threshold=None, filters=None, retrieval_strategy=SIMILARITY, distance_metric=COSINE, max_tokens=4000, **kwargs) -> list[MemorySearchResult]` | Search memories by query. |
+| `asearch` | `async (config, query, memory_type=None, category=None, limit=10, score_threshold=None, filters=None, retrieval_strategy=None, distance_metric=None, max_tokens=4000, **kwargs) -> list[MemorySearchResult]` | Search memories by query. `retrieval_strategy` and `distance_metric` default to `None`, meaning the store's configured value; a custom store must accept `None`. |
 | `aget` | `async (config, memory_id, **kwargs) -> MemorySearchResult \| None` | Fetch a memory by ID. |
 | `aget_all` | `async (config, limit=100, **kwargs) -> list[MemorySearchResult]` | List memories in the config's scope. |
 | `aupdate` | `async (config, memory_id, content, metadata=None, **kwargs) -> Any` | Update a memory's content. |
 | `adelete` | `async (config, memory_id, **kwargs) -> Any` | Delete a memory by ID. |
-| `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. `QdrantStore` also narrows by the keyword arguments `memory_type`, `category` and `filters` (combined with AND; a `filters` value that is not a string, integer or boolean raises `ValueError`). `Mem0Store` can delete only by user, so it raises `ValueError` when any of the three is passed. |
-| `asetup` | `async () -> Any` | Create the collection or other backing resources. Implemented by `QdrantStore`; the base class raises `NotImplementedError`. |
+| `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. `QdrantStore` and `PgVectorStore` also narrow by the keyword arguments `memory_type`, `category` and `filters` (combined with AND). On `QdrantStore` a `filters` value that is not a string, integer or boolean raises `ValueError`; on `PgVectorStore` see [filters](/docs/guides/multi-tenant-data#filters). |
+| `asetup` | `async () -> Any` | Create the collection or other backing resources. Implemented by `QdrantStore` and `PgVectorStore`; the base class raises `NotImplementedError`. |
 | `aping` | `async () -> None` | Abstract. Return when the store's backend is reachable, raise when it is not. Must be read-only and cheap, because a server may call it on every readiness probe. An in-process store just returns. `10xgraph-api` calls it for `/health/ready` and at startup. A custom store that does not implement it raises `TypeError` when created. Added in 1.0.0rc3. |
-| `arelease` | `async () -> None` | Release connections. Not abstract, but the base implementation raises `NotImplementedError`; `Mem0Store` overrides it. |
+| `arelease` | `async () -> None` | Release connections. Not abstract, but the base implementation raises `NotImplementedError`; `PgVectorStore` overrides it. |
 
 There is no bulk `abatch_store`; call `astore` in a loop or with `asyncio.gather`.
 
-`QdrantStore.aping()` lists the collections on the server, `Mem0Store.aping()` lists the collections of its vector store, and `InMemoryStore.aping()` returns at once. Added in 1.0.0rc3.
+`QdrantStore.aping()` lists the collections on the server, `PgVectorStore.aping()` runs `SELECT 1`, and `InMemoryStore.aping()` returns at once. Added in 1.0.0rc3.
 
 ### Sync wrappers
 
@@ -406,7 +410,7 @@ Every long-term memory operation needs a non-empty `user_id`, taken from the `co
 ValueError: user_id is required for memory operations; use system_user_id(name) for shared data
 ```
 
-This applies to `astore`, `asearch`, `aget`, `aget_all`, `aupdate`, `adelete` and `aforget_memory` on both `QdrantStore` and `Mem0Store`. A store never falls back to searching or deleting across all users.
+This applies to `astore`, `asearch`, `aget`, `aget_all`, `aupdate`, `adelete` and `aforget_memory` on `QdrantStore` and `PgVectorStore`. A store never falls back to searching or deleting across all users.
 
 Two rules refine this:
 
@@ -511,33 +515,57 @@ asyncio.run(store.asetup())  # creates the collection; pass the store to graph.c
 
 ---
 
-## `Mem0Store`
+## `PgVectorStore`
 
-Managed long-term memory using the [mem0](https://mem0.ai) library. Delegates all vector storage and memory management to Mem0.
+Long-term memory and RAG in Postgres with the pgvector extension, in one table next to the `PgCheckpointer` tables. For a walkthrough see [How to use PgVectorStore](/docs/guides/use-pgvector-store); for tenant and extra columns see [Multi-tenant data](/docs/guides/multi-tenant-data).
 
-<aside class="callout callout-note" role="note"><p class="callout-title">Optional dependency</p>
+Requires PostgreSQL 14 or newer, the pgvector extension 0.7.0 or newer, and `pip install "10xgraph[pgvector]"`. A text-only store (`embedding=None`) does not need the extension.
 
-Install with `pip install "10xgraph[mem0]"`.
+```python title="pgvector_store.py"
+from tenxgraph.storage.store import OpenAIEmbedding, PgVectorStore
 
-</aside>
-
-```python title="mem0_store.py"
-from tenxgraph.storage.store import Mem0Store
-
-store = Mem0Store(config={
-    "llm": {"provider": "openai", "config": {"model": "gpt-4o-mini"}},
-    "embedder": {"provider": "openai", "config": {"model": "text-embedding-3-small"}},
-    "vector_store": {"provider": "qdrant", "config": {"host": "localhost", "port": 6333}},
-})
-# pass the store to graph.compile(store=store); no asetup() call is needed
+store = PgVectorStore(
+    embedding=OpenAIEmbedding(),
+    dsn="postgresql://user:pass@localhost:5432/app",
+)
+await store.asetup()
 ```
+
+### Constructor parameters
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `config` | `mem0 MemoryConfig \| dict` | Required | Mem0 configuration. A dict goes through `AsyncMemory.from_config`. |
-| `app_id` | `str \| None` | `"agentflow_app"` | App identifier. A per-call `config["app_id"]` overrides it. |
+| `embedding` | `BaseEmbedding \| None` | required | Embedding service, or `None` for a text-only store (no `embedding` column). |
+| `dsn` | `str \| None` | `None` | Connection string. The store creates a pool and closes it in `arelease()`. |
+| `pool` | asyncpg `Pool` \| None | `None` | Existing pool. Never closed by the store. Pass `dsn` or `pool`, not both. |
+| `pool_config` | `dict \| None` | `None` | Extra `asyncpg.create_pool` arguments for a pool built from `dsn`. |
+| `schema` | `str` | `"public"` | Postgres schema of the table. |
+| `table` | `str` | `"tenxgraph_memories"` | Table name, at most 48 characters. |
+| `collection` | `str \| Callable[[dict], str] \| None` | `None` | Default collection: a name or a function of the config. |
+| `distance_metric` | `DistanceMetric \| str` | `COSINE` | Metric of the HNSW index and the default for searches. |
+| `retrieval_strategy` | `RetrievalStrategy \| str \| None` | `None` | Default strategy: `SIMILARITY`, `TEXT` or `HYBRID`. `None` means `SIMILARITY`, or `TEXT` when `embedding=None`. |
+| `hybrid_weights` | `tuple[float, float]` | `(1.0, 1.0)` | `(vector_weight, text_weight)` for `HYBRID`. |
+| `rrf_k` | `int` | `60` | The Reciprocal Rank Fusion constant. |
+| `hybrid_candidates` | `int \| None` | `None` | Rows each list contributes to fusion. `None` means `max(4 * limit, 20)`. |
+| `text_search_config` | `str` | `"english"` | Postgres text search configuration, fixed when the table is created. |
+| `on_embedding_error` | `"fallback" \| "raise"` | `"fallback"` | On an embedding failure, save text without an embedding and search as `TEXT`, or raise. |
+| `acquire_timeout` | `float \| None` | `30.0` | Seconds to wait for a pooled connection. |
+| `tenant_columns` | `list \| dict \| None` | `None` | Isolation columns (`text`, `bigint`, `integer`, `uuid`). Values come only from `config["user"]`. |
+| `extra_columns` | `list \| dict \| None` | `None` | Your own data columns, any Postgres type. |
+| `row_level_security` | `bool` | `False` | Also enforce tenant columns with native row-level security. Needs `tenant_columns`. |
+| `ddl_lock_timeout` | `float \| None` | `10.0` | Seconds a setup DDL statement waits for a table lock; on timeout setup raises `SetupLockTimeoutError`. `None` waits forever. |
 
-`Mem0Store` delegates to Mem0's `AsyncMemory` client, created lazily on first use. Every call needs `user_id` in the `config` dict, otherwise it raises the same `ValueError` as `QdrantStore`. `asetup` is not implemented for `Mem0Store`, so do not call it. `aforget_memory` deletes all memories for the user.
+Methods specific to this store: `await store.adrop_legacy_key_index() -> list[str]` drops the `memory_key` index of an earlier declaration after tenant columns were added (see [Multi-tenant data](/docs/guides/multi-tenant-data#add-tenant-columns-to-a-pgvectorstore-table-that-has-data)). It is deprecated and will be removed in the next breaking release (1.5 or 2.0). Column names `authz`, `scope`, `scopes`, `role` and `roles` are reserved.
+
+### Methods beyond `BaseStore`
+
+| Method | Description |
+|---|---|
+| `abackfill_embeddings(batch_size=100)` | Embed every memory saved without an embedding and return how many were filled. Raises on a text-only store. |
+| `filter_schema` | Attribute. The `FilterSchema` for `tenxgraph.storage.sql_filter.validate_filters`. |
+| `tenant_column_names` | Attribute. The declared tenant column names. |
+
+`asearch`, `aget_all` and `aforget_memory` take `filters`; see [Filters](/docs/guides/multi-tenant-data#filters) for operators and limits. Keys that are not columns match top-level `metadata` keys exactly.
 
 ---
 
@@ -614,60 +642,6 @@ store = create_cloud_qdrant_store(
 | `**kwargs` | `Any` | Passed to `QdrantStore`. |
 
 **Returns:** A configured `QdrantStore` instance.
-
-### `create_mem0_store(config, user_id="default_user", app_id="agentflow_app")`
-
-Create a `Mem0Store` with custom configuration.
-
-```python
-from tenxgraph.storage.store import create_mem0_store
-
-store = create_mem0_store(config={
-    "llm": {"provider": "openai", "config": {"model": "gpt-4o-mini"}},
-    "embedder": {"provider": "openai", "config": {"model": "text-embedding-3-small"}},
-    "vector_store": {"provider": "qdrant", "config": {"host": "localhost", "port": 6333}},
-})
-```
-
-| Parameter | Type | Description |
-|---|---|---|
-| `config` | `dict` | Mem0 configuration with llm, embedder, and vector_store sections. |
-| `user_id` | `str` | Accepted but not used by `Mem0Store`; pass `user_id` in each call's `config`. |
-| `app_id` | `str` | Default app identifier. |
-
-**Returns:** A configured `Mem0Store` instance.
-
-### `create_mem0_store_with_qdrant(qdrant_url, ...)`
-
-Create a `Mem0Store` backed by a Qdrant server, with OpenAI as the default LLM and embedder provider.
-
-```python title="mem0_qdrant.py"
-from tenxgraph.storage.store import create_mem0_store_with_qdrant
-
-store = create_mem0_store_with_qdrant(
-    qdrant_url="http://localhost:6333",
-    llm_model="gpt-4o-mini",
-)
-```
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `qdrant_url` | `str` | Required | Qdrant server URL. |
-| `qdrant_api_key` | `str \| None` | None | Qdrant API key. |
-| `collection_name` | `str` | `"agentflow_memories"` | Qdrant collection used by Mem0. |
-| `embedding_model` | `str` | `"text-embedding-ada-002"` | Embedder model name. |
-| `llm_model` | `str` | `"gpt-4o-mini"` | LLM model name. |
-| `app_id` | `str` | `"agentflow_app"` | App identifier. |
-| `**kwargs` | `Any` | | Optional `vector_store_config`, `embedder_provider`, `embedder_config`, `llm_provider`, `llm_config`. |
-
-**Returns:** A configured `Mem0Store` instance.
-
----|---|---|
-| `embedding` | `BaseEmbedding` | The embedding service. |
-| `llm_model` | `str` | OpenAI model to use for Mem0. |
-| `qdrant_path` | `str` | Local path for the embedded Qdrant server. |
-
-**Returns:** A configured `Mem0Store` instance.
 
 ---
 
@@ -747,8 +721,9 @@ The `store` parameter is injected when you pass `store=` to `graph.compile()`.
 | Error | Cause | Fix |
 |---|---|---|
 | `ImportError: qdrant-client package is required for QdrantStore` | `qdrant-client` is not installed. | `pip install "10xgraph[qdrant]"`. |
-| `ImportError: mem0 package is required for Mem0Store` | `mem0ai` is not installed. | `pip install "10xgraph[mem0]"`. |
+| `ImportError: asyncpg is required for PgVectorStore` | The `pgvector` extra is not installed. | `pip install "10xgraph[pgvector]"`. |
+| `RuntimeError` naming the pgvector extension | `asetup()` could not create the `vector` extension, or it is older than 0.7.0. | Have an admin run `CREATE EXTENSION vector;` (or `ALTER EXTENSION vector UPDATE;`), or use `embedding=None`. |
 | `ValueError: OpenAI API key must be provided...` | No `api_key` and no `OPENAI_API_KEY`. | Set the variable or pass `api_key`. |
 | `ValueError: user_id is required for memory operations; use system_user_id(name) for shared data` | A store call has a missing, `None`, empty or blank `user_id`. | Put the user's id in the `config` dict, or `system_user_id(name)` for shared data. See [The `user_id` rule](#the-user_id-rule-and-system_user_id). |
 | `RuntimeError: Memory requires an existing ToolNode...` | `Agent(memory=...)` in `POSTLOAD` mode without a tool node. | Pass `tool_node=` or use `PRELOAD`. |
-| `NotImplementedError` from `asetup` | Called `asetup()` on `Mem0Store`. | Only `QdrantStore` implements it. |
+| `NotImplementedError` from `asetup` | Called `asetup()` on a store that does not implement it. | `QdrantStore` and `PgVectorStore` implement it. |

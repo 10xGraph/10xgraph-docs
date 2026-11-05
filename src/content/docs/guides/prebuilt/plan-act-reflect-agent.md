@@ -153,7 +153,7 @@ app = agent.compile(
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `checkpointer` | `BaseCheckpointer` | `None` | Persist and restore agent state across runs. With a checkpointer, passing the same `thread_id` in the run config resumes from the last checkpoint. Without one, state is lost after the run ends. |
-| `store` | `BaseStore` | `None` | Long-term cross-thread memory storage (Qdrant, Mem0, or custom). Pairs with the `memory` parameter in the constructor to enable retrieval across different conversations. |
+| `store` | `BaseStore` | `None` | Long-term cross-thread memory storage (PgVectorStore, Qdrant, or custom). Pairs with the `memory` parameter in the constructor to enable retrieval across different conversations. |
 | `interrupt_before` | `list[str]` | `None` | Pause before executing the named nodes (e.g., `["REFLECT", "PLAN"]`). Useful for human-in-the-loop workflows. The graph saves the state and can resume with new input. |
 | `interrupt_after` | `list[str]` | `None` | Pause after the named nodes complete. Combined with `interrupt_before`, enables fine-grained control over execution. |
 | `callback_manager` | `CallbackManager` | default | Attach lifecycle hooks (on_start, on_end, on_error, etc.) to monitor or modify execution. |

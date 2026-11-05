@@ -1,7 +1,7 @@
 ---
-title: "Long-Term Agent Memory with Qdrant and Mem0 in 10xGraph"
-seoTitle: "Long-term agent memory with Qdrant"
-description: "Give a 10xGraph Python agent long-term memory across sessions with MemoryConfig, a local Qdrant vector store or Mem0, user memory and shared agent memory."
+title: "Long-Term Agent Memory with Postgres and Qdrant in 10xGraph"
+seoTitle: "Long-term agent memory with pgvector and Qdrant"
+description: "Give a 10xGraph Python agent long-term memory across sessions with MemoryConfig, PgVectorStore in Postgres or a local Qdrant store, user memory and shared agent memory."
 section: Examples
 group: "Memory and patterns"
 order: 27
@@ -22,7 +22,7 @@ This example gives a Claude chat agent long-term memory that survives across con
 
 A Claude chat agent that remembers facts between conversations. In the first session a user says they are vegetarian and live in Lisbon. In a second session, on a new thread with the same `user_id`, the agent recalls both facts. A different user sees none of it.
 
-`qdrant_memory.py` uses a local Qdrant store, so no cloud account is needed. `mem0_memory.py` uses the same agent configuration with `Mem0Store`, where Mem0 extracts and deduplicates the facts.
+`qdrant_memory.py` uses a local Qdrant store, so no cloud account is needed. `pgvector_memory.py` uses the same agent configuration with `PgVectorStore`, so checkpoints and memories live in one Postgres. A third script, `multi_tenant_memory.py`, shows tenant columns on both (see [Multi-tenant data](/docs/guides/multi-tenant-data)).
 
 ## Key concepts
 
@@ -33,7 +33,7 @@ A Claude chat agent that remembers facts between conversations. In the first ses
 - `system_user_id(name)`: the reserved owner id (`__system__:<name>`) for shared data such as agent memory.
 - `create_local_qdrant_store(path, embedding)`: file-based Qdrant, no server.
 - `OpenAIEmbedding`: embeds memories with `text-embedding-3-small`.
-- `Mem0Store`: a store backed by Mem0, with its own LLM and embedder configuration.
+- `PgVectorStore`: memories in Postgres with pgvector, searched by `SIMILARITY`, `TEXT` or `HYBRID`.
 
 ## Run it
 
@@ -43,17 +43,26 @@ cd 10xGraph/agentflow
 ```
 
 ```bash
-pip install "10xgraph[anthropic,openai,qdrant]"      # qdrant_memory.py
-pip install "10xgraph[anthropic,openai,qdrant,mem0]" # mem0_memory.py
+pip install "10xgraph[anthropic,openai,qdrant]"               # qdrant_memory.py
+pip install "10xgraph[anthropic,openai,pg_checkpoint,pgvector]" # pgvector_memory.py
 export ANTHROPIC_API_KEY=...   # chat model
-export OPENAI_API_KEY=...      # embeddings (and Mem0's LLM in mem0_memory.py)
+export OPENAI_API_KEY=...      # embeddings
 ```
 
-No Docker services are required. Both scripts store vectors in a temporary directory and delete it at the end.
+`qdrant_memory.py` needs no Docker services: it stores vectors in a temporary directory and deletes it at the end.
 
 ```bash
 python examples/long_term_memory/qdrant_memory.py
-python examples/long_term_memory/mem0_memory.py
+```
+
+`pgvector_memory.py` and `multi_tenant_memory.py` need Postgres with the pgvector extension, and Redis. `examples/persistence/docker-compose.yml` starts both (its image, `pgvector/pgvector:0.8.7-pg16`, ships the extension). On your own Postgres, have an admin run `CREATE EXTENSION vector;` once.
+
+```bash
+docker compose -f examples/persistence/docker-compose.yml up -d
+export POSTGRES_DSN=postgresql://tenx:tenx@localhost:5432/tenx
+export REDIS_URL=redis://localhost:6379/0
+python examples/long_term_memory/pgvector_memory.py
+python examples/long_term_memory/multi_tenant_memory.py   # no API key needed
 ```
 
 ## How the code works
@@ -162,40 +171,72 @@ async def main() -> None:
 
 Writes happen in the background, so the script calls `await app.aclose()` between sessions to flush them before session 2 searches. The last call uses `bob`, who gets a different slice of the store.
 
-### mem0_memory.py
+### pgvector_memory.py
 
-Here the store is `Mem0Store`. Mem0 extracts and deduplicates facts itself, using its own LLM and embedder. This config is independent of the Claude chat model.
-
-```python
-MEM0_CONFIG = {
-    "vector_store": {
-        "provider": "qdrant",
-        "config": {
-            "collection_name": "assistant_mem0",
-            "path": QDRANT_PATH,
-            "embedding_model_dims": 1536,  # text-embedding-3-small
-        },
-    },
-    "embedder": {"provider": "openai", "config": {"model": "text-embedding-3-small"}},
-    "llm": {"provider": "openai", "config": {"model": "gpt-5-mini"}},
-}
-```
+The agent and the memory scopes are the same. The store is `PgVectorStore`, in the Postgres that also holds the checkpoints.
 
 ```python
-store = Mem0Store(config=MEM0_CONFIG, app_id="assistant-demo")
+store = PgVectorStore(
+    embedding=OpenAIEmbedding(model="text-embedding-3-small"),
+    dsn=POSTGRES_DSN,
+    collection="assistant_memory",
+    retrieval_strategy=RetrievalStrategy.HYBRID,
+    on_embedding_error="fallback",
+)
 ```
 
-`app_id` scopes memories in Mem0 and defaults to a generic value, so set your own.
+`HYBRID` fuses vector similarity and full-text rank with Reciprocal Rank Fusion, so a search for an exact word still finds it. With `on_embedding_error="fallback"`, an embedding outage saves memories as text and searches by text instead of failing; `abackfill_embeddings()` fills the vectors in later.
 
 ```python
-    memory=MemoryConfig(
-        store=store,
-        retrieval_mode=ReadMode.POSTLOAD,  # the model calls user_memory_tool
-        limit=5,
-    ),
+agent_memory=AgentMemoryConfig(
+    enabled=True,
+    agent_id="support-bot",
+    retrieval_strategy=RetrievalStrategy.SIMILARITY,
+),
 ```
 
-The rest of the file matches the Qdrant version: two sessions on separate threads, a flush with `aclose()` in between, and the temporary Qdrant folder removed at the end.
+Search settings resolve in three levels: the store constructor, then `MemoryConfig` or a memory scope, then the method call. This scope overrides the store's `HYBRID` default for agent memory, and the last lines of `main()` override it again with `retrieval_strategy=RetrievalStrategy.TEXT` on one `asearch` call.
+
+```python
+checkpointer = PgCheckpointer(postgres_dsn=POSTGRES_DSN, redis_url=REDIS_URL)
+await checkpointer.asetup()
+await store.asetup()  # creates the extension, table and indexes; safe to repeat
+```
+
+Both `asetup()` calls are safe to repeat. The rest of `main()` matches the Qdrant version: two sessions on separate threads, a flush with `aclose()` in between, and a second user who sees none of the first user's memories.
+
+### multi_tenant_memory.py
+
+Two organisations, `acme` and `globex`, each have a user with the same id, `sam`. The checkpointer and the store declare the same columns:
+
+```python
+TENANT_COLUMNS = ["org_id"]                            # isolates data
+EXTRA_COLUMNS = {"public_id": "text", "plan": "text"}  # your own data, filterable
+
+checkpointer = PgCheckpointer(
+    postgres_dsn=POSTGRES_DSN, redis_url=REDIS_URL,
+    tenant_columns=TENANT_COLUMNS, extra_columns=EXTRA_COLUMNS,
+)
+store = PgVectorStore(
+    embedding=None,  # text-only store, so no API key is needed
+    dsn=POSTGRES_DSN, retrieval_strategy=RetrievalStrategy.TEXT,
+    tenant_columns=TENANT_COLUMNS, extra_columns=EXTRA_COLUMNS,
+)
+```
+
+The column values come from `config["user"]` only. Behind the API your auth class fills it; in this core-only script the script builds it, standing in for your trusted auth:
+
+```python
+"user": {"org_id": org_id, "public_id": public_id, "plan": plan}
+```
+
+Each org's search returns only its own memory, although both belong to `sam`. The last part lists threads with a filter on an extra column, which can only narrow the isolated result:
+
+```python
+await checkpointer.alist_threads(acme, filters={"plan": {"in": ["pro"]}})
+```
+
+The script deletes its rows at the end. The [Multi-tenant data](/docs/guides/multi-tenant-data) guide covers the auth class, isolation scopes and every filter operator.
 
 ## Full code
 
@@ -320,65 +361,86 @@ if __name__ == "__main__":
 ```
 
 </TabItem>
-<TabItem label="mem0_memory.py">
+<TabItem label="pgvector_memory.py">
 
 ```python
-"""Long-term memory for a Claude agent backed by Mem0.
+"""Long-term memory for a Claude agent on Postgres with pgvector.
 
-Same agent-level `MemoryConfig` as qdrant_memory.py, but the store is `Mem0Store`.
-Mem0 extracts and deduplicates facts itself, using its own LLM and embedder (set in the
-config dict below, OpenAI here). Mem0 can keep its vectors in Qdrant.
+One Postgres holds both the conversation checkpoints (PgCheckpointer) and the memories
+(PgVectorStore). Session 1 tells the agent some facts. Session 2 is a new thread for the
+same user_id and recalls them. The store searches with HYBRID retrieval (vector similarity
+and full-text, fused with RRF), and one memory scope overrides that default.
 
-Run:  python examples/long_term_memory/mem0_memory.py
+Run:  docker compose -f examples/persistence/docker-compose.yml up -d
+      export POSTGRES_DSN=postgresql://tenx:tenx@localhost:5432/tenx
+      export REDIS_URL=redis://localhost:6379/0
+      python examples/long_term_memory/pgvector_memory.py
 """
 
 import asyncio
-import shutil
-import tempfile
+import os
 
 from dotenv import load_dotenv
 
 from tenxgraph.core.state import Message
 from tenxgraph.prebuilt.agent import ReactAgent
-from tenxgraph.storage.checkpointer import InMemoryCheckpointer
-from tenxgraph.storage.store import Mem0Store, MemoryConfig, ReadMode
+from tenxgraph.storage.checkpointer import PgCheckpointer
+from tenxgraph.storage.store import (
+    AgentMemoryConfig,
+    MemoryConfig,
+    OpenAIEmbedding,
+    PgVectorStore,
+    ReadMode,
+    UserMemoryConfig,
+    system_user_id,
+)
+from tenxgraph.storage.store.store_schema import RetrievalStrategy
 
 
 load_dotenv()
 
-QDRANT_PATH = tempfile.mkdtemp(prefix="10xgraph-mem0-")
+POSTGRES_DSN = os.environ["POSTGRES_DSN"]
+REDIS_URL = os.environ["REDIS_URL"]
 
-# Mem0's own configuration: where it keeps vectors, which LLM extracts facts, which
-# model embeds them. This is independent of the chat model the agent uses.
-MEM0_CONFIG = {
-    "vector_store": {
-        "provider": "qdrant",
-        "config": {
-            "collection_name": "assistant_mem0",
-            "path": QDRANT_PATH,
-            "embedding_model_dims": 1536,  # text-embedding-3-small
-        },
-    },
-    "embedder": {"provider": "openai", "config": {"model": "text-embedding-3-small"}},
-    "llm": {"provider": "openai", "config": {"model": "gpt-5-mini"}},
-}
+# Requires the pgvector extension in the database (the pgvector/pgvector image has it).
+store = PgVectorStore(
+    embedding=OpenAIEmbedding(model="text-embedding-3-small"),
+    dsn=POSTGRES_DSN,
+    collection="assistant_memory",
+    # Store-level default for every search that does not pick a strategy.
+    # SIMILARITY: vectors only. TEXT: full-text only. HYBRID: both, fused with RRF.
+    retrieval_strategy=RetrievalStrategy.HYBRID,
+    # If the embedding provider fails, writes are saved as text and searches fall back
+    # to full-text. Use "raise" to fail instead. abackfill_embeddings() fills gaps later.
+    on_embedding_error="fallback",
+)
 
-# app_id scopes memories in Mem0 and defaults to a generic value, so set your own.
-store = Mem0Store(config=MEM0_CONFIG, app_id="assistant-demo")
+memory = MemoryConfig(
+    store=store,
+    retrieval_mode=ReadMode.POSTLOAD,
+    limit=5,
+    # Settings resolve in three levels: store constructor -> MemoryConfig or scope ->
+    # method call. This scope overrides the store's HYBRID default for agent memory.
+    user_memory=UserMemoryConfig(),
+    agent_memory=AgentMemoryConfig(
+        enabled=True,
+        agent_id="support-bot",
+        retrieval_strategy=RetrievalStrategy.SIMILARITY,
+    ),
+)
 
 agent = ReactAgent(
     model="claude-sonnet-5-5",
     system_prompt=[
         {
             "role": "system",
-            "content": "You are a personal assistant. Remember what users tell you.",
+            "content": (
+                "You are a personal assistant. Save durable facts and preferences the "
+                "user tells you, and search memory before answering questions about them."
+            ),
         }
     ],
-    memory=MemoryConfig(
-        store=store,
-        retrieval_mode=ReadMode.POSTLOAD,  # the model calls user_memory_tool
-        limit=5,
-    ),
+    memory=memory,
 )
 
 
@@ -390,14 +452,144 @@ async def say(app, text: str, user_id: str, thread_id: str) -> None:
 
 
 async def main() -> None:
-    app = agent.compile(checkpointer=InMemoryCheckpointer())
-    await say(app, "My dog is called Biscuit and I work night shifts.", "alice", "s1")
-    await app.aclose()  # flush background memory writes
+    checkpointer = PgCheckpointer(postgres_dsn=POSTGRES_DSN, redis_url=REDIS_URL)
+    await checkpointer.asetup()
+    await store.asetup()  # creates the extension, table and indexes; safe to repeat
 
-    app = agent.compile(checkpointer=InMemoryCheckpointer())
-    await say(app, "What is my dog's name, and when do I work?", "alice", "s2")
+    # Shared agent memory is owned by system_user_id(agent_id).
+    await store.astore(
+        {
+            "user_id": system_user_id("support-bot"),
+            "agent_id": "support-bot",
+            "thread_id": "support-bot",
+            "collection": "assistant_memory",
+        },
+        "Company policy: refunds are available within 30 days of purchase.",
+    )
+
+    app = agent.compile(checkpointer=checkpointer)
+    await say(app, "I'm vegetarian and I live in Lisbon. Please remember that.", "alice", "s1")
+    await app.aclose()  # memory writes run in the background; aclose() flushes them
+
+    # Session 2: new thread, same user_id. Only the store carries the facts over.
+    app = agent.compile(checkpointer=checkpointer)
+    await say(app, "Suggest a dinner idea for tonight, close to home.", "alice", "s2")
+    await say(app, "What is the refund policy?", "alice", "s2")
+
+    # A different user_id sees none of alice's memories.
+    await say(app, "What do you know about my diet?", "bob", "s3")
+
+    # A search call can override the strategy again (third level).
+    hits = await store.asearch(
+        {"user_id": "alice", "collection": "assistant_memory"},
+        "vegetarian",
+        retrieval_strategy=RetrievalStrategy.TEXT,
+    )
+    print("alice TEXT search:", [h.content for h in hits])
+
     await app.aclose()
-    shutil.rmtree(QDRANT_PATH, ignore_errors=True)
+    await store.arelease()
+    await checkpointer.arelease()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</TabItem>
+<TabItem label="multi_tenant_memory.py">
+
+```python
+"""Multi-tenant memory and threads on one Postgres, with no LLM.
+
+Both PgCheckpointer and PgVectorStore get the same developer-owned columns:
+
+- tenant column ``org_id``: isolates data. Two orgs can reuse the same user_id and still
+  never see each other's rows.
+- extra columns ``public_id`` and ``plan``: plain data stored with each row. ``plan`` is
+  filterable in ``alist_threads``.
+
+Where the values come from (trusted-source rule): tenant and extra column values come only
+from ``config["user"]``. ``user`` is a reserved config key that clients cannot set. In an
+API deployment your auth class fills it (BaseAuth.authenticate() result or JWT claims). In
+core-only use, as here, YOU build ``config["user"]`` from your own trusted auth (a verified
+session or token). Never read these values from request config, metadata, state or model
+output.
+
+The store is text-only (``embedding=None``), so no embedding key is needed.
+
+Run:  export POSTGRES_DSN=postgresql://tenx:tenx@localhost:5432/tenx
+      export REDIS_URL=redis://localhost:6379/0
+      python examples/long_term_memory/multi_tenant_memory.py
+"""
+
+import asyncio
+import os
+
+from tenxgraph.storage.checkpointer import PgCheckpointer
+from tenxgraph.storage.store import PgVectorStore
+from tenxgraph.storage.store.store_schema import RetrievalStrategy
+from tenxgraph.utils import ThreadInfo
+
+
+POSTGRES_DSN = os.environ["POSTGRES_DSN"]
+REDIS_URL = os.environ["REDIS_URL"]
+
+TENANT_COLUMNS = ["org_id"]
+EXTRA_COLUMNS = {"public_id": "text", "plan": "text"}
+
+
+def run_config(user_id: str, thread_id: str, org_id: str, public_id: str, plan: str) -> dict:
+    """Build a run config. The `user` dict must come from your trusted auth, not a client."""
+    return {
+        "user_id": user_id,
+        "thread_id": thread_id,
+        "collection": "tenant_demo",
+        "user": {"org_id": org_id, "public_id": public_id, "plan": plan},
+    }
+
+
+async def main() -> None:
+    checkpointer = PgCheckpointer(
+        postgres_dsn=POSTGRES_DSN,
+        redis_url=REDIS_URL,
+        tenant_columns=TENANT_COLUMNS,
+        extra_columns=EXTRA_COLUMNS,
+    )
+    store = PgVectorStore(
+        embedding=None,  # text-only store: TEXT search, no pgvector extension needed
+        dsn=POSTGRES_DSN,
+        retrieval_strategy=RetrievalStrategy.TEXT,
+        tenant_columns=TENANT_COLUMNS,
+        extra_columns=EXTRA_COLUMNS,
+    )
+    await checkpointer.asetup()
+    await store.asetup()
+
+    # Two orgs, the same user_id "sam".
+    acme = run_config("sam", "t-acme", "acme", "pub-acme-1", "pro")
+    globex = run_config("sam", "t-globex", "globex", "pub-globex-1", "free")
+
+    for cfg, org in ((acme, "acme"), (globex, "globex")):
+        await checkpointer.aput_thread(cfg, ThreadInfo(thread_id=cfg["thread_id"], user_id="sam"))
+        await store.astore(cfg, f"Sam works at {org} and prefers email over phone.")
+
+    # Same user_id, different org: each sees only its own memory.
+    for cfg in (acme, globex):
+        hits = await store.asearch(cfg, "email")
+        print(cfg["user"]["org_id"], "->", [h.content for h in hits])
+
+    # Filter threads by an extra column. Filters can only narrow the isolated listing.
+    pro_threads = await checkpointer.alist_threads(acme, filters={"plan": {"in": ["pro"]}})
+    print("acme pro threads:", [t.thread_id for t in pro_threads])
+    none_for_globex = await checkpointer.alist_threads(globex, filters={"plan": {"in": ["pro"]}})
+    print("globex pro threads:", [t.thread_id for t in none_for_globex])
+
+    # Clean up the demo rows.
+    for cfg in (acme, globex):
+        await checkpointer.aclean_thread(cfg)
+    await store.arelease()
+    await checkpointer.arelease()
 
 
 if __name__ == "__main__":
@@ -429,7 +621,7 @@ assistant: I don't have anything saved about your diet yet.
 
 ## Using a different model
 
-Change the model string, for example `ReactAgent(model="gpt-5-mini", ...)` with `pip install "10xgraph[openai,qdrant]"`, or `model="gemini-2.5-flash"` with the `google-genai` extra. To embed with Google instead, swap `OpenAIEmbedding` for `GoogleEmbedding`. The memory configuration does not change.
+Change the model string, for example `ReactAgent(model="gpt-5-mini", ...)` with `pip install "10xgraph[openai,qdrant]"` (or `pgvector`), or `model="gemini-2.5-flash"` with the `google-genai` extra. To embed with Google instead, swap `OpenAIEmbedding` for `GoogleEmbedding`. The memory configuration does not change.
 
 ## Next steps
 

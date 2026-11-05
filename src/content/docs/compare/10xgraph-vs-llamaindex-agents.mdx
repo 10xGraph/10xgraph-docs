@@ -10,7 +10,7 @@ faq:
   - q: Can I use my LlamaIndex indexes inside a 10xGraph agent?
     a: Yes. Wrap your query engine in a Python function, hand it to a ToolNode, and the agent calls it like any other tool. Your indexing and retrieval stack stays the same.
   - q: Does 10xGraph have its own retrieval or indexing?
-    a: 10xGraph does not bundle an indexing framework. Pair it with LlamaIndex, LangChain retrievers, raw vector clients such as Qdrant or pgvector, or your own retriever. It has Qdrant and Mem0 long-term memory stores.
+    a: 10xGraph does not bundle an indexing framework. Pair it with LlamaIndex, LangChain retrievers, raw vector clients such as Qdrant or pgvector, or your own retriever. It has PgVectorStore and Qdrant long-term memory stores.
   - q: How does memory in 10xGraph compare to LlamaIndex's Context?
     a: LlamaIndex serializes a Context object that you save and restore yourself. 10xGraph checkpoints the full graph state per thread_id to SQLite or to Postgres with a Redis cache, so threads survive restarts without extra code.
   - q: Does LlamaIndex have a production server for agents?

@@ -343,7 +343,7 @@ mock_client.clear()
 
 ## InMemoryStore
 
-`InMemoryStore` provides an in-memory implementation of the memory store for testing graphs that use memory retrieval (memory tools, long-term storage) without requiring Postgres, Qdrant, or Mem0.
+`InMemoryStore` provides an in-memory implementation of the memory store for testing graphs that use memory retrieval (memory tools, long-term storage) without requiring Postgres or Qdrant.
 
 ### Basic setup
 

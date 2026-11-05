@@ -25,7 +25,7 @@ Valkey, Dragonfly and KeyDB speak the Redis protocol, so you do not need any of 
 | Class | Package | Default | Holds |
 |---|---|---|---|
 | `BaseCheckpointer` | `10xgraph` | `PgCheckpointer` (Postgres plus its own Redis hot cache) | Threads, messages and state |
-| `BaseStore` | `10xgraph` | `QdrantStore` or `Mem0Store` | Long-term memory |
+| `BaseStore` | `10xgraph` | `PgVectorStore` or `QdrantStore` | Long-term memory |
 | `BaseCacheStore` | `10xgraph-api` | `RedisCacheStore`; `InMemoryCacheStore` when no Redis is set | Everything the API shares between workers |
 
 Each of the three has an abstract `aping()`. The server calls it at startup and on `/health/ready`, so a replacement tells the server whether it is usable in the same way as a built-in.

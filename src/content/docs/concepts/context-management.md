@@ -142,7 +142,7 @@ Subsequent summarizations append to the existing summary, preserving a rolling h
 If you use trimming and conversation grows long, the model will lose early context. Move critical facts to:
 
 1. **`state` fields**: Store extracted data in custom state fields (e.g., `state.user_profile`, `state.decisions`). Nodes can update these; the model can read them.
-2. **Memory store**: Use `/docs/guides/use-memory-store` to save facts to a durable store (vector DB or Mem0). Nodes can retrieve them with a retrieval tool.
+2. **Memory store**: Use `/docs/guides/use-memory-store` to save facts to a durable store (PgVectorStore or another vector DB). Nodes can retrieve them with a retrieval tool.
 3. **System prompt**: Include static facts (company policies, user role) in the system prompt; they are always preserved.
 
 Example:

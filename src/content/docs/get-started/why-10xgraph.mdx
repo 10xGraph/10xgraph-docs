@@ -123,7 +123,7 @@ Defaults are there to get you to production quickly, not to lock you in. Each pa
 | Rate limiting | Off | Counters in the API's cache store (memory, Redis or your own) | `rate_limit` block plus `redis` or `"cache_store": "module:attr"` |
 | Shared state (locks, caps, idempotency) | One process | Redis, Valkey, Dragonfly, KeyDB or your own `BaseCacheStore` | `redis`, `REDIS_URL` or `cache_store`; see [Bring your own backend](/docs/server/bring-your-own-backend) |
 | Persistence | In-memory checkpointer | Postgres + Redis, SQLite or your own | Pass it to `compile(checkpointer=...)` |
-| Long-term memory | None | Qdrant, Mem0 or your own `BaseStore` | `"store": "module:instance"` |
+| Long-term memory | None | `PgVectorStore`, Qdrant or your own `BaseStore` | `"store": "module:instance"` |
 | Events and tracing | None | Console, Redis, Kafka, RabbitMQ, OTel, Logfire, LangSmith | Bind a publisher, or use the `observability` block |
 | Dependency injection | Global container | Your own InjectQ container with your services | `"injectq": "module:container"` |
 | Thread names | None | Your own naming logic | `"thread_name_generator": "module:Class"` |
@@ -190,7 +190,7 @@ class TeamAccess(AuthorizationBackend):
             return "admin" in user.get("roles", [])
         return True
 
-    def isolation_scope(self) -> str:
+    def isolation_scope(self, user) -> str:
         return "none"  # threads are shared across the team instead of owner-only
 ```
 

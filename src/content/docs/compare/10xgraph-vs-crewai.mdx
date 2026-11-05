@@ -12,7 +12,7 @@ faq:
   - q: Does 10xGraph support hierarchical agents like CrewAI's Process.hierarchical?
     a: You can build the same delegate-at-runtime behavior with a router node and handoff tools (create_handoff_tool). The routing stays an explicit graph you can inspect, instead of a manager agent decision.
   - q: How does 10xGraph handle long-term memory compared to CrewAI?
-    a: The 10xGraph checkpointer persists full graph state per thread_id, so chat history and intermediate state are durable. For semantic recall, pair it with a vector store such as Qdrant or Mem0, which 10xGraph supports as memory stores.
+    a: The 10xGraph checkpointer persists full graph state per thread_id, so chat history and intermediate state are durable. For semantic recall, pair it with a vector store such as pgvector or Qdrant, which 10xGraph supports as memory stores (`PgVectorStore`, `QdrantStore`).
   - q: Is 10xGraph good for non-chat workflows like research pipelines?
     a: Yes. The graph runtime does not assume a chat surface, and you can run a compiled graph from any Python entry point, not just the API server.
   - q: Is 10xGraph free for commercial use?

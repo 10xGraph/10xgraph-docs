@@ -107,9 +107,9 @@ Search memories by semantic similarity. Requires `store:read` permission.
 | `category` | string | no | `null` | Filter results by category |
 | `limit` | integer | no | `10` | Maximum results to return; must be between 1 and 100 |
 | `score_threshold` | float | no | `null` | Minimum similarity score (between 0 and 1) for a result to be included |
-| `filters` | object | no | `null` | Additional store-specific filters |
-| `retrieval_strategy` | string | no | `similarity` | One of `similarity`, `temporal`, `relevance`, `hybrid`, `graph_traversal`; support depends on the backend |
-| `distance_metric` | string | no | `cosine` | One of `cosine`, `euclidean`, `dot_product`, `manhattan` |
+| `filters` | object | no | `null` | Additional store-specific filters. With `PgVectorStore`, column conditions as in [Filters](/docs/guides/multi-tenant-data#filters); a bad filter answers 422 |
+| `retrieval_strategy` | string | no | `null` (the store's own setting) | One of `similarity`, `temporal`, `relevance`, `hybrid`, `graph_traversal`; support depends on the backend |
+| `distance_metric` | string | no | `null` (the store's own setting) | One of `cosine`, `euclidean`, `dot_product`, `manhattan` |
 | `max_tokens` | integer | no | `4000` | Token budget for truncation during search; at most 16000 |
 
 **Response (200 OK):**
@@ -179,6 +179,7 @@ This is a `POST` endpoint (not `GET`) because the request carries a `config` obj
 | --- | --- | --- | --- | --- |
 | `limit` | integer | no | `100` | Maximum memories to return; must be between 1 and 1000 |
 | `offset` | integer | no | `0` | Memories to skip, for paging. Send `next_offset` from the previous response. |
+| `filters` | object | no | `null` | Narrows the list. With `PgVectorStore`, column conditions as in [Filters](/docs/guides/multi-tenant-data#filters); a bad filter answers 422. The list stays scoped to the caller, so filters can only reduce it |
 
 **Response (200 OK):**
 
@@ -214,7 +215,7 @@ This is a `POST` endpoint (not `GET`) because the request carries a `config` obj
 
 - `401` Unauthorized: missing or invalid auth token
 - `403` Forbidden: insufficient permission (not `store:read`)
-- `422` Unprocessable Entity: `limit` is outside the 1 to 1000 range, or `offset` is negative or above the server maximum
+- `422` Unprocessable Entity: `limit` is outside the 1 to 1000 range, or `offset` is negative or above the server maximum, or a filter is not allowed
 
 **Example:**
 
@@ -406,7 +407,7 @@ Use this to bulk-delete memories by type, category, or custom filters without li
 | --- | --- | --- | --- |
 | `memory_type` | string | no | Restrict deletion to this memory type (same values as when storing) |
 | `category` | string | no | Restrict deletion to this category |
-| `filters` | object | no | Additional metadata filters. With `QdrantStore` each value must be a string, integer or boolean (otherwise the request fails). With `Mem0Store` any of `memory_type`, `category` or `filters` makes the request fail, because Mem0 can only forget by user |
+| `filters` | object | no | Additional filters. With `QdrantStore` each value must be a string, integer or boolean (otherwise the request fails). With `PgVectorStore` a key that is a column takes an equality value or operators such as `{"gte": 5}` (see [Filters](/docs/guides/multi-tenant-data#filters)); tenant columns and `user_id` answer 422; any other key matches a top-level `metadata` key exactly |
 
 **Response (200 OK):**
 

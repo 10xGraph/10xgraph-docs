@@ -41,6 +41,67 @@ npm install 10xgraph-client@next
 
 ---
 
+## After 1.0.0rc4: Postgres memory, tenant columns and safer scopes
+
+These changes ship in 1.0.0. Read them if you use stores, `PgCheckpointer`, a custom `AuthorizationBackend` or `RAGAgent`.
+
+- **`Mem0Store` and the `mem0` extra are removed,** with no stub. Move to `PgVectorStore`
+  (`pip install "10xgraph[pgvector]"`) or `QdrantStore`. Memories saved in Mem0 are not
+  migrated; re-store the ones you need. See [How to use PgVectorStore](/docs/guides/use-pgvector-store).
+- **`BaseStore.asearch` and `search` default `retrieval_strategy` and `distance_metric` to `None`,**
+  meaning the store's configured value. A custom store must accept `None` for both.
+  `QdrantStore.asearch` raises `ValueError` for a strategy other than `SIMILARITY` and for a
+  distance metric different from the store's; both used to be ignored.
+- **An unknown isolation scope now raises `ValueError`.** `build_authz(scope="owners")` used to
+  fall back to `"none"` (no isolation), and `isolation_scope(config)` used to return `None` for a
+  value it did not understand. Both raise now, and so does every storage call that reads such a
+  scope. Use `"owner"`, `"none"`, `tenxgraph.core.authz.Isolation` or a list of column names.
+  `isolation_scope(config)` can also return a list; compare with `isolation_columns()` instead of
+  `== "owner"`.
+- **`isolation_scope` on an API `AuthorizationBackend` takes the user:**
+  `def isolation_scope(self, user)`. It may return `"owner"`, `"none"` or a list such as
+  `["org_id"]`. A backend written as `isolation_scope(self)` keeps working. See
+  [Multi-tenant data](/docs/guides/multi-tenant-data).
+- **`PgCheckpointer` schema version 6** adds only the tenant and extra columns you declare to
+  `threads`. With nothing declared it changes nothing. See [Database migration](#database-migration).
+- **New and optional:** `tenant_columns`, `extra_columns` and `row_level_security` on
+  `PgCheckpointer` and `PgVectorStore`; `GET /v1/threads?filters=`;
+  `BaseCheckpointer.aget_thread_scope()`; `compile(allow_tenant_mismatch=True)`. With tenant
+  columns declared, `compile()` refuses a checkpointer and store whose tenant columns differ when
+  `MODE=production` (`GRAPH_TENANT_001`). Threads and memories written before a tenant column
+  existed hold `NULL` there and are hidden from scopes that pick it until you backfill them.
+- **`RAGAgent` forwards only `config["user"]` to the store,** never `config["authz"]`, so a
+  caller with the `"none"` scope cannot widen a knowledge-base search.
+
+- **Search defaults on the REST API:** `POST /v1/store/search` `retrieval_strategy` and
+  `distance_metric` default to `null`, so the store's own settings apply (they were forced to
+  `similarity` / `cosine`).
+- **Setup on live tables:** `PgCheckpointer` and `PgVectorStore` take `ddl_lock_timeout`
+  (default 10 seconds). Setup skips DDL already in place, builds indexes on tables in use
+  `CONCURRENTLY`, and raises `SetupLockTimeoutError` instead of hanging behind an open
+  transaction. See [Multi-tenant data](/docs/guides/multi-tenant-data#setup-on-a-table-that-is-in-use).
+- **Reserved column names:** `authz`, `scope`, `scopes`, `role` and `roles` cannot be tenant or
+  extra column names.
+- **Row-level security needs a full rollout.** With `row_level_security=True` (FORCE), old pods
+  that set no settings see zero rows. Enable it with all pods on the new version, not pod by pod.
+- **Zero vectors with `COSINE`:** a write raises `ValueError`; a zero query vector searches by
+  `TEXT` under `on_embedding_error="fallback"`.
+- **Custom auth paths:** `"auth": {"method": "custom", "path": ...}` accepts `auth_app:Cls`,
+  `auth_app.py:Cls`, `pkg.mod:Cls` and `pkg/mod.py:Cls`.
+
+### Deprecations and planned removals
+
+- **`PgVectorStore.adrop_legacy_key_index()` and the legacy key index handling** are
+  transitional and deprecated. Setup keeps the pre-tenant `<table>_key_uq` index next to the new
+  `<table>_kuq_<hash>` index when you add tenant columns, and a keyed write that hits it raises
+  `ValueError`. Both will be removed in the next breaking release (1.5 or 2.0); after that, setup
+  replaces the old index directly. Until then, run the rollout in
+  [Multi-tenant data](/docs/guides/multi-tenant-data#add-tenant-columns-to-a-pgvectorstore-table-that-has-data).
+- The `agentflow` import alias, `agentflow` CLI command and `AgentFlow*` client aliases are
+  removed in 2.0.
+
+---
+
 ## From 1.0.0rc3 to 1.0.0rc4
 
 The API's shared state (run locks and caps, idempotency, the ownership cache, token revocation
@@ -147,7 +208,7 @@ Migration steps:
 
 ### Stores and memory
 
-**Who is affected:** anyone using `QdrantStore`, `Mem0Store`, `Agent(memory=...)` or `RAGAgent`.
+**Who is affected:** anyone using `QdrantStore`, `Agent(memory=...)` or `RAGAgent`.
 
 - **A missing or empty `user_id` now raises `ValueError`** on store operations. Pass a concrete
   `user_id`, or `system_user_id(name)` for shared data. Re-index records written with an empty
@@ -174,10 +235,10 @@ Migration steps:
   `async def aping(self) -> None`: return when its backend is reachable, raise when it is not.
   Keep it read-only and cheap, because `10xgraph-api` calls it on `/health/ready` and at
   startup. An in-process store just returns. A store without it raises `TypeError` when
-  created. `QdrantStore`, `Mem0Store` and `InMemoryStore` implement it already.
-- **`aforget_memory` differs by store.** `QdrantStore` applies `memory_type`, `category` and
-  `filters`. `Mem0Store` raises `ValueError` if any of them is passed. The `qdrant` extra needs
-  `qdrant-client>=1.10.0` and a Qdrant server 1.10 or newer.
+  created. `QdrantStore`, `PgVectorStore` and `InMemoryStore` implement it already.
+- **`aforget_memory` applies `memory_type`, `category` and `filters`** in `QdrantStore` and
+  `PgVectorStore`. The `qdrant` extra needs `qdrant-client>=1.10.0` and a Qdrant server 1.10 or
+  newer.
 - **`GoogleEmbedding` sends Gemini task types.** `RETRIEVAL_DOCUMENT` when storing and
   `RETRIEVAL_QUERY` when searching (`BaseEmbedding.aembed_query`, used by `QdrantStore.asearch`).
   Set `document_task_type` and `query_task_type` to change them, or `None` to send none. Vectors
@@ -252,7 +313,6 @@ Migration steps:
 - **New opt-in LLM limits, all off by default:** `stream_idle_timeout` (per agent, `set_default_stream_idle_timeout()` or `TENXGRAPH_LLM_STREAM_IDLE_TIMEOUT`; a stalled stream raises `LLMStreamIdleTimeoutError`) and the cross-process cap on `RetryConfig` (`distributed_max_concurrent_calls` and related fields; it fails open with a WARNING when Redis is down). See [Errors and limits](/docs/concepts/errors-and-limits).
 - **`LiveAgent.arun()` raises `RuntimeError` when the same instance already runs a session.** `arealtime()` runs each connection on its own copy (`LiveAgent.new_session()`). If you call `arun()` yourself, give each concurrent session its own `new_session()`.
 - **A stop request is saved as `StopRequestStatus.STOPPED`.** Code that checks `execution_meta.stop_current_execution` for `STOP_REQUESTED` after a stop must also accept `STOPPED`.
-- **`mem0ai` is bounded to `>=2.0,<3`.** mem0ai 1.x is no longer supported.
 - **A cancelled or crashed run leaves a usable thread.** A new message after a cut-off run starts
   a new turn. `await graph.aclose(grace, stop_timeout, timeout)` ends active runs in phases, and
   new runs raise `GraphClosedError`. Nothing installs signal handlers unless you call
@@ -389,7 +449,7 @@ Added in 1.0.0rc3.
 
 - **Custom authorization backends are isolated by default.** A backend that implements only
   `authorize()` now gets per-owner storage isolation. If you relied on sharing, add
-  `def isolation_scope(self) -> str: return "none"`.
+  `def isolation_scope(self, user): return "none"` (the `user` argument is new; `isolation_scope(self)` still works).
 - **JWTs with an invalid `user_id` or scope claim are refused with 401.** `user_id` must be a
   non-empty string or an integer. Null, empty, boolean, float, list and dict are rejected. A
   `scope` or `scopes` claim that is not a string or a list of strings is rejected, so fix the
@@ -454,7 +514,7 @@ message.
 
 ## Database migration
 
-`PgCheckpointer` schema version 4 changes the messages primary key to
+`PgCheckpointer` is at schema version 6. The last step (version 6) only adds the tenant and extra columns you declare to `threads`. Schema version 4 changes the messages primary key to
 `(thread_id, message_id)` and builds its index under an `ACCESS EXCLUSIVE` lock. `aget_message` and `adelete_message` now require `thread_id` in the
 config, and `aget_tool_result` is scoped to the thread owner. The migration runs automatically
 on first setup. Old and new code cannot run against the same database at the same time: once v4 has run, every message insert from a 0.10.x pod fails. Back up first:
@@ -477,7 +537,7 @@ The migration is not reversible. A rollback to 0.10.x needs a restore of the dat
 
 The extras raise these floors. A fresh install resolves them; an existing environment must be upgraded.
 
-- `10xgraph`: `images` needs `Pillow>=13.0.0`, `mcp` needs `mcp>=1.30.0`, `otel` and `langsmith` need `opentelemetry-api>=1.45.1` and `opentelemetry-sdk>=1.45.1`, and `mem0` needs `mem0ai>=2.0,<3`.
+- `10xgraph`: `images` needs `Pillow>=13.0.0`, `mcp` needs `mcp>=1.30.0`, `otel` and `langsmith` need `opentelemetry-api>=1.45.1` and `opentelemetry-sdk>=1.45.1`.
 - `10xgraph-api`: `python-multipart>=0.0.31`, `starlette>=1.3.1`, `PyJWT>=2.15.0` (the `jwt` extra), and `opentelemetry-api` and `opentelemetry-sdk` `>=1.45.1` (the `otel` extra).
 
 ---

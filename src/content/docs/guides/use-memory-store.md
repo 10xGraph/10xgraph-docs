@@ -1,6 +1,6 @@
 ---
 title: How to use the memory store
-description: Guide to using QdrantStore and Mem0Store for long-term vector memory, factory helpers, and enabling agent-level memory with MemoryConfig.
+description: Guide to using PgVectorStore and QdrantStore for long-term memory, factory helpers, and enabling agent-level memory with MemoryConfig.
 section: "Build agents"
 group: "State, memory and context"
 order: 250
@@ -33,31 +33,32 @@ Example: a customer support agent uses the checkpointer to recall "we discussed 
 
 10xGraph provides two production-ready memory store implementations. Both implement the `BaseStore` interface and work with the same `MemoryConfig` API.
 
+### PgVectorStore
+
+**Best for:** Teams that already run Postgres for checkpoints and want one database for threads and memory, tenant isolation with your own columns, and hybrid (vector plus keyword) search.
+
+`PgVectorStore` keeps memories in one Postgres table next to the `PgCheckpointer` tables. It needs PostgreSQL 14 or newer and the pgvector extension 0.7.0 or newer.
+
+**Trade-offs:**
+- One database to back up, secure and operate
+- Search strategies `SIMILARITY`, `TEXT` and `HYBRID`, with `embedding=None` for a text-only store
+- Tenant and extra columns you declare, with safe filters on them
+- Vector search speed depends on your Postgres sizing
+
 ### QdrantStore
 
-**Best for:** Self-hosted or cloud vector database deployments, full control over infrastructure, hybrid retrieval strategies.
+**Best for:** Self-hosted or cloud vector database deployments, full control over infrastructure, a dedicated vector service.
 
 Qdrant is an open-source, high-performance vector database optimized for similarity search. You can run it locally (file-backed), self-hosted (server), or on Qdrant Cloud.
 
 **Trade-offs:**
 - More operational overhead (Qdrant server management)
-- More flexible configuration (distance metrics, retrieval strategies, chunking)
+- More flexible configuration (distance metrics, chunking)
 - Excellent performance at scale
 - No vendor lock-in
+- Supports `SIMILARITY` search only; `TEXT` and `HYBRID` raise
 
-### Mem0Store
-
-**Best for:** Managed, serverless memory experiences, minimal operations, batteries-included setup.
-
-Mem0 is a managed memory platform that abstracts away vector database operations. It provides automatic memory consolidation, deduplication, and retrieval.
-
-**Trade-offs:**
-- Third-party dependency and service terms
-- Less control over vector search internals
-- Easier to start and maintain
-- Built-in memory cleanup and optimization
-
-Choose based on your infrastructure preferences. For this guide, we'll show both; they are interchangeable in your agent code.
+Choose based on your infrastructure preferences. The two are interchangeable in your agent code.
 
 ---
 
@@ -161,58 +162,29 @@ store = QdrantStore(
 
 ---
 
-## Setting up Mem0Store
-
-### Install the package
+## Setting up PgVectorStore
 
 ```bash
-pip install "10xgraph[mem0]"
+pip install "10xgraph[pgvector,openai]"
 ```
-
-The Mem0 examples below use OpenAI models, so set `OPENAI_API_KEY`.
-
-### Mem0 with OpenAI LLM
-
-Mem0 uses its own configuration format to specify the LLM and vector store.
 
 ```python
-from tenxgraph.storage.store import (
-    Mem0Store,
-    create_mem0_store,
-)
+from tenxgraph.storage.store import OpenAIEmbedding, PgVectorStore
 
-store = create_mem0_store(
-    config={
-        "llm": {
-            "provider": "openai",
-            "config": {"model": "gpt-4o-mini"}
-        }
-    },
-    user_id="default_user",
-    app_id="support_app",
+store = PgVectorStore(
+    embedding=OpenAIEmbedding(),  # uses OPENAI_API_KEY
+    dsn="postgresql://user:pass@localhost:5432/app",
 )
+await store.asetup()  # creates the extension, table and indexes
 ```
 
-### Mem0 backed by your own Qdrant
-
-You can combine Mem0's memory consolidation with your own Qdrant infrastructure.
-
-```python
-from tenxgraph.storage.store import create_mem0_store_with_qdrant
-
-store = create_mem0_store_with_qdrant(
-    qdrant_url="https://abc123-ef45.qdrant.io",
-    qdrant_api_key="your-api-key",
-    collection_name="mem0_collection",
-    app_id="support_app",
-)
-```
+Use the same DSN as your `PgCheckpointer` to keep everything in one database. Pass `embedding=None` for a text-only store that needs no embedding provider. Search strategies, per-level settings, embedding fallback and the table layout are in [How to use PgVectorStore](/docs/guides/use-pgvector-store). To isolate organizations or add your own columns, see [Multi-tenant data](/docs/guides/multi-tenant-data).
 
 ---
 
 ## Embedding options
 
-Both `QdrantStore` and `Mem0Store` need an embedding function to convert text to vectors. Choose based on your API keys and preferences.
+`PgVectorStore` and `QdrantStore` need an embedding function to convert text to vectors (`PgVectorStore` can skip it with `embedding=None`). Choose based on your API keys and preferences.
 
 | Class | Provider | Model | Env var required |
 |---|---|---|---|
@@ -576,6 +548,8 @@ Pass the store the server should use through the `store` key in `10xgraph.json`.
 
 ## Next steps
 
+- [How to use PgVectorStore](/docs/guides/use-pgvector-store) for search strategies, embedding fallback and the table layout.
+- [Multi-tenant data](/docs/guides/multi-tenant-data) to isolate organizations and add your own columns.
 - [Set up checkpointing](/docs/guides/set-up-checkpointing) to persist conversation history across threads.
 - [Use dependency injection](/docs/guides/use-dependency-injection) to access the store in custom nodes and tools.
 - [Configure the Agent](/docs/guides/configure-agent) for the full list of `Agent` constructor options.
