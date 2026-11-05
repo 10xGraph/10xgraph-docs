@@ -365,6 +365,20 @@ It runs `DROP INDEX CONCURRENTLY` under the setup lock and `ddl_lock_timeout`, a
 - **A crashed build is repaired.** An index left invalid by a build that failed or was cancelled is dropped and built again on the next setup.
 - Setup is serialised across processes by a session-level advisory lock, which also covers the concurrent builds.
 
+## Uploaded files
+
+Uploaded files follow the same tenant isolation as threads and memories. When the checkpointer declares tenant columns, each upload records the uploader's `user_id` and tenant values, taken only from `config["user"]`. Every later use of the file must match all of them:
+
+- download, `/info`, `/url` and delete (a mismatch answers 404)
+- `GET /v1/files`, which lists only the caller's files in their tenant
+- any `graph://media/` or `file_id` reference in a run, `PUT state` or `POST messages`
+
+The same `user_id` in two organisations is two identities: neither sees the other's files, and each has its own upload quota. An identity with no tenant value cannot upload (403) or read files.
+
+Files uploaded before tenant columns were declared carry no tenant values and are denied. To keep them, backfill each file's metadata with `{"tenant": {"org_id": "<value>"}}`, using the canonical text form (for example a lowercase UUID).
+
+Deleting a thread, including by an org admin, releases the files the thread's owner linked to it; `media.delete_with_thread` still decides whether an unlinked file is deleted.
+
 ## RAGAgent and tenant stores
 
 `RAGAgent` forwards only `config["user"]` from the run config into the config it passes to `store.asearch`, so a store with tenant columns scopes knowledge-base searches to the caller's tenant. It never forwards `config["authz"]`: a caller whose scope is `Isolation.NONE` must not widen a knowledge-base search to every tenant. The tenant values are read from the run config only, never from state, messages or model output.
