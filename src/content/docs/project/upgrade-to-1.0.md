@@ -73,6 +73,33 @@ These changes ship in 1.0.0. Read them if you use stores, `PgCheckpointer`, a cu
 - **`RAGAgent` forwards only `config["user"]` to the store,** never `config["authz"]`, so a
   caller with the `"none"` scope cannot widen a knowledge-base search.
 
+- **Search defaults on the REST API:** `POST /v1/store/search` `retrieval_strategy` and
+  `distance_metric` default to `null`, so the store's own settings apply (they were forced to
+  `similarity` / `cosine`).
+- **Setup on live tables:** `PgCheckpointer` and `PgVectorStore` take `ddl_lock_timeout`
+  (default 10 seconds). Setup skips DDL already in place, builds indexes on tables in use
+  `CONCURRENTLY`, and raises `SetupLockTimeoutError` instead of hanging behind an open
+  transaction. See [Multi-tenant data](/docs/guides/multi-tenant-data#setup-on-a-table-that-is-in-use).
+- **Reserved column names:** `authz`, `scope`, `scopes`, `role` and `roles` cannot be tenant or
+  extra column names.
+- **Row-level security needs a full rollout.** With `row_level_security=True` (FORCE), old pods
+  that set no settings see zero rows. Enable it with all pods on the new version, not pod by pod.
+- **Zero vectors with `COSINE`:** a write raises `ValueError`; a zero query vector searches by
+  `TEXT` under `on_embedding_error="fallback"`.
+- **Custom auth paths:** `"auth": {"method": "custom", "path": ...}` accepts `auth_app:Cls`,
+  `auth_app.py:Cls`, `pkg.mod:Cls` and `pkg/mod.py:Cls`.
+
+### Deprecations and planned removals
+
+- **`PgVectorStore.adrop_legacy_key_index()` and the legacy key index handling** are
+  transitional and deprecated. Setup keeps the pre-tenant `<table>_key_uq` index next to the new
+  `<table>_kuq_<hash>` index when you add tenant columns, and a keyed write that hits it raises
+  `ValueError`. Both will be removed in the next breaking release (1.5 or 2.0); after that, setup
+  replaces the old index directly. Until then, run the rollout in
+  [Multi-tenant data](/docs/guides/multi-tenant-data#add-tenant-columns-to-a-pgvectorstore-table-that-has-data).
+- The `agentflow` import alias, `agentflow` CLI command and `AgentFlow*` client aliases are
+  removed in 2.0.
+
 ---
 
 ## From 1.0.0rc3 to 1.0.0rc4

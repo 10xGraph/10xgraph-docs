@@ -553,6 +553,9 @@ await store.asetup()
 | `tenant_columns` | `list \| dict \| None` | `None` | Isolation columns (`text`, `bigint`, `integer`, `uuid`). Values come only from `config["user"]`. |
 | `extra_columns` | `list \| dict \| None` | `None` | Your own data columns, any Postgres type. |
 | `row_level_security` | `bool` | `False` | Also enforce tenant columns with native row-level security. Needs `tenant_columns`. |
+| `ddl_lock_timeout` | `float \| None` | `10.0` | Seconds a setup DDL statement waits for a table lock; on timeout setup raises `SetupLockTimeoutError`. `None` waits forever. |
+
+Methods specific to this store: `await store.adrop_legacy_key_index() -> list[str]` drops the `memory_key` index of an earlier declaration after tenant columns were added (see [Multi-tenant data](/docs/guides/multi-tenant-data#add-tenant-columns-to-a-pgvectorstore-table-that-has-data)). It is deprecated and will be removed in the next breaking release (1.5 or 2.0). Column names `authz`, `scope`, `scopes`, `role` and `roles` are reserved.
 
 ### Methods beyond `BaseStore`
 

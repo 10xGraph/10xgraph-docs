@@ -25,6 +25,8 @@ updated: "2026-11-05"
 
 Both options exist on `PgCheckpointer` (columns on the `threads` table) and `PgVectorStore` (columns on the memories table). Each declared column becomes a real column with a B-tree index.
 
+**Reserved names.** A tenant or extra column cannot be named `authz`, `scope`, `scopes`, `role` or `roles`: those keys of `config["user"]` carry authorization data (the isolation policy, granted scopes and roles), so declaring one raises `ValueError`. Built-in column names of the table (such as `user_id`, `created_at`, `memory_key`) are refused too. Pick another name, for example `org_role`.
+
 A declaration is a list of names (each a `text` column), a mapping of name to type, or a mapping of name to `{"type": ..., "required": ...}`:
 
 ```python title="columns.py"
@@ -308,6 +310,12 @@ checkpointer = PgCheckpointer(..., tenant_columns=TENANT_COLUMNS, row_level_secu
 store = PgVectorStore(..., tenant_columns=TENANT_COLUMNS, row_level_security=True)
 ```
 
+<Callout type="warning" title="Enable it in a full rollout, not pod by pod">
+
+With `FORCE`, a pod that does not set the tenant values sees zero rows. Old pods (the version before you turned `row_level_security=True` on) set no settings, so as soon as setup runs on the first new pod, every old pod reads and writes nothing useful until it runs the new version. Stop the old pods, start the new version, then serve traffic. Do not turn it on while old and new pods share the database.
+
+</Callout>
+
 It needs at least one tenant column. Setup runs `ENABLE` and `FORCE ROW LEVEL SECURITY` and creates a policy that compares each tenant column with `current_setting('tenxgraph.<column>', true)`. On the checkpointer the policy covers `threads`, and `states`, `messages` and `tool_executions` are visible only when their thread is. Every call then runs in a transaction that sets those values with `set_config(..., true)` (`SET LOCAL`).
 
 - **Cost.** One transaction and one extra statement per call, plus a thread lookup per child row on the checkpointer. It is off by default.
@@ -327,6 +335,35 @@ UPDATE public.tenxgraph_memories SET org_id = '7b0e2b3a-9a57-4b14-8e1b-2a1e3f1c9
 ```
 
 Map each old `user_id` to its tenant in your own data. If your tenant column was added as `uuid`, use real UUID values.
+
+## Add tenant columns to a `PgVectorStore` table that has data
+
+<Callout type="warning" title="Deprecated: legacy key index handling">
+
+`adrop_legacy_key_index()` and the handling that keeps the pre-tenant `<table>_key_uq` index next to the new one are transitional and deprecated. They will be removed in the next breaking release (1.5 or 2.0). After that, setup replaces the old index directly, and the rollout below needs no extra step.
+
+</Callout>
+
+The `memory_key` unique index gains the tenant columns, so the same `user_id` in two tenants keeps separate keyed memories. On a table in use, roll it out in three steps:
+
+1. **Deploy** the new version with `tenant_columns`. Setup adds the columns and builds the new index `<table>_kuq_<hash>` with `CREATE INDEX CONCURRENTLY`. It keeps the old index `<table>_key_uq`, because pods still on the previous version need it as the `ON CONFLICT` target of their keyed writes. While both indexes exist, a keyed write for the same `(collection, user_id, memory_type, memory_key)` in a second tenant fails with `ValueError`, whose message names the old index. Nothing else changes, and setup logs a warning that the old index is kept.
+2. **Backfill** the tenant values of old rows once every pod runs the new version (see [Backfill old rows](#backfill-old-rows)). Old rows hold `NULL` and are invisible to scopes that pick those columns.
+3. **Drop the old index** once:
+
+```python
+dropped = await store.adrop_legacy_key_index()   # names of the indexes it dropped, [] if none
+```
+
+It runs `DROP INDEX CONCURRENTLY` under the setup lock and `ddl_lock_timeout`, and only after it checks that a valid index for the current declaration exists. It raises `RuntimeError` if none does (run `asetup()` first).
+
+## Setup on a table that is in use
+
+`PgCheckpointer` and `PgVectorStore` take `ddl_lock_timeout` (seconds, default `10.0`; `None` waits forever). It is the Postgres `lock_timeout` for every setup DDL statement. A statement that cannot get its table lock in time fails with `tenxgraph.storage.columns.SetupLockTimeoutError` (a `RuntimeError`) instead of hanging behind an open transaction, which would also queue every later read of the table behind it. The statement that timed out changed nothing, so retry setup after the other transaction ends, or raise the timeout.
+
+- **Setup skips what is in place.** It reads the catalog first and runs no DDL for anything that exists, so a restart takes no table lock.
+- **Indexes on a table already in use are built `CONCURRENTLY`,** so reads and writes continue. Adding a declared column is a short `ALTER TABLE` under the timeout.
+- **A crashed build is repaired.** An index left invalid by a build that failed or was cancelled is dropped and built again on the next setup.
+- Setup is serialised across processes by a session-level advisory lock, which also covers the concurrent builds.
 
 ## RAGAgent and tenant stores
 

@@ -108,8 +108,8 @@ Search memories by semantic similarity. Requires `store:read` permission.
 | `limit` | integer | no | `10` | Maximum results to return; must be between 1 and 100 |
 | `score_threshold` | float | no | `null` | Minimum similarity score (between 0 and 1) for a result to be included |
 | `filters` | object | no | `null` | Additional store-specific filters. With `PgVectorStore`, column conditions as in [Filters](/docs/guides/multi-tenant-data#filters); a bad filter answers 422 |
-| `retrieval_strategy` | string | no | `similarity` | One of `similarity`, `temporal`, `relevance`, `hybrid`, `graph_traversal`; support depends on the backend |
-| `distance_metric` | string | no | `cosine` | One of `cosine`, `euclidean`, `dot_product`, `manhattan` |
+| `retrieval_strategy` | string | no | `null` (the store's own setting) | One of `similarity`, `temporal`, `relevance`, `hybrid`, `graph_traversal`; support depends on the backend |
+| `distance_metric` | string | no | `null` (the store's own setting) | One of `cosine`, `euclidean`, `dot_product`, `manhattan` |
 | `max_tokens` | integer | no | `4000` | Token budget for truncation during search; at most 16000 |
 
 **Response (200 OK):**

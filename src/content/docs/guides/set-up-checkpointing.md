@@ -164,6 +164,7 @@ PgCheckpointer(
     tenant_columns: Any = None,             # Columns on threads that isolate data, e.g. {"org_id": "uuid"}
     extra_columns: Any = None,              # Your own data columns on threads, e.g. {"plan": "text"}
     row_level_security: bool = False,       # Also enforce tenant columns with Postgres RLS
+    ddl_lock_timeout: float | None = 10.0,  # Seconds setup DDL waits for a table lock (None waits)
 )
 ```
 
@@ -232,6 +233,8 @@ Isolation is only meaningful if a real `user_id` reaches the checkpointer. The A
 
 </aside>
 
+`asetup()` waits at most `ddl_lock_timeout` seconds for a table lock on each DDL statement. If another transaction holds the table longer, it raises `tenxgraph.storage.columns.SetupLockTimeoutError` instead of hanging; retry once that transaction ends. Setup reads the catalog first and runs no DDL for what is already in place, so a restart takes no lock. Missing indexes on an existing table are built with `CREATE INDEX CONCURRENTLY`, and an invalid leftover index from a failed build is dropped and rebuilt on the next setup.
+
 ### Tenant and extra columns
 
 For several organizations or projects in one database, declare columns on the `threads` table that you own:
@@ -252,6 +255,7 @@ checkpointer = PgCheckpointer(
 - `asetup()` adds the columns (schema version 6) and a B-tree index for each. Threads created before a tenant column existed hold `NULL` there and are hidden from scopes that pick it until you backfill them.
 - Declare the same tenant columns on `PgVectorStore`. `compile()` refuses a mismatch under `MODE=production` unless you pass `allow_tenant_mismatch=True`.
 - `InMemoryCheckpointer` and `SqliteCheckpointer` raise if you pass these options.
+- The names `authz`, `scope`, `scopes`, `role` and `roles` cannot be column names.
 
 Native row-level security, the full `BaseAuth` example, isolation scopes and the filter reference are in [Multi-tenant data](/docs/guides/multi-tenant-data).
 

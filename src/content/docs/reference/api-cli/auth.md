@@ -163,6 +163,8 @@ Provide your own `BaseAuth` subclass when you need integration with an internal 
 }
 ```
 
+The `path` accepts four forms: `auth_app:Cls` (a top-level module in the project folder), `auth_app.py:Cls`, `pkg.mod:Cls` (a dotted package path) and `pkg/mod.py:Cls` (a file path). A path that does not exist raises an error naming it.
+
 Subclass `BaseAuth` and implement `authenticate`. The method is **synchronous** and receives the request, response, and credential:
 
 ```python

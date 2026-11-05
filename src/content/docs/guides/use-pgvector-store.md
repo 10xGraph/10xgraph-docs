@@ -65,6 +65,7 @@ Owner rules match `QdrantStore`: every call needs a non-empty `user_id` in `conf
 | `tenant_columns` | `None` | Columns that isolate data. See [Multi-tenant data](/docs/guides/multi-tenant-data). |
 | `extra_columns` | `None` | Your own data columns, same page. |
 | `row_level_security` | `False` | Also enforce tenant columns with native Postgres row-level security. |
+| `ddl_lock_timeout` | `10.0` | Seconds a setup DDL statement waits for a table lock before setup raises `SetupLockTimeoutError` (`None` waits forever). See [Setup on a table that is in use](/docs/guides/multi-tenant-data#setup-on-a-table-that-is-in-use). |
 
 Collections work as described in [Collections: keeping data apart](/docs/concepts/memory-and-store#collections-keeping-data-apart). One table holds every collection.
 
@@ -134,7 +135,9 @@ An embedding provider can fail or be rate limited. With `on_embedding_error="fal
 - **Writes** save the text with an empty embedding and log a warning. The memory is searchable by `TEXT` at once.
 - **Searches** that cannot embed the query run as `TEXT` and log a warning.
 
-A vector of the wrong size always raises, because that is a configuration error and not an outage. Set `on_embedding_error="raise"` if you would rather see every failure.
+A vector of the wrong size always raises, because that is a configuration error and not an outage.
+
+Zero vectors need care with `COSINE`, where the distance to a zero vector is undefined. A write whose embedding is a zero vector raises `ValueError`. A query whose embedding is a zero vector falls back to `TEXT` search under `"fallback"` (and logs a warning), and raises `ValueError` under `"raise"`. A non-finite score (NaN) never passes `score_threshold`. Set `on_embedding_error="raise"` if you would rather see every failure.
 
 Fill the missing embeddings later with `abackfill_embeddings`:
 
@@ -170,6 +173,7 @@ Details that matter in production:
 - The vector dimension comes from your embedding service. A table whose `embedding` column has another dimension makes setup raise. HNSW cannot index more than 2000 dimensions; above that the store logs a warning and searches without an index.
 - With a `memory_key`, `astore` is one atomic upsert, so two writers cannot create duplicate memories for the same key. On PostgreSQL 15 and newer, optional tenant columns hold `NULL` and still dedupe (`NULLS NOT DISTINCT`); on 14 they do not.
 - `metadata` is for free-form extras you never filter on. Anything you filter or index should be a real column: declare it as an extra column.
+- Adding tenant columns to a table that already has data keeps the old key index until you call `adrop_legacy_key_index()`. That handling is deprecated; see [Add tenant columns to a table that has data](/docs/guides/multi-tenant-data#add-tenant-columns-to-a-pgvectorstore-table-that-has-data).
 - A write whose `memory_id` belongs to another user raises `PermissionError`, in the same statement as the write.
 - A cancelled call leaves no partial row, and a lost connection is retried the way `PgCheckpointer` retries.
 - `aping()` runs `SELECT 1`. `arelease()` closes the pool only when the store created it from `dsn`.

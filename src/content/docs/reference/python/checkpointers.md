@@ -195,6 +195,7 @@ The constructor takes the connection arguments below as named parameters; the re
 | `tenant_columns` (kwarg) | `list \| dict \| None` | `None` | Columns on `threads` that isolate data, such as `{"org_id": "uuid"}`. Types: `text`, `bigint`, `integer`, `uuid`. Required on thread creation by default. Values come only from `config["user"]`. Schema version 6 adds them. |
 | `extra_columns` (kwarg) | `list \| dict \| None` | `None` | Your own data columns on `threads`, any Postgres type, optional by default and filterable in `alist_threads`. |
 | `row_level_security` (kwarg) | `bool` | `False` | Also enforce tenant columns with native row-level security. Needs `tenant_columns`. |
+| `ddl_lock_timeout` (kwarg) | `float \| None` | `10.0` | Seconds a setup DDL statement waits for a table lock; on timeout setup raises `tenxgraph.storage.columns.SetupLockTimeoutError`. `None` waits forever. Indexes on existing tables are built `CONCURRENTLY`. |
 
 See [Multi-tenant data](/docs/guides/multi-tenant-data) for how the columns, isolation scopes and filters work. `InMemoryCheckpointer` and `SqliteCheckpointer` raise `ValueError` if you pass these three options.
 

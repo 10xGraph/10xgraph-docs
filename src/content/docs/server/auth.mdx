@@ -182,7 +182,7 @@ class ApiKeyAuth(BaseAuth):
         return {"user_id": "service-account", "roles": ["service"]}
 ```
 
-Point the config at it with the object form:
+Point the config at it with the object form. The `path` accepts `auth_app:Cls`, `auth_app.py:Cls`, `pkg.mod:Cls` and `pkg/mod.py:Cls`:
 
 ```json title="10xgraph.json"
 {
