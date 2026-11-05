@@ -58,6 +58,7 @@ client.threads(search?: string, offset?: number, limit?: number): Promise<Thread
 | `search` | `string` | none | Search string passed to the checkpointer. |
 | `offset` | `number` | none | Records to skip. Must be 0 or more. |
 | `limit` | `number` | 100 | Page size. Must be above 0. The server caps it at 1000. |
+| `filters` | `Filters` | none | Filter by column. Request-object form only. Sent as a JSON `filters` query parameter (at most 8192 characters); omitted when empty. |
 
 Returns `ThreadsResponse`, with the threads at `response.data.threads`:
 
@@ -78,7 +79,14 @@ const first = await client.threads();
 const searched = await client.threads({ search: 'paris', offset: 0, limit: 20 });
 const positional = await client.threads('paris', 0, 20);
 console.log(first.data.threads.length, searched.data.threads[0]?.thread_id, positional.metadata);
+
+// Filter by column. A bare value means equality; { op: value } picks an operator.
+const pro = await client.threads({
+  filters: { plan: { in: ['pro'] }, created_at: { gte: '2026-11-01T00:00:00Z' } },
+});
 ```
+
+`Filters` is `Record<string, FilterScalar | FilterCondition>`. Operators: `eq`, `ne`, `in`, `nin`, `like`, `ilike`, `is_null`, `gt`, `gte`, `lt`, `lte`. `in` and `nin` take arrays, `is_null` takes a boolean. The client does not check column names; the server answers 422 (`ValidationError`) for an unknown column, a wrong value type or a tenant column.
 
 ### `threadDetails`
 

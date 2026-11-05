@@ -63,7 +63,7 @@ Both lock and cap are taken before the response starts, so a busy or over-cap re
 | Working state | The `AgentState` for the run in progress: messages, your custom fields. | The graph run, in the worker's memory | One run |
 | Redis hot cache | A copy of each thread's latest state, so a resumed run does not read Postgres. | `PgCheckpointer` | TTL, 24 hours by default (`cache_ttl`) |
 | Postgres | Durable thread history. Each write appends a new version under a per-thread row lock; a write based on an out-of-date version raises `StaleStateError` and the API returns 409. Also the tool-call ledger. | `PgCheckpointer` | Until you delete the thread |
-| Vector memory store | Long-term memory across threads (Qdrant or Mem0). | The `BaseStore` you pass to the graph, served at `/v1/store` | Until you delete it |
+| Vector memory store | Long-term memory across threads (PgVectorStore or Qdrant). | The `BaseStore` you pass to the graph, served at `/v1/store` | Until you delete it |
 | Media store | Uploaded and generated files, referenced by `graph://media/` URLs. | The media store you configure | Until deleted; by default a file is deleted with the last thread that references it (`media.delete_with_thread`) |
 
 Postgres is the source of truth. Redis is a cache and a coordination tool, not a second copy you must back up. The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. For the full model see [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).

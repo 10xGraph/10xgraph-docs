@@ -26,7 +26,7 @@ config = {
 }
 ```
 
-`thread_id` is the primary key for all state, message, and metadata operations. `user_id` scopes thread ownership in a multi-tenant deployment. `PgCheckpointer` enforces it by default (`enforce_user_isolation=True`), so one user cannot read another's threads; the other checkpointers enforce owner-only access only when the API server's authorization policy asks for it. Each user can have many threads; each thread persists independently until explicitly deleted. When you call the compiled graph from Python, you choose the `thread_id`. Behind the API server, the server picks the id of a new thread (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)), and clients send it back to continue.
+`thread_id` is the primary key for all state, message, and metadata operations. `user_id` scopes thread ownership in a multi-tenant deployment. `PgCheckpointer` enforces it by default (`enforce_user_isolation=True`), so one user cannot read another's threads; the other checkpointers enforce owner-only access only when the API server's authorization policy asks for it. In a multi-tenant deployment you can also declare `tenant_columns` (for example `org_id`) on `PgCheckpointer`, so isolation matches on those columns as well as `user_id`; see [Multi-tenant data](/docs/guides/multi-tenant-data). Each user can have many threads; each thread persists independently until explicitly deleted. When you call the compiled graph from Python, you choose the `thread_id`. Behind the API server, the server picks the id of a new thread (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)), and clients send it back to continue.
 
 ## How checkpointing works
 
@@ -159,6 +159,8 @@ Install with:
 pip install "10xgraph[pg_checkpoint]"
 ```
 
+`PgCheckpointer` also takes `tenant_columns` and `extra_columns`: real columns on the `threads` table that you name. Tenant columns (such as `org_id` and `project_id`) isolate data the way `user_id` does, and extra columns (such as `plan`) carry your own data and can be filtered in `alist_threads` and `GET /v1/threads`. Their values are set when the thread is created, never change, and come only from `config["user"]`, which your auth class fills. Declare the same tenant columns on `PgVectorStore` so threads and memories are isolated alike. The in-memory and SQLite checkpointers do not support them. See [Multi-tenant data](/docs/guides/multi-tenant-data).
+
 `await checkpointer.asetup()` creates the schema and is safe to repeat. The API server calls it at boot (on failure it logs and retries on first use), so a fresh Postgres needs no manual step there. See [guides/set-up-checkpointing](/docs/guides/set-up-checkpointing) for full configuration.
 
 ## Trade-offs and decision guide
@@ -203,6 +205,7 @@ The server uses the compiled graph's checkpointer for all requests. See [server/
 ## Related concepts
 
 - [Interrupts](/docs/concepts/interrupts): pause a run for human review, saved in a checkpoint
+- [Multi-tenant data](/docs/guides/multi-tenant-data): tenant and extra columns, isolation scopes, filters
 - [Memory and store](/docs/concepts/memory-and-store): long-term memory vs. short-term thread state
 - [State and messages](/docs/concepts/state-and-messages): what is stored in a checkpoint
 - [Durability and concurrency](/docs/guides/durability-and-concurrency): thread isolation and optimistic locking

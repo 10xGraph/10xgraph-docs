@@ -210,14 +210,34 @@ The most important decision is **how the agent accesses memory**. This determine
 
 ## Available store backends
 
-The two main options are **Qdrant** (vector database you host) and **Mem0** (managed service):
+The two production options are **PgVectorStore** (memory in the Postgres you already run for checkpoints) and **Qdrant** (a vector database you host):
 
-| Store | Hosting | Embeddings | Good for |
-|---|---|---|---|
-| `QdrantStore` | Local or cloud Qdrant | Your choice (OpenAI, Google, custom) | Full control, self-hosted |
-| `Mem0Store` | Mem0 managed service | Mem0-provided | Low ops, Mem0 handles scaling |
+| Store | Hosting | Embeddings | Search | Good for |
+|---|---|---|---|---|
+| `PgVectorStore` | Your Postgres 14+ with the pgvector 0.7.0+ extension | Your choice (OpenAI, Google, custom), or none | `SIMILARITY`, `TEXT`, `HYBRID` | One database for threads and memory, tenant columns |
+| `QdrantStore` | Local or cloud Qdrant | Your choice (OpenAI, Google, custom) | `SIMILARITY` | Full control, a dedicated vector service |
 
-Both use semantic similarity search, so searches match meaning, not keywords. A query like "What's my timezone?" will find a memory "I'm UTC-5" even though the words are different.
+`SIMILARITY` search matches meaning, not keywords. A query like "What's my timezone?" will find a memory "I'm UTC-5" even though the words are different. `PgVectorStore` also offers `TEXT` (full-text rank) and `HYBRID` (both fused with Reciprocal Rank Fusion), which help when users search for exact names or codes.
+
+### Setting up PgVectorStore
+
+```bash
+pip install "10xgraph[pgvector,openai]"
+```
+
+```python
+from tenxgraph.storage.store import OpenAIEmbedding, PgVectorStore
+
+store = PgVectorStore(
+    embedding=OpenAIEmbedding(),  # requires OPENAI_API_KEY
+    dsn="postgresql://user:pass@localhost:5432/app",
+)
+await store.asetup()
+```
+
+Use the same database as your `PgCheckpointer`. `retrieval_strategy` can be set on the store, on `MemoryConfig` or a memory scope, and per `asearch` call, and the most specific wins (`distance_metric` can be set on the store and per call). If the embedding provider fails, a write saves the text without an embedding and a search falls back to `TEXT`, and `abackfill_embeddings()` fills the gaps later. See [How to use PgVectorStore](/docs/guides/use-pgvector-store).
+
+For several organizations in one database, declare tenant columns on the store and the checkpointer. Their values come only from `config["user"]`, which your auth class fills. See [Multi-tenant data](/docs/guides/multi-tenant-data).
 
 ### Setting up Qdrant locally
 
@@ -238,7 +258,7 @@ store = create_local_qdrant_store(
 )
 ```
 
-This creates a persistent database on disk. For production, use `create_cloud_qdrant_store(url=..., api_key=..., embedding=...)` for Qdrant Cloud, or `create_remote_qdrant_store(host=..., port=..., embedding=...)` for a server you run. `GoogleEmbedding` is also available. For Mem0, install the `mem0` extra and use `create_mem0_store`.
+This creates a persistent database on disk. For production, use `create_cloud_qdrant_store(url=..., api_key=..., embedding=...)` for Qdrant Cloud, or `create_remote_qdrant_store(host=..., port=..., embedding=...)` for a server you run. `GoogleEmbedding` is also available.
 
 ## Implementation patterns
 
@@ -373,6 +393,7 @@ config = MemoryConfig(
     retrieval_mode="postload",         # "no_retrieval" | "preload" | "postload" (default "postload")
     limit=5,                           # Max memories per search (default 5)
     score_threshold=0.0,               # Min similarity (default 0.0)
+    retrieval_strategy=None,           # Optional: SIMILARITY | TEXT | HYBRID; a memory scope's own value wins
     max_tokens=None,                   # Optional: limit tokens in injected memories
     inject_system_prompt=True,         # Auto-add memory instructions
     user_memory=UserMemoryConfig(
@@ -558,4 +579,5 @@ The `store` key expects a `module:attribute` path pointing to a `BaseStore` inst
 - **To set up memory:** See the task guide [Use memory store](/docs/guides/use-memory-store).
 - **For REST API details:** See [REST API: Memory store](/docs/reference/rest-api/memory-store).
 - **To learn about thread memory:** See [Checkpointing and threads](/docs/concepts/checkpointing-and-threads) (in-thread state is different from long-term memory).
+- **To use Postgres for memory:** See [How to use PgVectorStore](/docs/guides/use-pgvector-store) and [Multi-tenant data](/docs/guides/multi-tenant-data).
 - **To understand scoping:** See [Authorization scopes](/docs/guides/authorization-scopes) (user isolation is handled by auth).

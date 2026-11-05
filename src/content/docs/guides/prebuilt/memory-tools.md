@@ -22,7 +22,7 @@ There is one way to turn memory on: pass `memory=MemoryConfig(...)` to the `Agen
 | `user_memory_tool` | Memory scoped to individual users | `MemoryConfig(user_memory=...)`; on by default | search, remember |
 | `agent_memory_tool` | Read-only, application-wide memory (for example a knowledge base or policies) | `MemoryConfig(agent_memory=AgentMemoryConfig(enabled=True, ...))` | search only |
 
-Both tools need a store (for example Qdrant or Mem0) that supports semantic search. Pass it to `MemoryConfig(store=...)` or to `compile(store=...)`. The Agent registers the tools on its `ToolNode` only when `MemoryConfig.retrieval_mode` is `postload` (the default for `MemoryConfig`). With `preload`, there are no memory tools: the Agent searches once per invocation and adds the memories to the latest user message as a fenced block (see [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text)). With `no_retrieval`, the model has no memory tools and nothing is injected.
+Both tools need a store (for example PgVectorStore or Qdrant) that supports semantic search. Pass it to `MemoryConfig(store=...)` or to `compile(store=...)`. The Agent registers the tools on its `ToolNode` only when `MemoryConfig.retrieval_mode` is `postload` (the default for `MemoryConfig`). With `preload`, there are no memory tools: the Agent searches once per invocation and adds the memories to the latest user message as a fenced block (see [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text)). With `no_retrieval`, the model has no memory tools and nothing is injected.
 
 ## How memory works
 
@@ -203,15 +203,18 @@ store = create_local_qdrant_store(
 
 Qdrant works offline in local mode. For production, `QdrantStore` also accepts `host`/`port` or `url` and `api_key` for a server or Qdrant Cloud. Install with `pip install "10xgraph[qdrant]"` (needs `qdrant-client` 1.10.0 or newer, and Qdrant server 1.10 or newer for a server).
 
-**Mem0 (enterprise multi-agent memory):**
+**PgVectorStore (memory in the Postgres you already run):**
 
 ```python
-from tenxgraph.storage import Mem0Store
+from tenxgraph.storage.store import OpenAIEmbedding, PgVectorStore
 
-store = Mem0Store(config=mem0_config)  # a mem0 MemoryConfig or an equivalent dict
+store = PgVectorStore(
+    embedding=OpenAIEmbedding(),
+    dsn="postgresql://user:pass@localhost:5432/app",
+)
 ```
 
-`Mem0Store` takes a Mem0 configuration (`config`, plus an optional `app_id`) and delegates memory storage and embeddings to Mem0. Install with `pip install "10xgraph[mem0]"`.
+`PgVectorStore` keeps memories in one Postgres table and supports `SIMILARITY`, `TEXT` and `HYBRID` search. Install with `pip install "10xgraph[pgvector]"` (needs PostgreSQL 14 or newer and the pgvector extension 0.7.0 or newer). See [How to use PgVectorStore](/docs/guides/use-pgvector-store).
 
 Choose the embedding model based on your provider and token budget. `OpenAIEmbedding` defaults to `text-embedding-3-small`, and its `model` argument selects another OpenAI embedding model.
 

@@ -28,6 +28,7 @@ Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: th
 | `authorization` | string, object or null | by `MODE` | Access control backend |
 | `injectq` | string or null | none | Import path of an InjectQ container |
 | `store` | string or null | none | Import path of a `BaseStore` for long-term memory |
+| `store_allow_tenant_mismatch` | boolean | `false` | Boot even when the `store` declares different tenant columns than the checkpointer (production refuses otherwise). Use for a store that holds only shared data. See [Multi-tenant data](/docs/guides/multi-tenant-data) |
 | `checkpointer` | string or null | none | Not applied by the API server. If set, the server logs a warning and ignores it. Pass the checkpointer to `compile()` |
 | `thread_name_generator` | string or null | `random` | `random`, `first_message`, `none` or a `module:attr` path. See [thread_name_generator](#thread_name_generator) |
 | `id_generator` | string or null | graph's own | `uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or a `module:attr` path. See [id_generator](#id_generator) |

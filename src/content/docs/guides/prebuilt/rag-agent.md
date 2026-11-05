@@ -138,7 +138,7 @@ When you create a RAGAgent, you configure both the retrieval behavior and the un
 | `reranker` | `BaseReranker \| None` | `None` | Optional reranker (`CohereReranker`, `CrossEncoderReranker`, or your custom class). If provided, a RERANK node is inserted between RETRIEVE and SYNTHESIZE. |
 | `top_k` | `int` | `5` | Number of candidates retrieved from the store. Increase to 15-20 if you use a reranker (it needs more candidates to filter). |
 | `top_n` | `int` | `3` | Number of documents forwarded to the LLM after reranking. Ignored if no reranker is provided; all `top_k` docs go to the LLM instead. |
-| `retrieval_strategy` | `RetrievalStrategy` | `SIMILARITY` | Vector search strategy (e.g., `RetrievalStrategy.SIMILARITY`). Passed to `store.asearch()`. |
+| `retrieval_strategy` | `RetrievalStrategy \| None` | `None` | Search strategy passed to `store.asearch()`. `None` uses the store's own setting (`SIMILARITY`, `TEXT` or `HYBRID` on `PgVectorStore`). |
 | `score_threshold` | `float \| None` | `None` | Minimum similarity score. Documents below this are filtered out. Useful to exclude near-misses. |
 | `store_config` | `dict \| None` | `None` | Extra key-value pairs passed to every `store.asearch()` call. Without a `user_id` key, the search runs as `system_user_id("knowledge_base")`, the reserved owner of the shared knowledge base. Example: `{"user_id": "u42"}` to filter documents by user. Fixed for all runs. |
 | `store_config_builder` | `Callable[[dict], dict] \| None` | `None` | Builds the store config for each run from the run config, for example per user or tenant. When set, it is used instead of `store_config` as is, so it must include a `user_id`. Example: `lambda cfg: {"user_id": cfg["user_id"]}`. |
@@ -571,6 +571,15 @@ rag = RAGAgent(store=store, agent=agent, store_config_builder=company_search_con
 ```
 
 `cfg["user"]` is the dict your auth backend returns; a custom `BaseAuth` can add `tenant_id` to it. With auth off there is no `user` dict, so the example raises. To keep every company in one collection instead, drop the `collection` key and keep the per-company owner. The API drops `collection` from client config on every route, so a client cannot redirect the search. See [Collections: keeping data apart](/docs/concepts/memory-and-store#collections-keeping-data-apart).
+
+## Tenant stores
+
+When the store has tenant columns (`PgVectorStore(tenant_columns=...)`), `RAGAgent` forwards only `config["user"]` from the run config to `store.asearch`, so knowledge-base searches stay inside the caller's tenant. It never forwards `config["authz"]`: a caller whose isolation scope is `none` must not widen a knowledge-base search to every tenant. The tenant values are read from the run config only, never from state, messages or model output.
+
+- Documents indexed with tenant values are visible only inside that tenant.
+- To share one knowledge base across tenants, set `"authz"` yourself in `store_config` or the `store_config_builder` output with a scope that does not pick the tenant columns, or use a store without tenant columns. In the second case compile with `allow_tenant_mismatch=True` when the checkpointer declares tenant columns.
+
+See [Multi-tenant data](/docs/guides/multi-tenant-data#ragagent-and-tenant-stores).
 
 ---
 

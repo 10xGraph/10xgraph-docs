@@ -49,7 +49,7 @@ The methods below are abstract and must be implemented by a subclass:
 | `adelete_message` | `async (config, message_id) -> Any \| None` | Delete a single message. |
 | `aput_thread` | `async (config, thread_info) -> Any \| None` | Store thread metadata. |
 | `aget_thread` | `async (config) -> ThreadInfo \| None` | Get thread metadata. |
-| `alist_threads` | `async (config, search=None, offset=None, limit=None) -> list[ThreadInfo]` | List threads. |
+| `alist_threads` | `async (config, search=None, offset=None, limit=None, filters=None) -> list[ThreadInfo]` | List threads. `filters` (column conditions, see [Multi-tenant data](/docs/guides/multi-tenant-data#filters)) is supported by `PgCheckpointer`; `InMemoryCheckpointer` and `SqliteCheckpointer` raise `FilterError` for non-empty filters. |
 | `aclean_thread` | `async (config) -> Any \| None` | Delete a thread and its state and messages. |
 | `aping` | `async () -> None` | Return when the checkpointer's backends are reachable and usable, raise when they are not. Must be read-only (no writes, no table creation) and cheap, because the API server calls it on every readiness probe and at startup. An in-process checkpointer just returns. Abstract since 1.0.0rc4: a subclass without it raises `TypeError` when created. |
 | `arelease` | `async () -> Any \| None` | Release resources (close pools and connections). |
@@ -86,7 +86,7 @@ message = await checkpointer.aupdate_message_metadata(
 )
 ```
 
-Optional, non-abstract async methods also exist on the base class, for example `aput_checkpoint`, `aput_cache_value`, `aput_cache_value_if_absent` (set a cache value only if the key is missing: Redis `SET NX`, one SQLite statement, in-memory under its lock; the base class falls back to get-then-put), `aget_cache_value`, `arequest_stop` and `aget_thread_owner`. Backends override them as needed.
+Optional, non-abstract async methods also exist on the base class, for example `aput_checkpoint`, `aput_cache_value`, `aput_cache_value_if_absent` (set a cache value only if the key is missing: Redis `SET NX`, one SQLite statement, in-memory under its lock; the base class falls back to get-then-put), `aget_cache_value`, `arequest_stop`, `aget_thread_owner` and `aget_thread_scope` (the thread's `user_id` plus tenant column values, not scoped to the caller, for authorization layers; the base class returns `{"user_id": owner}`). Backends override them as needed.
 
 ### Stop requests and active runs
 
@@ -192,6 +192,11 @@ The constructor takes the connection arguments below as named parameters; the re
 | `state_history_limit` (kwarg) | `int` | `20` | Number of historical state snapshots to retain per thread. |
 | `release_resources` (kwarg) | `bool` | `False` | On `arelease()`, close the Postgres and Redis resources even if you passed them in. By default only resources the checkpointer created itself are closed. |
 | `enforce_user_isolation` (kwarg) | `bool` | `True` | Treat `user_id` as an ownership boundary. When enabled, threads and state are scoped to the requesting user. Set to `False` for single-tenant apps or when there is no real user identity. |
+| `tenant_columns` (kwarg) | `list \| dict \| None` | `None` | Columns on `threads` that isolate data, such as `{"org_id": "uuid"}`. Types: `text`, `bigint`, `integer`, `uuid`. Required on thread creation by default. Values come only from `config["user"]`. Schema version 6 adds them. |
+| `extra_columns` (kwarg) | `list \| dict \| None` | `None` | Your own data columns on `threads`, any Postgres type, optional by default and filterable in `alist_threads`. |
+| `row_level_security` (kwarg) | `bool` | `False` | Also enforce tenant columns with native row-level security. Needs `tenant_columns`. |
+
+See [Multi-tenant data](/docs/guides/multi-tenant-data) for how the columns, isolation scopes and filters work. `InMemoryCheckpointer` and `SqliteCheckpointer` raise `ValueError` if you pass these three options.
 
 ### ID types
 

@@ -60,10 +60,16 @@ The curl examples in this page assume a local server on port 8000 and a token in
 | `search` | string | none | Free-text filter over thread records |
 | `offset` | integer | none | Number of threads to skip. A negative value returns `422` |
 | `limit` | integer | `100` | Page size. A value above `1000` is lowered to `1000`; zero or a negative value returns `422` |
+| `filters` | string (JSON object) | none | Column conditions, for example `{"plan": "pro", "created_at": {"gte": "2026-01-01T00:00:00+00:00"}}`. Filterable: `thread_name`, `created_at`, `updated_at` and the checkpointer's extra columns. Tenant columns and `user_id` are refused. Needs `PgCheckpointer`. Invalid JSON, a column or operator that is not allowed, or a checkpointer without filterable columns returns `422`. At most 8192 characters. See [Filters](/docs/guides/multi-tenant-data#filters) |
 
 ```bash
 # List the first 20 threads whose records match "weather"
 curl "http://localhost:8000/v1/threads?search=weather&limit=20" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Only threads whose "plan" extra column is "pro"
+curl -G "http://localhost:8000/v1/threads" \
+  --data-urlencode 'filters={"plan": "pro"}' \
   -H "Authorization: Bearer $TOKEN"
 ```
 

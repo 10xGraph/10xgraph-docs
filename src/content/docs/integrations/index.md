@@ -17,7 +17,7 @@ updated: "2026-10-27"
 
 **Backend frameworks.** Serve graphs over the REST API (the `10xgraph-api` server), embed them directly in your FastAPI app, or call them from TypeScript with the `10xgraph-client` SDK. The API server handles auth, rate limiting, and streaming out of the box.
 
-**Storage and memory.** Persist thread state to PostgreSQL with Redis as a hot cache, use SQLite for local development, or keep everything in memory for tests. Long-term memory integrations (Qdrant, Mem0) store facts across sessions for your agents to retrieve.
+**Storage and memory.** Persist thread state to PostgreSQL with Redis as a hot cache, use SQLite for local development, or keep everything in memory for tests. Long-term memory integrations (PgVectorStore, Qdrant) store facts across sessions for your agents to retrieve.
 
 **Observability and debugging.** Publish execution events to Redis, Kafka, or RabbitMQ. Send traces to OpenTelemetry, Logfire, or LangSmith. The API server logs all requests and can redact secrets.
 
@@ -45,7 +45,7 @@ Read [Models](/docs/integrations/models) first. Then:
 
 ### I want to give agents long-term memory
 
-- Vector stores: [Qdrant](https://qdrant.tech) or [Mem0](https://mem0.ai) store and retrieve agent facts across sessions.
+- Vector stores: [pgvector](https://github.com/pgvector/pgvector) in your Postgres (`PgVectorStore`) or [Qdrant](https://qdrant.tech) store and retrieve agent facts across sessions.
 - Storage guide: `/docs/guides/use-memory-store` shows how to wire a store into your graph.
 
 ### I want to observe and debug in production
@@ -74,8 +74,8 @@ The core library includes support for many backends. Install only the extras you
 | SQLite | Local file-based | `sqlite_checkpoint` | developing or running single-instance |
 | In-memory | RAM (default) | - | tests or ephemeral runs |
 | **Long-term memory** |
-| Qdrant | Vector database | `qdrant` | agents need persistent facts across sessions |
-| Mem0 | Memory management API | `mem0` | you prefer a managed memory service |
+| PgVectorStore | Postgres with the pgvector extension | `pgvector` | agents need persistent facts and you already run Postgres |
+| Qdrant | Vector database | `qdrant` | agents need persistent facts across sessions in a dedicated vector service |
 | **Tools and protocols** |
 | Model Context Protocol | MCP servers and clients | `mcp` | your tools run in separate processes |
 | **Event publishing** |

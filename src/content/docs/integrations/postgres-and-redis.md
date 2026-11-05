@@ -134,6 +134,9 @@ You must supply one Postgres source (`postgres_dsn` or `pg_pool`) and one Redis 
 | `enforce_user_isolation` | `bool` (kwarg) | `True` | Scope threads, state and messages to the `user_id` in the config |
 | `user_id_type` | `str` (kwarg) | `"string"` | Column type for `user_id`: `string`, `int` or `bigint` |
 | `release_resources` | `bool` (kwarg) | `False` | Also close pools you passed in when `arelease()` runs |
+| `tenant_columns` | `list` or `dict` (kwarg) | `None` | Columns on `threads` that isolate data, such as `{"org_id": "uuid"}`. Allowed types: `text`, `bigint`, `integer`, `uuid`. Values come only from `config["user"]` |
+| `extra_columns` | `list` or `dict` (kwarg) | `None` | Your own data columns on `threads`, any Postgres type, filterable in `alist_threads` |
+| `row_level_security` | `bool` (kwarg) | `False` | Also enforce tenant columns with Postgres row-level security. Needs `tenant_columns` |
 
 ## Schema
 
@@ -141,11 +144,11 @@ The checkpointer creates five tables in the configured schema and records the sc
 
 | Table | Purpose | Main columns |
 |---|---|---|
-| `threads` | One row per thread | `thread_id` (primary key), `thread_name`, `user_id`, `created_at`, `updated_at`, `meta` (jsonb) |
+| `threads` | One row per thread | `thread_id` (primary key), `thread_name`, `user_id`, `created_at`, `updated_at`, `meta` (jsonb), plus your tenant and extra columns |
 | `states` | Versioned state snapshots | `state_id`, `thread_id`, `version` (bigint), `state_data` (jsonb), `created_at`, `updated_at`, `meta` |
 | `messages` | Messages per thread | `message_id`, `thread_id`, `role` (enum), `content`, `tool_calls` (jsonb), `tool_call_id`, `total_tokens`, `usages` (jsonb), `meta` |
 | `tool_executions` | Tool results keyed by `(thread_id, tool_call_id)`, so a replayed node does not re-run finished tools | `thread_id`, `tool_call_id`, `result` (jsonb), `created_at` |
-| `schema_version` | Applied schema versions (currently 5) | `version`, `applied_at` |
+| `schema_version` | Applied schema versions (currently 6) | `version`, `applied_at` |
 
 Notes on the types:
 
@@ -210,7 +213,7 @@ Replace the `...` line with your own graph run.
 
 ## Multi-tenant scoping
 
-`enforce_user_isolation` is on by default, so every query is scoped to the `user_id` in the config. Knowing another user's `thread_id` is not enough to read or delete their thread. Put the tenant in the thread id or the user id so tenants stay separate.
+`enforce_user_isolation` is on by default, so every query is scoped to the `user_id` in the config. Knowing another user's `thread_id` is not enough to read or delete their thread. For several organizations or projects, declare `tenant_columns` (for example `org_id`) so isolation matches on those columns as well as `user_id`; they are set from `config["user"]`, which your auth class fills. See [Multi-tenant data](/docs/guides/multi-tenant-data). Without tenant columns, put the tenant in the thread id or the user id so tenants stay separate.
 
 ```python
 config = {
@@ -258,6 +261,8 @@ Run autovacuum or a periodic `VACUUM` to reclaim space after large deletes.
 
 - [Checkpointing and threads](/docs/concepts/checkpointing-and-threads)
 - [Long-term memory](/docs/concepts/memory-and-store)
+- [How to use PgVectorStore](/docs/guides/use-pgvector-store) (memory in the same Postgres)
+- [Multi-tenant data](/docs/guides/multi-tenant-data)
 - [Set up checkpointing](/docs/guides/set-up-checkpointing)
 - [Durability and concurrency](/docs/guides/durability-and-concurrency)
 - [Production checklist](/docs/server/production-checklist)

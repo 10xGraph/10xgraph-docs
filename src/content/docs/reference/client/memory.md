@@ -138,7 +138,7 @@ for (const result of response.data.results) {
 | `category` | `string` | `''` | Filter by category. Empty string returns all categories. |
 | `limit` | `number` | `10` | Maximum number of results to return. |
 | `score_threshold` | `number` | `0` | Minimum similarity score (0 to 1). Results below this threshold are excluded. |
-| `filters` | `Record<string, any>` | `{}` | Additional key-value filters matched against memory metadata. |
+| `filters` | `Filters` | `{}` | Filter by column: `{ col: value }` or `{ col: { op: value } }`. See [Filters](#filters). |
 | `retrieval_strategy` | `RetrievalStrategy` | `SIMILARITY` | Which retrieval algorithm to use. |
 | `distance_metric` | `DistanceMetric` | `COSINE` | Which distance metric to use for vector search. |
 | `max_tokens` | `number` | `4000` | Maximum total tokens to return across all results. |
@@ -291,6 +291,7 @@ if (response.data.has_more) {
 |---|---|---|
 | `options.limit` | `number` | Maximum number of memories to return. Default `100`. |
 | `options.offset` | `number` | Memories to skip, for paging. Pass `next_offset` from the previous page. Needs `10xgraph-api` with paging support. |
+| `options.filters` | `Filters` | Filter by column. See [Filters](#filters). Omitted when empty. |
 | `options.config` | `Record<string, any>` | Optional store-level config. |
 | `options.options` | `Record<string, any>` | Optional store-level options. |
 
@@ -298,7 +299,7 @@ if (response.data.has_more) {
 
 ## `forgetMemories(options?)`
 
-Bulk-delete memories matching a type, category or metadata filter. It is one request instead of a `deleteMemory()` call per memory. Only the fields you pass are sent. The server applies every field you pass; with none, all of your memories are deleted. A Mem0 store can only forget by user, so it rejects `memory_type`, `category` and `filters` with an error.
+Bulk-delete memories matching a type, category or metadata filter. It is one request instead of a `deleteMemory()` call per memory. Only the fields you pass are sent. The server applies every field you pass; with none, all of your memories are deleted. With `PgVectorStore`, `filters` on a tenant column or `user_id` is rejected (422).
 
 **Endpoint:** `POST /v1/store/memories/forget`
 
@@ -315,13 +316,15 @@ await client.forgetMemories({
 });
 ```
 
+A failed `forgetMemories()` call throws a `TenxGraphError` subclass (for example `ValidationError` for 422).
+
 ### Parameters
 
 | Parameter | Type | Description |
 |---|---|---|
 | `options.memory_type` | `MemoryType` | Filter by memory type. |
 | `options.category` | `string` | Filter by category. |
-| `options.filters` | `Record<string, any>` | Additional key-value filters matched against memory metadata. |
+| `options.filters` | `Filters` | Filter by column. See [Filters](#filters). |
 | `options.config` | `Record<string, any>` | Optional store-level config. |
 | `options.options` | `Record<string, any>` | Optional store-level options. |
 
@@ -336,6 +339,27 @@ interface ForgetMemoriesResponse {
   metadata: ResponseMetadata;
 }
 ```
+
+---
+
+## Filters
+
+`searchMemory()`, `listMemories()` and `forgetMemories()` accept `filters`, and so does `threads()`. A filter is `{ column: value }` for equality, or `{ column: { op: value, ... } }`. Operators: `eq`, `ne`, `in`, `nin`, `like`, `ilike`, `is_null`, `gt`, `gte`, `lt`, `lte`. `in` and `nin` take arrays, `is_null` takes a boolean. Several operators on one column are combined.
+
+```ts
+import type { Filters } from '10xgraph-client';
+
+const filters: Filters = {
+  plan: { in: ['pro'] },
+  created_at: { gte: '2026-11-01T00:00:00Z' },
+};
+
+const found = await client.searchMemory({ query: 'dark mode', filters });
+const page = await client.listMemories({ limit: 50, filters });
+await client.forgetMemories({ filters: { plan: { in: ['trial'] } } });
+```
+
+The client does not check column names or value types. The server validates them and answers 422 with a safe message for an unknown column, a wrong type or a tenant column. The exported types are `Filters`, `FilterCondition`, `FilterOperator` and `FilterScalar`.
 
 ---
 
@@ -398,7 +422,7 @@ console.log(result.messages);
 
 ## Common errors
 
-Failed requests from every method except `forgetMemories()` throw `TenxGraphError` with a `statusCode`. `forgetMemories()` throws a plain `Error` with the message `Forget memories failed: <status> <statusText>`. See [Client errors](/docs/reference/client/errors) for the full error class.
+Failed requests throw `TenxGraphError` (or a subclass such as `ValidationError`) with a `statusCode`. See [Client errors](/docs/reference/client/errors) for the full error class.
 
 | Error | Cause | Fix |
 |---|---|---|

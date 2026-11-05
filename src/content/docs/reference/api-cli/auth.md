@@ -313,11 +313,16 @@ class MyAuthBackend(AuthorizationBackend):
             return user.get("role") == "admin"
         return True
 
-    def isolation_scope(self) -> str:
-        """Storage partitioning: "owner" scopes rows to caller; "none" does not.
-        Defaults to "owner". Return "none" only to share data between users.
-        Stamped server-side into config["user"]["authz"]; the client cannot forge it.
+    def isolation_scope(self, user: dict[str, Any]) -> str | list[str]:
+        """Storage partitioning for this caller, called once per request.
+
+        "owner" scopes rows to the caller; "none" does not; a list such as
+        ["org_id"] scopes by those columns. Defaults to "owner". Return "none" only to
+        share data between users. Stamped server-side into config["user"]["authz"];
+        the client cannot forge it.
         """
+        if user.get("role") == "org_admin":
+            return ["org_id"]
         return "owner"
 
     def scopes_for(self, user: dict[str, Any]) -> list[str] | None:
@@ -325,7 +330,7 @@ class MyAuthBackend(AuthorizationBackend):
         return user.get("scopes")
 ```
 
-`isolation_scope()` defaults to `"owner"`, so a backend that only implements `authorize` still gives each user their own threads and memories. To share data on purpose, return `"none"`. Before this default, a custom backend shared every thread and memory with every user.
+`isolation_scope(user)` defaults to `"owner"`, so a backend that only implements `authorize` still gives each user their own threads and memories. To share data on purpose, return `"none"`. Return a list of `user_id` and tenant column names (declared with `tenant_columns=` on `PgCheckpointer` and `PgVectorStore`) to scope by those columns, for example `["org_id"]` for an org admin. You can return the `Isolation` enum from `tenxgraph.core.authz` instead of the strings. An unknown scope raises, so a typo cannot weaken isolation; a backend written as `isolation_scope(self)` with no `user` argument keeps working. See [Multi-tenant data](/docs/guides/multi-tenant-data#isolation-scopes).
 
 Point `10xgraph.json` at it (no `method` wrapper, just the path):
 
@@ -408,7 +413,7 @@ After a successful check, the resolved list is stamped into `user["authz"]["scop
 
 ### Data isolation contract
 
-The API layer enforces object-level `authorize` and scope checks. The data layer (checkpointer, store) enforces isolation separately via a trusted policy stamped by the server after a successful check: `user["authz"] = {user_id, scope, scopes}`, where `scope` comes from `isolation_scope()`. Every service copies that trusted `user` into `config["user"]`, so the policy reaches the graph and cannot be forged by the client. With `scope: "owner"`, checkpointer and store queries are scoped to the caller; with `scope: "none"`, they are not.
+The API layer enforces object-level `authorize` and scope checks. The data layer (checkpointer, store) enforces isolation separately via a trusted policy stamped by the server after a successful check: `user["authz"] = {user_id, scope, scopes}`, where `scope` comes from `isolation_scope(user)`. Every service copies that trusted `user` into `config["user"]`, so the policy reaches the graph and cannot be forged by the client. With `scope: "owner"`, checkpointer and store queries are scoped to the caller (and to their tenant columns); with `scope: "none"`, they are not; with a list, they are scoped by exactly those columns.
 
 ## Boot-time route guard
 
