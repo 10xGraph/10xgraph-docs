@@ -14,6 +14,8 @@ faq:
     a: Closing the compiled graph with `aclose()` cancels outstanding background tasks, then waits up to `shutdown_timeout` (default 30 seconds) for the cancellations to finish. To let tasks finish instead, call `await task_manager.wait_for_all(timeout=...)` before closing.
 ---
 
+> This guide covers the in-process `BackgroundTaskManager`. For durable tasks that run in a separate worker, survive restarts and can be scheduled, see [Background tasks with a worker](/docs/server/background-tasks).
+
 Some operations should not block the agent's response. Sending notifications, writing to a slow store, triggering webhooks, or updating a database are good candidates to run in the background. `BackgroundTaskManager` launches these tasks asynchronously from inside any node function, returning control to the caller immediately.
 
 ## When to use background tasks

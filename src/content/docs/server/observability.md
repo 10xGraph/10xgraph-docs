@@ -151,7 +151,9 @@ Install the OTEL extra:
 pip install "10xgraph-api[otel]"
 ```
 
-Call `setup_otel_metrics()` once at startup, after your application has configured an OTEL `MeterProvider` with an exporter:
+When `OTEL_ENABLED=true`, the API and the background worker do this for you: they install a `MeterProvider` that exports to `OTEL_EXPORTER_OTLP_ENDPOINT` (the console when it is unset outside production) and call `setup_otel_metrics()`, so the metrics below, and the task metrics in [background tasks](/docs/server/background-tasks), reach your collector along with the traces. Point the collector at Prometheus; there is no separate Prometheus setup.
+
+In your own process, call `setup_otel_metrics()` once at startup, after your application has configured an OTEL `MeterProvider` with an exporter:
 
 ```python
 from tenxgraph.utils.metrics import setup_otel_metrics
