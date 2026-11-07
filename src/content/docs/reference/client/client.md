@@ -75,7 +75,7 @@ console.log((await client.ping()).data); // server pong string
 
 ## Method Overview
 
-`TenxGraphClient` groups its public methods into seven areas. The tables below list each method with its return type; the linked reference pages give the request and response shapes.
+`TenxGraphClient` groups its public methods into eight areas. The tables below list each method with its return type; the linked reference pages give the request and response shapes.
 
 ### Graph control
 
@@ -149,6 +149,34 @@ See [Memory](/docs/reference/client/memory) for full details.
 | `getMultimodalConfig()` | `Promise<MultimodalConfigResponse>` | Fetch the server's multimodal configuration (storage backend, max size, etc.). |
 
 See [Files](/docs/reference/client/files) for full details.
+
+### Background tasks
+
+| Method | Returns | Description |
+|---|---|---|
+| `runTask(name, { args?, kwargs? })` | `Promise<RunTaskResponse>` | Run an `http=True` task now. `data.task_id` is the id. |
+| `scheduleTask(name, { args?, kwargs?, schedule })` | `Promise<ScheduleTaskResponse>` | Schedule a task. `schedule` is exactly one of `{ cron }`, `{ at }` or `{ every }` (seconds). `data.schedule_id` is the id. 501 without Redis. |
+| `getTask(id)` | `Promise<GetTaskResponse>` | Read a task (`status`, `progress`, `result`, `error`) or a schedule. |
+| `rescheduleTask(scheduleId, schedule)` | `Promise<RescheduleTaskResponse>` | Change a schedule's time; arguments stay. |
+| `cancelTask(id)` | `Promise<CancelTaskResponse>` | Cancel a task, or delete a schedule. |
+
+`status` is one of `queued`, `running`, `success`, `failure` or `cancelled`. A task you do not own or
+that is not `http=True` answers 404 (`NotFoundError`); a reserved argument answers 422
+(`ValidationError`). The client does not poll; call `getTask` until `status` is final.
+
+```ts
+const { data } = await client.runTask('web_add', { kwargs: { a: 1, b: 2 } });
+const task = await client.getTask(data.task_id);
+
+const { data: sched } = await client.scheduleTask('web_add', {
+  kwargs: { a: 1, b: 2 },
+  schedule: { every: 60 },
+});
+await client.rescheduleTask(sched.schedule_id, { cron: '0 * * * *' });
+await client.cancelTask(sched.schedule_id);
+```
+
+See [Run background tasks with a worker](/docs/server/background-tasks) for defining tasks and running the worker.
 
 ### Remote tools
 
