@@ -209,7 +209,7 @@ The check needs a core release that ships `MediaFetchPolicy`. On older cores it 
 
 ## Delete a file and file lifecycle
 
-`DELETE /v1/files/{file_id}` deletes a file and its metadata. Only the uploader can delete it. A missing file, or a file that belongs to someone else, returns `404`, never `403`. The route needs the `files:delete` scope, which roles granted `"*"` have.
+`DELETE /v1/files/{file_id}` deletes a file and its metadata. Only the uploader can delete it. A missing file, or a file that belongs to someone else, returns `404`, never `403`. The route needs the `files:delete` permission, which roles granted `"*"` have.
 
 ```bash
 curl -X DELETE http://127.0.0.1:8000/v1/files/a8f2k9x1m5p3 \

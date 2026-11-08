@@ -117,7 +117,7 @@ If each request feels like a new conversation, the server is not seeing the same
 **Likely causes**
 
 - `thread_id` is missing from the second call onward, so each call starts a new thread.
-- You sent an id you made up. By default the server refuses an id that does not exist with `403` (`PermissionError`), the same as another user's thread. Omit `thread_id` on the first call and use the one the server returns.
+- You sent an id you made up. By default the server refuses an id that does not exist with `404` (`NotFoundError`), the same as another user's thread. Omit `thread_id` on the first call and use the one the server returns.
 - `thread_id` is nested in the wrong place. The API reads `config.thread_id` at the top level of `config`. A LangGraph style `config.configurable.thread_id` is not read.
 - The server has no checkpointer, so nothing is persisted between calls.
 - Reading a thread that does not exist returns `STORAGE_NOT_FOUND_000`.
@@ -233,7 +233,7 @@ When a socket closes right after opening, the numeric close code tells you why. 
 |------|----------|-------|-----|
 | 1008 | `/v1/graph/live` | The graph is not a live (realtime) agent. An `error` event with `code: 'not_live'` arrives first. | Use `stream()` or `wsStream()`. `graph()` shows the graph type. |
 | 1008 | `/v1/graph/ws` | The graph is a live agent, or the token expired or was revoked after the socket opened. | Use `realtime()` for live agents, or refresh the token. |
-| 1008 | Either | Not authorized for the requested `thread_id` (on `/live`, an error event with `code: 'not_authorized'` arrives first). | Check the token and the server's authorization rules for that thread. |
+| 1008 | Either | Not authorized for the requested `thread_id` (on `/live`, an error event with `code: 'THREAD_NOT_FOUND'` arrives first). | Check the token and that the thread belongs to that user. |
 | 1003 | `/v1/graph/live` | The init frame was not valid JSON or not a JSON object. | Only relevant if you write the protocol by hand. The client sends valid frames. |
 | 1013 | Either | Rate limit or `websocket.max_connections` cap exceeded (default 1000 per server process). | Back off and retry, or raise the cap in the server config. |
 | 1011 | `/v1/graph/ws` | Unexpected server error. | Check the server logs. |

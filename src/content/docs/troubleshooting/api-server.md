@@ -248,7 +248,7 @@ This is the most common request-time symptom: the server is up, but the graph fa
 - verify graph dependencies, provider keys, and tool integrations work outside the server
 - test with a minimal invoke payload (e.g., no tools)
 
-### Issue: `403 Missing required scope: <resource>:<action>`
+### Issue: `403 Missing required permission: <resource>:<action>`
 
 **Symptoms**
 
@@ -256,15 +256,17 @@ This is the most common request-time symptom: the server is up, but the graph fa
 
 **Cause**
 
-The identity carries a scope list that does not include this endpoint's `"<resource>:<action>"` pair. Scopes resolve from the authorization backend's `scopes_for` method first, and only fall back to the token's own `scopes` claim when that returns `None`.
+The caller's permissions do not include this endpoint's `"<resource>:<action>"` pair. With no roles configured, every authenticated caller holds everything except `admin:*`. With roles, the caller holds what their roles grant. A token `scope` or `scopes` claim can only narrow that set. A custom `BaseAuth.authorize` can also refuse.
 
-A common case: switching to the RBAC backend. `RoleBasedAuthorizationBackend` always returns a list (never `None`), so a user whose role is absent from the `roles` table and for whom `default_scopes` is empty resolves to `[]` and is denied everything. An empty list is not the same as no scopes.
+A common case: adding a role table. A user whose role is absent from `roles`, with no `default_role`, holds no permissions and is denied everything.
 
 **Fix**
 
-- Add the pair to the role's scopes in your authorization backend, or to `default_scopes`
-- Confirm the user's `roles` or `role` claim matches a key in the `roles` table
-- To go back to unrestricted, ensure `scopes_for` returns `None` rather than `[]`
+- Add the permission to the role's `permissions` in the `auth` object, or set `default_role`
+- Confirm the token's `roles_claim` matches a key in the `roles` table
+- Call `GET /v1/me` with the token to see the permissions and reach the server resolved
+
+A `404` is a different problem: the thread, message, memory, file or run is not visible to the caller (unknown, or owned by someone else).
 
 ### Issue: requests are unexpectedly public
 
@@ -300,7 +302,7 @@ A common case: switching to the RBAC backend. `RoleBasedAuthorizationBackend` al
 
 A `404` on `POST /v1/ag-ui` means `ag_ui.enabled` is not `true` in `10xgraph.json`. The threads, store, and files routers are always mounted.
 
-A `1008` accompanied by an `error` event with `code: "not_live"` or `"not_authorized"` tells you which of the two `1008` causes applies.
+A `1008` accompanied by an `error` event with `code: "not_live"` or `"THREAD_NOT_FOUND"` tells you which of the two `1008` causes applies.
 
 ### Issue: `429 Too Many Requests`
 
@@ -370,7 +372,7 @@ With `MODE=production` the server replaces the message of every 5xx error with a
 - no checkpointer configured (the thread routes answer `503` with `Checkpointer is not configured`)
 - checkpointer backend unavailable (Postgres, Redis, or SQLite)
 - inconsistent `thread_id` usage
-- a `thread_id` that does not exist, which answers `403` by default (`runs.thread_ids` is `server`)
+- a `thread_id` that does not exist, which answers `404` by default (`runs.thread_ids` is `server`)
 - a state update whose `context` is not a list of messages, or that sets built-in fields or keys outside `runs.state_keys`, which answers `422`
 - a message id that is not in the thread, which answers `404` (`Message not found`)
 

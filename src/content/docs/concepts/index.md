@@ -257,7 +257,7 @@ Build robust agents: checkpointing threads, long-term memory stores, context tri
 Production patterns: serving agents over HTTP, auth, observability, media handling, and extensibility.
 
 - [Serving agents](/docs/concepts/serving-agents): How the API server loads graphs, request lifecycle, workers, and config vs code.
-- [Security and validators](/docs/concepts/security-and-validators): Input validation, authorization models, and isolation scopes.
+- [Security and validators](/docs/concepts/security-and-validators): Input validation, authorization models, and reach.
 - [Events and observability](/docs/concepts/events-and-observability): The event model, publishers, metrics, and tracing.
 - [Remote tools](/docs/concepts/remote-tools): When to use remote tool execution.
 - [Media and files](/docs/concepts/media-and-files): Media refs, offload policies, storage backends, and provider file APIs.

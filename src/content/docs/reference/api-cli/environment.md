@@ -46,7 +46,7 @@ MODE=production 10xgraph dev --no-reload
 | --- | --- | --- |
 | `APP_NAME` | `MyApp` | Application name shown in logs |
 | `APP_VERSION` | `0.1.0` | Application version |
-| `MODE` | `development` | `production` (or `prod`), or `development` (or `dev`, `local`). Trimmed and case-insensitive. Unset means `development`. Any other value stops the server at startup, and `10xgraph dev` exits with code 2; the message lists the accepted values. Drives several defaults, including debug mode (on in development, off in production), the authorization backend, the run timeout and the strict startup checks. |
+| `MODE` | `development` | `production` (or `prod`), or `development` (or `dev`, `local`). Trimmed and case-insensitive. Unset means `development`. Any other value stops the server at startup, and `10xgraph dev` exits with code 2; the message lists the accepted values. Drives several defaults, including debug mode (on in development, off in production), the run timeout and the strict startup checks. |
 | `STRICT_PRODUCTION_CHECKS` | on in production | In production, refuse to start on a wildcard `ALLOWED_HOST`, a wildcard `ORIGINS`, or an enabled `DOCS_PATH` or `REDOCS_PATH`. Set `false` to log warnings instead. Has no effect outside production. |
 | `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `SUMMARY` | `10xGraph Backend` | One-line service summary shown in the OpenAPI schema |
@@ -144,14 +144,14 @@ Both must be set when `10xgraph.json` has `"auth": "jwt"`; the config load raise
 | `REDIS_CONNECT_TIMEOUT` | `5.0` | Seconds to wait when opening a Redis connection. `0` turns it off. |
 | `REDIS_MAX_CONNECTIONS` | `50` | Pool size of each Redis client the API opens. `0` means no bound. |
 | `REDIS_POOL_TIMEOUT` | `5.0` | Seconds a request waits for a free pooled connection. `0` means no timeout. |
-| `REDIS_KEY_PREFIX` | `""` | Put in front of every key the API writes to Redis (run locks and caps, idempotency, ownership cache, token revocation, rate limiting), so two deployments sharing one Redis cannot read each other's entries. The core checkpointer has its own `redis_key_prefix` option for its cache keys. To separate a whole deployment, set both to the same value. |
+| `REDIS_KEY_PREFIX` | `""` | Put in front of every key the API writes to Redis (run locks and caps, idempotency, token revocation, rate limiting), so two deployments sharing one Redis cannot read each other's entries. The core checkpointer has its own `redis_key_prefix` option for its cache keys. To separate a whole deployment, set both to the same value. |
 | `REDIS_HEALTH_CHECK_INTERVAL` | `30.0` | Seconds between health checks of an idle connection. `0` turns them off. |
 
 The `REDIS_*` limits apply to the Redis client behind the API's cache store (`RedisCacheStore`).
 
 `REDIS_URL` is **optional everywhere**. The API reads it only when `cache_store` has `"type": "redis"` and no `url` (or a `url` such as `${REDIS_URL}` that expands it). `REDIS_URL` alone never selects Redis: with no `cache_store` the API uses the in-memory store even when the variable is set. A `cache_store.url` you set wins over the variable, so the cache store can use a different Redis than your checkpointer. The server logs one INFO line at boot that names the store and the config key it came from.
 
-- **The cache store.** `RedisCacheStore` shares run locks, run and WebSocket caps, idempotency, the ownership cache (L2), token revocation and rate limiting between workers. With the in-memory type they live in each process. Valkey, Dragonfly and KeyDB work through the same URL.
+- **The cache store.** `RedisCacheStore` shares run locks, run and WebSocket caps, idempotency, token revocation and rate limiting between workers. With the in-memory type they live in each process. Valkey, Dragonfly and KeyDB work through the same URL.
 - **`PgCheckpointer`.** It requires a Redis connection (`redis_url`, `redis_pool` or `redis`) as the hot cache in front of Postgres; constructing it without one raises `ValueError`. It does not read `REDIS_URL` itself, so pass the URL to its constructor in your own code, for example `redis_url=os.environ["REDIS_URL"]`. The durable data lives in Postgres.
 
 The rate limiter has no Redis setting of its own; it uses the cache store.

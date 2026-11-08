@@ -13,7 +13,7 @@ faq:
   - question: "Can I use in-memory checkpointing in production?"
     answer: "No. InMemoryCheckpointer loses all state on restart and cannot be shared across instances. Use PgCheckpointer for all production deployments."
   - question: "Do I have to use Redis?"
-    answer: "PgCheckpointer requires a Redis connection (redis_url, a redis_pool or a redis instance) in addition to Postgres; Redis is its cache and Postgres is the durable store. The API itself uses Redis as its cache store (run locks and caps, idempotency, ownership cache, token revocation, rate-limit counters) when `cache_store.type` is `redis`; without it those live in each process."
+    answer: "PgCheckpointer requires a Redis connection (redis_url, a redis_pool or a redis instance) in addition to Postgres; Redis is its cache and Postgres is the durable store. The API itself uses Redis as its cache store (run locks and caps, idempotency, token revocation, rate-limit counters) when `cache_store.type` is `redis`; without it those live in each process."
 ---
 
 Deploying 10xGraph to production requires hardening your API server for security, reliability, and scale. This checklist walks through every critical setting, from runtime mode to persistence topology to horizontal scaling, with verification steps to confirm each piece is working before traffic arrives.
@@ -27,8 +27,8 @@ With `MODE=production`, the server does these for you. You do not configure them
 - Turns off the `/docs` and `/redocs` pages unless you set their paths.
 - Replaces 5xx error text, including streamed error chunks, with a generic message. Raise `ClientInputError` for 422 messages that must reach the client.
 - Cancels a graph run after 300 seconds unless you set `runs.timeout`.
-- Scopes graph introspection (`GET /v1/graph`, `/v1/graph/tools`, `/v1/graph:StateSchema`) to callers with the `graph:read` scope, unless you set `graph_introspection` to `"open"`.
-- Defaults authorization to ownership, so each user reaches only their own threads.
+- Scopes graph introspection (`GET /v1/graph`, `/v1/graph/tools`, `/v1/graph:StateSchema`) to callers with the `graph:read` permission.
+- Gives every authenticated user reach `own` unless a role says otherwise, so each user reaches only their own threads.
 - Turns debug mode off.
 - Pings every configured backend at boot and refuses to start while one is unreachable (see [Startup check](#startup-check)). Added in 1.0.0rc3.
 - Ships a hardened image when you use `10xgraph build`: non-root user, Gunicorn with `TenxGraphUvicornWorker` and long graceful timeouts, health check on `/ping`. On SIGTERM `/health/ready` answers 503 while open runs finish.
@@ -141,20 +141,11 @@ In production mode the documentation pages are off unless you set `DOCS_PATH` or
 
 ### Access control
 
-If you are using authorization (RBAC or ownership-based access control), configure it in `10xgraph.json`:
+With `"auth": "jwt"` or a custom `BaseAuth`, each user reaches only their own threads by default. To give other callers wider access, add `roles` to the `auth` object (see [Authentication and authorization](/docs/server/auth)). Verify the setup by requesting a thread owned by a different user; the API should answer 404.
 
-```json
-{
-  "auth": "jwt",
-  "authorization": "ownership"
-}
-```
+### Permissions
 
-The `ownership` backend ensures each user can access only their own threads. `10xgraph init` writes it into new projects that use JWT or custom auth; it is not applied automatically otherwise. Verify it is enforced by requesting a thread owned by a different user; the API should deny the request.
-
-### Permission scopes
-
-If your authorization uses custom scopes, ensure they are validated on every protected route. Authentication guards the graph, thread, store and media routes. `/ping` needs no authentication.
+Every protected route checks one `resource:action` permission, and the server refuses to start if a route has none. Authentication guards the graph, thread, store and media routes. `/ping` needs no authentication. Review every role that has reach `all`: the server logs them at startup.
 
 ## 5. Persistence topology
 
@@ -203,7 +194,7 @@ Added in 1.0.0rc3.
 
 Redis acts as a hot cache in front of Postgres. `PgCheckpointer` requires a Redis connection, but the durable data lives in Postgres. After a Redis connection failure, `PgCheckpointer` skips Redis for a short cool-down (`redis_breaker_cooldown`, 5 seconds by default, `0` disables it) and uses Postgres at once, so a Redis outage does not slow every run step.
 
-If several deployments share one Redis, set `REDIS_KEY_PREFIX` for the API (run locks and caps, idempotency, ownership cache, token revocation, rate limiting) and `redis_key_prefix` on `PgCheckpointer` to the same value. They are two separate settings, and each prefixes only its own keys.
+If several deployments share one Redis, set `REDIS_KEY_PREFIX` for the API (run locks and caps, idempotency, token revocation, rate limiting) and `redis_key_prefix` on `PgCheckpointer` to the same value. They are two separate settings, and each prefixes only its own keys.
 
 ```bash
 REDIS_URL=redis://redis.internal:6379/0
@@ -504,7 +495,7 @@ curl http://127.0.0.1:8000/ping
 | Symptom | Cause | Fix |
 |---|---|---|
 | "JWT_SECRET_KEY is shorter than 32 bytes" at startup | HMAC secret too short in production mode | Generate a longer `JWT_SECRET_KEY` |
-| Requests are denied on a thread | User does not own the thread | Check authorization backend and thread ownership |
+| A thread answers 404 | User does not own the thread | Check that the token carries the same `user_id` as the thread's creator, and the role's reach |
 | Thread state disappears after restart | Using `InMemoryCheckpointer` | Switch to `PgCheckpointer` with Postgres DSN |
 | One worker sees state, another does not | Workers are not sharing the same backend | Point all instances at the same Postgres and Redis |
 | CORS requests are blocked | `ORIGINS` does not include the client domain | Add the domain to `ORIGINS`. A public API can set `ORIGINS=*` with `CORS_ALLOW_CREDENTIALS=false` and `STRICT_PRODUCTION_CHECKS=false` |

@@ -216,7 +216,7 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
 
 The graph now sees all previous messages in the thread, so it can answer contextually. The checkpointer (passed to `graph.compile(checkpointer=...)` in your graph code) stores the thread state durably.
 
-By default (`runs.thread_ids` is `"server"`), a `thread_id` that does not exist answers `403`, the same as an id another user owns. Do not invent an id for a new conversation. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
+By default (`runs.thread_ids` is `"server"`), a `thread_id` that does not exist answers `404`, the same as an id another user owns. Do not invent an id for a new conversation. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 
 ### Read thread history
 
@@ -352,7 +352,8 @@ Failures during a stream arrive as an `error` chunk, because the HTTP status is 
 |--------|---------|
 | 422 | Invalid request (bad schema, missing messages, invalid input, a request over the size limits, or a resume answer that fails the interrupt's `response_schema`). |
 | 401 | Authentication required (token missing or invalid). |
-| 403 | Permission denied (you do not own this thread, or a required scope is missing). |
+| 403 | Permission denied (a required permission is missing). |
+| 404 | The thread does not exist for this caller (unknown, or owned by someone else). |
 | 409 | The thread is busy (another run was still active after 30 seconds), or `interrupt_id` does not match the open interrupt. |
 | 429 | Rate limit exceeded. Retry after the `Retry-After` header. |
 | 500 | Internal server error (bug in your graph or infrastructure failure). |
@@ -363,9 +364,9 @@ Failures during a stream arrive as an `error` chunk, because the HTTP status is 
 
 You sent an empty messages array. Include at least one message, or use `resume` to continue an interrupted thread.
 
-**403 on a thread you expect to own**
+**404 on a thread you expect to own**
 
-With `"authorization": "ownership"` a thread belongs to the user who created it. Check that the token carries the same `user_id` as the original request.
+With auth on, a thread belongs to the user who created it. Check that the token carries the same `user_id` as the original request.
 
 **Stream stops abruptly**
 

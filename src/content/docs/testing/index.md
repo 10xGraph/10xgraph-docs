@@ -27,7 +27,7 @@ Then move to [evaluation](/docs/testing/evaluation) for scored runs against real
 
 For conversational agents, [user simulation](/docs/testing/user-simulation) lets a model play the user and drives realistic multi-turn interactions. Integration with pytest is in [evals in pytest](/docs/testing/evals-in-pytest), which runs evals as part of your test suite via helpers like `eval_test` and `run_eval`.
 
-Before you launch, follow [Test before production](/docs/testing/before-production): it adds `10xgraph audit`, a startup check in production mode, and curl smoke tests for auth (`401`), thread isolation (`403`) and rate limits (`429`).
+Before you launch, follow [Test before production](/docs/testing/before-production): it adds `10xgraph audit`, a startup check in production mode, and curl smoke tests for auth (`401`), thread isolation (`404`) and rate limits (`429`).
 
 Wiring both layers into CI pipelines is covered in [run tests](/docs/testing/run-tests) and [run evaluations](/docs/testing/run-evals).
 

@@ -112,7 +112,7 @@ If the graph asks the client to run a tool in your app (a remote tool), `invoke(
 
 ## Keep a conversation on one thread
 
-A `thread_id` names a conversation. The server picks the id when it starts a thread, and stores the state under it through the checkpointer. A second call with the same id continues where the first stopped. By default the server refuses an id it did not create (`403`), so do not make one up.
+A `thread_id` names a conversation. The server picks the id when it starts a thread, and stores the state under it through the checkpointer. A second call with the same id continues where the first stopped. By default the server refuses an id it did not create (`404`), so do not make one up.
 
 ```ts title="multi-turn.ts"
 import { TenxGraphClient, Message } from "10xgraph-client";

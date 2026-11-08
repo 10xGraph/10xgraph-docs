@@ -197,7 +197,7 @@ Both `POST /v1/graph/invoke` and `POST /v1/graph/stream` record runs. Invoke has
 
 ### Errors and empty results
 
-An unknown thread or an unknown `run_id` is not an error: the endpoint returns 200 with `run: null` (and `run_count` and `run_ids` for any runs that do exist). A missing or invalid token returns 401, and a token without `graph:read` returns 403. With auth on, the thread id also goes to the authorization backend, so by default a user can read traces only for their own threads.
+A thread with no runs, or an unknown `run_id`, is not an error: the endpoint returns 200 with `run: null` (and `run_count` and `run_ids` for any runs that do exist). A missing or invalid token returns 401, and a token without `graph:read` returns 403. The thread is read through the caller's reach first, so a thread the caller cannot see (unknown, or owned by someone else) returns 404, and by default a user can read traces only for their own threads.
 
 ---
 

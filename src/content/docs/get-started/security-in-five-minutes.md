@@ -8,8 +8,8 @@ updated: "2026-10-27"
 faq:
   - q: Which claims does a token need?
     a: "`exp` and `user_id`. JwtAuth requires `exp` on every token, and rejects a token without `user_id` (or with one that is not a non-empty string or a whole number) with a 401. If you set `JWT_ISSUER` or `JWT_AUDIENCE`, `iss` and `aud` are required too."
-  - q: Why did user B get a 403 and not an empty thread?
-    a: Once auth is configured, the server uses the ownership authorization backend. The first caller to run a thread becomes its owner, and any other user is refused before the request reaches the graph or the checkpointer.
+  - q: Why did user B get a 404 and not an empty thread?
+    a: Once auth is configured, every thread query is filtered by the caller. The first caller to run a thread becomes its owner, and to any other user the thread does not exist, so the server answers 404 before the request reaches the graph. See [authentication and authorization](/docs/server/auth).
   - q: Is this enough for production?
     a: No. It proves the isolation mechanism. Production also needs a strong secret from a secret store, a durable checkpointer, rate limits and the other items on the production checklist.
 ---
@@ -108,13 +108,13 @@ curl -s -o /dev/null -w "%{http_code}\n" \
   http://127.0.0.1:8000/v1/threads/$THREAD_ID/messages
 ```
 
-The server answers `403`. Repeat the same request with `$ALICE_TOKEN` and you get `200` with her messages. Bob also cannot invoke the agent on her thread: a foreign `invoke` or `stream` is refused with `403` before it reaches the graph.
+The server answers `404`: to Bob, Alice's thread does not exist. Repeat the same request with `$ALICE_TOKEN` and you get `200` with her messages. Bob also cannot invoke the agent on her thread: a foreign `invoke` or `stream` answers `404` before it reaches the graph. A `403` means the caller lacks a permission for the route, not that the thread belongs to someone else.
 
 ## What this turned on
 
 Setting `auth` to `"jwt"` did more than check a signature:
 
-- **Ownership authorization is on.** When `authorization` is not set, the server uses the ownership backend whenever auth is configured or `MODE=production`. The first caller to run a thread becomes its owner. Every route that touches a thread (invoke, stream, stop, and all thread reads and writes) checks the owner first.
+- **Owner-only threads are on.** With `"auth": "jwt"` the default permission set applies and every caller reaches only their own data. The first caller to run a thread becomes its owner. Every route that touches a thread (invoke, stream, stop, and all thread reads and writes) reads it through the caller's scope first, so a foreign thread answers `404`.
 - **Per-user storage scope.** Threads and long-term memories are scoped to the calling `user_id`.
 - **Server-picked thread ids.** By default (`runs.thread_ids` is `server`) a client cannot invent a thread id. It starts a thread by omitting the id and uses the id the server returns.
 - **Reserved identities are refused.** A token whose `user_id` starts with the reserved `__system__:` prefix is rejected, so no one can authenticate as the owner of shared data.

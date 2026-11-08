@@ -48,7 +48,7 @@ The readiness probe. `/ping` says the process is alive; `/health/ready` says the
 
 - **checkpointer**: `aping()` of the checkpointer. For `PgCheckpointer` that is a `SELECT 1`, a check that the schema version is not older than the code expects, and a ping of its Redis cache. It never creates the schema.
 - **store**: `aping()` of the store, when one is bound.
-- **cache**: `aping()` of the API's cache store (Redis, or your own `BaseCacheStore`). It is reported always, but it fails readiness only when a fail-closed feature uses it: `cache_store.token_revocation` is on (with auth), or `cache_store.rate_limit` is on with `fail_open` set to `false`. For everything else (locks, caps, idempotency, the ownership cache) a cache store outage is reported and the server keeps taking traffic.
+- **cache**: `aping()` of the API's cache store (Redis, or your own `BaseCacheStore`). It is reported always, but it fails readiness only when a fail-closed feature uses it: `cache_store.token_revocation` is on (with auth), or `cache_store.rate_limit` is on with `fail_open` set to `false`. For everything else (locks, caps, idempotency) a cache store outage is reported and the server keeps taking traffic.
 
 A component that is not configured, or has nothing to check, is left out of the response. The endpoint is public, so it returns only `ok` or `fail` per component and logs the reason on the server. Results are cached for 3 seconds and concurrent callers share one check, so a flood of probes does not become a flood of database round trips.
 

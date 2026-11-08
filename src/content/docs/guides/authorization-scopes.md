@@ -1,105 +1,103 @@
 ---
 title: "Authorization scopes"
-description: "Read caller identity and enforce scopes inside graph nodes and tools using get_authz, has_scope, and isolation_scope."
+description: "Read the caller's identity and check permissions inside graph nodes and tools with get_identity, can and Identity."
 order: 380
 group: "Safety"
 section: "Build agents"
-updated: "2026-10-29"
+updated: "2026-11-08"
 label: "Authorization scopes"
 faq:
-  - question: "What is the difference between identity and scopes?"
-    answer: "Identity is the caller (user_id), set by the auth system. Scopes are permissions - each scope is a resource:action pair like graph:invoke or store:read. The API server stamps both into config user authz so your nodes and tools can enforce them."
+  - question: "What is the difference between identity and permissions?"
+    answer: "Identity is the caller: user_id, tenant, roles and reach. Permissions are resource:action strings such as graph:invoke or store:read. The API server builds one Identity per request and puts it in config user, so your nodes and tools can read both."
   - question: "Can I use these functions in direct SDK calls?"
-    answer: "Yes. In direct calls to CompiledGraph.invoke(), you build the authz block yourself and pass it in config authz. If you do not pass one, all functions return permissive defaults (all scopes allowed, no isolation)."
-  - question: "Who fills the authz block when I use the API server?"
-    answer: "The API server's auth system (RequirePermission) fills user authz server-side after authenticating and authorizing the request. This happens before your graph runs and is non-hijackable - clients cannot override it."
+    answer: "Yes. Pass config user as an Identity or a dict that validates into one. If you pass none, get_identity returns None and can returns True, so there are no checks."
+  - question: "Who fills the identity when I use the API server?"
+    answer: "The API server fills config user after it authenticates and authorizes the request. It runs before your graph and clients cannot override it."
 ---
 
-When your 10xGraph application runs over the API server, the caller's identity and scopes are automatically added to the request. Inside your nodes and tools, you can read this information to enforce fine-grained permissions: restrict certain operations to authorized users, log who performed actions, or apply policies like "only the thread owner can read this."
+When your 10xGraph application runs over the API server, the caller's identity is added to the run config. Inside your nodes and tools you can read it to enforce fine-grained rules: restrict an operation to some callers, log who did what, or apply a policy like "only admins may export."
 
-This guide covers the three authorization functions, `get_authz`, `has_scope`, and `isolation_scope`, and how to use them in your agent code.
+This guide covers `get_identity`, `can` and the `Identity` model, and how to use them in your agent code. Server-side configuration (roles, reach, the `auth` key) is in [API authentication](/docs/server/auth).
 
-## How authorization reaches your code
+## How the identity reaches your code
 
-The API server authenticates every request and builds an authorization context from the verified identity and the configured authorization backend. This context is stamped into `config["user"]["authz"]` before your graph runs. Inside any node, tool, or hook, you can access this information through the config:
+The API server authenticates every request and resolves an `Identity` from the verified claims and the `auth` config. It stores it in `config["user"]` before your graph runs. Inside any node, tool or hook, read it with `get_identity`:
 
 ```python
-from tenxgraph.core.authz import get_authz, has_scope
+from tenxgraph.core.authz import get_identity
 from tenxgraph.utils import tool
 
 @tool
-def sensitive_operation(*, config):
-    authz = get_authz(config)
-    if authz is None:
-        # No authz context, either direct SDK call with no authz,
-        # or auth is not configured on the server.
-        print("No authorization context")
-        return "Allowed (no policy)"
-    
-    user_id = authz.get("user_id")
-    scopes = authz.get("scopes", [])
-    print(f"User {user_id} has scopes: {scopes}")
-    return f"Operation performed by {user_id}"
+def whoami(*, config):
+    identity = get_identity(config)
+    if identity is None:
+        # Auth is off, or a direct SDK call with no user.
+        return "No identity"
+    return f"{identity.user_id} with roles {sorted(identity.roles)}"
 ```
 
-When you run over the API server with auth enabled, `get_authz()` always returns a dict with three keys:
+`Identity` is a frozen model:
 
-- `user_id`: The authenticated caller's identity.
-- `scope`: The data isolation policy: `"owner"`, `"none"` or a list of column names such as `["org_id"]`.
-- `scopes`: A list of resource:action permissions the caller holds.
+| Field | Meaning |
+|---|---|
+| `user_id` | The authenticated caller. Never empty. |
+| `kind` | `user`, or `system` for a background-task identity. |
+| `tenant` | Tenant values such as `{"org_id": "acme"}`, from `auth.tenant_claims`. |
+| `roles` | The roles the caller holds (only those defined in `auth.roles`). |
+| `permissions` | `resource:action` strings the caller holds. `None` means unrestricted (direct SDK, auth off). |
+| `reach` | `own`, `tenant` or `all`. How far the caller's reads and deletes reach in storage. |
+| `claims` | The raw verified claims, read-only. |
 
-When no auth is configured, `get_authz()` returns `None`, and all scopes are implicitly allowed. If auth is on but the identity carries no scopes and the backend defines none, the block is stamped with an empty `scopes` list and `has_scope()` returns `False` for every scope.
+The identity also reads like a dict: `identity.get("email")`, `identity["user_id"]` and `"org_id" in identity` read the merged view of the claims, the tenant values and `user_id`, with `user_id` and tenant values winning over raw claims.
 
-## Check if a caller has a specific scope
+With auth off, `get_identity(config)` returns `None`.
 
-Use `has_scope()` to gate operations behind permissions:
+## Check a permission
+
+Use `identity.can(...)` or the helper `can(config, ...)` to gate operations:
 
 ```python
-from tenxgraph.core.authz import has_scope
+from tenxgraph.core.authz import can
 from tenxgraph.core.state import ToolResult
+from tenxgraph.utils import tool
 
 @tool
 def create_memory(text: str, *, config):
-    """Store long-term memory, only for users with store:write scope."""
-    if not has_scope(config, "store:write"):
+    """Store long-term memory, only for callers with store:write."""
+    if not can(config, "store:write"):
         return ToolResult(
             message="You do not have permission to write to memory.", is_error=True
         )
-    
-    # Proceed with the memory operation
     return f"Memory created: {text}"
 ```
 
-The scope string is always `"resource:action"`. The full list of scopes is:
+The permission string is always `resource:action`. The registry the server knows:
 
-- Graph execution: `graph:invoke`, `graph:stream`, `graph:stop`, `graph:fix`, `graph:read`
-- Thread state (checkpointer): `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`
-- Thread import (admin only): `checkpointer:import`
-- Long-term memory (store): `store:read`, `store:write`, `store:delete`
-- Media and files: `files:read`, `files:upload`, `files:delete`
-- Configuration: `config:read`
+| Resource | Actions |
+|---|---|
+| `graph` | `read`, `invoke`, `stream`, `stop`, `fix` |
+| `threads` | `read`, `write`, `delete` |
+| `store` | `read`, `write`, `delete` |
+| `files` | `read`, `upload`, `delete` |
+| `config` | `read` |
+| `tasks` | `trigger`, `read`, `cancel` |
+| `admin` | `read`, `write` |
 
-The built-in scopes guard API routes. Names you define yourself work the same way inside tools (see [Control access inside a tool](#control-access-inside-a-tool)).
+`resource:*` matches every action of a resource and `*` matches everything. `admin:read` and `admin:write` guard no built-in route, so they are free for your own checks.
 
-`files:delete` guards `DELETE /v1/files/{file_id}`. Only the uploader can delete a file even with the scope: a missing file or someone else's file returns 404. A role of `"*"` includes it.
-
-`checkpointer:import` guards `POST /v1/threads/{thread_id}/messages`, which imports history of any role. It is the one scope that is never implied. Other routes treat an identity with no declared scopes as unrestricted. This route returns 403 unless the scope is granted explicitly. A role of `"*"` includes it. Grant it only to trusted admin identities.
-
-`has_scope()` is permissive by default: if no authorization context is present (auth not configured, or a direct SDK call without an authz block), it returns `True`. This ensures backward compatibility, existing graphs work unchanged.
+`can` returns `True` when there is no identity. Auth off or a direct SDK call without `config["user"]` means no checks.
 
 ## Control access inside a tool
 
-Scopes guard API routes: a caller needs `graph:invoke` to start a run, and the server enforces that before your graph runs. What a tool may do once a run is going is up to you, and you have everything you need to decide. A tool can take these parameters by name and 10xGraph injects them:
+Permissions guard API routes: a caller needs `graph:invoke` to start a run, and the server enforces that before your graph runs. What a tool may do once a run is going is up to you. A tool can take these parameters by name and 10xGraph injects them:
 
-- `config`: the run config. `get_authz(config)` returns the authz block (`user_id`, `scope`, `scopes`) the server stamped, and `has_scope(config, "resource:action")` checks one scope.
+- `config`: the run config. `get_identity(config)` returns the `Identity`, and `can(config, "resource:action")` checks one permission.
 - `state`, `tool_call_id`, `store`, `checkpointer` and the other injectable names listed in the [tools reference](/docs/reference/python/tools#per-tool-access-control).
 
-Scope names are exact strings, so you can define your own next to the built-in ones. If your auth backend or token issues `orders:refund`, a tool can require it. The server only checks the route scope (`graph:invoke`), and passes the others through to `config` untouched.
-
-This tool refuses politely when the caller lacks a scope, and tells the model what to say:
+Permission names are exact strings, but the server only accepts names from its registry in a role or a `permissions_claim`. To gate a tool, use a registry name such as `admin:write`, or check a role or claim directly:
 
 ```python
-from tenxgraph.core.authz import get_authz, has_scope
+from tenxgraph.core.authz import get_identity
 from tenxgraph.core.state import ToolResult
 from tenxgraph.utils import tool
 
@@ -107,96 +105,64 @@ from tenxgraph.utils import tool
 @tool
 def refund_order(order_id: str, config: dict) -> ToolResult | str:
     """Refund an order."""
-    if not has_scope(config, "orders:refund"):
+    identity = get_identity(config)
+    if identity is None or "support" not in identity.roles:
         return ToolResult(
             message=(
-                "Refunds need the orders:refund permission, which this account does not "
-                "have. Tell the user to contact an administrator."
+                "Refunds need the support role, which this account does not have. "
+                "Tell the user to contact an administrator."
             ),
             is_error=True,
         )
-    user_id = (get_authz(config) or {}).get("user_id", "anonymous")
-    return f"Order {order_id} refunded by {user_id}."
+    return f"Order {order_id} refunded by {identity.user_id}."
 ```
 
-`ToolResult(..., is_error=True)` marks the call as failed and puts your text in front of the model, so it can explain the refusal. If you raise an exception instead, the model only sees `Tool 'refund_order' failed with an internal error (reference ...)` and the detail goes to the server log. Raise when you want an operator to investigate; return a `ToolResult` when the refusal is an expected answer.
+`ToolResult(..., is_error=True)` marks the call as failed and puts your text in front of the model, so it can explain the refusal. If you raise an exception instead, the model only sees `Tool 'refund_order' failed with an internal error (reference ...)` and the detail goes to the server log. Raise when you want an operator to investigate. Return a `ToolResult` when the refusal is an expected answer.
 
-Two behaviors to keep in mind:
+Keep in mind:
 
-- With no authz block (direct SDK calls, or an API server with `"auth": null`), `has_scope()` returns `True`. A tool that must never run without auth should check `get_authz(config) is None` itself and refuse.
-- With auth on, an identity that declares no scopes gets an empty `scopes` list, and `has_scope()` returns `False` for every scope, including your own. Issue the scopes your tools need in the token or from your authorization backend.
+- With no identity (direct SDK calls, or an API server with `"auth": null`), `can()` returns `True`. A tool that must never run without auth should check `get_identity(config) is None` itself and refuse.
+- With roles configured, a caller who holds no role has an empty `permissions` set, so `can()` is `False` for everything. Give such users a `default_role`.
 
-You can apply the same check to every tool in one place with a `before_invoke` callback on `InvocationType.TOOL`: `context.function_name` is the tool name and `context.metadata["config"]` is the run config. Raise from the callback to block the call, or keep a dict that maps tool names to required scopes. See [Use callbacks](/docs/guides/use-callbacks).
+You can apply the same check to every tool in one place with a `before_invoke` callback on `InvocationType.TOOL`: `context.function_name` is the tool name and `context.metadata["config"]` is the run config. Raise from the callback to block the call, or keep a dict that maps tool names to required permissions. See [Use callbacks](/docs/guides/use-callbacks).
 
 ## Read caller identity inside tools and nodes
 
-The `user_id` from the authz block tells you who made the request. Use it to log actions, associate resources with owners, or enforce object-level access control:
+The `user_id` tells you who made the request. Use it to log actions or associate resources with owners:
 
 ```python
-from tenxgraph.core.authz import get_authz
+from tenxgraph.core.authz import get_identity
 from tenxgraph.utils import tool
 
 @tool
-def query_user_threads(*, config):
-    """Retrieve threads belonging to the caller."""
-    authz = get_authz(config)
-    if authz is None:
-        # No identity available; cannot scope by user.
+def my_notes(*, config):
+    """List the caller's notes."""
+    identity = get_identity(config)
+    if identity is None:
         return []
-    
-    user_id = authz.get("user_id")
-    # Query the checkpointer or thread store filtered to this user.
-    # (The checkpointer respects isolation_scope too; see below.)
-    return find_threads_for_user(user_id)
+    return find_notes_for(identity.user_id, identity.tenant)  # your own storage
 ```
 
-Combining `user_id` with a checkpointer that supports owner-only access (like `PgCheckpointer`, which enforces user isolation by default) ensures that data isolation is enforced at the storage layer too.
+For the framework's own storage (checkpointer, store, files) you do not filter by hand. Each query already filters by the caller's reach, see [Multi-tenant data](/docs/guides/multi-tenant-data).
 
-## Understand isolation scope
+## Reach and shared data
 
-The `isolation_scope` returned by `isolation_scope(config)` tells you (and the storage layer) which data-isolation policy is in effect: `"owner"`, `"none"` or a list of columns. A custom `AuthorizationBackend` chooses it per request in `isolation_scope(self, user)`; one that does not override the method gets `"owner"`. Return `"none"` from the backend only when users should share data, and a list such as `["org_id"]` to scope by tenant columns. An unknown scope (for example the typo `"owners"`) raises `ValueError` instead of weakening isolation:
+`identity.reach` is what the storage layer uses to filter every query:
 
-```python
-from tenxgraph.core.authz import Isolation, isolation_scope
+| Reach | Storage returns |
+|---|---|
+| `own` | Rows of this `user_id` within their tenant. |
+| `tenant` | Rows of every user with the same tenant values. |
+| `all` | Every row. |
 
-def authorize_thread_access(thread_id: str, user_id: str, config):
-    """Apply custom per-thread access control based on the isolation policy.
+Reach widens reads, lists, deletes and stop. Runs and state or message writes always stay on the caller's own threads. Shared data written under a `__system__:<name>` owner (agent memory, RAG knowledge bases) is pinned to that owner on every reach, so a wider reach never reads other users' rows through a shared-data query.
 
-    This is a plain helper, not a tool, so it raises. Call it from your own route or
-    node code. If a tool calls it, catch PermissionError there and return a ToolResult
-    instead, because a raise inside a tool reaches the model only as a generic failure.
-    """
-    policy = isolation_scope(config)
-    
-    if policy == Isolation.OWNER:
-        # Owner-only: validate that thread_id is owned by user_id.
-        owner = get_thread_owner(thread_id)  # Your storage backend
-        if owner != user_id:
-            raise PermissionError(f"Thread {thread_id} is owned by {owner}, not {user_id}")
-    elif policy == Isolation.NONE:
-        # No isolation: any authenticated user can access.
-        pass
-    elif isinstance(policy, list):
-        # A column list such as ["org_id"]: match the caller's values on those columns.
-        pass
-    else:
-        # No policy set; each layer applies its own default.
-        pass
-```
+Call `owner_filter(config, tenant_columns)` and `can_reach(config, user_id, tenant)` from `tenxgraph.core.authz` if you write your own storage and want to follow the same rules. `owner_filter` returns the column filters a query must apply, or `None` when there is no identity.
 
-- `Isolation.OWNER` (`"owner"`): Data is scoped to the caller's `user_id` and every declared tenant column. The checkpointer filters rows; your code should too. `SCOPE_OWNER` is kept as an alias.
-- `Isolation.NONE` (`"none"`): No scoping. All authenticated users see all data. `SCOPE_NONE` is kept as an alias.
-- A list of column names (`user_id` and tenant columns): rows must match the caller's values on exactly those columns. Use `isolation_columns(config, tenant_columns)` to resolve any scope to the columns it picks. See [Multi-tenant data](/docs/guides/multi-tenant-data#isolation-scopes).
-- `None`: No policy is set. Storage backends (like `PgCheckpointer`) fall back to their own `enforce_user_isolation` setting.
-
-In practice, the checkpointer and store already respect the isolation policy, so you rarely need to call `isolation_scope()` directly. Use it when your code implements custom data filtering or when you want to log what policy is active.
-
-## Example: Multi-tenant agent with scope checks
-
-Install with `pip install "10xgraph[google-genai]"`. Here is a complete example of a graph that uses authorization scopes to enforce multi-tenant data isolation and fine-grained permissions:
+## Example: a tool set with role checks
 
 ```python
-from tenxgraph.core.authz import get_authz, has_scope
+from tenxgraph.core.authz import can, get_identity
 from tenxgraph.core.state import ToolResult
 from tenxgraph.prebuilt.agent import ReactAgent
 from tenxgraph.utils import tool
@@ -205,50 +171,35 @@ from tenxgraph.utils import tool
 NOTES: dict[str, list[str]] = {}
 
 
-def fetch_user_notes(user_id):
-    return NOTES.get(user_id, [])
-
-
-def save_note(user_id, text):
-    NOTES.setdefault(user_id, []).append(text)
-    return len(NOTES[user_id])
-
 @tool
 def list_notes(*, config) -> str:
     """List notes belonging to the current user."""
-    authz = get_authz(config)
-    if authz is None:
-        return "Error: No authorization context"
-    
-    user_id = authz.get("user_id")
-    # Your storage layer (e.g., memory store) returns notes for this user.
-    notes = fetch_user_notes(user_id)
-    return f"Found {len(notes)} notes for {user_id}"
+    identity = get_identity(config)
+    if identity is None:
+        return "Error: no identity"
+    notes = NOTES.get(identity.user_id, [])
+    return f"Found {len(notes)} notes for {identity.user_id}"
+
 
 @tool
-def create_note(text: str, *, config) -> str:
-    """Create a note, restricted to users with store:write scope."""
-    if not has_scope(config, "store:write"):
-        return ToolResult(message="Missing scope: store:write.", is_error=True)
-    
-    authz = get_authz(config)
-    user_id = authz.get("user_id") if authz else "anonymous"
-    
-    # Store the note, associated with the user.
-    note_id = save_note(user_id, text)
-    return f"Note created (id={note_id}) for {user_id}"
+def create_note(text: str, *, config) -> str | ToolResult:
+    """Create a note, only for callers with store:write."""
+    if not can(config, "store:write"):
+        return ToolResult(message="Missing permission: store:write.", is_error=True)
+    identity = get_identity(config)
+    user_id = identity.user_id if identity else "anonymous"
+    NOTES.setdefault(user_id, []).append(text)
+    return f"Note created for {user_id}"
+
 
 @tool
-def export_data(format: str, *, config) -> str:
-    """Export all user data, admin-only."""
-    if not has_scope(config, "config:read"):
-        return ToolResult(message="Missing scope: config:read.", is_error=True)
-    
-    authz = get_authz(config)
-    user_id = authz.get("user_id")
-    return f"Exported {format} for {user_id}"
+def export_data(format: str, *, config) -> str | ToolResult:
+    """Export data, only for callers with admin:read."""
+    if not can(config, "admin:read"):
+        return ToolResult(message="Missing permission: admin:read.", is_error=True)
+    return f"Exported {format}"
 
-# ReactAgent wires the agent node, tool node and routing for you
+
 agent = ReactAgent(
     model="gemini/gemini-2.5-flash",
     tools=[list_notes, create_note, export_data],
@@ -256,86 +207,72 @@ agent = ReactAgent(
 compiled = agent.compile()
 ```
 
-When you invoke this over the API server:
+Install with `pip install "10xgraph[google-genai]"`. Over the API server:
 
-1. A user authenticates (JWT or custom auth).
-2. The authorization backend (`OwnershipAuthorizationBackend` or custom) checks scopes.
-3. `RequirePermission` builds `user["authz"]` with the user's ID and granted scopes.
-4. Your graph runs; each tool calls `get_authz()`, `has_scope()`, or `isolation_scope()`.
-5. If a tool is asked to perform an unauthorized action, it returns a `ToolResult` with `is_error=True` and a clear message, which the model can relay to the user.
-6. If the caller's scopes don't include `store:write`, `create_note()` returns the failed result "Missing scope: store:write." and does not run.
+1. The caller authenticates (JWT or a custom `BaseAuth`).
+2. The server resolves the `Identity` and `authorize` allows `graph:invoke`.
+3. Your graph runs with the identity in `config["user"]`.
+4. Each tool calls `get_identity()` or `can()`. A refusal returns a `ToolResult` with `is_error=True`, which the model can relay to the user.
 
-## Direct SDK calls with authorization
+## Direct SDK calls
 
-When you call `CompiledGraph.invoke()` directly in Python (not over the API server), you can build and pass an authz block yourself:
+When you call `CompiledGraph.invoke()` directly in Python (not over the API server), your process is the trust boundary. Build the identity yourself from your own verified session:
 
 ```python
-from tenxgraph.core.authz import build_authz
+from tenxgraph.core.authz import Identity, Reach
 from tenxgraph.core.state import Message
 
-authz_block = build_authz(
+identity = Identity(
     user_id="alice",
-    scope="owner",
-    scopes=["graph:invoke", "checkpointer:read", "store:write"]
+    tenant={"org_id": "acme"},
+    permissions=frozenset({"graph:invoke", "threads:read", "store:write"}),
+    reach=Reach.OWN,
 )
 
 result = compiled.invoke(
     {"messages": [Message.text_message("List my notes")]},
-    config={"authz": authz_block, "thread_id": "session-1"}
+    config={"user": identity, "thread_id": "session-1"},
 )
 ```
 
-Without an authz block, `get_authz()` returns `None`, and all functions default to permissive (all scopes allowed, no isolation). This keeps your graphs backward compatible.
+`config["user"]` also takes a dict that validates into an `Identity`. An unknown key raises. With `permissions` left as `None` the identity is unrestricted. Without any `user`, `get_identity()` returns `None` and there are no checks.
 
-## How the API server fills the authz block
+## How the API server fills the identity
 
-When a request reaches the API server, the `RequirePermission` dependency (in the route's `Depends()`) performs this flow:
+For every route, the `RequirePermission` dependency does this once per request:
 
-1. **Authenticate**: Extract and verify the bearer token (JWT or custom `BaseAuth`). Decode claims to get `user_id`, `roles`, `scopes`, etc.
-2. **Check scopes**: Call the authorization backend's `scopes_for(user)` (for example `RoleBasedAuthorizationBackend` maps roles to scopes), falling back to the identity's `scope` and `scopes` claims (read as exact names). If scopes are declared, verify that the required scope (e.g., `"graph:invoke"` for a POST to `/v1/graph/invoke`) is granted.
-3. **Check object access**: Call `authorize(user, resource, action, resource_id)` to enforce object-level rules (e.g., ownership checks).
-4. **Build and stamp authz**: Call `build_authz(user_id, scope=isolation_policy, scopes=granted_scopes)`, where `isolation_policy` comes from `isolation_scope(user)` on the backend, and place it in `user["authz"]`. This overwrites anything the client sent, it is non-hijackable.
-5. **Place in config**: Every service (graph execution, checkpointer, store) copies `user` into `config["user"]`, so the authz block reaches your code.
+1. **Authenticate.** The bearer token (JWT or a custom `BaseAuth`) is verified and decoded to claims. A failure is 401.
+2. **Resolve.** The claims become an `Identity`: roles, permissions, tenant values and reach, with token `scope` claims narrowing the permissions. A missing tenant claim or a malformed roles or permissions claim is 401.
+3. **Check for revocation and reserved ids.** A revoked token is 401. A `__system__` user id is 401.
+4. **Authorize.** `BaseAuth.authorize(identity, "resource:action", resource)` decides. A refusal is 403.
+5. **Place in config.** Every service copies the identity into `config["user"]`, so it reaches your code. Clients cannot set `user`.
 
-This flow is defined in `tenxgraph_api/src/app/core/auth/permissions.py`. For details on configuring backends, see `/docs/server/auth`.
+This flow is in `tenxgraph_api/src/app/core/auth/permissions.py`. For configuration, see [API authentication](/docs/server/auth).
 
 ## Common errors and fixes
 
-**Tool result "Missing scope: store:write"**
+**Tool result "Missing permission: store:write"**
 
-The caller doesn't have the required scope. This happens when:
+The caller does not hold the permission. This happens when:
 
-- The user's role is not mapped to that scope in your authorization backend.
-- The identity's `scopes` (for example from the JWT claims) don't include the required scope.
-- The identity declares no scopes, so `has_scope()` sees an empty list.
+- The caller's role does not include it, or the caller holds no role and `default_role` is not set.
+- A token `scope` or `scopes` claim narrows the permissions below it.
+- The token's `permissions_claim` does not list it.
 
-Fix: Check your `authorization` setting in `10xgraph.json` and your role-scope mappings.
+Fix: check `auth.roles`, `default_role` and the token claims. `GET /v1/me` shows the roles, permissions and reach the server resolved for a token.
 
-**get_authz() returns None inside a tool**
+**`get_identity()` returns None inside a tool**
 
-This is not an error, it means either:
+This is not an error. Either auth is off on the server (`"auth": null`) or you are calling the graph directly without a `config["user"]`. In both cases `can()` returns `True`, so handle the `None` case in code that must not run without a caller.
 
-- Auth is not configured on the API server (`"auth": null` in `10xgraph.json`).
-- You're calling the graph directly in Python without passing an authz block.
+**A user reaches `404` for a thread they know exists**
 
-In both cases, `has_scope()` and `isolation_scope()` default to permissive, and your code should handle the None case gracefully.
-
-**"Thread is owned by user2, not user1"**
-
-The caller tried to access a thread they don't own, but the ownership check passed the initial route guard. This means:
-
-- The ownership backend is configured but your code is checking ownership a second time.
-- Or, you're using a custom authorization backend that does not enforce ownership.
-
-Fix: Ensure your authorization backend (`OwnershipAuthorizationBackend` or a custom one) checks thread ownership. For a custom check, call `await checkpointer.aget_thread_owner(thread_id)` and compare.
-
-## Run it in production
-
-The server resolves the caller from your auth backend and checks these scopes on every route, so the list here is what a deployed API enforces. Configure `auth` and `authorization` in `10xgraph.json` as described in [Server auth](/docs/server/auth), and read how the pieces fit in the [Security model](/docs/production/security-model).
+The thread is outside the caller's reach: another user's thread, or another tenant's. Storage filters every query, so the server cannot tell it apart from a missing id. Give the viewer a role with reach `tenant` to read a colleague's thread, or check the token's tenant claim.
 
 ## Related pages
 
-- `/docs/server/auth`: Configure authentication and authorization on the API server.
-- `/docs/guides/protect-against-prompt-injection`: Additional safety patterns for input validation.
-- `/docs/guides/use-dependency-injection`: Access config and other dependencies in nodes and tools.
-- `/docs/concepts/security-and-validators`: Design patterns for secure agent systems.
+- [API authentication](/docs/server/auth): Configure roles, reach and custom `authorize` on the API server.
+- [Multi-tenant data](/docs/guides/multi-tenant-data): Tenant columns and how reach filters storage.
+- [Protect against prompt injection](/docs/guides/protect-against-prompt-injection): Additional safety patterns for input validation.
+- [Use dependency injection](/docs/guides/use-dependency-injection): Access config and other dependencies in nodes and tools.
+- [Security and validators](/docs/concepts/security-and-validators): Design patterns for secure agent systems.

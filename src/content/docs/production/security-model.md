@@ -10,7 +10,7 @@ faq:
   - question: "Is a 10xGraph server secure by default?"
     answer: "The request surface is hardened by default: every route needs a guard, threads and files belong to their owner, client input is shaped, and production hides internal errors. Authentication itself is not forced: with auth set to null in production the server starts open, so you must configure it."
   - question: "Can a client set its own user id?"
-    answer: "No. Identity comes from the authenticated token. A user_id, user or authz key sent in the request config is dropped, and an identity that starts with the reserved __system__ prefix is refused."
+    answer: "No. Identity comes from the authenticated token. A user_id or user key sent in the request config is dropped, and an identity that starts with the reserved __system__ prefix is refused."
   - question: "Does the server stop prompt injection?"
     answer: "No. It bounds what a client can send and lets you register validators, but the model reading untrusted text is your graph's concern. See What 10xGraph does not protect."
 ---
@@ -35,21 +35,21 @@ flowchart LR
 | Graph to tools, stores, models | You | Tool authorization logic, what a tool may read or call, prompts, model choice |
 | Stores and files | Server defaults, your backends | Per-user isolation of threads, memories and files |
 
-Identity comes only from the authenticated user in the run config. The server never reads a user id from state or from messages, and it drops a client-sent `user`, `user_id` or `authz` config key. Your tools read the verified identity with dependency injection, never from request fields.
+Identity comes only from the authenticated user in the run config. The server never reads a user id from state or from messages, and it drops a client-sent `user` or `user_id` config key. Your tools read the verified identity with dependency injection, never from request fields.
 
 ## Threats and what the server does
 
 | Threat | What the server does | Where to configure | More |
 |---|---|---|---|
 | Stolen or forged token | Validates the signature and expiry, requires a non-empty `user_id` claim, checks `iss` and `aud` when `JWT_ISSUER` and `JWT_AUDIENCE` are set, refuses an HS* secret under 32 bytes in production, and rejects revoked tokens (HTTP, WebSocket runs, and every 30 s during a live session; a cache store failure fails closed with 503) | `auth`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `token_revocation` | [Authentication](/docs/server/auth) |
-| Another user's thread | Ownership is object-level: a foreign `invoke` or `stream` is rejected with 403 before the graph starts, and every checkpointer read, write and delete is checked. With `runs.thread_ids: "server"` (default) a client may only name an existing thread; a new thread starts by omitting the id | `authorization`, `runs.thread_ids` | [Authentication](/docs/server/auth) |
-| Another user's files and memories | Threads and memories are scoped per user by default (`isolation_scope` returns `owner`), downloads and deletes are owner-only, `MEDIA_REQUIRE_OWNER` is on in production, and no identity starting with `__system__` is accepted, so a caller cannot act as the owner of shared data | custom `AuthorizationBackend.isolation_scope`, `MEDIA_REQUIRE_OWNER` | [Files and multimodal](/docs/server/files-and-multimodal) |
+| Another user's thread | Ownership is enforced in storage: every query is scoped to the caller's reach, so a foreign thread answers 404, and a foreign `invoke` or `stream` is rejected before the graph starts. Reach `tenant` or `all` widens reads, lists and deletes only; runs and writes stay on the caller's own threads. With `runs.thread_ids: "server"` (default) a client may only name an existing thread; a new thread starts by omitting the id | `auth.roles`, `runs.thread_ids` | [Authentication](/docs/server/auth) |
+| Another user's files and memories | Threads and memories are scoped per user by default (reach `own`), downloads and deletes are owner-only, `MEDIA_REQUIRE_OWNER` is on in production, and no identity starting with `__system__` is accepted, so a caller cannot act as the owner of shared data | `auth.roles` (reach), `MEDIA_REQUIRE_OWNER` | [Files and multimodal](/docs/server/files-and-multimodal) |
 | Forged state or messages | Clients send `user` messages only (tool results only to answer a pending remote tool call), `context_summary` and `execution_meta` are never writable, the server replaces client message ids, `current_node` must be a real node, and state values must match the state model | none; always on | [Client can and cannot send](#what-a-client-can-and-cannot-send) |
 | Client steering server config | Server-owned config keys sent by a client are dropped, and operators can allow-list the rest | `runs.config_keys`, `runs.state_keys` | [Configure](/docs/server/configure) |
 | SSRF through media URLs and fetch tools | Every external media URL in client input is checked against the graph's `MediaFetchPolicy` before the run (400 if blocked). Downloads and the built-in `fetch_url` tool use a client that resolves the host once, requires public addresses, pins the connection, re-checks each redirect and caps the body | `media_policy` argument of `graph.compile(...)`, a `MediaFetchPolicy` (default `MediaFetchPolicy()`; import from `tenxgraph.storage.media`) | [Files and multimodal](/docs/server/files-and-multimodal) |
 | Upload abuse | The first bytes must match the declared type for formats with a signature (else 415), uploads are size-limited, and text extraction is capped | `MEDIA_MAX_SIZE_MB` | [Files and multimodal](/docs/server/files-and-multimodal) |
 | Abuse and cost | Rate limit per IP, user or global; per-user cap on runs in flight (429); WebSocket connection caps (global and per user, close code 1013 when full); run timeout (300 s by default in production); request size cap (413); cap on parallel tool calls per model turn | `rate_limit`, `runs.max_concurrent_per_user`, `websocket.max_connections`, `websocket.max_connections_per_user`, `runs.timeout`, `MAX_REQUEST_SIZE`, `runs.max_parallel_tool_calls` | [Rate limiting](/docs/server/rate-limiting) |
-| Information leaks | In production, 5xx bodies, error chunks on streams and WebSockets, and validation messages that did not come from client input carry generic text; user-controlled values are escaped before logging; `/docs` and `/redocs` are off; graph introspection needs an explicit `graph:read` scope; Sentry is sent without request bodies or local variables; OTEL prints no spans to stdout | `MODE`, `graph_introspection`, `DOCS_PATH`, `REDOCS_PATH`, `SENTRY_DSN` | [Production checklist](/docs/server/production-checklist) |
+| Information leaks | In production, 5xx bodies, error chunks on streams and WebSockets, and validation messages that did not come from client input carry generic text; user-controlled values are escaped before logging; `/docs` and `/redocs` are off; graph introspection needs the `graph:read` permission; Sentry is sent without request bodies or local variables; OTEL prints no spans to stdout | `MODE`, `DOCS_PATH`, `REDOCS_PATH`, `SENTRY_DSN` | [Production checklist](/docs/server/production-checklist) |
 | Browser attacks | CORS with explicit origins, Host header validation, security headers (HSTS, frame options, CSP) on by default, and `X-Forwarded-For` honoured only from trusted proxies | `ORIGINS`, `ALLOWED_HOST`, `SECURITY_HEADERS_ENABLED`, `rate_limit.trusted_proxies` | [CORS and security headers](/docs/server/cors-and-security-headers) |
 | Concurrent runs on one thread | A per-thread lock lets one run proceed; a second waits up to 30 s, then gets 409 "thread is busy". `on_busy: "cancel"` stops the running one instead | `on_busy` request option | [Invoke and stream](/docs/server/invoke-and-stream) |
 | Deployment | The generated image runs as a non-root user with a numeric id, drops the CLI code, and the compose file publishes the port on 127.0.0.1 only | `10xgraph build` | [Deploy](/docs/server/deploy) |
@@ -68,11 +68,11 @@ Client input is reshaped before the graph sees it. Fields that are not allowed a
 | Custom state fields (`state` / `initial_state`) | Yes | Intentional, see [below](#intentional-design) | `runs.state_keys` restricts to a list |
 | `context_summary`, `execution_meta` | No, 422 | Built-in fields are server-managed | none |
 | `current_node` | Yes | Must be a real node of the graph | `runs.state_keys` |
-| Request `config` keys | Yes, except reserved | `user`, `user_id`, `authz`, `remote_tools`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection` and keys starting with `_` are dropped | `runs.config_keys` (422 on others) |
+| Request `config` keys | Yes, except reserved | `user`, `user_id`, `remote_tools`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection` and keys starting with `_` are dropped | `runs.config_keys` (422 on others) |
 | `thread_id` | Existing threads only | A new thread starts by omitting the id | `runs.thread_ids: "client"` to opt out |
 | User id or identity | No | Taken from the verified token; ids starting with `__system__` are refused | none |
 | External media URL | Checked | Run through the graph's `MediaFetchPolicy`; 400 if blocked. `graph://media/` ids are owner-checked | `media_policy` argument of `graph.compile(...)`, a `MediaFetchPolicy` (default `MediaFetchPolicy()`; import from `tenxgraph.storage.media`) |
-| Imported message history | Admin only | `POST /v1/threads/{thread_id}/messages` needs the `checkpointer:import` scope explicitly | scopes in your auth |
+| Imported message history | No | The API has no route to import messages | none |
 
 `/v1/ag-ui` and `/v1/graph/live` are exempt from the server-made thread id rule because their frontends create their own thread ids.
 
@@ -92,7 +92,7 @@ In production the docs and redoc pages default to off, debug mode is off, and `M
 
 > **Run trace is a development tool.** It exists for the playground. It is turned off in production mode: nothing is recorded, and the endpoint returns `enabled: false`.
 >
-> The playground's Run trace page reads `GET /v1/observability/{thread_id}`, which needs `graph:read`. With auth on, the thread id goes through the authorization backend, so by default a user can read traces only for their own threads, the same rule as reading the thread. With `MODE=production` the in-memory trace store is never created, so there is nothing to read and no memory cost. Run any server that other people can reach (staging, demos) with `MODE=production`, or at least with auth on.
+> The playground's Run trace page reads `GET /v1/observability/{thread_id}`, which needs `graph:read`. With auth on, the thread is read through the caller's reach, so by default a user can read traces only for their own threads, the same rule as reading the thread. With `MODE=production` the in-memory trace store is never created, so there is nothing to read and no memory cost. Run any server that other people can reach (staging, demos) with `MODE=production`, or at least with auth on.
 
 ## What you must still do
 

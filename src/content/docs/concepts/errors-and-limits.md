@@ -184,9 +184,9 @@ Round, iteration and retry budgets (such as `max_rounds` or `max_attempts` on th
 
 `SqliteCheckpointer` creates its database directory with mode 0o700 and the database file with mode 0o600. SQLite gives the `-wal` and `-shm` files the database file's mode, so they are owner-only too. An existing directory or file keeps its mode. The local media store uses the same modes. Cloud object stores are not affected; use their own access controls.
 
-### Thread import scope
+### Thread history import
 
-When you serve with `10xgraph-api` and an authorization backend, importing thread history (any role) needs the `checkpointer:import` scope (`CHECKPOINT_IMPORT`). It is never implied by an empty scope list, so grant it only to trusted admin identities. See [Authorization scopes](/docs/guides/authorization-scopes).
+The API has no route to import thread history, so there is no permission for it. To load history, write it through your own code with the checkpointer. See [Authentication and authorization](/docs/server/auth).
 
 ### Request size (API server)
 

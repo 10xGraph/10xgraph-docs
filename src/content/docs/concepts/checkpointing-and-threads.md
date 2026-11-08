@@ -205,7 +205,7 @@ The server uses the compiled graph's checkpointer for all requests. See [server/
 ## Related concepts
 
 - [Interrupts](/docs/concepts/interrupts): pause a run for human review, saved in a checkpoint
-- [Multi-tenant data](/docs/guides/multi-tenant-data): tenant and extra columns, isolation scopes, filters
+- [Multi-tenant data](/docs/guides/multi-tenant-data): tenant and extra columns, reach, filters
 - [Memory and store](/docs/concepts/memory-and-store): long-term memory vs. short-term thread state
 - [State and messages](/docs/concepts/state-and-messages): what is stored in a checkpoint
 - [Durability and concurrency](/docs/guides/durability-and-concurrency): thread isolation and optimistic locking

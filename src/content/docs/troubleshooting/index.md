@@ -41,7 +41,7 @@ faq:
 | An optional feature (PostgreSQL, Redis, Qdrant, etc.) needs a package you have not installed | [Installation troubleshooting](/docs/troubleshooting/installation), section on optional features |
 | Provider API keys look unset, `.env` is ignored, or auth fails with a provider | [Provider errors](/docs/troubleshooting/providers) or [Installation troubleshooting](/docs/troubleshooting/installation), section on environment variables |
 | The server will not start, refuses unprotected routes, rejects a CORS setting, or the port is in use | [API server troubleshooting](/docs/troubleshooting/api-server) |
-| A request returns `403 Missing required scope`, WebSocket closes immediately, or `/ping` works but graph routes fail | [API server troubleshooting](/docs/troubleshooting/api-server) |
+| A request returns `403 Missing required permission`, WebSocket closes immediately, or `/ping` works but graph routes fail | [API server troubleshooting](/docs/troubleshooting/api-server) |
 | The server refuses to start in production, or you are unsure it is locked down | [Test before production](/docs/testing/before-production) and the [production checklist](/docs/server/production-checklist) |
 | A request returns `429`, or errors show a generic message in production | [API server troubleshooting](/docs/troubleshooting/api-server) |
 | Every client request fails, the browser fails but curl works, threads do not persist, or streaming behaves differently than invoke | [Client troubleshooting](/docs/troubleshooting/client) |

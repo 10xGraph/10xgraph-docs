@@ -112,7 +112,7 @@ The first frame from the client must be a JSON text frame. It configures the ses
 
 Fields not present in the init frame keep the agent's compiled values. An invalid init frame (not JSON, or JSON that is not an object) closes the socket with code `1003`.
 
-**Thread handling.** `thread_id` is optional. When it is absent, blank or `"new"` the server generates an id for the session and persists the thread record before the first event is pumped; the generated id is sent in the `session_started` event, so a client that needs to resume later keeps it and sends it back. With the default `runs.thread_ids` of `server`, an id the server never issued is refused like a thread owned by someone else. Set `runs.thread_ids` to `client` to let the caller name a new thread. When `thread_id` **is** present it is ownership-checked before the session starts (only when auth is configured): a thread owned by another user is rejected with a fatal `error` event (`code: "not_authorized"`) and close code `1008`.
+**Thread handling.** `thread_id` is optional. When it is absent, blank or `"new"` the server generates an id for the session and persists the thread record before the first event is pumped; the generated id is sent in the `session_started` event, so a client that needs to resume later keeps it and sends it back. With the default `runs.thread_ids` of `server`, an id the server never issued is refused like a thread owned by someone else. Set `runs.thread_ids` to `client` to let the caller name a new thread. When `thread_id` **is** present it is ownership-checked before the session starts (only when auth is configured): a thread owned by another user is rejected with a fatal `error` event (`code: "THREAD_NOT_FOUND"`) and close code `1008`.
 
 ---
 
@@ -303,7 +303,7 @@ Codes the bridge itself emits, in addition to any provider code passed through:
 | `code` | `fatal` | Meaning | Followed by close |
 |---|---|---|---|
 | `not_live` | `true` | The configured graph is not a live agent. Use `WS /v1/graph/ws`. | `1008` |
-| `not_authorized` | `true` | The `thread_id` in the init frame belongs to another user, or (with `runs.thread_ids: server`, the default) was never issued by the server. | `1008` |
+| `THREAD_NOT_FOUND` | `true` | The `thread_id` in the init frame belongs to another user (or does not exist), or (with `runs.thread_ids: server`, the default) was never issued by the server. | `1008` |
 | `session_expired` | `true` | The token expired or was revoked during the session. Reconnect with a fresh token. | `1008` |
 | `invalid_config` | `true` | The init frame produced an invalid `RealtimeConfig` (for example an unusable `modalities` value). | server close |
 
@@ -315,7 +315,7 @@ Codes the bridge itself emits, in addition to any provider code passed through:
 |---|---|
 | `1000` | Normal closure: the session ended. |
 | `1003` | Invalid init frame: the first frame was not JSON, or was JSON that is not an object. |
-| `1008` | Policy violation: authentication or authorization was rejected at the handshake, or the graph is not a live agent (`not_live`), or the requested `thread_id` is owned by another user (`not_authorized`), or the token expired or was revoked during the session (`session_expired`). |
+| `1008` | Policy violation: authentication or authorization was rejected at the handshake, or the graph is not a live agent (`not_live`), or the requested `thread_id` is owned by another user (`THREAD_NOT_FOUND`), or the token expired or was revoked during the session (`session_expired`). |
 | `1011` | Unexpected server error during the session (provider failure, checkpointer error). This code is used only for unhandled failures. |
 | `1013` | Try again later: the global rate limit or `websocket.max_connections` was exceeded. The handshake is refused before `accept()`. |
 

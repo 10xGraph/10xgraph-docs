@@ -195,7 +195,7 @@ For local development, `10xgraph dev` is sufficient. For shared or production us
 
 - **Persistence required:** Set a durable checkpointer (for example `PgCheckpointer`), by passing it to `graph.compile(checkpointer=...)` in your graph code (the `checkpointer` key in `10xgraph.json` is not read). In-memory checkpointing loses all threads on restart.
 - **Multiple instances:** Use a shared durable checkpointer and a shared store (if using long-term memory). Each instance must access the same database backend.
-- **Shared state across instances:** Set `"cache_store": {"type": "redis"}` so the API's cache store is shared. It holds the run locks, caps, idempotency state, ownership cache, token revocation and rate-limit counters. The in-memory store counts per process and is not shared.
+- **Shared state across instances:** Set `"cache_store": {"type": "redis"}` so the API's cache store is shared. It holds the run locks, caps, idempotency state, token revocation and rate-limit counters. The in-memory store counts per process and is not shared.
 
 ## Production environment settings
 
@@ -214,7 +214,7 @@ For durable persistence and distributed deployments, also configure:
 
 - A `PgCheckpointer` or equivalent (never rely on in-memory checkpointing in production).
 - A `BaseStore` subclass if you use long-term memory.
-- An `AuthorizationBackend` to enforce thread ownership or role-based access control.
+- Role-based access control, if owner-only threads are not enough: add `roles` to the `auth` object.
 
 Full reference is in the [configuration](/docs/reference/api-cli/configuration) and [environment](/docs/reference/api-cli/environment) pages.
 

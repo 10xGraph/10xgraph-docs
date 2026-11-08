@@ -8,7 +8,7 @@ order: 120
 updated: "2026-10-27"
 faq:
   - q: Which template should I start from?
-    a: "Use quick-start to try an idea, since it writes a graph, an env example and 10xgraph.json. Use production when the agent will be deployed, because it adds a state class, a tool, a prompt-injection validator, lifecycle hooks, evals, tests, ruff and pre-commit setup, and the recommended config: JWT auth, ownership authorization, a UUID ID generator and a Redis cache store with rate limiting and token revocation."
+    a: "Use quick-start to try an idea, since it writes a graph, an env example and 10xgraph.json. Use production when the agent will be deployed, because it adds a state class, a tool, a prompt-injection validator, lifecycle hooks, evals, tests, ruff and pre-commit setup, and the recommended config: JWT auth with owner-only data, a UUID ID generator and a Redis cache store with rate limiting and token revocation."
   - q: Does init overwrite my existing files?
     a: No. If a file already exists, init stops with an error unless you pass --force. A 10xgraph.json that was already in the directory is protected by the same rule.
   - q: Can I add rate limiting without auth?
@@ -333,7 +333,7 @@ class AgentAuth(BaseAuth):
         raise HTTPException(status_code=401, detail="Authentication is not configured")
 ```
 
-Return a dict with at least `user_id`. It becomes the thread and memory owner, so take it from the verified credential, never from a client-set header or body field. Optional `roles` and `scopes` feed the authorization backend. See [Authentication](/docs/server/auth).
+Return a dict with at least `user_id`. It becomes the thread and memory owner, so take it from the verified credential, never from a client-set header or body field. An optional `roles` claim feeds the built-in role-based access, and a token `scope` or `scopes` claim can only narrow permissions. See [Authentication](/docs/server/auth).
 
 ### evals and tests
 
@@ -406,7 +406,6 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
   "ag_ui": {
     "enabled": false
   },
-  "authorization": "ownership",
   "injectq": "graph.agent:container",
   "id_generator": "uuid",
   "cache_store": {
@@ -435,13 +434,12 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
 | `auth` | Always | `null` for none, `"jwt"` for JWT (needs `JWT_SECRET_KEY` and `JWT_ALGORITHM`), or `{"method": "custom", "path": "auth.agent_auth:AgentAuth"}` |
 | `ag_ui` | Always | `{"enabled": false}`, the AG-UI endpoint is off |
 | `thread_name_generator` | Always | `null` for quick-start, `graph.thread_name_generator:MyNameGenerator` for production |
-| `authorization` | Production with jwt or custom | `"ownership"`: a thread is accessible only to its owner. Other values are `"allow_all"` or a `module:attribute` backend. |
 | `injectq` | Production | `graph.agent:container` (see the warning below) |
 | `id_generator` | Production | `"uuid"` |
 | `cache_store` | Production | `{"type": "redis", ...}` with no `url`, so Redis comes from `REDIS_URL`. It holds `rate_limit` (100 requests per 60 seconds, by `user`, `fail_open` false) and `token_revocation` (`true` with auth). `--cache-store memory` writes `"type": "memory"`; `--no-rate-limit` and `--no-token-revocation` leave those two out |
 | `websocket` | Always | `{"enabled": false}`, or `true` with `--websocket` |
 
-Keys such as `test`, `evaluation`, `remote_tools` and `store` are not written for production, though you can add them yourself. There is no `checkpointer` key to set: the server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The quick-start template adds no `cache_store`, `authorization` or `id_generator`. Run `10xgraph config` to change any of these. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), for what is on by default see [Configure 10xgraph.json](/docs/server/configure#what-is-on-by-default), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
+Keys such as `test`, `evaluation`, `remote_tools` and `store` are not written for production, though you can add them yourself. There is no `checkpointer` key to set: the server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The quick-start template adds no `cache_store` or `id_generator`. Run `10xgraph config` to change any of these. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), for what is on by default see [Configure 10xgraph.json](/docs/server/configure#what-is-on-by-default), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
 
 ## Fix these before you deploy
 

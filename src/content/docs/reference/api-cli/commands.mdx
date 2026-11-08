@@ -58,7 +58,7 @@ Scaffold a new agent project. Interactive `init` asks three questions: the agent
 
 **Production** writes the recommended setup without asking:
 
-- `"auth": "jwt"` and `"authorization": "ownership"`
+- `"auth": "jwt"`
 - `"id_generator": "uuid"`
 - `"cache_store"` with `"type": "redis"` (no `url`, so Redis comes from `REDIS_URL`), a `rate_limit` of 100 requests per 60 seconds by user with `fail_open` false, and `token_revocation` on
 - WebSocket and AG-UI off
@@ -192,7 +192,7 @@ Install locations: `.agents/skills/10xgraph` (Codex), `.claude/skills/10xgraph` 
 
 ## audit
 
-Read-only environment check: Python version, installed packages, core evaluation API, `10xgraph.json` validity, a security check and whether the default port is free. The security check reads only the JSON file and reports production-readiness gaps (auth, authorization, rate limiting, token revocation) as warnings; they never fail the command. Exits 1 if any check fails, so it works as a CI gate.
+Read-only environment check: Python version, installed packages, core evaluation API, `10xgraph.json` validity, a security check and whether the default port is free. The security check reads only the JSON file and reports production-readiness gaps (auth, rate limiting, token revocation) as warnings; they never fail the command. Exits 1 if any check fails, so it works as a CI gate.
 
 ```bash
 10xgraph audit [--config FILE]
@@ -241,7 +241,7 @@ The editor groups every key in a sidebar:
 | Group | Pages |
 |---|---|
 | Get running | Core |
-| Before production | Authentication, Authorization, Cache store (rate limiting, token revocation), Observability, Graph introspection |
+| Before production | Auth, Cache store (rate limiting, token revocation), Observability |
 | Runs and streaming | Runs, WebSocket, AG-UI, Remote tools, Media |
 | Project wiring | Checkpointer, ID generation, Thread naming, Memory store, Dependency injection |
 | Developer tools | Test, Evaluation |

@@ -1,15 +1,15 @@
 ---
 title: Authentication
 seoTitle: "API server authentication and authorization"
-description: Configure JWT, custom auth backends, and authorization for the 10xGraph API server.
+description: Configure JWT, custom BaseAuth classes, roles, permissions and reach for the 10xGraph API server.
 section: Reference
 group: "CLI and configuration"
 order: 440
 label: Authentication
-updated: "2026-10-31"
+updated: "2026-11-08"
 ---
 
-By default, the 10xGraph API accepts all requests without authentication (suitable for local development). For production, configure either JWT or a custom `BaseAuth` backend to verify identity, and optionally set authorization rules via `AuthorizationBackend` to control what authenticated users may do.
+By default, the 10xGraph API accepts all requests without authentication (suitable for local development). For production, set the `auth` key to JWT or to a custom `BaseAuth` class to verify identity, and add roles to control what each user may do and how far their data reaches. This page is the reference. For a guided walk-through and the migration from the removed `authorization` key, see [Set up API authentication](/docs/server/auth).
 
 ## No authentication (default)
 
@@ -20,7 +20,7 @@ By default, the 10xGraph API accepts all requests without authentication (suitab
 }
 ```
 
-All endpoints are publicly accessible. Only use this locally or behind a secure gateway.
+All endpoints are publicly accessible, no thread has an owner, and `GET /v1/me` answers `{"auth": "off"}`. Only use this locally or behind a secure gateway. `"auth": {"method": "none"}` is the same. RBAC keys with auth off refuse to boot.
 
 ## JWT authentication
 
@@ -72,11 +72,11 @@ The built-in backend requires:
 
 If `JWT_ISSUER` or `JWT_AUDIENCE` is set, the matching `iss` or `aud` claim is also required.
 
-Other claims (`roles`, `scopes`, `email`, custom fields) are passed through to `config["user"]` unchanged.
+Other claims (`roles`, `scopes`, `email`, custom fields) are kept in `identity.claims`. The claims named in `auth.roles_claim`, `auth.permissions_claim` and `auth.tenant_claims` also drive permissions, reach and tenant values.
 
 Two claims are also read by the server:
 
-- `scope` (a space-separated string, as in OAuth) and `scopes` (a list of strings, or a space-separated string). Both are merged into one set of scope names, and a scope matches only by its exact name. `graph:invoke_admin` does not grant `graph:invoke`. A token with neither claim is not scope-restricted. A token with `scope` set to an empty string is restricted to no scopes at all. A scope claim of the wrong type (a number, an object, or a list that holds non-strings) is rejected with 401.
+- `scope` (a space-separated string, as in OAuth) and `scopes` (a list of strings, or a space-separated string). Both only **narrow** the permissions the roles grant: the effective set is the granted set intersected with the permission-shaped entries (`*` or anything containing `:`). A scope matches by exact name or wildcard. Plain OAuth scopes such as `openid profile` are ignored, so they do not narrow. A token with no permission-shaped scope is not narrowed. A scope claim of the wrong type (a number, an object, or a list that holds non-strings) is rejected with 401.
 - `jti`, the token ID. When `cache_store.token_revocation` is on in `10xgraph.json`, a revoked `jti` is refused. The check runs even when `user_id` is missing or unusual. See [Token revocation](#token-revocation).
 
 ### Rotating the signing key
@@ -101,6 +101,7 @@ Set `JWT_MAX_TOKEN_AGE_SECONDS` to refuse tokens older than that many seconds, c
 | 401 | `REVOKED_TOKEN` | No credential was presented (missing Authorization header, missing WebSocket auth, missing query param) |
 | 401 | `EXPIRED_TOKEN` | Token `exp` is in the past, or the token is older than `JWT_MAX_TOKEN_AGE_SECONDS` by its `iat` |
 | 401 | `INVALID_TOKEN` | Signature or structure is invalid, `user_id` is missing or malformed, or a `scope` or `scopes` claim has the wrong type |
+| 401 | (message "Invalid token, please login again") | A configured `tenant_claims` claim is missing, or the roles or permissions claim is malformed |
 | 500 | `JWT_SETTINGS_NOT_CONFIGURED` | `JWT_SECRET_KEY` or `JWT_ALGORITHM` is unset at request time |
 
 On WebSocket routes, errors become a clean close with code 1008 instead of an HTTP response.
@@ -169,7 +170,7 @@ Subclass `BaseAuth` and implement `authenticate`. The method is **synchronous** 
 
 ```python
 from typing import Any
-from fastapi import Request, Response
+from fastapi import HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials
 from tenxgraph_api import BaseAuth
 
@@ -180,15 +181,15 @@ class MyAuthBackend(BaseAuth):
         response: Response,
         credential: HTTPAuthorizationCredentials | None,  # bearer token or None
     ) -> dict[str, Any] | None:
-        """Return user context dict, None for anonymous, or raise to reject.
-        
-        - Return dict (with at least 'user_id') to authenticate.
-        - Return None/{} for anonymous requests.
+        """Return the verified claims, or raise to reject.
+
+        - Return a dict with at least 'user_id' to authenticate.
+        - Returning None or {} answers 401 "Authentication required".
         - Raise UserAccountError (401) or HTTPException (your status) to reject.
         - On WebSocket: either becomes a clean 1008 close.
         """
         if credential is None:
-            return None
+            raise HTTPException(status_code=401, detail="Missing credentials")
         claims = my_identity_service.verify(credential.credentials)
         return {
             "user_id": claims["sub"],
@@ -204,77 +205,112 @@ The server calls `authenticate(...)` without `await`. If you declare it `async d
 
 </aside>
 
-## Authorization (access control)
+## Authorization (roles, permissions, reach)
 
-Authorization decides what an authenticated user may do and whose data they can access. It is configured separately from `auth`, via the `authorization` key in `10xgraph.json`.
+Authorization decides what an authenticated user may do and whose data they can see. It sits under the same `auth` key as authentication. The top-level `authorization` key and `AuthorizationBackend` are removed: a leftover `authorization` key stops the server at boot.
 
-### Built-in backends
-
-Two backends ship built in; choose one or write your own:
-
-| Value | Behavior |
-|---|---|
-| `"ownership"` | Owner-only threads: a thread is readable, runnable, stoppable, fixable, and deletable **only by the user who created it**. A request for another user's thread is rejected with 403 before it reaches the graph. With the default `runs.thread_ids` of `server`, a request that names a thread that does not exist is rejected the same way. |
-| `"allow_all"` (also `"default"`, `"none"`) | Any authenticated user may do anything. |
-| `"module:attr"` | Your custom `AuthorizationBackend`. |
-| `{ ... }` (object) | RBAC config block (see below). |
-| `null` | **Default:** `"ownership"` whenever auth is configured or `MODE=production`; `"allow_all"` only with auth off in development. |
-
-Example:
+### The `auth` object
 
 ```json
 {
-  "agent": "graph.react:app",
-  "auth": "jwt",
-  "authorization": "ownership"
+  "auth": {
+    "method": "jwt",
+    "path": null,
+    "roles_claim": "roles",
+    "permissions_claim": null,
+    "tenant_claims": ["org_id"],
+    "roles": {
+      "member": {"permissions": ["graph:*", "threads:*", "store:*", "files:*"], "reach": "own"},
+      "org_admin": {"inherits": ["member"], "permissions": ["admin:read"], "reach": "tenant"}
+    },
+    "default_role": "member",
+    "system_identities": {"nightly": {"roles": ["member"], "tenant": {"org_id": "acme"}}}
+  }
 }
 ```
 
-An unrecognized built-in name raises `ValueError` at startup. The classes are importable for subclassing or composition:
+| Key | Type | Meaning |
+|---|---|---|
+| `method` | `none` \| `jwt` \| `custom` | Which class verifies the credential. Default `none`. `null` and `"jwt"` are accepted as shortcuts. |
+| `path` | string | `"module:Class"` of a `BaseAuth` subclass. Only with `custom`, and required there. |
+| `roles` | object | Role name to `{permissions, inherits, reach}`. `reach` is required, `permissions` and `inherits` are lists. |
+| `roles_claim` | string | Claim holding the caller's role names (list or space-separated string). Defaults to `roles` when `roles` is set. Refused without `roles`. |
+| `permissions_claim` | string | Claim holding permissions directly. Cannot be combined with `roles`. A missing claim gives no permissions. |
+| `tenant_claims` | list of strings | Claims that name the caller's tenant. Each must be a non-empty string or whole number on every token, else 401. |
+| `default_role` | string | Role for a token with no roles claim. Must be in `roles`. |
+| `system_identities` | object | Name to `{roles, tenant}`, for background tasks. |
 
-```python
-from tenxgraph_api.src.app.core.auth.authorization import (
-    AuthorizationBackend,             # abstract base
-    DefaultAuthorizationBackend,      # "allow_all" / "default" / "none"
-    OwnershipAuthorizationBackend,    # "ownership"
-    RoleBasedAuthorizationBackend,    # RBAC config block
-)
+With no RBAC keys, every authenticated user gets the default permission set (every permission except `admin:*`) and reach `own`.
+
+### Permissions
+
+Permissions are `resource:action` from one registry. A role naming anything else refuses to boot. `resource:*` and `*` are wildcards.
+
+| Resource | Actions |
+|---|---|
+| `graph` | `read`, `invoke`, `stream`, `stop`, `fix` |
+| `threads` | `read`, `write`, `delete` |
+| `store` | `read`, `write`, `delete` |
+| `files` | `read`, `upload`, `delete` |
+| `config` | `read` |
+| `tasks` | `trigger`, `read`, `cancel` |
+| `admin` | `read`, `write` |
+
+The route guards:
+
+| Routes | Permission |
+|---|---|
+| `POST /v1/graph/invoke` | `graph:invoke` |
+| `POST /v1/graph/stream`, `/v1/graph/ws`, `/v1/graph/live`, `POST /v1/ag-ui` | `graph:stream` |
+| `GET /v1/graph`, `GET /v1/graph/tools`, `GET /v1/graph:StateSchema`, `GET /v1/observability/{thread_id}` | `graph:read` |
+| `POST /v1/graph/stop` | `graph:stop` |
+| `POST /v1/graph/fix` | `graph:fix` |
+| Thread, state and message reads | `threads:read` |
+| Thread state and message writes | `threads:write` |
+| Thread, state and message deletes | `threads:delete` |
+| Store search, get and list | `store:read` |
+| Store create and update | `store:write` |
+| Store delete and forget | `store:delete` |
+| File downloads, info, urls and list | `files:read` |
+| File upload | `files:upload` |
+| File delete | `files:delete` |
+| Server config read | `config:read` |
+| `POST /v1/tasks/{name}`, `PATCH /v1/tasks/{schedule_id}` | `tasks:trigger` |
+| `GET /v1/tasks/{id}` | `tasks:read` |
+| `POST /v1/tasks/{id}/cancel` | `tasks:cancel` |
+| `GET /v1/me` | Authentication only |
+
+A refusal answers 403 `Missing required permission: <resource>:<action>`. A permission the registry does not know raises at import, not on the first request.
+
+### Reach
+
+| Reach | Rows a caller's queries match |
+|---|---|
+| `own` | This `user_id`, within their tenant values |
+| `tenant` | Any user, with the caller's tenant values. Needs `tenant_claims` and tenant columns on the checkpointer |
+| `all` | No filter |
+
+A caller with several roles gets the union of their permissions and the widest reach. Reach widens reads, lists, deletes and stop only. Runs and state or message writes always stay `own`. A thread, message, memory, file or run outside the caller's reach answers 404. Token claims cannot name a reach.
+
+### Resolving a token
+
+1. `authenticate` returns claims with a `user_id` (a string, or a whole number stored as a string).
+2. Tenant values are read from each `tenant_claims` claim.
+3. With `roles`, the roles come from `roles_claim` (names not in `roles` are ignored), or from `default_role` when the claim is absent. With `permissions_claim`, the permissions come from that claim. Otherwise the default set applies.
+4. Token `scope` and `scopes` narrow the result.
+5. A `__system__` user id is refused (401). A revoked token is refused (401).
+
+The result is an `Identity` (`user_id`, `kind`, `tenant`, `roles`, `permissions`, `reach`, `claims`), stored as `config["user"]`.
+
+### `GET /v1/me`
+
+Returns the resolved caller. Needs only authentication.
+
+```json
+{"data": {"user_id": "u-42", "tenant": {"org_id": "acme"}, "roles": ["member"], "permissions": ["graph:invoke", "graph:stream"], "reach": "own"}}
 ```
 
-### Ownership model
-
-`OwnershipAuthorizationBackend` checks ownership only for thread-scoped resources: `graph` and `checkpointer`. The `store`, `files`, and `config` resources enforce their own per-user scoping.
-
-Decision table:
-
-| Situation | Decision |
-|---|---|
-| No `user_id` on request | Deny |
-| No `resource_id` (list/create endpoints, e.g., `GET /v1/threads`) | Allow (already user-scoped by the service) |
-| Thread does not exist | Allow (new session; `invoke`/`stream` will create it owned by the caller) |
-| Thread exists and caller owns it | Allow |
-| Thread exists and someone else owns it | **Deny**, including on `invoke` and `stream` |
-| No checkpointer, or one that cannot resolve ownership (`aget_thread_owner` not implemented) | **Deny** (fails closed). With auth on, the server refuses to start in this setup |
-| Ownership lookup fails | **Deny** (failures never grant access) |
-
-<aside class="callout callout-note" role="note"><p class="callout-title">Ownership requires a checkpointer that tracks owners</p>
-
-Ownership comes from `BaseCheckpointer.aget_thread_owner`. `PgCheckpointer`, SQLite, and the in-memory checkpointer implement it; the base class raises `NotImplementedError`. A custom checkpointer must also implement the abstract `aping()`; see [Bring your own backend](/docs/server/bring-your-own-backend). The backend fails closed: with no checkpointer, or one that cannot resolve owners, thread requests are denied, and with ownership active the server refuses to start. The server uses the checkpointer passed to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. The in-memory checkpointer records owners only when explicitly writing a thread, so ownership is the production default (with Postgres) but development defaults to `DefaultAuthorizationBackend`.
-
-</aside>
-
-### Ownership caching
-
-Ownership is immutable, so it is cached by `ThreadOwnershipResolver` for scalability:
-
-| Tier | Details |
-|---|---|
-| L1 | In-process LRU: 10,000 entries per worker, 30 s TTL |
-| L2 | Optional shared tier in the API's cache store (owner entries under `af:authz:owner:id:<thread_id>`, kept for 1 hour; a delete removes the entry and leaves a "just deleted" marker under `af:authz:owner:tomb:<thread_id>` for 30 seconds, so the id cannot be claimed while another worker still caches the old owner; cache store errors degrade to database lookup and never fail the request) |
-
-Negative results are not cached (a missing thread could be created by a later request). The L2 tier is the API's cache store: the `cache_store` object in `10xgraph.json` (`type` `redis` or `custom`). With the in-memory cache store the L2 tier is local to the process, so it adds nothing over L1.
-
-Cache eviction happens on thread delete via `CheckpointerService.delete_thread`. A custom authorization backend should implement `evict(thread_id)` (returns the resolver's `evict` coroutine or `None`) and `aclose()`.
+An identity with no permission restriction reports `["*"]`. With auth off the answer is `{"auth": "off"}`.
 
 ### Token revocation
 
@@ -291,135 +327,51 @@ Revoke a token (by `jti`) or all of a user's tokens with `10xgraph revoke`. The 
 
 Revocation fails closed: if the cache store raises an error, requests that need the check answer `503`. With an in-memory cache store in production, or `WEB_CONCURRENCY` above 1, the server warns that revocations only reach this process; set `cache_store.type` to `redis` (or a shared custom store).
 
-### Custom authorization backend
-
-Subclass `AuthorizationBackend`. The `authorize` method is required; `isolation_scope` and `scopes_for` are optional:
+### `BaseAuth.authorize`
 
 ```python
-from typing import Any
-from tenxgraph_api.src.app.core.auth.authorization import AuthorizationBackend
+from tenxgraph_api import BaseAuth
 
-class MyAuthBackend(AuthorizationBackend):
-    async def authorize(
-        self,
-        user: dict[str, Any],
-        resource: str,  # "graph" | "checkpointer" | "store" | "files" | "config"
-        action: str,    # "invoke" | "stream" | "read" | "write" | "delete" | ...
-        resource_id: str | None = None,  # thread_id / memory_id when available
-        **context: Any,
-    ) -> bool:
-        """Return True to allow, False to deny (403)."""
-        if not user.get("user_id"):
-            return False
-        if resource == "store":
-            return user.get("role") == "admin"
-        return True
+class MyAuth(BaseAuth):
+    def authenticate(self, request, response, credential): ...
 
-    def isolation_scope(self, user: dict[str, Any]) -> str | list[str]:
-        """Storage partitioning for this caller, called once per request.
-
-        "owner" scopes rows to the caller; "none" does not; a list such as
-        ["org_id"] scopes by those columns. Defaults to "owner". Return "none" only to
-        share data between users. Stamped server-side into config["user"]["authz"];
-        the client cannot forge it.
-        """
-        if user.get("role") == "org_admin":
-            return ["org_id"]
-        return "owner"
-
-    def scopes_for(self, user: dict[str, Any]) -> list[str] | None:
-        """Scopes this identity carries, or None for unrestricted (default)."""
-        return user.get("scopes")
+    async def authorize(self, identity, permission, resource=None) -> bool:
+        """True to allow, False for 403."""
+        return await super().authorize(identity, permission, resource)
 ```
 
-`isolation_scope(user)` defaults to `"owner"`, so a backend that only implements `authorize` still gives each user their own threads and memories. To share data on purpose, return `"none"`. Return a list of `user_id` and tenant column names (declared with `tenant_columns=` on `PgCheckpointer` and `PgVectorStore`) to scope by those columns, for example `["org_id"]` for an org admin. You can return the `Isolation` enum from `tenxgraph.core.authz` instead of the strings. An unknown scope raises, so a typo cannot weaken isolation; a backend written as `isolation_scope(self)` with no `user` argument keeps working. See [Multi-tenant data](/docs/guides/multi-tenant-data#isolation-scopes).
+- The default returns `identity.can(permission)`.
+- `permission` is `resource:action`. `resource` is the thread id, memory id, namespace or file id from the path or the JSON body, the task name for a background task, or `None`.
+- It takes no request, so the jobs worker calls it too (`tasks:trigger`).
+- If you override it and `roles` is set, the roles apply only when you call `super().authorize`. Boot warns about it.
+- An exception fails the request; it never counts as allowed.
 
-Point `10xgraph.json` at it (no `method` wrapper, just the path):
+### Boot-time checks
 
-```json
-{ "authorization": "graph.auth:MyAuthBackend" }
-```
+The same validator runs at boot, `10xgraph config`, `10xgraph audit` and `10xgraph build`.
 
-### Resources and actions
-
-The server passes `(resource, action)` pairs to `authorize`. The required **scope** for an endpoint is `"<resource>:<action>"`.
-
-| Resource | Actions |
+| Setup | Result |
 |---|---|
-| `graph` | `invoke`, `stream`, `stop`, `fix`, `setup`, `read` |
-| `checkpointer` | `read`, `write`, `delete` |
-| `store` | `read`, `write`, `delete` |
-| `files` | `upload`, `read` |
-| `config` | `read` |
+| RBAC key with `auth` off | Refused |
+| Top-level `authorization` or `graph_introspection` key | Refused |
+| `custom` without a valid `path`, or `path` with another method | Refused |
+| `permissions_claim` with `roles` or `roles_claim` | Refused |
+| `roles_claim` without `roles` | Refused |
+| `default_role`, `inherits` or a system identity role naming an unknown role | Refused |
+| Inheritance cycle, unknown permission, missing or unknown `reach` | Refused |
+| Role with reach `tenant` and no `tenant_claims` | Refused |
+| `tenant_claims` and checkpointer or store tenant columns differ | Refused in production, warning otherwise |
+| `authorize` overridden with `roles` set | Warning |
+| Role with reach `all` | Warning listing the roles |
+| `MODE=production` with auth off | Warning |
 
-### Role-based access control (no code)
+### Ownership and data isolation
 
-Use the RBAC config block instead of writing a backend to map roles to scopes. It loads `RoleBasedAuthorizationBackend`, which inherits owner-only isolation from `OwnershipAuthorizationBackend`:
-
-```json
-{
-  "authorization": {
-    "backend": "rbac",
-    "roles": {
-      "admin": ["*"],
-      "member": ["graph:invoke", "graph:stream", "graph:read", "checkpointer:read"]
-    },
-    "default_scopes": ["graph:read"],
-    "isolation": "owner"
-  }
-}
-```
-
-| Key | Alias | Meaning |
-|---|---|---|
-| `backend` | `type` | `"rbac"`, `"role_based"`, or `"roles"` (all select the same backend) |
-| `roles` | `role_scopes` | Map role (from user's `roles` or `role` claim) to scopes. `"*"` grants all scopes. |
-| `default_scopes` | none | Scopes for users with no role. Defaults to empty. |
-| `isolation` | none | `"owner"` (owner-only, default) or `"none"` (all rows). Any other value falls back to `"owner"`. |
-
-An unrecognized `backend`/`type` value raises `ValueError` at startup. The same backend is available in code:
-
-```python
-from tenxgraph_api.src.app.core.auth.authorization import RoleBasedAuthorizationBackend
-
-backend = RoleBasedAuthorizationBackend(
-    role_scopes={
-        "admin": ["*"],
-        "member": ["graph:invoke", "graph:stream", "checkpointer:read"],
-    },
-    default_scopes=["graph:read"],
-    isolation="owner",
-)
-```
-
-Point `10xgraph.json` at it with `"authorization": "module:backend"`. Subclass it when you need to compute roles at runtime: override `scopes_for`, and owner-only isolation still applies.
-
-### Scope resolution
-
-A request is allowed only if the identity's scopes include the endpoint's `"<resource>:<action>"`. Scopes are resolved in order:
-
-1. `authz.scopes_for(user)` from your backend (if it defines the method).
-2. The scope claims on the authenticated identity, `scope` and `scopes` (only if step 1 returns `None`).
-
-A backend that returns a list wins outright; the identity's own `scopes` claim cannot widen it.
-
-| Resolved value | Effect |
-|---|---|
-| `None` | **Unrestricted.** Scope check is skipped; nothing breaks until scopes are actually issued. |
-| Non-empty list | Only listed `"<resource>:<action>"` pairs are allowed; anything else is 403. |
-| Empty list (`[]`) | **Denies everything.** Not the same as `None`: no endpoint passes the check. |
-
-The base `AuthorizationBackend.scopes_for` reads the `scope` claim (space-separated) and the `scopes` claim (a list or a space-separated string), merges them, and matches by exact name. It returns `None` when the identity has neither claim, which is why such an identity stays unrestricted. A claim of the wrong type gets 401. An empty `scope` claim resolves to an empty list, which denies everything.
-
-After a successful check, the resolved list is stamped into `user["authz"]["scopes"]` server-side, so downstream code reads the trusted value.
-
-### Data isolation contract
-
-The API layer enforces object-level `authorize` and scope checks. The data layer (checkpointer, store) enforces isolation separately via a trusted policy stamped by the server after a successful check: `user["authz"] = {user_id, scope, scopes}`, where `scope` comes from `isolation_scope(user)`. Every service copies that trusted `user` into `config["user"]`, so the policy reaches the graph and cannot be forged by the client. With `scope: "owner"`, checkpointer and store queries are scoped to the caller (and to their tenant columns); with `scope: "none"`, they are not; with a list, they are scoped by exactly those columns.
+Storage enforces ownership. Every checkpointer, store and file query filters by the caller's reach, so no ownership cache or resolver exists. Each thread route makes one scoped read before the run lock, which gives the 404 and enforces `runs.thread_ids`. See [Multi-tenant data](/docs/guides/multi-tenant-data).
 
 ## Boot-time route guard
 
-Authorization is applied per handler with `Depends(RequirePermission(resource, action))`. To prevent forgotten guards from shipping open endpoints, `assert_all_routes_protected` runs at startup and walks every `APIRoute` and `APIWebSocketRoute` to check that the entire dependency subtree includes a `RequirePermission` instance.
+Authorization is applied per handler with `Depends(RequirePermission(resource, action))`. `RequireIdentity()` authenticates without a permission check; `GET /v1/me` uses it. To prevent forgotten guards from shipping open endpoints, `assert_all_routes_protected` runs at startup and walks every `APIRoute` and `APIWebSocketRoute` to check that the entire dependency subtree includes a `RequirePermission` instance.
 
 If any non-public route lacks one, the server refuses to start:
 
@@ -433,11 +385,12 @@ The check is free per request. Starlette infrastructure routes (`/docs`, `/redoc
 
 ### Public paths
 
-Only this path is publicly accessible:
+Only these paths are publicly accessible:
 
 | Path | Purpose |
 |---|---|
 | `/ping` | Health check (for load balancers and orchestrators) |
+| `/health/ready` | Readiness check |
 
 
 Adding paths to the allowlist requires editing the source frozenset, which is deliberate: opening a route becomes a reviewable change.

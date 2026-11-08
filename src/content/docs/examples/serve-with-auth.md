@@ -6,7 +6,7 @@ section: Examples
 group: Production
 order: 11
 label: Serve with auth
-updated: "2026-10-27"
+updated: "2026-11-08"
 faq:
   - q: Does the production template run with no auth?
     a: "No. With --auth jwt the generated 10xgraph.json sets \"auth\": \"jwt\" and the server needs JWT_SECRET_KEY. If you set \"auth\": null and MODE=production, the server starts open and nothing refuses it, so configure auth yourself."
@@ -14,7 +14,7 @@ faq:
     a: The generated image starts Gunicorn with WEB_CONCURRENCY=2, and an in-memory checkpointer lives inside one process. Use PgCheckpointer so threads, ownership and the tool ledger survive a restart and are shared between workers.
 ---
 
-You write the agent. `10xgraph-api` turns it into an HTTP service with JWT auth, per-user thread ownership, rate limiting and a hardened container. This page goes from an empty folder to a token-protected server and a Docker build, with the commands and files exactly as the CLI generates them.
+You write the agent. `10xgraph-api` turns it into an HTTP service with JWT auth, per-user data ownership, rate limiting and a hardened container. This page goes from an empty folder to a token-protected server and a Docker build, with the commands and files exactly as the CLI generates them.
 
 **Needs:** Python 3.12+, `pip install "10xgraph[openai]" "10xgraph-api[jwt,redis]"` (the template's own `pyproject.toml` lists these), `OPENAI_API_KEY` for the model, and a Redis if you keep the Redis rate limiter. Use `--provider google` or `--provider anthropic` to switch the provider extra and the key name.
 
@@ -30,7 +30,7 @@ The command writes the project into the current folder. The files you will touch
 
 | File | What it holds |
 |---|---|
-| `10xgraph.json` | `"agent": "graph.agent:app"`, `"auth": "jwt"`, `"authorization": "ownership"`, the `cache_store` block, `id_generator`, `websocket` and `ag_ui` both off |
+| `10xgraph.json` | `"agent": "graph.agent:app"`, `"auth": "jwt"`, the `cache_store` block, `id_generator`, `websocket` and `ag_ui` both off |
 | `graph/agent.py` | A `ReactAgent` compiled with a checkpointer |
 | `.env.example` | `MODE="production"`, `ORIGINS`, `ALLOWED_HOST`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `REDIS_URL`, `OPENAI_API_KEY`, empty `DOCS_PATH` |
 | `tests/`, `evals/` | A starter test and a starter eval file |
@@ -124,7 +124,7 @@ curl -s http://127.0.0.1:8000/v1/graph/invoke \
   -d '{"messages":[{"role":"user","content":[{"type":"text","text":"Where is order 1042?"}]}]}'
 ```
 
-The response carries `data.meta.thread_id`. The server makes thread ids; to continue the conversation send `"config": {"thread_id": "<that id>"}` in the next request. Another user's token on that id gets `403`.
+The response carries `data.meta.thread_id`. The server makes thread ids; to continue the conversation send `"config": {"thread_id": "<that id>"}` in the next request. Another user's token on that id gets `404`, the same answer as for an id that does not exist. Call `GET /v1/me` with a token to see the roles, permissions and reach the server resolved for it.
 
 The same call with the TypeScript client (`npm install 10xgraph-client`):
 
@@ -167,7 +167,7 @@ docker compose up --build
 
 ## What this shows
 
-- Auth is on from the first command: the template writes `"auth": "jwt"` and `"authorization": "ownership"`, and a request without a valid token never reaches your graph. See [Security in five minutes](/docs/get-started/security-in-five-minutes).
+- Auth is on from the first command: the template writes `"auth": "jwt"` (default permissions, every user sees only their own data), and a request without a valid token never reaches your graph. To add roles and wider reach for admins, see [API authentication](/docs/server/auth). See [Security in five minutes](/docs/get-started/security-in-five-minutes).
 - Production mode refuses unsafe settings at start (wildcard origins and hosts, enabled docs). See [Production readiness](/docs/production) and [Security model](/docs/production/security-model).
 - The container is hardened by `10xgraph build`, not by your agent code. See [Production checklist](/docs/server/production-checklist) and [Architecture](/docs/production/architecture).
 - What you must still do: set auth (a server with `auth: null` in production starts open), replace the in-memory checkpointer, and put TLS in front. See [What 10xGraph does not protect](/docs/production/limits).

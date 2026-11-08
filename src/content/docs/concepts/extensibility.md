@@ -10,9 +10,9 @@ faq:
   - q: "Why extend a base class instead of modifying the code?"
     a: "Extensions let you swap implementations at runtime without modifying the framework code or graph logic. You keep your custom backend in your own codebase and pass it to `StateGraph(...)`, `compile()` or `10xgraph.json`."
   - q: "Can I extend multiple base classes in the same graph?"
-    a: "Yes. You can extend a checkpointer for storage, a publisher for events, and an authorization backend all in the same graph. They compose independently."
+    a: "Yes. You can extend a checkpointer for storage, a publisher for events, and a `BaseAuth` subclass with its own authorization rules all in the same graph. They compose independently."
   - q: "Which base classes go in compile() vs 10xgraph.json?"
-    a: "Checkpointer, store and media_store go in compile(). Context manager, publisher and ID generator go in the StateGraph constructor. Auth, authorization, thread_name_generator and cache_store are set in 10xgraph.json."
+    a: "Checkpointer, store and media_store go in compile(). Context manager, publisher and ID generator go in the StateGraph constructor. Auth (including its roles and `authorize` rules), thread_name_generator and cache_store are set in 10xgraph.json."
 ---
 
 10xGraph's major components are built on abstract base classes. Extend any of them to swap storage backends, auth mechanisms, LLM providers, ID schemes, rate limiting, or event routing. Your graph logic stays unchanged. This page explains the pattern and shows when and how to extend each.
@@ -36,7 +36,6 @@ flowchart TB
   end
   subgraph "API / Server"
     BAUTH[BaseAuth]
-    BAUTHZ[AuthorizationBackend]
     BCS[BaseCacheStore]
     TNG[ThreadNameGenerator]
     BID[BaseIDGenerator]
@@ -65,8 +64,7 @@ flowchart TB
 | `BaseConverter` | `tenxgraph/runtime/adapters/llm/base_converter.py` | `convert_response()`, `convert_streaming_response()` |
 | `BaseValidator` | `tenxgraph/utils/callbacks.py` | `async validate(messages)` |
 | `BaseIDGenerator` | `tenxgraph/utils/id_generator.py` | `id_type`, `generate()` |
-| `BaseAuth` | `tenxgraph_api/src/app/core/auth/base_auth.py` | `authenticate(request, response, credential)` |
-| `AuthorizationBackend` | `tenxgraph_api/src/app/core/auth/authorization.py` | `authorize(user, resource, action, resource_id=None, **context)` |
+| `BaseAuth` | `tenxgraph_api/src/app/core/auth/base_auth.py` | `authenticate(request, response, credential)`, optional `authorize(identity, permission, resource=None)` |
 | `BaseCacheStore` | `tenxgraph_api/src/app/core/cache_store/base.py` | `aping()`, `now()`, `acquire()`, `renew()`, `release()`, `get()`, `set()`, `delete()` |
 | `ThreadNameGenerator` | `tenxgraph_api/src/app/utils/thread_name_generator.py` | `generate_name(messages)` |
 | `BaseCriterion` | `tenxgraph/qa/evaluation/criteria/base.py` | `async evaluate(actual, expected)` |
@@ -326,23 +324,26 @@ class ApiKeyAuth(BaseAuth):
         return lookup_api_key(key)   # dict with user_id; raise an exception to reject
 ```
 
-### AuthorizationBackend
+### Custom authorization rules
 
-You extend `AuthorizationBackend` when the built-in authorization models (allow-all, ownership, RBAC) do not fit your permission model. Examples: attribute-based access control (ABAC), graph-based permissions, or integration with an external policy engine.
+Override `BaseAuth.authorize` when the built-in role-based permissions do not fit your model. Examples: attribute-based access control (ABAC), graph-based permissions, or integration with an external policy engine. It takes the `Identity`, a `resource:action` permission and an optional resource id, and it takes no request, so background jobs can call it too.
 
 ```python
-from tenxgraph_api.src.app.core.auth.authorization import AuthorizationBackend
+from tenxgraph_api import BaseAuth
 
-class RBACBackend(AuthorizationBackend):
-    async def authorize(self, user, resource, action, resource_id=None, **context) -> bool:
-        return f"{resource}:{action}" in ROLE_PERMISSIONS[user["role"]]
+class PolicyAuth(BaseAuth):
+    def authenticate(self, request, response, credential) -> dict | None:
+        ...  # verify the credential, return claims with user_id
+
+    async def authorize(self, identity, permission, resource=None) -> bool:
+        return await policy_engine.allowed(identity.user_id, permission, resource)
 ```
 
-For simple role-to-scope mapping, you do not need a class. Set `authorization` to an RBAC config block (`{"backend": "rbac", "roles": {...}}`). The built-in `"ownership"` selector gives owner-only threads with no code, and `"allow_all"` permits any authenticated user.
+For simple role-to-permission mapping, you do not need a class. Add `roles` to the `auth` object. See [Authentication and authorization](/docs/server/auth).
 
 ### BaseCacheStore
 
-The API keeps everything it shares between workers in one `BaseCacheStore`: the per-thread run lock, run and WebSocket caps, idempotency, the ownership cache, token revocation and rate-limit counters. `RedisCacheStore` is used when `cache_store.type` is `redis` (Valkey, Dragonfly and KeyDB work through the URL); `InMemoryCacheStore` is the default for one process. You extend `BaseCacheStore` when the shared state has to live in something that does not speak the Redis protocol.
+The API keeps everything it shares between workers in one `BaseCacheStore`: the per-thread run lock, run and WebSocket caps, idempotency, token revocation and rate-limit counters. `RedisCacheStore` is used when `cache_store.type` is `redis` (Valkey, Dragonfly and KeyDB work through the URL); `InMemoryCacheStore` is the default for one process. You extend `BaseCacheStore` when the shared state has to live in something that does not speak the Redis protocol.
 
 ```python
 from tenxgraph_api import BaseCacheStore, SlotResult
@@ -372,12 +373,11 @@ class DatePrefixNameGenerator(ThreadNameGenerator):
         return f"{date.today()}: {messages[0][:30]}"
 ```
 
-Wire any of these in `10xgraph.json`. Auth, authorization, thread naming and the cache store each have a dedicated top-level key:
+Wire any of these in `10xgraph.json`. Auth (with its authorization rules), thread naming and the cache store each have a dedicated top-level key:
 
 ```json
 {
   "auth": { "method": "custom", "path": "auth.my_auth:ApiKeyAuth" },
-  "authorization": "auth.my_auth:RBACBackend",
   "thread_name_generator": "services.naming:DatePrefixNameGenerator",
   "cache_store": "services.cache:store"
 }
@@ -496,6 +496,6 @@ class SlackReporter(BaseReporter):
 | Page | What it covers |
 |---|---|
 | [Callbacks and Command](/docs/concepts/callbacks-and-command) | BaseValidator, CallbackManager, GraphLifecycleHook in practice |
-| [Serving Agents](/docs/concepts/serving-agents) | BaseAuth, AuthorizationBackend, BasePublisher wired to a running server |
+| [Serving Agents](/docs/concepts/serving-agents) | BaseAuth, BasePublisher wired to a running server |
 | [Memory and store](/docs/concepts/memory-and-store) | BaseCheckpointer, BaseStore, BaseEmbedding in the memory layer context |
 | [Testing and evaluation](/docs/testing) | BaseCriterion, BaseReporter in the evaluation pipeline |

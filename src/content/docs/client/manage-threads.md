@@ -218,29 +218,6 @@ This is useful if you want to reset a conversation while keeping the message his
 
 ---
 
-## Add messages to a thread
-
-<aside class="callout callout-warning" role="note"><p class="callout-title">addThreadMessages is deprecated and admin-only</p>
-<p>The server route needs the <code>checkpointer:import</code> scope, so a normal user gets 403. Send messages through <code>invoke</code> or <code>stream</code>, which accept user messages only. To record feedback on a message, use <code>updateThreadMessageFeedback</code> (see the next section).</p></aside>
-
-An admin identity can inject messages of any role directly into a thread's history, for example to import data from an external source:
-
-```ts
-import { Message } from '10xgraph-client';
-
-await client.addThreadMessages(
-  'thread-abc123',
-  [
-    Message.text_message('You are a Paris travel expert.', 'system'),
-  ],
-  {}  // config (the thread_id comes from the path)
-);
-
-console.log('Messages added to thread');
-```
-
-Added messages become part of the thread history and will be included when you list messages or start a new invoke.
-
 ## Set feedback on a message
 
 Attach a rating or comment to a message with `updateThreadMessageFeedback`. It stores your object in `message.metadata.feedback` and replaces any earlier feedback. Nothing else on the message changes.

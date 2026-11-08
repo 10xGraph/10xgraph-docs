@@ -12,7 +12,7 @@ faq:
   - q: "Can I use my own authentication provider?"
     a: "Yes. Subclass BaseAuth, verify the credential however you like (Auth0, Clerk, Firebase, API keys, an internal SSO) and return a dict with user_id. Point the auth key in 10xgraph.json at your class."
   - q: "Does the server scale horizontally?"
-    a: "Yes, once state is outside the process: use a durable checkpointer such as PgCheckpointer and set REDIS_URL. Thread locks, rate limits, per-user run caps, WebSocket caps, ownership cache and token revocation then work across every worker and replica."
+    a: "Yes, once state is outside the process: use a durable checkpointer such as PgCheckpointer and set REDIS_URL. Thread locks, rate limits, per-user run caps, WebSocket caps and token revocation then work across every worker and replica."
   - q: "Is it secure by default?"
     a: "The server refuses to start if any route lacks a permission guard, and production mode refuses wildcard CORS and hosts, short JWT secrets and public API docs. Threads are owner-only, and client input is stripped of reserved keys and forged assistant or system turns."
   - q: "Can I add my own FastAPI routes to the server?"
@@ -73,10 +73,10 @@ Security is not a checklist you finish later. These protections are on unless yo
 
 - **No unguarded routes.** Every route declares the permission it needs. At startup the server checks every route and refuses to boot if one is missing its guard.
 - **Authentication.** Built-in JWT (`"auth": "jwt"`) verifies the signature, requires `exp` and `user_id`, and checks `iss` and `aud` when you set them. In production, a JWT secret under 32 bytes stops the server from starting.
-- **Owner-only threads.** With auth on, a conversation thread belongs to the user who created it. Another user cannot read, run, stop or delete it. Ownership checks are cached in process and in Redis, and fail closed.
-- **Scoped permissions.** Every route maps to a scope such as `graph:invoke` or `checkpointer:delete`. Tokens that carry scopes are limited to them. Role-based access is one config block away.
+- **Owner-only threads.** With auth on, a conversation thread belongs to the user who created it. Another user cannot read, run, stop or delete it: the thread answers 404 because every query is scoped to the caller.
+- **Scoped permissions.** Every route maps to a permission such as `graph:invoke` or `threads:delete`. Tokens that carry `scope` or `scopes` are limited to them. Role-based access is one config block away: see [authentication and authorization](/docs/server/auth).
 - **Token revocation.** Revoke a single token or every token a user holds, backed by Redis. If the revocation store is unreachable, requests fail closed with 503.
-- **Hardened input.** Clients can only send user messages; forged assistant or system turns are refused. Reserved config keys (`user_id`, `authz`, timeouts and others) are stripped, message ids are regenerated server-side, and external media URLs pass an SSRF guard.
+- **Hardened input.** Clients can only send user messages; forged assistant or system turns are refused. Reserved config keys (`user_id`, `user`, timeouts and others) are stripped, message ids are regenerated server-side, and external media URLs pass an SSRF guard.
 - **Production guards.** In production mode the server refuses to start with wildcard CORS origins, wildcard allowed hosts or public API docs.
 - **Security headers and size limits.** HSTS, CSP, frame, content-type and referrer headers on every response. Request bodies over 10 MiB (25 MB for uploads) are rejected with 413, including chunked bodies.
 - **No leaking internals.** In production, 5xx errors return a generic message with a request id. Logs redact tokens, passwords, keys and JWT-shaped strings, and escape control characters so log lines cannot be forged.
@@ -94,7 +94,6 @@ The server keeps no conversation state in the worker. Conversation state lives i
 | Rate limits | Redis sliding window shared by all workers | Per process |
 | Per-user concurrent runs | Redis counter, 429 over the cap | Per process |
 | WebSocket connection caps | Redis, global and per user | Per process |
-| Ownership cache | Redis L2 plus in-process L1 | In-process only |
 | Token revocation | Redis | In memory |
 
 Two requests for the same thread never run at the same time: the second waits up to 30 seconds and then gets a 409, or it can ask the active run to stop and take over. The generated image runs Gunicorn with Uvicorn workers (`WEB_CONCURRENCY`, default 2), and the Kubernetes manifest starts with two replicas and separate liveness and readiness probes.
@@ -118,7 +117,7 @@ Defaults are there to get you to production quickly, not to lock you in. Each pa
 | Part | Default | Replace it with | How |
 |---|---|---|---|
 | Authentication | Off, or built-in JWT | Any identity provider or API keys | Subclass `BaseAuth`; `"auth": {"method": "custom", "path": "auth.my_auth:MyAuth"}` |
-| Authorization | Owner-only threads | Role-based access, or your own rules | `{"backend": "rbac", ...}` or subclass `AuthorizationBackend` and set `"authorization": "module:Class"` |
+| Authorization | Owner-only threads, default permission set | Roles with permissions and reach, or your own rules | `roles` inside the `auth` object, or override `BaseAuth.authorize` |
 | Token revocation | Off | Kept in the API's cache store (Redis, memory or your own) | `"token_revocation": true` plus `redis` or `cache_store` |
 | Rate limiting | Off | Counters in the API's cache store (memory, Redis or your own) | `rate_limit` block plus `redis` or `"cache_store": "module:attr"` |
 | Shared state (locks, caps, idempotency) | One process | Redis, Valkey, Dragonfly, KeyDB or your own `BaseCacheStore` | `redis`, `REDIS_URL` or `cache_store`; see [Bring your own backend](/docs/server/bring-your-own-backend) |
@@ -152,7 +151,7 @@ class MyAuth(BaseAuth):
         claims = verify_with_your_provider(credential.credentials)  # Auth0, Clerk, Firebase, API keys...
         if claims is None:
             raise HTTPException(status_code=401, detail="Invalid credentials")
-        # user_id becomes the owner of threads and memories; roles and scopes feed authorization
+        # user_id becomes the owner of threads and memories; roles feed the built-in RBAC
         return {"user_id": claims["sub"], "roles": claims.get("roles", [])}
 ```
 
@@ -164,14 +163,17 @@ class MyAuth(BaseAuth):
 
 ```json
 {
-  "authorization": {
-    "backend": "rbac",
+  "auth": {
+    "method": "jwt",
+    "roles_claim": "roles",
     "roles": {
-      "admin": ["*"],
-      "member": ["graph:invoke", "graph:stream", "checkpointer:read"]
+      "member": {
+        "permissions": ["graph:invoke", "graph:stream", "threads:read"],
+        "reach": "own"
+      },
+      "admin": {"permissions": ["*"], "reach": "all"}
     },
-    "default_scopes": ["graph:read"],
-    "isolation": "owner"
+    "default_role": "member"
   }
 }
 ```
@@ -180,22 +182,22 @@ class MyAuth(BaseAuth):
 
 ```python
 # auth/team_access.py
-from tenxgraph_api.src.app.core.auth.authorization import AuthorizationBackend
+from tenxgraph_api import BaseAuth
 
 
-class TeamAccess(AuthorizationBackend):
-    async def authorize(self, user, resource, action, resource_id=None, **context) -> bool:
+class TeamAccess(BaseAuth):
+    def authenticate(self, request, response, credential):
+        ...  # verify the credential and return claims with user_id
+
+    async def authorize(self, identity, permission, resource=None) -> bool:
         # Everyone on the team may run the agent; only admins may delete history
-        if action == "delete":
-            return "admin" in user.get("roles", [])
-        return True
-
-    def isolation_scope(self, user) -> str:
-        return "none"  # threads are shared across the team instead of owner-only
+        if permission == "threads:delete":
+            return "admin" in identity.roles
+        return await super().authorize(identity, permission, resource)
 ```
 
 ```json
-{ "authorization": "auth.team_access:TeamAccess" }
+{ "auth": { "method": "custom", "path": "auth.team_access:TeamAccess" } }
 ```
 
 ## Know the boundaries
@@ -204,7 +206,7 @@ A production claim is only useful if it is honest about its edges. Today:
 
 - **Metrics:** there is no Prometheus endpoint, and logs are plain text, not JSON. Use OpenTelemetry tracing and Sentry, or a publisher, for telemetry.
 - **Autoscaling:** the generated Kubernetes manifest has a fixed replica count. Add a HorizontalPodAutoscaler and an Ingress for your cluster.
-- **Per-tool permissions:** scopes apply per route, not per tool. Restrict tools with tool tags or separate graphs.
+- **Per-tool permissions:** permissions apply per route, not per tool. Restrict tools with tool tags or separate graphs.
 - **Custom routes:** mounting the server into your own FastAPI app, or adding routes to it, is not a supported API. Run your own service alongside it.
 - **Checkpointer config:** set the checkpointer in `compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not applied by the server yet. The production template starts with an in-memory checkpointer, so switch it to `PgCheckpointer` before running more than one worker.
 

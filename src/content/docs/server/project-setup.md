@@ -8,7 +8,7 @@ label: Initialize a Project
 updated: "2026-10-27"
 faq:
   - q: "What is the difference between Quick Start and Production templates?"
-    a: "Quick Start generates a minimal graph with 10xgraph.json and environment template. Production adds tests, evaluations, auth stubs, and a full project structure, and writes the recommended config: JWT auth, ownership authorization, a UUID ID generator, a Redis cache store with rate limiting and token revocation."
+    a: "Quick Start generates a minimal graph with 10xgraph.json and environment template. Production adds tests, evaluations, auth stubs, and a full project structure, and writes the recommended config: JWT auth with owner-only data, a UUID ID generator, a Redis cache store with rate limiting and token revocation."
   - q: "Can I change the template or auth choice after scaffolding?"
     a: "Yes, re-run 10xgraph init with --force to regenerate, or edit 10xgraph.json directly. See server/configure for full config reference."
   - q: "When should I choose a memory cache store instead of Redis?"
@@ -178,7 +178,6 @@ Init builds your config from your answers, not a static template. Examples:
   "auth": null,
   "thread_name_generator": "graph.thread_name_generator:MyNameGenerator",
   "injectq": "graph.agent:container",
-  "authorization": null,
   "ag_ui": {"enabled": false}
 }
 ```
@@ -190,7 +189,6 @@ Init builds your config from your answers, not a static template. Examples:
   "agent": "graph.agent:app",
   "env": ".env",
   "auth": "jwt",
-  "authorization": "ownership",
   "thread_name_generator": "graph.thread_name_generator:MyNameGenerator",
   "injectq": "graph.agent:container",
   "id_generator": "uuid",
@@ -214,7 +212,7 @@ Init builds your config from your answers, not a static template. Examples:
 
 The cache store has no `url`, so Redis comes from the `REDIS_URL` environment variable. The block also holds the `test` and `evaluation` defaults.
 
-**Production with `--auth none`:** the same file with `"auth": null`, no `authorization` and no token revocation.
+**Production with `--auth none`:** the same file with `"auth": null`, and no token revocation.
 
 For full details on every config key, see `/docs/server/configure`. To see what each key does when it is absent, see [What is on by default](/docs/server/configure#what-is-on-by-default).
 

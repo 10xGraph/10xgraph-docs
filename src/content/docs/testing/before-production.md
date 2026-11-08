@@ -1,7 +1,7 @@
 ---
 title: Test before production
 seoTitle: "Test a 10xGraph agent before production"
-description: "A pre-launch ladder: unit tests, evals and audit as CI gates, a production-mode startup check, and curl smoke tests for auth (401), isolation (403) and rate limits (429)."
+description: "A pre-launch ladder: unit tests, evals and audit as CI gates, a production-mode startup check, and curl smoke tests for auth (401), isolation (404) and rate limits (429)."
 section: "Testing and evaluation"
 order: 15
 label: Before production
@@ -74,7 +74,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:8000/v1/graph/
 
 Expected: `401`. A `200` means auth is off.
 
-**Isolation: another user's thread returns 403.** Call as user A, copy `data.meta.thread_id`, then read it as user B.
+**Isolation: another user's thread returns 404.** Call as user A, copy `data.meta.thread_id`, then read it as user B.
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" \
@@ -82,7 +82,7 @@ curl -s -o /dev/null -w "%{http_code}\n" \
   http://127.0.0.1:8000/v1/threads/$ALICE_THREAD_ID/messages
 ```
 
-Expected: `403`. The same request with Alice's token returns `200`.
+Expected: `404`. The same request with Alice's token returns `200`.
 
 **Rate limit: a burst returns 429.** Set a low `rate_limit` in a test config (for example `requests: 5`), then send more than that in one window.
 

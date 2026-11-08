@@ -1,12 +1,12 @@
 ---
 title: Multi-tenant data
 seoTitle: "Multi-tenant data in 10xGraph"
-description: "Isolate organizations and projects in one Postgres with tenant columns on PgCheckpointer and PgVectorStore, pick isolation scopes per user and filter your own columns."
+description: "Isolate organizations and projects in one Postgres with tenant columns on PgCheckpointer and PgVectorStore, set reach per role and filter your own columns."
 section: "Build agents"
 group: "State, memory and context"
 order: 253
 label: Multi-tenant data
-updated: "2026-11-05"
+updated: "2026-11-08"
 ---
 
 `PgCheckpointer` and `PgVectorStore` accept two kinds of columns you declare yourself. **Tenant columns** such as `org_id` and `project_id` isolate data the way `user_id` does. **Extra columns** such as `public_id` or `plan` are plain data you can read and filter. 10xGraph owns a few columns; the rest of the schema is yours. Nothing is created until you declare something.
@@ -20,12 +20,12 @@ updated: "2026-11-05"
 | Value required on write | Yes, by default | No, by default (missing is `NULL`) |
 | Opt out or opt in | `{"type": "text", "required": False}` | `{"type": "integer", "required": True}` |
 | Allowed types | `text`, `bigint`, `integer`, `uuid` | Any Postgres type |
-| Used in isolation scopes | Yes | No |
+| Used for reach (`tenant`) | Yes | No |
 | Allowed in client `filters` | No, always rejected | Yes |
 
 Both options exist on `PgCheckpointer` (columns on the `threads` table) and `PgVectorStore` (columns on the memories table). Each declared column becomes a real column with a B-tree index.
 
-**Reserved names.** A tenant or extra column cannot be named `authz`, `scope`, `scopes`, `role` or `roles`: those keys of `config["user"]` carry authorization data (the isolation policy, granted scopes and roles), so declaring one raises `ValueError`. Built-in column names of the table (such as `user_id`, `created_at`, `memory_key`) are refused too. Pick another name, for example `org_role`.
+**Reserved names.** A tenant or extra column cannot be named `kind`, `tenant`, `roles`, `permissions`, `reach` or `claims`: those are fields of the `Identity` in `config["user"]` and carry authorization data, so declaring one raises `ValueError`. Built-in column names of the table (such as `user_id`, `created_at`, `memory_key`) are refused too. Pick another name, for example `org_role`.
 
 A declaration is a list of names (each a `text` column), a mapping of name to type, or a mapping of name to `{"type": ..., "required": ...}`:
 
@@ -50,15 +50,15 @@ Names match `^[a-z_][a-z0-9_]{0,62}$`, cannot be a column the table already owns
 
 <Callout type="warning" title="Trusted source rule">
 
-Tenant and extra column values come only from `config["user"]`. `user` is a reserved config key: clients cannot set it. Your auth class fills it (the `BaseAuth.authenticate()` result or JWT claims). Return `org_id`, `project_id` and `public_id` there. Never read them from request config, metadata, state or model output.
+Tenant values come only from the `Identity` in `config["user"]`, taken from the claims you list in `auth.tenant_claims`. Extra column values come from the same identity's claims. `user` is a reserved config key: clients cannot set it. Your auth class fills it (the `BaseAuth.authenticate()` result or JWT claims). Return `org_id`, `project_id` and `public_id` there. Never read them from request config, metadata, state or model output.
 
 </Callout>
 
-Every write stores the values found in `config["user"]`. Every read, update and delete is filtered by the tenant columns the caller's isolation scope picks, using the same source. A client that sends `org_id` in its request config, in a message or in a tool argument changes nothing, because only `config["user"]` is read.
+Every write stores the values found in `config["user"]`. Every read, update and delete is filtered by the caller's reach, using the same source. A client that sends `org_id` in its request config, in a message or in a tool argument changes nothing, because only `config["user"]` is read.
 
 ### With the API server and a custom `BaseAuth`
 
-Return the values from `authenticate()`. Every key you return is merged into `config["user"]`.
+Return the values from `authenticate()`. Every key you return ends up in the identity's claims, and the keys named in `auth.tenant_claims` become its tenant values. A token with a tenant claim missing is rejected with 401.
 
 ```python title="auth/tenant_auth.py"
 from fastapi import HTTPException, Request, Response
@@ -82,20 +82,27 @@ class TenantAuth(BaseAuth):
             "org_id": claims["org_id"],
             "project_id": claims["project_id"],
             "public_id": claims["public_id"],
-            "role": claims.get("role", "user"),
+            "roles": claims.get("roles", ["member"]),
         }
 ```
 
 ```json title="10xgraph.json"
 {
   "agent": "graph.agent:app",
-  "auth": { "method": "custom", "path": "auth.tenant_auth:TenantAuth" },
-  "authorization": "auth.tenant_authz:TenantAuthorization",
+  "auth": {
+    "method": "custom",
+    "path": "auth.tenant_auth:TenantAuth",
+    "tenant_claims": ["org_id", "project_id"],
+    "roles": {
+      "member": {"permissions": ["graph:*", "threads:*", "store:*", "files:*"], "reach": "own"},
+      "org_admin": {"inherits": ["member"], "reach": "tenant"}
+    }
+  },
   "store": "graph.dependencies:store"
 }
 ```
 
-The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The `store` key points to the same `PgVectorStore` instance you compile with.
+The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The `store` key points to the same `PgVectorStore` instance you compile with. `tenant_claims` must list the same names as the tenant columns on both. Boot refuses a mismatch under `MODE=production` and warns otherwise.
 
 ### With the API server and JWT
 
@@ -107,7 +114,7 @@ The built-in `"auth": "jwt"` backend returns the whole decoded token as the user
   "org_id": "7b0e2b3a-9a57-4b14-8e1b-2a1e3f1c9c11",
   "project_id": "docs",
   "public_id": "usr_8f2k",
-  "role": "org_admin",
+  "roles": ["org_admin"],
   "exp": 1893456000
 }
 ```
@@ -116,18 +123,18 @@ The signature is what makes the claims trustworthy, so keep `JWT_SECRET_KEY` sec
 
 ### Core only, without the API server
 
-When you call the compiled graph from your own code, your process is the trust boundary. Build `config["user"]` yourself from your verified session or token:
+When you call the compiled graph from your own code, your process is the trust boundary. Build `config["user"]` yourself from your verified session or token. It takes an `Identity` or a dict that validates into one; an unknown key raises:
 
 ```python title="run.py"
 def run_config(session, thread_id: str) -> dict:
     """`session` comes from your own verified login, never from the request body."""
     return {
         "thread_id": thread_id,
-        "user_id": session.user_id,
         "user": {
-            "org_id": session.org_id,
-            "project_id": session.project_id,
-            "public_id": session.public_id,
+            "user_id": session.user_id,
+            "tenant": {"org_id": session.org_id, "project_id": session.project_id},
+            "claims": {"public_id": session.public_id},
+            "reach": "own",
         },
     }
 
@@ -178,68 +185,60 @@ The API server runs the same check on a store bound with the `store` key in `10x
 
 Notes on each backend:
 
-- **`PgCheckpointer`** sets the values when a thread is created and never changes them. Every query that touches a thread (threads, states, messages, tool executions) is filtered through the thread row. Schema version 6 adds the columns to `threads` with `ADD COLUMN IF NOT EXISTS`, and a column you declare later is added on the next setup. `aget_thread_scope(thread_id)` returns `{"user_id": ..., "org_id": ...}` for a thread (all tenant columns), without scoping to the caller; the API's ownership backend uses it to decide whether a caller may act on a thread. `aget_thread_owner` is kept.
-- **`PgVectorStore`** adds missing columns on every `asetup()`. The tenant columns also join the unique `memory_key` index, so the same `user_id` in two tenants keeps separate memories for the same key. Shared data written under `system_user_id(name)` is shared only inside the tenant values the scope picks.
+- **`PgCheckpointer`** sets the values when a thread is created and never changes them. Every query that touches a thread (threads, states, messages, tool executions) is filtered through the thread row. Schema version 6 adds the columns to `threads` with `ADD COLUMN IF NOT EXISTS`, and a column you declare later is added on the next setup. `aget_thread_scope(thread_id)` returns `{"user_id": ..., "org_id": ...}` for a thread (all tenant columns), without scoping to the caller. `aget_thread_owner` is kept.
+- **`PgVectorStore`** adds missing columns on every `asetup()`. The tenant columns also join the unique `memory_key` index, so the same `user_id` in two tenants keeps separate memories for the same key. Shared data written under `system_user_id(name)` is shared only inside the caller's tenant values, on every reach.
 - **`InMemoryCheckpointer` and `SqliteCheckpointer`** raise if you pass `tenant_columns`, `extra_columns` or `row_level_security`. Use `PgCheckpointer` for tenant data.
 
-## Isolation scopes
+## Reach
 
-An isolation scope says which columns a caller's rows must match. The authorization backend chooses it per request from the authenticated user, and the server stamps it into `config["user"]["authz"]`, where the clients cannot reach it. The scope is a list of column names, or one of two shortcuts from `tenxgraph.core.authz.Isolation`:
+Reach says which rows a caller's queries match. You set it per role in `auth.roles`, and the server puts it on the `Identity`. Storage reads it on every query.
 
-| Scope | Columns the caller's rows must match |
+| Reach | Rows the caller's queries match |
 |---|---|
-| `Isolation.OWNER` (`"owner"`) | `user_id` and every declared tenant column |
-| `Isolation.NONE` (`"none"`) | None: storage is not scoped |
-| `["org_id"]` | Rows with the caller's `org_id`, any user |
-| `["org_id", "project_id"]` | Rows with the caller's `org_id` and `project_id`, any user |
+| `own` | `user_id` and every declared tenant column: the caller's own rows in their tenant |
+| `tenant` | Every declared tenant column, any user: all rows of the caller's tenant |
+| `all` | No filter: every row of every tenant |
 
-Any subset of `user_id` and the declared tenant columns is allowed. Leaving `user_id` out means rows of every user in that tenant match.
-
-Return the scope from `isolation_scope(self, user)` on an `AuthorizationBackend`. Subclass `OwnershipAuthorizationBackend` to keep the thread ownership check, which compares the same columns:
-
-```python title="auth/tenant_authz.py"
-from tenxgraph.core.authz import Isolation
-from tenxgraph_api.src.app.core.auth.authorization import OwnershipAuthorizationBackend
-
-
-class TenantAuthorization(OwnershipAuthorizationBackend):
-    def isolation_scope(self, user):
-        role = user.get("role")
-        if role == "super_admin":
-            return Isolation.NONE                 # every thread and memory
-        if role == "org_admin":
-            return ["org_id"]                     # everything in the caller's org
-        if role == "project_admin":
-            return ["org_id", "project_id"]       # everything in the caller's project
-        return Isolation.OWNER                    # the caller's own rows in their org and project
+```json title="10xgraph.json"
+{
+  "auth": {
+    "method": "jwt",
+    "tenant_claims": ["org_id", "project_id"],
+    "roles": {
+      "member": {"permissions": ["graph:*", "threads:*", "store:*", "files:*"], "reach": "own"},
+      "org_admin": {"inherits": ["member"], "reach": "tenant"},
+      "super_admin": {"permissions": ["*"], "reach": "all"}
+    }
+  }
+}
 ```
 
-| Caller | Scope | What they see |
+| Caller | Reach | What they see |
 |---|---|---|
-| Super admin | `Isolation.NONE` | Every thread and memory |
-| Org admin | `["org_id"]` | All threads and memories of the org |
-| Project admin | `["org_id", "project_id"]` | All threads and memories of the project |
-| User | `Isolation.OWNER` | Their own threads and memories |
+| Super admin | `all` | Every thread and memory |
+| Org admin | `tenant` | All threads and memories with the caller's `org_id` and `project_id` |
+| User | `own` | Their own threads and memories |
 
 Rules to know:
 
-- **Unknown scopes raise.** A string other than `"owner"` or `"none"` (such as the typo `"owners"`), a value that is neither a string nor a list, or a list entry that is not a valid column name raises `ValueError`. A list that names a column the backend does not declare raises too. A typo never becomes "no isolation". The API's `RoleBasedAuthorizationBackend` checks its `isolation` setting the same way when the server boots.
-- **A picked column needs a value.** If the scope picks `org_id` and `config["user"]` has no `org_id`, the call raises. The column is never dropped from the filter quietly.
-- **The default is `"owner"`.** A backend without `isolation_scope`, or one that does not override it, means `Isolation.OWNER`. Backends written before 1.0 with `isolation_scope(self)` and no `user` argument keep working.
-- **A scope without `user_id` changes what identifies a row.** With `["project_id"]` alone, rows match on `project_id` only, so two orgs that both have a project called `"docs"` would see each other's rows. Pick a column set that is unique for your ids, such as `["org_id", "project_id"]`.
-- **Store calls still carry a `user_id`.** Writes and `aforget_memory` always name an owner, whatever the scope is.
-- **Thread access follows the scope.** A thread is accessible when its tenant values equal the caller's on every picked column. An org admin can open any thread of the org; a scope of `Isolation.NONE` reaches any existing thread.
+- **Reach widens reads, lists and deletes only.** Runs and state or message writes always stay `own`, admins included. Nobody runs inside another user's thread. Stop follows reach.
+- **Reach is never a fallback.** A role with a missing or unknown reach refuses to boot. A token cannot name its own reach.
+- **A picked column needs a value.** Reach `own` needs a value for every declared tenant column in `Identity.tenant`. A missing value raises, and the API answers 401 because the token lacks a tenant claim. The column is never dropped from the filter quietly.
+- **Reach `tenant` needs tenant columns.** `InMemoryCheckpointer` and `SqliteCheckpointer` declare none. On them a read, list or delete by a caller with reach `tenant` raises `ValueError`, so the request fails; it never falls back to `own`. Writes use `own` and still work. Use `PgCheckpointer` with tenant columns for any role with reach `tenant`.
+- **Reach `tenant` matches every declared tenant column.** All declared columns must equal the caller's values. A role cannot pick a subset.
+- **A foreign row is a 404.** A thread outside the caller's reach looks the same as a missing one.
+- **Store calls still carry a `user_id`.** Writes and `aforget_memory` always name an owner, whatever the reach is.
+- **Shared data stays shared inside the tenant.** Rows written under a `__system__:<name>` owner (agent memory, knowledge bases) are pinned to that owner on every reach, so a wider reach never reads other users' rows through a shared-data query.
 
-In core-only use, build the block with `build_authz` and put it in `config["authz"]` (the API's stamp in `config["user"]["authz"]` always wins over it):
+In core-only use, put the reach on the identity yourself:
 
 ```python
-from tenxgraph.core.authz import Isolation, build_authz
+from tenxgraph.core.authz import Identity, Reach
 
-config["authz"] = build_authz(session.user_id, scope=["org_id"])      # an org admin
-config["authz"] = build_authz(session.user_id, scope=Isolation.OWNER)
+config["user"] = Identity(user_id=session.user_id, tenant={"org_id": "acme"}, reach=Reach.TENANT)
 ```
 
-When `config["authz"]` is absent, isolation falls back to each backend's own setting and the scope picks every declared tenant column.
+Without any identity, each backend applies its own default, and the filter helper `owner_filter(config, tenant_columns)` returns `None`.
 
 ## Filters
 
@@ -320,12 +319,12 @@ It needs at least one tenant column. Setup runs `ENABLE` and `FORCE ROW LEVEL SE
 
 - **Cost.** One transaction and one extra statement per call, plus a thread lookup per child row on the checkpointer. It is off by default.
 - **Superusers and roles with `BYPASSRLS` skip RLS.** A warning is logged when the connected role does. Connect with an ordinary role. The table owner is filtered only because of `FORCE`.
-- **Maintenance calls** that deliberately cross tenants (`aget_thread_scope`, `abackfill_embeddings`) set a scope that picks no tenant column, which the policy reads as all rows.
+- **Maintenance calls** that deliberately cross tenants (`aget_thread_scope`, `abackfill_embeddings`) run with no tenant values set, which the policy reads as all rows.
 - **Turning it off.** Keep the tenant columns and set `row_level_security=False`: the next setup drops the policies and disables RLS. This works the same on the store.
 
 ## Backfill old rows
 
-Rows written before a tenant column existed hold `NULL` in it. A scope that picks that column never matches them, so those threads and memories become invisible to every caller, including admins whose scope picks the column, until you fill them in. A scope that does not pick the column, such as `Isolation.NONE`, still sees them.
+Rows written before a tenant column existed hold `NULL` in it. Reach `own` and `tenant` never match them, so those threads and memories become invisible to every caller on those reaches, admins included, until you fill them in. Reach `all` has no filter and still sees them.
 
 After declaring the column and running setup, update the old rows yourself:
 
@@ -347,7 +346,7 @@ Map each old `user_id` to its tenant in your own data. If your tenant column was
 The `memory_key` unique index gains the tenant columns, so the same `user_id` in two tenants keeps separate keyed memories. On a table in use, roll it out in three steps:
 
 1. **Deploy** the new version with `tenant_columns`. Setup adds the columns and builds the new index `<table>_kuq_<hash>` with `CREATE INDEX CONCURRENTLY`. It keeps the old index `<table>_key_uq`, because pods still on the previous version need it as the `ON CONFLICT` target of their keyed writes. While both indexes exist, a keyed write for the same `(collection, user_id, memory_type, memory_key)` in a second tenant fails with `ValueError`, whose message names the old index. Nothing else changes, and setup logs a warning that the old index is kept.
-2. **Backfill** the tenant values of old rows once every pod runs the new version (see [Backfill old rows](#backfill-old-rows)). Old rows hold `NULL` and are invisible to scopes that pick those columns.
+2. **Backfill** the tenant values of old rows once every pod runs the new version (see [Backfill old rows](#backfill-old-rows)). Old rows hold `NULL` and are invisible to reach `own` and `tenant`.
 3. **Drop the old index** once:
 
 ```python
@@ -373,7 +372,7 @@ Uploaded files follow the same tenant isolation as threads and memories. When th
 - `GET /v1/files`, which lists only the caller's files in their tenant
 - any `graph://media/` or `file_id` reference in a run, `PUT state` or `POST messages`
 
-The same `user_id` in two organisations is two identities: neither sees the other's files, and each has its own upload quota. An identity with no tenant value cannot upload (403) or read files.
+Reads and deletes follow the caller's reach: a role with reach `tenant` can read and delete the files of its tenant, and reach `all` any file. Uploads always belong to the uploader. The same `user_id` in two organisations is two identities: neither sees the other's files, and each has its own upload quota. An identity with no tenant value cannot upload (403) or read files.
 
 Files uploaded before tenant columns were declared carry no tenant values and are denied. To keep them, backfill each file's metadata with `{"tenant": {"org_id": "<value>"}}`, using the canonical text form (for example a lowercase UUID).
 
@@ -381,10 +380,10 @@ Deleting a thread, including by an org admin, releases the files the thread's ow
 
 ## RAGAgent and tenant stores
 
-`RAGAgent` forwards only `config["user"]` from the run config into the config it passes to `store.asearch`, so a store with tenant columns scopes knowledge-base searches to the caller's tenant. It never forwards `config["authz"]`: a caller whose scope is `Isolation.NONE` must not widen a knowledge-base search to every tenant. The tenant values are read from the run config only, never from state, messages or model output.
+`RAGAgent` forwards only `config["user"]` from the run config into the config it passes to `store.asearch`, so a store with tenant columns scopes knowledge-base searches to the caller's tenant. It pins the forwarded identity to the knowledge-base owner (`system_user_id("knowledge_base")` by default) with reach `own`, so a caller with reach `tenant` or `all` cannot widen a knowledge-base search to other users' rows. The tenant values are read from the run config only, never from state, messages or model output.
 
 - Documents written with tenant values are visible only inside that tenant.
-- To share one knowledge base across tenants, either set `"authz"` yourself in `store_config` or the builder output with a scope that does not pick the tenant columns, or use a store without tenant columns. In the second case compile with `allow_tenant_mismatch=True` when the checkpointer declares tenant columns.
+- To share one knowledge base across tenants, use a store without tenant columns, and compile with `allow_tenant_mismatch=True` when the checkpointer declares tenant columns.
 
 ## Contains search with `pg_trgm`
 
@@ -401,6 +400,6 @@ CREATE INDEX threads_title_trgm ON public.threads USING gin (title gin_trgm_ops)
 
 - **To set up the store:** [How to use PgVectorStore](/docs/guides/use-pgvector-store).
 - **For checkpointer options:** [Set up checkpointing](/docs/guides/set-up-checkpointing).
-- **For authorization scopes inside nodes and tools:** [Authorization scopes](/docs/guides/authorization-scopes).
+- **For permissions inside nodes and tools:** [Authorization scopes](/docs/guides/authorization-scopes).
 - **For authentication and ownership on the server:** [Set up API authentication and authorization](/docs/server/auth).
 - **For runnable code:** `examples/long_term_memory/multi_tenant_memory.py` and `examples/long_term_memory/pgvector_memory.py`.

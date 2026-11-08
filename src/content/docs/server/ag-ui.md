@@ -76,7 +76,9 @@ curl -N http://127.0.0.1:8000/v1/ag-ui \
 |---|---|
 | `data: {"type": "RUN_STARTED"...` followed by events and `data: {"type": "RUN_FINISHED"...` | Endpoint is working |
 | `404` | AG-UI is not enabled in 10xgraph.json, or the server was not restarted |
-| `401` or `403` | Authentication is required and the token is missing, invalid, or not authorized for this thread |
+| `401` | Authentication is required and the token is missing or invalid |
+| `403` | The token lacks the permission for the route (`graph:stream`) |
+| `404` | The thread does not exist for this caller (unknown, or owned by someone else) |
 | `422` | The request body is invalid. Check that `threadId`, `runId`, and `messages` are present and properly formatted |
 | `data: {"type": "RUN_ERROR"...` in the stream | The run started but encountered an error. Check the server logs for details |
 
@@ -101,7 +103,7 @@ The AG-UI endpoint is mounted whenever enabled, regardless of `MODE`. Treat it w
 
 ### Persistent checkpointing
 
-AG-UI clients identify the conversation by `threadId`, which the server maps to a 10xGraph thread. AG-UI follows `runs.thread_ids` like REST. With the default `"server"`, a `threadId` the server never issued gets `403`; send a blank or `"new"` `threadId` to have the server create the thread, and read the id from `RUN_STARTED`. CopilotKit makes its own ids by default, so a CopilotKit frontend needs `"runs": {"thread_ids": "client"}` in `10xgraph.json`. An existing thread is owner-checked as usual. The server reads the checkpoint to determine which messages are new and only sends those to the graph. With an in-memory checkpointer:
+AG-UI clients identify the conversation by `threadId`, which the server maps to a 10xGraph thread. AG-UI follows `runs.thread_ids` like REST. With the default `"server"`, a `threadId` the server never issued gets `404`; send a blank or `"new"` `threadId` to have the server create the thread, and read the id from `RUN_STARTED`. CopilotKit makes its own ids by default, so a CopilotKit frontend needs `"runs": {"thread_ids": "client"}` in `10xgraph.json`. An existing thread is scoped to the caller as usual, so another user's thread answers `404`. The server reads the checkpoint to determine which messages are new and only sends those to the graph. With an in-memory checkpointer:
 
 - Threads are lost when the server restarts
 - State is not shared across replicas
@@ -111,12 +113,11 @@ Use a persistent checkpointer (Postgres or SQLite). See [Set up checkpointing](/
 
 ### Authentication and authorization
 
-Without authentication, anyone can access anyone's thread. Enable auth with `"auth": "jwt"` or a custom `BaseAuth` subclass. In production, the authorization backend defaults to `ownership`, which enforces that each user can only access their own threads.
+Without authentication, anyone can access anyone's thread. Enable auth with `"auth": "jwt"` or a custom `BaseAuth` subclass. With auth on, each user reaches only their own threads by default (reach `own`).
 
 ```json
 {
-  "auth": "jwt",
-  "authorization": "ownership"
+  "auth": "jwt"
 }
 ```
 

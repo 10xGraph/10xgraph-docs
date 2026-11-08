@@ -9,7 +9,7 @@ faq:
   - q: "Do I need Redis to run more than one worker?"
     a: "You can run without it, but the per-thread run lock, the per-user run cap, WebSocket caps, idempotency, rate limits and token revocation then live in each process (the in-memory cache store). A cap of 10 across 4 workers becomes up to 40. Configure Redis, or your own cache store, for any multi-worker deployment."
   - q: "What happens if Redis goes down?"
-    a: "Rate limiting follows rate_limit.fail_open (default true: requests are allowed; false answers 503 RATE_LIMIT_UNAVAILABLE). The run lock, run cap, WebSocket caps and idempotency fail open. Ownership lookups fall back to the database. Token revocation fails closed with a 503. The readiness probe reports the cache store as failed, and returns 503 only when token revocation or a fail-closed rate limit uses it."
+    a: "Rate limiting follows rate_limit.fail_open (default true: requests are allowed; false answers 503 RATE_LIMIT_UNAVAILABLE). The run lock, run cap, WebSocket caps and idempotency fail open. Token revocation fails closed with a 503. The readiness probe reports the cache store as failed, and returns 503 only when token revocation or a fail-closed rate limit uses it."
   - q: "What happens if Postgres goes down?"
     a: "Runs that need the checkpointer fail, and GET /health/ready returns 503 so an orchestrator takes the pod out of rotation. Liveness (/ping) stays up."
   - q: "Is there a queue for long runs?"
@@ -24,7 +24,6 @@ The API keeps its shared state in one `BaseCacheStore`. Set `cache_store.type` t
 
 | Feature | With Redis | Without Redis (per process) |
 |---|---|---|
-| Thread ownership cache | L1 in each worker (30 s), L2 shared in Redis (1 h). Only known owners are cached, never "no owner". Deleting a thread evicts both and leaves a tombstone for 30 s so another user cannot claim the id while a worker still holds the old owner. | L1 only; the tombstone exists only on the worker that handled the delete. |
 | Rate limit | One sliding window for all workers. | Each worker counts alone, so the real limit is `requests x workers`. |
 | Per-thread run lock | One-slot lease shared by all workers. Renewed while the run is alive, expires if the worker dies. | Lock holds only for runs on the same worker. Two workers can run one thread at once, and the Postgres version check then rejects the later write with a 409. |
 | Per-user run cap (`runs.max_concurrent_per_user`) | Leases shared by all workers. | Counted per process: up to `limit x workers`. |
@@ -57,7 +56,7 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 | Per-thread run lock | One run per thread, so a double click or a second tab does not interleave history. |
 | Timeouts | `runs.timeout` bounds a whole run. Set `node_timeout` and `tool_timeout` (no default) so one stuck tool cannot hold a run forever. |
 | Parallel tool cap | Tools run in parallel up to 10 by default. Change it with `runs.max_parallel_tool_calls` or `TENXGRAPH_MAX_PARALLEL_TOOL_CALLS`. |
-| Graceful shutdown | On SIGTERM the worker marks the app as draining, so `/health/ready` answers 503 and the load balancer stops sending new requests. Open runs get up to `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` (540 by default) to finish. Open streams then end with a final "interrupted" chunk. The app calls `graph.aclose()` with `SHUTDOWN_GRACE_SECONDS`, `SHUTDOWN_STOP_SECONDS` and `SHUTDOWN_TIMEOUT_SECONDS` (10, 10 and 30 seconds by default), which also drains background work, and closes limiters, revocation and authorization backends. A run that was cut off leaves a thread the next message can use. See [Graceful shutdown](/docs/guides/graceful-shutdown). |
+| Graceful shutdown | On SIGTERM the worker marks the app as draining, so `/health/ready` answers 503 and the load balancer stops sending new requests. Open runs get up to `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` (540 by default) to finish. Open streams then end with a final "interrupted" chunk. The app calls `graph.aclose()` with `SHUTDOWN_GRACE_SECONDS`, `SHUTDOWN_STOP_SECONDS` and `SHUTDOWN_TIMEOUT_SECONDS` (10, 10 and 30 seconds by default), which also drains background work, and closes limiters and revocation. A run that was cut off leaves a thread the next message can use. See [Graceful shutdown](/docs/guides/graceful-shutdown). |
 | Readiness probe | `GET /health/ready` calls `aping()` on the checkpointer, the store and the cache store (each time-boxed to 2 s, cached for 3 s) and returns 200 or 503. The response keys are `checkpointer`, `store` and `cache`. The cache store fails readiness only when token revocation or a fail-closed rate limit uses it. It is public and returns only `ok` or `fail` per component. `/ping` is the liveness probe. |
 
 ## Failure behaviour

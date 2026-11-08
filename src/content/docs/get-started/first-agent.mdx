@@ -392,7 +392,7 @@ When you call `/v1/graph/invoke`, you send a `GraphInputSchema` and get back a `
 
 <Callout type="tip" title="Let the server pick the thread id">
 
-Omit `thread_id` from `config` to start a new thread. The server picks the id and returns it in `data.meta.thread_id`, and on every chunk of a stream. Send that id on later requests to continue, resume or stop the conversation. By default the server refuses an id it did not create (`403`), so do not make one up. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
+Omit `thread_id` from `config` to start a new thread. The server picks the id and returns it in `data.meta.thread_id`, and on every chunk of a stream. Send that id on later requests to continue, resume or stop the conversation. By default the server refuses an id it did not create (`404`), so do not make one up. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 
 </Callout>
 

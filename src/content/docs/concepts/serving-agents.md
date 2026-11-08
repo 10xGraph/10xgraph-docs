@@ -19,7 +19,7 @@ flowchart TB
     FA[FastAPI]
     RATE[RateLimitMiddleware]
     AUTH[BaseAuth.authenticate]
-    AUTHZ[AuthorizationBackend]
+    AUTHZ[BaseAuth.authorize]
     SVC[GraphService]
     GRAPH["Compiled Graph\n(loaded once at startup)"]
   end
@@ -61,7 +61,6 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
   "agent": "graph.agent:get_compiled_graph",
   "env": ".env",
   "auth": "jwt",
-  "authorization": "auth.agent_auth:MyAuthorizationBackend",
   "injectq": "graph.agent:container",
   "store": "services.store:my_store",
   "thread_name_generator": "services.naming:MyNameGenerator",
@@ -83,14 +82,13 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
 |---|---|---|
 | `agent` | module:callable | Returns a `CompiledGraph`. Required. |
 | `env` | file path | Path to a `.env` file, loaded at startup. |
-| `auth` | `"jwt"` \| object | `"jwt"` enables built-in JWT auth; `{"method": "custom", "path": "module:Class"}` loads your `BaseAuth` subclass. |
-| `authorization` | module:path \| name \| object | Your `AuthorizationBackend`, a built-in name, or an RBAC config. See Authorization. |
+| `auth` | `"jwt"` \| object | `"jwt"` enables built-in JWT auth; `{"method": "custom", "path": "module:Class"}` loads your `BaseAuth` subclass. Role keys (`roles`, `roles_claim`, `tenant_claims` and others) sit in the same object. See Authorization. |
 | `checkpointer` | module:path | Accepted in the file, but the server does not load it. Pass the checkpointer to `compile(checkpointer=...)` in your graph module instead. |
 | `injectq` | module:path | Points to an `InjectQ` container instance. |
 | `store` | module:path | Loads your `BaseStore` for long-term memory. |
 | `id_generator` | name \| module:path | `uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or your `BaseIDGenerator`. |
 | `thread_name_generator` | name \| module:path | `random` (default), `first_message`, `none`, or your `ThreadNameGenerator` class or instance. |
-| `cache_store` | object | The cache store (`type`, `url`, `path`) plus `rate_limit` and `token_revocation` (see below). The ownership authorization cache uses it as a shared cache tier. |
+| `cache_store` | object | The cache store (`type`, `url`, `path`) plus `rate_limit` and `token_revocation` (see below). |
 
 **Starting the server:**
 
@@ -108,13 +106,13 @@ The API exposes these routers (all under `/v1` except `/ping`):
 | Router | Endpoints | Purpose |
 |---|---|---|
 | Graph | `POST /v1/graph/invoke`, `POST /v1/graph/stream`, `WebSocket /v1/graph/ws`, `WebSocket /v1/graph/live`, `POST /v1/graph/stop`, `POST /v1/graph/fix`, `GET /v1/graph`, `GET /v1/graph/tools` | Invoke or stream the agent, stop a run, fix interrupted state, get graph info. |
-| Threads | `GET /v1/threads`, `GET /v1/threads/{id}`, `GET`/`PUT`/`DELETE /v1/threads/{id}/state`, `GET`/`POST /v1/threads/{id}/messages`, `GET`/`PUT`/`DELETE /v1/threads/{id}/messages/{message_id}` | Manage thread state and message history. `POST` messages is admin-only; `PUT` message sets feedback. |
+| Threads | `GET /v1/threads`, `GET /v1/threads/{id}`, `GET`/`PUT`/`DELETE /v1/threads/{id}/state`, `GET /v1/threads/{id}/messages`, `GET`/`PUT`/`DELETE /v1/threads/{id}/messages/{message_id}` | Manage thread state and message history. `PUT` message sets feedback. |
 | Store | `POST /v1/store/memories`, `POST /v1/store/memories/list`, `POST /v1/store/memories/{id}`, `POST /v1/store/search` | Long-term memory operations. |
 | Files | `POST /v1/files/upload`, `GET /v1/files/{id}`, `GET /v1/files/{id}/info`, `GET /v1/files/{id}/url` | Upload, retrieve, and get signed URLs for media. |
 | Config | `GET /v1/config/multimodal` | Get multimodal settings. |
 | Ping | `GET /ping` | Health check. |
 
-When configured, rate limiting runs first as middleware. Each protected route then runs authentication (`BaseAuth.authenticate`) and authorization (`AuthorizationBackend.authorize`) before the handler. If no `auth` is configured, authentication and authorization are skipped and every request runs as an anonymous user.
+When configured, rate limiting runs first as middleware. Each protected route then runs authentication (`BaseAuth.authenticate`) and authorization (`BaseAuth.authorize`, which defaults to the built-in role-based permission check) before the handler. If no `auth` is configured, authentication and authorization are skipped and every request runs as an anonymous user.
 
 ## Authentication
 
@@ -176,35 +174,23 @@ Returning `None` or an empty dict gives the request an empty identity rather tha
 
 ## Authorization
 
-Authorization is separate from authentication. After the user is identified, `AuthorizationBackend` decides whether they can perform a specific operation on a specific resource.
+Authorization is separate from authentication. After the user is identified, the server builds an `Identity` with the caller's permissions and reach, and every route checks one `resource:action` permission (for example `graph:invoke` or `threads:read`). The default `BaseAuth.authorize` is the built-in role-based check. Override it on your `BaseAuth` subclass for custom rules; it takes no request, so background jobs can call it too.
 
 ```python
 # auth/multi_tenant.py
-from typing import Any
-from tenxgraph_api.src.app.core.auth.authorization import AuthorizationBackend
+from tenxgraph_api import BaseAuth
 
-class TenantAuthorizationBackend(AuthorizationBackend):
-    async def authorize(
-        self, user: dict[str, Any], resource: str, action: str,
-        resource_id: str | None = None, **context: Any,
-    ) -> bool:
-        # resource: "graph" | "checkpointer" | "store" | "files" | "config"
-        # action: "invoke" | "stream" | "stop" | "fix" | "read" | "write" | "delete" | "upload"
-        # resource_id: thread_id or memory_id when applicable
-        return user.get("tenant_id") == context.get("tenant_id")
+class TenantAuth(BaseAuth):
+    def authenticate(self, request, response, credential):
+        ...  # verify the credential and return claims that include user_id
+
+    async def authorize(self, identity, permission, resource=None) -> bool:
+        # permission: "graph:invoke", "threads:read", "store:write", ...
+        # resource: thread_id or memory_id when applicable
+        return await super().authorize(identity, permission, resource)
 ```
 
-```json
-{
-  "authorization": "auth.multi_tenant:TenantAuthorizationBackend"
-}
-```
-
-If no `authorization` key is set, the default depends on `MODE`:
-- **production**: `"ownership"` (a user can read, run, stop and fix only threads they own)
-- **development**: `"allow_all"` (any authenticated user can access all threads)
-
-Override by setting `authorization` to a `module:attr` path, a built-in name (`"ownership"`, `"allow_all"`, `"default"`, `"none"`), or an RBAC config object (`{"backend": "rbac", "roles": {...}}`).
+Role tables go in the `auth` object (`roles`, `roles_claim`, `tenant_claims`). With `"auth": "jwt"` alone, every caller gets the default permission set and reach `own`: a user reads, runs, stops and fixes only their own threads, and another user's thread answers 404. A missing permission answers 403. See [Authentication and authorization](/docs/server/auth) for roles, reach and tenants.
 
 ## Rate limiting
 
@@ -377,7 +363,7 @@ ORIGINS=https://example.com,https://app.example.com
 | Variable | Default | Purpose |
 |---|---|---|
 | `MODE` | `development` | `production` or `prod` enables security checks; `development`, `dev` and `local` are the other values. Anything else stops startup |
-| `REDIS_URL` | none | Redis connection for the API's cache store (locks, caps, idempotency, ownership cache, token revocation, rate limiting) |
+| `REDIS_URL` | none | Redis connection for the API's cache store (locks, caps, idempotency, token revocation, rate limiting) |
 | `JWT_SECRET_KEY` | none | Required for JWT auth; use 32+ random chars |
 | `SENTRY_DSN` | none | Sentry error tracking |
 | `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing |
@@ -424,4 +410,4 @@ pip install "10xgraph-api[otel]"    # API layer spans + OTLP exporter
 
 ## What's next
 
-Read the [API server guide](/docs/server) for tasks like configuring auth, setting up multi-worker deployments, and monitoring production systems. See the [Memory](/docs/concepts/memory) page to understand checkpointing and the long-term store. The [Extensibility](/docs/concepts/extensibility) page covers all extension points: `BaseAuth`, `AuthorizationBackend`, `BasePublisher`, `BaseCheckpointer`, and `BaseStore`.
+Read the [API server guide](/docs/server) for tasks like configuring auth, setting up multi-worker deployments, and monitoring production systems. See the [Memory](/docs/concepts/memory) page to understand checkpointing and the long-term store. The [Extensibility](/docs/concepts/extensibility) page covers all extension points: `BaseAuth`, `BasePublisher`, `BaseCheckpointer`, and `BaseStore`.

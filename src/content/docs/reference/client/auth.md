@@ -340,6 +340,34 @@ const client = new TenxGraphClient({
 
 ---
 
+## Who am I: `me()`
+
+`client.me()` calls `GET /v1/me` and returns the caller's identity, so a UI can hide actions the server would refuse.
+
+```ts
+import { TenxGraphClient, isAuthOff } from '10xgraph-client';
+
+const { data } = await client.me();
+
+if (isAuthOff(data)) {
+  // Server runs with "auth": null. Show everything.
+} else {
+  console.log(data.user_id, data.roles, data.reach); // reach: 'own' | 'tenant' | 'all'
+  const canInvoke = data.permissions.includes('*') || data.permissions.includes('graph:invoke');
+}
+```
+
+`data` is a union:
+
+| Type | Shape |
+|---|---|
+| `MeIdentity` | `{ user_id: string; tenant: Record<string, string>; roles: string[]; permissions: string[]; reach: 'own' \| 'tenant' \| 'all' }` |
+| `MeAuthOff` | `{ auth: 'off' }` |
+
+`permissions` is sorted and uses `resource:action` names (for example `graph:invoke`, `threads:read`). An identity with no permission list is unrestricted and reports `['*']`. A missing or invalid token gives a 401 `AuthenticationError`.
+
+---
+
 ## Cookie credentials
 
 For browser apps that rely on session cookies (e.g. an API gateway that sets a cookie), configure `credentials`:
@@ -361,7 +389,7 @@ const client = new TenxGraphClient({
 | Error | Cause | Fix |
 |---|---|---|
 | `TenxGraphError` status `401` | Missing or invalid token. | Check the `auth` config and the server `JWT_SECRET_KEY` / custom auth handler. |
-| `TenxGraphError` status `403` | Token is valid but lacks permission for the requested operation. | Check the server-side `AuthorizationBackend` configuration. |
+| `TenxGraphError` status `403` | Token is valid but lacks permission for the requested operation. | Check the roles and permissions in the server's `auth` config. Call `client.me()` to see what the token grants. |
 | `TypeError: Failed to fetch` | CORS blocked due to missing credentials or wrong origin. | Set `credentials: 'include'` and verify CORS headers on the server. |
 | WebSocket rejected while HTTP works | Non-bearer auth in a browser, or a proxy stripping `Sec-WebSocket-Protocol`. | Use a bearer token, and forward the subprotocol header through the proxy. |
 

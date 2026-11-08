@@ -126,7 +126,7 @@ The request body takes `messages` and optional `config`, `initial_state`, `recur
 }
 ```
 
-The request had no `thread_id`, so the server started a new thread, picked its id and returned it in `data.meta.thread_id`. Send that id back as `config.thread_id` to continue the thread and test memory. By default the server refuses an id that does not exist (`403`), so use the id it returned instead of making one up. Replace `THREAD_ID` with the id from your response:
+The request had no `thread_id`, so the server started a new thread, picked its id and returned it in `data.meta.thread_id`. Send that id back as `config.thread_id` to continue the thread and test memory. By default the server refuses an id that does not exist (`404`), so use the id it returned instead of making one up. Replace `THREAD_ID` with the id from your response:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/graph/invoke \

@@ -33,7 +33,6 @@ Every method accepts `threadId` as `string | number`. Failed requests throw `Ten
 | `updateThreadState` | `PUT /v1/threads/{thread_id}/state` | Merge new values into the state |
 | `clearThreadState` | `DELETE /v1/threads/{thread_id}/state` | Delete the state snapshot |
 | `threadMessages` | `GET /v1/threads/{thread_id}/messages` | List messages |
-| `addThreadMessages` | `POST /v1/threads/{thread_id}/messages` | Deprecated. Append messages without running the graph (admin scope) |
 | `singleMessage` | `GET /v1/threads/{thread_id}/messages/{message_id}` | Fetch one message |
 | `updateThreadMessageFeedback` | `PUT /v1/threads/{thread_id}/messages/{message_id}` | Set feedback on a message |
 | `deleteMessage` | `DELETE /v1/threads/{thread_id}/messages/{message_id}` | Delete one message |
@@ -180,36 +179,6 @@ const response = await client.threadMessages('thread-123', {
 console.log(response.data.messages.length);
 ```
 
-### `addThreadMessages`
-
-```ts
-client.addThreadMessages(
-  threadId: string | number,
-  messages: Message[],
-  config: Record<string, any> = {},
-  metadata?: Record<string, any>
-): Promise<AddThreadMessagesResponse>
-```
-
-Deprecated. Appends messages to the thread without running the graph. The server route needs the `checkpointer:import` scope, which only admin identities hold. A normal user gets HTTP 403. The server rejects any message that carries a tool call (HTTP 422), because only the model may request tools. To attach feedback to a message, use [`updateThreadMessageFeedback`](#updatethreadmessagefeedback). Returns `response.data` as `{ success, message, data }`.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `threadId` | `string \| number` | required | The thread to append to. |
-| `messages` | `Message[]` | required | Build text messages with `Message.textMessage(text, role)`. |
-| `config` | `Record<string, any>` | `{}` | Config sent in the request body. |
-| `metadata` | `Record<string, any>` | `{}` sent | Optional metadata stored with the messages. |
-
-```ts
-// Admin identities only: append a system message to an existing thread
-await client.addThreadMessages(
-  'thread-123',
-  [Message.textMessage('You are a travel guide.', 'system')],
-  {},
-  { injected_by: 'setup' }
-);
-```
-
 ### `updateThreadMessageFeedback`
 
 ```ts
@@ -220,7 +189,7 @@ client.updateThreadMessageFeedback(
 ): Promise<UpdateThreadMessageFeedbackResponse>
 ```
 
-Sets `message.metadata.feedback` to the object you pass, replacing any earlier feedback. Nothing else on the message changes. Needs the `checkpointer:write` scope. Returns the updated message at `response.data`, in the same shape as `singleMessage`.
+Sets `message.metadata.feedback` to the object you pass, replacing any earlier feedback. Nothing else on the message changes. Needs the `threads:write` permission. Returns the updated message at `response.data`, in the same shape as `singleMessage`.
 
 The server answers HTTP 422 when `feedback` is larger than 8192 serialized bytes or nested deeper than 10 levels, 404 when the thread has no such message, and 501 when the checkpointer lacks `aupdate_message_metadata` (added in `10xgraph` 1.0).
 

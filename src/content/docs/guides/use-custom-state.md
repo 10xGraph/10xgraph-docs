@@ -189,7 +189,7 @@ The server limits what a client can write:
 To restrict which custom keys clients may set, list them in `runs.state_keys` in `10xgraph.json`. When it is set, any other key is refused.
 
 <aside class="callout callout-warning" role="warning"><p class="callout-title">Never read identity from state</p>
-<p>Because clients can write custom state fields, a field such as <code>user_id</code>, <code>tenant_id</code>, <code>role</code> or <code>account</code> in state is not proof of who is calling. Do not use it for access checks, database filters or billing in tools or nodes. Take the user from the authenticated config with <code>get_authz(config)</code>, which clients cannot set. See <a href="/docs/guides/authorization-scopes#read-caller-identity-inside-tools-and-nodes">Authorization scopes</a>. The <code>user_id</code> field in the examples on this page is a display value only.</p></aside>
+<p>Because clients can write custom state fields, a field such as <code>user_id</code>, <code>tenant_id</code>, <code>role</code> or <code>account</code> in state is not proof of who is calling. Do not use it for access checks, database filters or billing in tools or nodes. Take the user from the authenticated config with <code>get_identity(config)</code> from <code>tenxgraph.core.authz</code>, which clients cannot set. See <a href="/docs/guides/authorization-scopes">Authorization scopes</a>. The <code>user_id</code> field in the examples on this page is a display value only.</p></aside>
 
 ---
 

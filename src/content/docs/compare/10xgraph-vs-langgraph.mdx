@@ -39,8 +39,8 @@ The rows below start with what differs most between the two. The shared basics (
 |---|---|---|
 | Production server (REST, NDJSON streaming, WebSocket) in the open-source install | Yes. The `10xgraph-api` server generates REST, NDJSON streaming, WebSocket and realtime-audio endpoints from the compiled graph | The `langgraph` library is MIT ([PyPI](https://pypi.org/project/langgraph/)). Serving goes through Agent Server: cloud needs Plus or above, self-hosted control plane needs Enterprise, standalone needs a LangSmith license ([deployment options](https://docs.langchain.com/langsmith/deployments), [pricing](https://www.langchain.com/pricing)) |
 | Auth (JWT or custom) | JWT (`"auth": "jwt"`) or a custom `BaseAuth` subclass | Custom auth via `@auth.authenticate`, supported on all plans ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
-| Authorization | Role scopes (such as `graph:invoke`, `checkpointer:read`) or a custom `AuthorizationBackend` | `@auth.on` handlers per resource and action ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
-| Thread ownership isolation | Built-in `"authorization": "ownership"` backend, with a two-tier cached owner check | Not built in. The docs show a handler pattern you write yourself ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
+| Authorization | Role permissions (such as `graph:invoke`, `threads:read`) with reach, or a custom `BaseAuth.authorize` | `@auth.on` handlers per resource and action ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
+| Thread ownership isolation | Built in: with auth on, every storage query is scoped to the caller, so another user's thread answers 404 | Not built in. The docs show a handler pattern you write yourself ([auth docs](https://docs.langchain.com/langgraph-platform/auth)) |
 | Security and isolation defaults when served | The server refuses to start if any non-public route lacks a permission guard. With auth on or `MODE=production`, threads are owner-only. In production it refuses wildcard `ORIGINS`, and replaces 5xx error messages with a generic text. `auth: null` still starts an open server ([limits](/docs/production/limits)) | See their docs |
 | Rate limiting | Memory or Redis sliding-window limits, set in `10xgraph.json` | Not verified |
 | Replay-safe tool calls after a crash | Tool ledger in the checkpointer: a tool that already ran is not executed again on resume. Needs a checkpointer | Resume replays from a checkpoint. The docs advise wrapping side effects in tasks and making them idempotent ([functional API docs](https://docs.langchain.com/oss/python/langgraph/functional-api)) |
@@ -99,7 +99,7 @@ pip install "10xgraph[google-genai,pg_checkpoint]" 10xgraph-api
 10xgraph build --docker-compose --k8s
 ```
 
-The `production` template writes an `10xgraph.json` with `"auth": "jwt"`, `"authorization": "ownership"` and a Redis rate limit. If the process is killed after `refund_order` returns but before the run is saved, the resumed run reads the tool ledger and does not refund twice. See [replay-safe tools](/docs/concepts/replay-safe-tools).
+The `production` template writes an `10xgraph.json` with `"auth": "jwt"` and a Redis rate limit. If the process is killed after `refund_order` returns but before the run is saved, the resumed run reads the tool ledger and does not refund twice. See [replay-safe tools](/docs/concepts/replay-safe-tools).
 
 For the equivalent LangGraph quickstart, see [LangGraph's docs](https://docs.langchain.com/oss/python/langgraph/overview).
 

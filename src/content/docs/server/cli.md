@@ -46,7 +46,7 @@ Each command accepts `--help` to show its full options. Detailed flags and param
 
 ### Create a new project
 
-Start with `10xgraph init` to scaffold your agent project. The command asks three questions: the agent name, the template (Quick Start or Production) and the AI provider. Production writes the recommended setup without asking: JWT auth, ownership authorization, a UUID ID generator, and a Redis cache store (reads `REDIS_URL`) with rate limiting and token revocation. WebSocket and AG-UI stay off.
+Start with `10xgraph init` to scaffold your agent project. The command asks three questions: the agent name, the template (Quick Start or Production) and the AI provider. Production writes the recommended setup without asking: JWT auth with owner-only data, a UUID ID generator, and a Redis cache store (reads `REDIS_URL`) with rate limiting and token revocation. WebSocket and AG-UI stay off.
 
 ```bash
 10xgraph init
@@ -122,7 +122,7 @@ See [Deployment guide](/docs/server/deploy) for more.
 10xgraph config --port 8765 --no-open  # Use a custom port, don't open browser
 ```
 
-The sidebar groups the pages as Get running, Before production (Authentication, Authorization, Cache store, Observability, Graph introspection), Runs and streaming, Project wiring (Checkpointer, ID generation, Thread naming, Memory store, Dependency injection) and Developer tools. The Cache store page holds the type (Memory, Redis, Custom) and the Rate limiting and Token revocation tabs. See the [command reference](/docs/reference/api-cli/commands#config).
+The sidebar groups the pages as Get running, Before production (Auth, Cache store, Observability), Runs and streaming, Project wiring (Checkpointer, ID generation, Thread naming, Memory store, Dependency injection) and Developer tools. The Cache store page holds the type (Memory, Redis, Custom) and the Rate limiting and Token revocation tabs. See the [command reference](/docs/reference/api-cli/commands#config).
 
 The editor is loopback-only for security. See [Configure the server](/docs/server/configure) for the full configuration schema.
 

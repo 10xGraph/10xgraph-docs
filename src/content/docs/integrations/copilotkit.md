@@ -274,19 +274,9 @@ The state updates in real-time as the graph runs. Set initial state from the fro
 
 ## Frontend context and configuration
 
-Pass data from the frontend to your graph nodes and tools via `RunAgentInput.context`. The AG-UI request extras are available inside any node or tool as `config["ag_ui"]`. The server sets this key itself, so it only appears on AG-UI runs: a client of `/v1/graph/invoke` or `/v1/graph/stream` cannot send it, and `runs.config_keys` does not need to list it.
+The server does not pass `RunAgentInput.context`, `tools` or `forwardedProps` to your nodes: a node cannot read them from `config`. The client's `tools` become per-run client tools when `ag_ui.allow_client_tools` is on (see [Client tools](/docs/reference/rest-api/ag-ui#client-tools)).
 
-```python
-# graph.py
-async def main_node(state: AppState, config: dict):
-    ag_ui = config.get("ag_ui", {})
-    # A list of AG-UI context items, each with "description" and "value".
-    frontend_context = ag_ui.get("context", [])
-    client_tools = ag_ui.get("tools", [])
-    forwarded_props = ag_ui.get("forwarded_props")
-```
-
-`context`, `tools` and `forwarded_props` are the AG-UI `RunAgentInput` fields of the same names. In CopilotKit, context registered with its context hooks arrives as `context`.
+To give a node data from the frontend, put it in the conversation (a user message) or in `RunAgentInput.state`, which becomes the run's starting state. The server never trusts client data for anything that decides access: identity comes from the verified token.
 
 ## Limitations and known behavior
 

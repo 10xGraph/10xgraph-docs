@@ -41,9 +41,24 @@ npm install 10xgraph-client@next
 
 ---
 
+## Auth, roles and reach
+
+These changes ship in 1.0.0 and replace the authorization notes in the sections below. Read them if you set `authorization` in `10xgraph.json`, wrote an `AuthorizationBackend`, or put an `authz` block in `config`. The full guide is [Authentication and authorization](/docs/server/auth).
+
+- **The top-level `authorization` key is removed,** and so are `AuthorizationBackend`, its built-in backends and the `graph_introspection` setting. A config that still has the `authorization` key refuses to start, with a pointer to `auth.roles`. Roles, claims and tenant settings now live in the `auth` object. `"auth": "jwt"` alone still works: every caller gets the default permission set and reach `own`.
+- **One class.** Subclass `BaseAuth`. `authenticate` returns the claims; the optional `authorize(identity, permission, resource=None)` defaults to the built-in role-based check and takes no request, so background jobs can call it.
+- **The `config["authz"]` block is replaced by `config["user"]`,** an `Identity` (`user_id`, `tenant`, `roles`, `permissions`, `reach`, `claims`) or a dict that validates into one. Direct SDK callers keep passing a dict. Replace `has_scope(config, ...)` with `can(config, ...)` and `get_authz(config)` with `get_identity(config)`, both from `tenxgraph.core.authz`.
+- **Isolation scopes are replaced by reach:** `own`, `tenant` or `all`. Reach is required on every role and is never a fallback. It widens reads, lists and deletes only; runs and writes to state and messages always stay on the caller's own threads, admins included.
+- **Permission names changed.** `checkpointer:read`, `checkpointer:write` and `checkpointer:delete` are now `threads:read`, `threads:write` and `threads:delete`. `checkpointer:import` and `POST /v1/threads/{thread_id}/messages` are gone. `graph_introspection` is now plain `graph:read`. New: `tasks:trigger`, `tasks:read`, `tasks:cancel` and `admin:read`, `admin:write`. Wildcards are `resource:*` and `*`. Token `scope` and `scopes` claims only narrow what a caller holds.
+- **A thread, message, memory, file or run that the caller's reach does not cover answers 404, not 403.** The ownership resolver, its cache and its tombstones are removed; every storage query is scoped instead. A 403 now means the caller lacks the permission. Update tests and clients that expect 403 for another user's thread, or for an id the server did not issue.
+- **Reserved column names:** `user_id`, `kind`, `tenant`, `roles`, `permissions`, `reach` and `claims` cannot be tenant or extra column names.
+- **New:** `GET /v1/me` returns `user_id`, `tenant`, `roles`, `permissions` and `reach` for the caller.
+
+---
+
 ## After 1.0.0rc4: Postgres memory, tenant columns and safer scopes
 
-These changes ship in 1.0.0. Read them if you use stores, `PgCheckpointer`, a custom `AuthorizationBackend` or `RAGAgent`.
+These changes ship in 1.0.0. Read them if you use stores, `PgCheckpointer` or `RAGAgent`. The isolation scope and `AuthorizationBackend` notes in this section are replaced by [Auth, roles and reach](#auth-roles-and-reach).
 
 - **`Mem0Store` and the `mem0` extra are removed,** with no stub. Move to `PgVectorStore`
   (`pip install "10xgraph[pgvector]"`) or `QdrantStore`. Memories saved in Mem0 are not
@@ -52,16 +67,7 @@ These changes ship in 1.0.0. Read them if you use stores, `PgCheckpointer`, a cu
   meaning the store's configured value. A custom store must accept `None` for both.
   `QdrantStore.asearch` raises `ValueError` for a strategy other than `SIMILARITY` and for a
   distance metric different from the store's; both used to be ignored.
-- **An unknown isolation scope now raises `ValueError`.** `build_authz(scope="owners")` used to
-  fall back to `"none"` (no isolation), and `isolation_scope(config)` used to return `None` for a
-  value it did not understand. Both raise now, and so does every storage call that reads such a
-  scope. Use `"owner"`, `"none"`, `tenxgraph.core.authz.Isolation` or a list of column names.
-  `isolation_scope(config)` can also return a list; compare with `isolation_columns()` instead of
-  `== "owner"`.
-- **`isolation_scope` on an API `AuthorizationBackend` takes the user:**
-  `def isolation_scope(self, user)`. It may return `"owner"`, `"none"` or a list such as
-  `["org_id"]`. A backend written as `isolation_scope(self)` keeps working. See
-  [Multi-tenant data](/docs/guides/multi-tenant-data).
+- **An unknown or missing reach raises `ValueError`** in every storage call, and a tenant reach on a backend without tenant columns raises too. Nothing widens silently. See [Auth, roles and reach](#auth-roles-and-reach).
 - **`PgCheckpointer` schema version 6** adds only the tenant and extra columns you declare to
   `threads`. With nothing declared it changes nothing. See [Database migration](#database-migration).
 - **New and optional:** `tenant_columns`, `extra_columns` and `row_level_security` on
@@ -70,8 +76,8 @@ These changes ship in 1.0.0. Read them if you use stores, `PgCheckpointer`, a cu
   columns declared, `compile()` refuses a checkpointer and store whose tenant columns differ when
   `MODE=production` (`GRAPH_TENANT_001`). Threads and memories written before a tenant column
   existed hold `NULL` there and are hidden from scopes that pick it until you backfill them.
-- **`RAGAgent` forwards only `config["user"]` to the store,** never `config["authz"]`, so a
-  caller with the `"none"` scope cannot widen a knowledge-base search.
+- **`RAGAgent` forwards only `config["user"]` to the store,** pinned to the knowledge base's
+  owner with reach `own`, so a caller with a wider reach cannot widen a knowledge-base search.
 
 - **Search defaults on the REST API:** `POST /v1/store/search` `retrieval_strategy` and
   `distance_metric` default to `null`, so the store's own settings apply (they were forced to
@@ -80,8 +86,6 @@ These changes ship in 1.0.0. Read them if you use stores, `PgCheckpointer`, a cu
   (default 10 seconds). Setup skips DDL already in place, builds indexes on tables in use
   `CONCURRENTLY`, and raises `SetupLockTimeoutError` instead of hanging behind an open
   transaction. See [Multi-tenant data](/docs/guides/multi-tenant-data#setup-on-a-table-that-is-in-use).
-- **Reserved column names:** `authz`, `scope`, `scopes`, `role` and `roles` cannot be tenant or
-  extra column names.
 - **Row-level security needs a full rollout.** With `row_level_security=True` (FORCE), old pods
   that set no settings see zero rows. Enable it with all pods on the new version, not pod by pod.
 - **Zero vectors with `COSINE`:** a write raises `ValueError`; a zero query vector searches by
@@ -104,7 +108,7 @@ These changes ship in 1.0.0. Read them if you use stores, `PgCheckpointer`, a cu
 
 ## From 1.0.0rc3 to 1.0.0rc4
 
-The API's shared state (run locks and caps, idempotency, the ownership cache, token revocation
+The API's shared state (run locks and caps, idempotency, token revocation
 and rate limiting) now lives behind one class, `BaseCacheStore`, configured by one `cache_store`
 object in `10xgraph.json`: `type` (`memory`, `redis` or `custom`), `url`, `path`, `rate_limit` and
 `token_revocation`. The old extension points are removed with no aliases. A top-level `redis`,
@@ -140,7 +144,7 @@ Other changes:
   one WARNING and the server starts. This fixes a bug in rc3 where a leftover `REDIS_URL` blocked
   boot for a setup that needed no Redis. The `/health/ready` keys are `checkpointer`, `store` and
   `cache`; the key `redis` is gone. Update probes or monitors that read it.
-- **Failure behaviour.** Run locks, caps, idempotency and the ownership cache fail open. Token
+- **Failure behaviour.** Run locks, caps and idempotency fail open. Token
   revocation fails closed (503). Rate limiting follows `cache_store.rate_limit.fail_open` (default `true`;
   `false` answers 503 `RATE_LIMIT_UNAVAILABLE` with `Retry-After: 5`).
 - **Rate-limit counters reset once.** The Redis keys moved to the `10xgraph:ratelimit2`
@@ -151,7 +155,7 @@ Other changes:
 - **`10xgraph revoke` builds the configured cache store** the same way as the server (the
   `--redis-url` override stays) and refuses with a clear error when it is `InMemoryCacheStore`.
 - **`10xgraph init` asks only the agent name, template and AI provider.** Production writes
-  `"auth": "jwt"`, `"authorization": "ownership"`, `"id_generator": "uuid"` and
+  `"auth": "jwt"`, `"id_generator": "uuid"` and
   `"cache_store": {"type": "redis", "rate_limit": {...}, "token_revocation": true}` (no `url`:
   Redis reads `REDIS_URL`). Quick Start writes no `cache_store`. The flags `--auth`,
   `--cache-store`, `--rate-limit`, `--token-revocation` and `--websocket` override parts of it.
@@ -380,14 +384,13 @@ Migration steps:
 ### Threads and clients
 
 - **`runs.thread_ids` defaults to `"server"`** (was `"client"`). REST and WebSocket clients that
-  invent a thread id for a new thread now get 403 on `/v1/graph/invoke`, `/v1/graph/stream`,
+  invent a thread id for a new thread now get 404 on `/v1/graph/invoke`, `/v1/graph/stream`,
   `/v1/graph/ws` and the checkpointer write routes. Omit the id on the first request and use
   the `meta.thread_id` the server returns from then on (`"new"` over `/v1/graph/ws`), or set
-  `"runs": {"thread_ids": "client"}` in `10xgraph.json`. Only the built-in ownership and rbac
-  backends refuse.
+  `"runs": {"thread_ids": "client"}` in `10xgraph.json`.
 - **AG-UI and `/v1/graph/live` follow `runs.thread_ids` too.** Under the default `"server"`, an
-  AG-UI `threadId` the server never issued gets 403, and a live `thread_id` it never issued gets
-  an error event with code `not_authorized` and close 1008. A blank or `"new"` id, or none, makes
+  AG-UI `threadId` the server never issued gets 404, and a live `thread_id` it never issued gets
+  an error event with code `THREAD_NOT_FOUND` and close 1008. A blank or `"new"` id, or none, makes
   the server create the thread: AG-UI returns the id in `RUN_STARTED`, and live sends
   `{"type": "session_started", "thread_id": "..."}` as its first server event. Frontends that
   make their own ids (CopilotKit does by default) must set `"runs": {"thread_ids": "client"}`.
@@ -411,9 +414,8 @@ Migration steps:
   on history.
 - **Assistant and system messages, and `context_summary` and `execution_meta`, are rejected
   with 422** on the client routes.
-- **`POST /v1/threads/{thread_id}/messages` is now admin-only.** It needs the
-  `checkpointer:import` scope held explicitly: an identity with no scopes gets 403, and a `"*"`
-  role has it. Send normal messages through invoke or stream, and use the new
+- **`POST /v1/threads/{thread_id}/messages` was admin-only at rc4 and is removed
+  in 1.0.0.** Send normal messages through invoke or stream, and use the new
   `PUT .../messages/{message_id}` for feedback.
 
 ### Production startup and timeouts
@@ -447,9 +449,8 @@ Added in 1.0.0rc3.
 
 ### Auth and authorization
 
-- **Custom authorization backends are isolated by default.** A backend that implements only
-  `authorize()` now gets per-owner storage isolation. If you relied on sharing, add
-  `def isolation_scope(self, user): return "none"` (the `user` argument is new; `isolation_scope(self)` still works).
+Authorization backends are replaced; see [Auth, roles and reach](#auth-roles-and-reach).
+
 - **JWTs with an invalid `user_id` or scope claim are refused with 401.** `user_id` must be a
   non-empty string or an integer. Null, empty, boolean, float, list and dict are rejected. A
   `scope` or `scopes` claim that is not a string or a list of strings is rejected, so fix the
@@ -458,7 +459,7 @@ Added in 1.0.0rc3.
   `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512`, `EdDSA`). `none`, an empty value
   or any other value stops startup. Startup also stops if PyJWT is missing with `"auth": "jwt"`,
   and the `auth` value must be exactly `"jwt"`.
-- **`graph:setup` is gone from the scope list.** The setup endpoint no longer exists.
+- **`graph:setup` is gone from the permission list.** The setup endpoint no longer exists.
 - **Graph validation errors use the code `VALIDATION_ERROR`.** The duplicate `AGENTFLOW_VALIDATION_ERROR` is gone; match on `VALIDATION_ERROR`.
 - **A run that hits its recursion limit answers 422 (`GRAPH_RECURSION_LIMIT`),** not 500.
 - **`POST /v1/graph/stream` is labelled `application/x-ndjson`,** not `text/event-stream`. The body was always newline-delimited JSON, so a client that parsed it as NDJSON is unaffected; one that selected on the content type must change.
@@ -470,7 +471,7 @@ Added in 1.0.0rc3.
 - **`/health/ready` answers 503 while the server shuts down** (`status: draining`), and while the database schema version is below what the code expects.
 - **Thread, message and memory ids must match `^[A-Za-z0-9._:@-]{1,128}$`,** in the path and in the body (`thread_id`, `config.thread_id`). Anything else gets 422 `VALIDATION_ERROR`. This breaks clients that make their own thread ids with spaces, slashes or more than 128 characters.
 - **Shutdown is configured with `SHUTDOWN_GRACE_SECONDS` (10), `SHUTDOWN_STOP_SECONDS` (10) and `SHUTDOWN_TIMEOUT_SECONDS` (30).** The lifespan calls `graph.aclose()` once with them; the old separate 30 second background drain is gone. A run started during shutdown gets 503 `SERVICE_UNAVAILABLE` with `Retry-After: 5`.
-- **Thread delete can answer `success: false`** with `data.cleanup_failed` when file, trace or cache cleanup fails, and also releases files linked to the thread by their metadata (local and memory stores).
+- **Thread delete can answer `success: false`** with `data.cleanup_failed` when file or trace cleanup fails, and also releases files linked to the thread by their metadata (local and memory stores).
 - **State-changing thread routes answer 409 while a run holds the thread** (PUT and DELETE state, POST and DELETE messages, DELETE thread, POST `/v1/graph/fix`).
 - **New WARNING logs:** `compile()` with no checkpointer, the first run of a graph with no `user_id`, and in production or with `WEB_CONCURRENCY` above 1 an in-memory or SQLite checkpointer or no Redis.
 
@@ -486,7 +487,7 @@ instead.
 
 **Node.js 18 is no longer supported:** `engines` is `node >= 20.0.0`. Nothing else in the client API changes signature. Also check the server default
 above: with `10xgraph-api` 1.0, a client that invents a thread id for a new conversation gets
-HTTP 403 on `invoke()`, `stream()` and `wsStream()`.
+HTTP 404 on `invoke()`, `stream()` and `wsStream()`.
 
 - Omit `thread_id` from `config` on the first request of a conversation.
 - Reuse the id the server returns on every later request: `result.meta.thread_id` for
@@ -506,9 +507,8 @@ The client-side tool loop on `invoke()` and `stream()` used to lose a server-ass
 on the requests that send tool results. That is fixed: the client reuses the returned id, a
 `thread_id` you pass is never replaced, and your `config` object is not modified.
 
-`addThreadMessages` is deprecated. It needs the `checkpointer:import` scope (admin only) on
-recent `10xgraph-api` releases. Use `updateThreadMessageFeedback` to attach feedback to a
-message.
+`addThreadMessages` is deprecated, and the route it calls is removed from `10xgraph-api`. Use
+`updateThreadMessageFeedback` to attach feedback to a message.
 
 ---
 
@@ -549,7 +549,7 @@ After upgrading, before sending production traffic:
 1. `10xgraph version` reports 1.0.0rc4 for core and the CLI.
 2. The server starts with `MODE=production` and explicit `ALLOWED_HOST` and `ORIGINS`.
 3. A new conversation without a `thread_id` succeeds, and a client-invented id for a new thread
-   gets 403 (unless you set `runs.thread_ids` to `"client"`).
+   gets 404 (unless you set `runs.thread_ids` to `"client"`).
 4. An existing thread can still be read by its owner and is not visible to anyone else.
 5. Memory and store calls pass a concrete `user_id` or `system_user_id(...)`, and no `ValueError`
    appears in the logs.
