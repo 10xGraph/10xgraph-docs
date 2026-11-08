@@ -87,7 +87,7 @@ async def make_report(
 Tasks are TaskIQ tasks, so everything in TaskIQ works. What 10xGraph adds:
 
 - `ctx: Annotated[TaskContext, TaskiqDepends()]` gives `task_id`, `task_name`, `config` and `await ctx.cancelled()`.
-- A `config` parameter gets the run config (`user_id`, `user`, `authz` and `task_id`) only if you declare it. Pass it to `graph.ainvoke(..., config=config)` to run as the caller. Without a label it is `{"task_id": ...}` only.
+- A `config` parameter gets the run config (`user_id`, `user` and `task_id`) only if you declare it. `user` is the caller's `Identity` as a dict. Pass it to `graph.ainvoke(..., config=config)` to run as the caller. Without a label it is `{"task_id": ...}` only.
 - Inject values with `InjectTaskiq`. Plain `Inject[...]` does not work in tasks.
 - Progress is TaskIQ's `ProgressTracker`.
 - `TaskCancelled` is the error a task cancelled before it started returns to the caller.
@@ -149,9 +149,9 @@ Only tasks marked `http=True` can be started over HTTP; any other task answers 4
 
 | Route | Does | Scope |
 | --- | --- | --- |
-| `POST /v1/tasks/{name}` | Run now (`{task_id}`), or schedule when the body has `schedule` (`{schedule_id}`). | `tasks:invoke` |
+| `POST /v1/tasks/{name}` | Run now (`{task_id}`), or schedule when the body has `schedule` (`{schedule_id}`). | `tasks:trigger` |
 | `GET /v1/tasks/{id}` | Task: `status`, `progress`, `result`, `error`. Schedule: its task, time and arguments. | `tasks:read` |
-| `PATCH /v1/tasks/{schedule_id}` | Change a schedule's time. | `tasks:invoke` |
+| `PATCH /v1/tasks/{schedule_id}` | Change a schedule's time. | `tasks:trigger` |
 | `POST /v1/tasks/{id}/cancel` | Cancel a task, or delete a schedule. | `tasks:cancel` |
 
 ```bash
@@ -177,13 +177,49 @@ curl -X PATCH http://localhost:8000/v1/tasks/$SCHEDULE_ID \
 The status is `queued`, `running`, `success`, `failure` or `cancelled`. Rules:
 
 - The body is `{"args": [], "kwargs": {}, "schedule": ...}`.
-- Callers set only the task's plain arguments. `config`, `user`, `user_id`, `authz`, injected parameters, unknown names and extra positional arguments are refused with 422. The server fills the run config from the caller.
-- Tasks and schedules are owner-only. Anyone else gets 404, the same as for an unknown id.
+- Callers set only the task's plain arguments. `config`, `user`, `user_id`, injected parameters, unknown names and extra positional arguments are refused with 422. The server fills the run config from the caller.
+- Tasks and schedules belong to the user who started them. `GET` and cancel follow the caller's reach (`own`, `tenant` or `all`); starting a task and `PATCH` stay on the caller's own. Anything outside the caller's reach gets 404, the same as for an unknown id.
 - There is no list route. Keep the ids you get back.
-- A schedule runs as the user who created it. It lives until you cancel it; a one-time `at` schedule expires after its run result does.
+- A schedule runs as the user who created it, with that user's roles as they are when each run starts. It lives until you cancel it; a one-time `at` schedule expires after its run result does.
 - Scheduling needs the Redis result backend; with the `memory` broker or result backend the answer is 501.
 - In production the `error` field is the exception class name only.
-- Grant the three scopes to the roles that need them; see [Authorization scopes](/docs/guides/authorization-scopes).
+- Grant `tasks:trigger`, `tasks:read` and `tasks:cancel` to the roles that need them, in `auth.roles`. There is no `tasks:pause`. See [API authentication](/docs/server/auth).
+
+## Auth in the worker
+
+With auth on, the worker checks every run again before it executes, because the role table may have changed since the task was queued:
+
+1. The stored identity is rebuilt from its claims with the **current** `auth.roles` the worker booted with. A `__system__` user id is refused.
+2. The worker calls `authorize(identity, "tasks:trigger", task_name)` on your `BaseAuth` class. If it refuses, the stored identity is invalid, or the check raises, the run does not execute and its status is `failure` (fail closed).
+3. The rebuilt identity goes into `config["user"]` and `TaskContext.config`.
+
+Token expiry and revocation are not checked, because a queued run has no live token. A user whose role loses `tasks:trigger` stops running at the next run, and a revoked user's already queued tasks still run until their role changes. Restart workers after you change `auth.roles`.
+
+### System identities
+
+A task that no user started (a cron schedule on the task, or a call from your own code) has no caller. Give it a name and the identity it runs as:
+
+```json title="10xgraph.json"
+{
+  "auth": {
+    "method": "jwt",
+    "roles": {"member": {"permissions": ["graph:*", "threads:*", "tasks:trigger"], "reach": "own"}},
+    "system_identities": {"nightly": {"roles": ["member"], "tenant": {"org_id": "acme"}}}
+  }
+}
+```
+
+```python
+@broker.task(schedule=[{"cron": "0 2 * * *"}], identity="nightly")
+async def nightly_cleanup(config: dict) -> None: ...
+```
+
+The run executes as `Identity(kind="system", user_id="__system__:nightly")` with the roles and tenant of that entry, resolved like a token holding them. Rules:
+
+- The `identity` label never overrides a caller. A task started by a user runs as that user.
+- An unknown name with auth on aborts the run. With auth off the task runs without an identity and logs one warning.
+- The system identity still needs `tasks:trigger` through its roles, and its reach comes from its roles.
+- HTTP callers cannot set labels.
 
 ## Monitoring and errors
 

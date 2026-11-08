@@ -322,7 +322,7 @@ Constants `REALTIME_INPUT_SAMPLE_RATE` (16000) and `REALTIME_OUTPUT_SAMPLE_RATE`
 | Symptom | Cause | Fix |
 |---|---|---|
 | Socket closes with code `1008` immediately, after an `error` event with `code: 'not_live'` | The configured graph is not rooted at a `LiveAgent`. | Point `10xgraph.json` at an `AudioAgent`-based graph. |
-| Socket closes with code `1008` after the init frame | Not authorized for the requested `thread_id`. Preceded by an `error` event with `code: 'not_authorized'`. | Check the token and the server's `AuthorizationBackend`. |
+| Socket closes with code `1008` after the init frame | Not authorized for the requested `thread_id`, or the thread is outside the caller's reach (the server treats it as not found). Preceded by an `error` event. | Check the token, the roles in the server's `auth` config (needs `graph:stream`) and the thread id. `client.me()` shows the resolved permissions and reach. |
 | Socket closes with code `1008` in the middle of a session, after an `error` event with `code: 'session_expired'` | The token expired or was revoked. The server re-checks it every 30 seconds. | Reconnect with a fresh token. |
 | Socket closes with code `1011` | An unexpected server-side error ended the session. | Check the server logs. |
 | Socket closes with code `1003` | Invalid init frame (e.g. an unsupported `modalities` value). | Check `model` and `modalities`; read the `error` event for the reason. |

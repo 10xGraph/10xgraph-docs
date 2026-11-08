@@ -20,7 +20,7 @@ Every request body accepts two optional fields besides the endpoint-specific one
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `config` | object | Values forwarded to the store backend. Defaults to `{}`. The keys `user_id`, `user`, `authz`, `remote_tools`, `collection` and any key starting with `_` are dropped by the server. |
+| `config` | object | Values forwarded to the store backend. Defaults to `{}`. The keys `user_id`, `user`, `remote_tools`, `collection` and any key starting with `_` are dropped by the server. |
 | `options` | object | Keyword arguments forwarded to the store backend. Only `infer` and `replace_metadata` are accepted; every other key is dropped, including `memory_id`, so the store always generates IDs. |
 
 The server sets `user_id` from the authenticated user (or `anonymous` when auth is off). Sending `user_id` in `config` has no effect. The same goes for `collection`: a client cannot choose the collection, and the routes always use the collection default of the store (a name, or a function the developer set, called with the authenticated `user`). See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). Store operations always need a non-empty `user_id`, so an identity without one cannot use these endpoints. Reserved ids starting with `__system__` (built with `system_user_id(name)`) own shared data such as agent memory and RAG knowledge bases, and the server refuses an authenticated identity whose `user_id` starts with `__system__`. See the [REST conventions](/docs/reference/rest-api/conventions) for the envelope and error format.

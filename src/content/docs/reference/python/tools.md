@@ -347,12 +347,12 @@ else:
 
 ## Per-tool access control
 
-Scopes guard API routes. Inside a tool you have the run config, the authenticated user and the authorization helpers, so you decide what each tool may do. A tool receives these by naming the parameter, and they are not shown to the model:
+Permissions guard API routes. Inside a tool you have the run config, the authenticated identity and the authorization helpers, so you decide what each tool may do. A tool receives these by naming the parameter, and they are not shown to the model:
 
 `tool_call_id`, `state`, `config`, `emit`, `generated_id`, `context_manager`, `publisher`, `checkpointer`, `store`, `task_manager`.
 
 ```python
-from tenxgraph.core.authz import get_authz, has_scope
+from tenxgraph.core.authz import can, get_identity
 from tenxgraph.core.state import ToolResult
 from tenxgraph.utils import tool
 
@@ -360,13 +360,14 @@ from tenxgraph.utils import tool
 @tool
 def delete_record(record_id: str, config: dict) -> ToolResult | str:
     """Delete a record."""
-    if not has_scope(config, "records:delete"):
+    if not can(config, "store:delete"):
         return ToolResult(message="You do not have permission to delete records.", is_error=True)
-    user_id = (get_authz(config) or {}).get("user_id")
+    identity = get_identity(config)
+    user_id = identity.user_id if identity else "anonymous"
     return f"Record {record_id} deleted by {user_id}."
 ```
 
-Return a `ToolResult` with `is_error=True` to refuse in words the model can relay. A raised exception reaches the model only as a generic failure with a reference. See [Control access inside a tool](/docs/guides/authorization-scopes#control-access-inside-a-tool) for the full guide, including the no-auth and empty-scope cases.
+Return a `ToolResult` with `is_error=True` to refuse in words the model can relay. A raised exception reaches the model only as a generic failure with a reference. See [Control access inside a tool](/docs/guides/authorization-scopes#control-access-inside-a-tool) for the full guide, including the no-auth case.
 
 ---
 

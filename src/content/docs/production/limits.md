@@ -38,7 +38,7 @@ What to do: inside each tool, check that the authenticated user may touch the ob
 
 ## `auth: null` starts an open server
 
-If `auth` is `null`, the server serves every route to anyone who can reach it. With `MODE=production` it still starts. Nothing refuses it. Ownership checks need an identity, so with no auth there is nobody to own a thread.
+If `auth` is `null`, the server serves every route to anyone who can reach it. With `MODE=production` it still starts. Nothing refuses it. Owner-scoped queries need an identity, so with no auth there is nobody to own a thread.
 
 What to do: set `"auth": "jwt"` with a strong `JWT_SECRET_KEY`, or a custom `BaseAuth` class, before the server is reachable. The `10xgraph init` production template does this for you. See [Auth](/docs/server/auth) and the [production checklist](/docs/server/production-checklist).
 

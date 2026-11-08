@@ -247,7 +247,7 @@ Configuration for user-scoped long-term memory. The model can both search and wr
 | `retrieval_strategy` | `RetrievalStrategy \| str \| None` | None | Search strategy for this scope. If None, uses the parent config's, then the store's. |
 | `config` | `dict[str, Any]` | {} | Optional config dict passed to store calls. |
 | `collection` | `str \| Callable[[dict], str] \| None` | None | Collection for this scope: a name, or a function of the run config. Always wins over any other collection. See [Collections](#collections). |
-| `user_id` | `str \| None` | None | User identifier for scoping. Blank strings are rejected. |
+| `user_id` | `str \| None` | None | Memory owner for runs without an identity; it replaces `config["user_id"]`. With an identity in `config["user"]` the identity's `user_id` wins and this value is ignored. Blank strings are rejected. |
 
 ### `AgentMemoryConfig`
 
@@ -414,7 +414,7 @@ This applies to `astore`, `asearch`, `aget`, `aget_all`, `aupdate`, `adelete` an
 
 Two rules refine this:
 
-- **Admin reads.** When the authz policy scope is `"none"` (admin or `allow_all`), reads and updates (`asearch`, `aget`, `aget_all`, `aupdate`, `adelete`) skip the user filter and see every user's memories. Writes (`astore`) and `aforget_memory` still need a concrete `user_id` under this policy.
+- **Wide reads.** When the caller's identity has reach `all` (see [Multi-tenant data](/docs/guides/multi-tenant-data)), reads and updates (`asearch`, `aget`, `aget_all`, `aupdate`, `adelete`) skip the user filter and see every user's memories. Writes (`astore`) and `aforget_memory` still need a concrete `user_id` under this reach.
 - **`aforget_memory`** always filters by `user_id`. `thread_id` is an optional extra filter, never a replacement. A narrowing argument is never dropped silently: it is applied or the call raises, so a narrow forget cannot delete everything.
 
 Data that belongs to no person, such as agent/app memory and RAG knowledge bases, is owned by a reserved system id. Three names are exported from `tenxgraph.storage.store` and `tenxgraph.storage`:
@@ -555,7 +555,7 @@ await store.asetup()
 | `row_level_security` | `bool` | `False` | Also enforce tenant columns with native row-level security. Needs `tenant_columns`. |
 | `ddl_lock_timeout` | `float \| None` | `10.0` | Seconds a setup DDL statement waits for a table lock; on timeout setup raises `SetupLockTimeoutError`. `None` waits forever. |
 
-Methods specific to this store: `await store.adrop_legacy_key_index() -> list[str]` drops the `memory_key` index of an earlier declaration after tenant columns were added (see [Multi-tenant data](/docs/guides/multi-tenant-data#add-tenant-columns-to-a-pgvectorstore-table-that-has-data)). It is deprecated and will be removed in the next breaking release (1.5 or 2.0). Column names `authz`, `scope`, `scopes`, `role` and `roles` are reserved.
+Methods specific to this store: `await store.adrop_legacy_key_index() -> list[str]` drops the `memory_key` index of an earlier declaration after tenant columns were added (see [Multi-tenant data](/docs/guides/multi-tenant-data#add-tenant-columns-to-a-pgvectorstore-table-that-has-data)). It is deprecated and will be removed in the next breaking release (1.5 or 2.0). Column names `user_id`, `kind`, `tenant`, `roles`, `permissions`, `reach` and `claims` are reserved.
 
 ### Methods beyond `BaseStore`
 

@@ -1,28 +1,37 @@
 ---
 title: "Set up API authentication and authorization"
-description: "Enable JWT or custom auth, enforce thread ownership, and protect your API with role-based access control in 10xGraph."
+description: "Enable JWT or custom auth, map roles to permissions, set how far each role can see, and keep every user's data private in 10xGraph."
 section: "API server"
 group: "Security"
 order: 60
-updated: "2026-10-31"
+updated: "2026-11-08"
 faq:
   - q: "Which claims must my JWT contain?"
     a: "Every token needs `exp` (expiration) and `user_id` claims. If you set JWT_ISSUER or JWT_AUDIENCE, the token must also carry matching `iss` or `aud` claims. A token without `user_id` is rejected with status 401, code `INVALID_TOKEN`."
   - q: "Why do I get 401 with code REVOKED_TOKEN?"
     a: "The request had no Authorization header, or it was not a Bearer credential. Send `Authorization: Bearer <token>` on every HTTP request, or use the `10xgraph-bearer` subprotocol on WebSocket."
-  - q: "Does ownership checking work with the in-memory checkpointer?"
-    a: "Yes, the in-memory checkpointer can name thread owners, but in-memory data disappears on restart. Use PgCheckpointer in production so thread ownership persists across restarts."
+  - q: "Does a role with reach all let an admin run inside another user's thread?"
+    a: "No. Reach `tenant` and `all` widen reads, lists, deletes and stop. Runs and state or message writes always stay on the caller's own threads, admins included."
+  - q: "What happens when I ask for another user's thread?"
+    a: "The server answers 404, the same as for a thread that does not exist. Storage filters every query by the caller's reach, so a foreign thread is invisible."
 ---
 
-Authentication answers "who is calling the API?" Authorization answers "what are they allowed to do?" In production, you need both. This guide covers JWT and custom auth, thread ownership, role-based access control, and the production safety checklist.
+Authentication answers "who is calling the API?" Authorization answers "what may they do, and whose data may they see?" In 10xGraph both live under one `auth` key in `10xgraph.json`. This guide covers JWT and custom auth, roles and permissions, reach, ownership, and the checks the server runs at boot.
 
-For the full picture of what the server enforces and what it leaves to you, see the [security model](/docs/production/security-model). Scope names and custom backends are covered in [Authorization scopes](/docs/guides/authorization-scopes).
+10xGraph is a resource server. It verifies tokens and reads claims. It does not issue tokens, store users or talk to an identity provider. Anything that needs a database or an identity provider lookup goes in your own `BaseAuth` class.
+
+For the full picture of what the server enforces and what it leaves to you, see the [security model](/docs/production/security-model). To read the caller inside tools and nodes, see [Authorization scopes](/docs/guides/authorization-scopes).
 
 ## The big picture
 
-When you enable auth, every API request must carry a credential (bearer token, API key, or custom). The server verifies it, extracts a `user_id`, and carries it through the graph execution. If you also enable authorization, the server checks whether that user is allowed to touch each thread before running it. The two are separate: you can use auth without authorization (global access), or inherit the authorization backend's isolation automatically when you add auth.
+Each request goes through the same steps on every transport (HTTP, WebSocket, AG-UI, live):
 
-The cleanest production posture is: set `"auth": "jwt"` in `10xgraph.json`, set `JWT_SECRET_KEY` in `.env`, and let the default ownership backend lock each thread to its creator.
+1. **Authenticate.** `BaseAuth.authenticate` verifies the credential and returns claims. A failure is 401 (close code 1008 on a WebSocket).
+2. **Resolve.** The server turns the claims into an `Identity`: `user_id`, tenant values, roles, permissions and reach. A token with a missing tenant claim or a malformed roles or permissions claim is 401. It never falls back to a default role or reach.
+3. **Authorize.** `BaseAuth.authorize(identity, permission, resource)` decides. A refusal is 403 with `Missing required permission: <permission>`.
+4. **Run.** The identity goes into the run config as `config["user"]`. Storage filters every query by the identity's reach, so a foreign thread, message, memory, file or run answers 404.
+
+Auth is opt-in. With `"auth": null` no check runs and no thread has an owner.
 
 ## Quick start with JWT
 
@@ -53,8 +62,7 @@ JWT is the easiest path: a stateless, standard bearer token that carries the use
    {
      "agent": "graph.agent:app",
      "env": ".env",
-     "auth": "jwt",
-     "authorization": "ownership"
+     "auth": "jwt"
    }
    ```
 
@@ -108,50 +116,184 @@ const ws = new WebSocket(
 
 The subprotocol list works as: the server looks for `10xgraph-bearer` (or the legacy `agentflow-bearer`), treats the next item as the token, and responds with the matching subprotocol. The server also accepts the `Authorization` header and, as a last resort, a `?token=` query parameter, which lands in URLs and logs. The subprotocol and `?token=` work on WebSocket routes only; HTTP routes take the `Authorization` header alone. If no credential is found, the connection is rejected with close code `1008` (policy violation).
 
+
 ## How does the user reach your code?
 
-The server copies the verified identity into the run config as `config["user"]` (the full decoded claims) and `config["user_id"]`. A tool or node can declare a parameter named `config` to receive it. Framework-injected parameters are hidden from the tool schema the model sees.
+The server builds an `Identity` from the verified claims and puts it in the run config as `config["user"]`. A tool or node that declares a `config` parameter receives it. Framework-injected parameters are hidden from the tool schema the model sees.
 
 ```python title="graph/tools/orders.py"
+from tenxgraph.core.authz import get_identity
+
 def list_my_orders(config: dict) -> list[dict]:
     """List the caller's recent orders."""
-    user_id = config["user_id"]  # Always from the verified token, never a tool argument
-    return db.orders_for(user_id)
+    identity = get_identity(config)  # None when auth is off
+    return db.orders_for(identity.user_id)  # From the verified token, never a tool argument
 ```
 
-User IDs starting with `__system__` are reserved for shared data (agent memory, RAG knowledge bases). The server refuses an authenticated identity that carries one (HTTP 401 "This user id is reserved", WebSocket close code 1008), so no caller can act as a shared owner.
+`Identity` is a frozen model with `user_id`, `kind` (`user` or `system`), `tenant`, `roles`, `permissions`, `reach` and the raw `claims`. `identity.can("store:write")` checks one permission. See [Authorization scopes](/docs/guides/authorization-scopes) for the full guide.
 
-Never take a user ID from a tool argument. The model chooses tool arguments; a prompt-injected model could ask to see another user's data. Instead, trust the server-verified `config["user_id"]`.
+User IDs starting with `__system__` are reserved for shared data (agent memory, RAG knowledge bases) and system identities. The server refuses a token that carries one (HTTP 401 "This user id is reserved", WebSocket close code 1008), so no caller can act as a shared owner.
 
-## Enforce thread ownership
+Never take a user ID from a tool argument. The model chooses tool arguments; a prompt-injected model could ask to see another user's data. Trust the server-verified identity.
 
-The simplest and most important authorization rule is "a user sees only their own threads." Set `"authorization": "ownership"` to make threads private by default:
+## The `auth` key
 
-```jsonc title="10xgraph.json"
+Everything about auth sits under one key. `method` picks who verifies the credential. The RBAC keys next to it apply to whichever method you choose.
+
+```json title="10xgraph.json"
 {
-  "agent": "graph.agent:app",
-  "auth": "jwt",
-  "authorization": "ownership"
+  "auth": {
+    "method": "jwt",
+    "roles_claim": "roles",
+    "tenant_claims": ["org_id"],
+    "roles": {
+      "member": {
+        "permissions": ["graph:*", "threads:*", "store:*", "files:*", "tasks:trigger", "tasks:read", "tasks:cancel"],
+        "reach": "own"
+      },
+      "org_admin": {"inherits": ["member"], "permissions": ["admin:read"], "reach": "tenant"},
+      "super_admin": {"permissions": ["*"], "reach": "all"}
+    },
+    "default_role": "member",
+    "system_identities": {
+      "nightly": {"roles": ["member"], "tenant": {"org_id": "acme"}}
+    }
+  }
 }
 ```
 
-A thread is read, continued, stopped, fixed, or deleted **only by the user who created it**. Another user's request on that thread is rejected up front with status 403 before the model runs, for every action including `invoke` and `stream`. Listing threads shows only the caller's.
+| Key | Meaning |
+|---|---|
+| `method` | `none`, `jwt` or `custom`. `"auth": null` is `none`. `"auth": "jwt"` is a shortcut for `{"method": "jwt"}`. |
+| `path` | Only for `custom`: `"module:Class"` or `"dir/file.py:Class"` of a `BaseAuth` subclass. |
+| `roles` | Role table. Each role has `permissions`, optional `inherits` and a required `reach`. |
+| `roles_claim` | Token claim that lists the caller's roles. Defaults to `roles` when `roles` is set. |
+| `permissions_claim` | Token claim that lists permissions directly. Use it instead of `roles`, never with it. |
+| `tenant_claims` | Token claims that name the caller's tenant, such as `org_id`. Every token must carry each one. |
+| `default_role` | Role given to a token that has no roles claim at all. |
+| `system_identities` | Named non-user callers for background jobs. See [Background tasks](/docs/server/background-tasks). |
 
-If you leave `authorization` unset, the default depends on `MODE`: ownership whenever auth is configured or `MODE=production` (secure by default), and allow-all only with auth off in development, where requests carry no identity. Your explicit choice always wins.
+With only `"auth": "jwt"`, every authenticated user gets the default permission set (everything except `admin:*`) with reach `own`.
 
-A custom `AuthorizationBackend` also isolates users by default: its `isolation_scope(user)` returns `"owner"`, so each user sees only their own threads and memories. A backend that wants shared data returns `"none"`, and one with tenant columns can return a list such as `["org_id"]` for an org admin (see [Multi-tenant data](/docs/guides/multi-tenant-data#isolation-scopes)). The built-in `allow_all` shares data, and `ownership` and `rbac` isolate it.
+### Where permissions come from
 
-Ownership is looked up through the checkpointer's `aget_thread_owner` method. The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. That checkpointer must be able to name thread owners: `PgCheckpointer`, `InMemoryCheckpointer` and the SQLite checkpointer do, and a custom `BaseCheckpointer` must implement `aget_thread_owner` and `aping()` (a read-only, cheap check that the backend answers; the server calls it for the startup check and `/health/ready`). With auth on, the server refuses to boot if there is no checkpointer or its `aget_thread_owner` is not implemented, and at request time ownership fails closed (thread requests are denied). Use a durable checkpointer such as `PgCheckpointer` so owners survive restarts. For high-concurrency workloads, set `redis` in `10xgraph.json` (or `REDIS_URL` in your environment) to cache ownership lookups across workers (the API's cache store holds the shared tier; see [Bring your own backend](/docs/server/bring-your-own-backend)):
+You pick one source. The framework defines no role meanings.
 
-```jsonc title="10xgraph.json"
+| Source | Config | Result |
+|---|---|---|
+| Default | no RBAC keys | Every authenticated user gets the default set, reach `own`. |
+| Roles | `roles` (and optionally `roles_claim`) | Permissions are the union of the caller's roles, including inherited ones. Reach is the widest reach among them. Role names in the token that are not in `roles` are ignored. |
+| Permissions | `permissions_claim` | The token lists permissions. Unknown names are ignored. A missing claim means no permissions. Reach is `own`. |
+
+The claim may be a list of strings or one space-separated string. Anything else is 401. A token with no roles claim takes `default_role` when you set one, otherwise it holds no role and no permission.
+
+Token `scope` and `scopes` claims only narrow. Effective permissions are the granted set intersected with the permission-shaped entries (those that contain `:` or equal `*`). Plain OAuth scopes such as `openid profile` are ignored. A permission-shaped scope the registry does not know narrows to nothing.
+
+### The permission registry
+
+Permissions are `resource:action` and come from one list. A role that names anything else refuses to boot.
+
+| Resource | Actions | Guards |
+|---|---|---|
+| `graph` | `read`, `invoke`, `stream`, `stop`, `fix` | `read`: graph structure routes. `invoke` and `stream`: runs (`stream` also covers WebSocket, live and AG-UI). |
+| `threads` | `read`, `write`, `delete` | Thread, state and message routes. |
+| `store` | `read`, `write`, `delete` | Long-term memory routes. |
+| `files` | `read`, `upload`, `delete` | Media routes. |
+| `config` | `read` | The server config route. |
+| `tasks` | `trigger`, `read`, `cancel` | `/v1/tasks` routes. |
+| `admin` | `read`, `write` | No built-in route uses these. They are for your own checks. |
+
+Wildcards: `resource:*` grants every action of a resource, and `*` grants everything. The default set is every permission except `admin:*`.
+
+### Reach: how far a caller sees
+
+Reach says whose data a caller can see. It is set per role and is never a fallback: a missing or unknown reach refuses to boot (config) or denies (token, custom `authorize`).
+
+| Reach | Sees |
+|---|---|
+| `own` | Rows of this `user_id` within their tenant. |
+| `tenant` | Rows of every user with the same tenant values. Needs `tenant_claims` and a checkpointer with tenant columns (`PgCheckpointer`). On `SqliteCheckpointer` and `InMemoryCheckpointer`, which have no tenant columns, a read, list or delete by a caller with reach `tenant` raises an error (the request fails); it does not fall back to `own`. Writes still use `own`. |
+| `all` | Every row. |
+
+Reach widens **reads, lists, deletes and stop only**. Runs and state or message writes always stay on the caller's own threads, admins included. Nobody runs inside another user's thread. Boot logs a warning for every role with reach `all`.
+
+## Ownership lives in storage
+
+There is no ownership cache and no ownership backend to configure. Every storage query filters by the caller's reach, so:
+
+- A thread, message, memory, file or run outside the caller's reach answers **404**, the same as one that does not exist. Nothing reveals that the id exists.
+- Each thread route makes one scoped read before the run lock and before any response header. That read gives the 404 and enforces [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
+- Deleting a thread outside the caller's reach answers 404 and does no file or telemetry cleanup.
+- With auth off there is no identity, so no thread has an owner.
+
+Use a durable, shared checkpointer such as `PgCheckpointer` in production. Tenant isolation needs tenant columns on both the checkpointer and the store, see [Multi-tenant data](/docs/guides/multi-tenant-data).
+
+## Who am I: `GET /v1/me`
+
+`GET /v1/me` returns what the server resolved for the caller. A UI can use it to show or hide views.
+
+```json
+{"data": {"user_id": "u-42", "tenant": {"org_id": "acme"}, "roles": ["member"], "permissions": ["graph:invoke", "graph:stream", "threads:read"], "reach": "own"}}
+```
+
+`permissions` is sorted. An identity with no restriction reports `["*"]`. With auth off the answer is `{"auth": "off"}`.
+
+## Custom authentication and authorization
+
+Subclass `BaseAuth` and implement `authenticate`. Optionally override `authorize`.
+
+```python title="auth/custom_auth.py"
+from fastapi import HTTPException
+from tenxgraph_api import BaseAuth
+
+class ApiKeyAuth(BaseAuth):
+    def authenticate(self, request, response, credential):
+        api_key = request.headers.get("X-API-Key")
+        if not api_key or not verify_key(api_key):
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        return {"user_id": "service-account", "roles": ["service"], "org_id": "acme"}
+```
+
+```json title="10xgraph.json"
 {
-  "auth": "jwt",
-  "authorization": "ownership",
-  "cache_store": {"type": "redis", "url": "redis://localhost:6379"}
+  "auth": {
+    "method": "custom",
+    "path": "auth.custom_auth:ApiKeyAuth",
+    "tenant_claims": ["org_id"],
+    "roles": {"service": {"permissions": ["graph:invoke", "graph:stream"], "reach": "own"}}
+  }
 }
 ```
 
-Ownership is immutable and cached (in-process L1 + optional Redis L2), so after the first lookup a check is an in-memory hit, not a database round-trip per request.
+The `path` accepts `auth_app:Cls`, `auth_app.py:Cls`, `pkg.mod:Cls` and `pkg/mod.py:Cls`.
+
+### `authenticate(request, response, credential)`
+
+- Required, and **synchronous**: the server calls it without `await`. Keep it a plain `def`.
+- Returns the verified claims as a dict. It must include `user_id`. Every other key lands in `identity.claims`.
+- Raise `HTTPException` (your status) or `UserAccountError` (401) to refuse. On a WebSocket both become a clean 1008 close.
+- Derive `user_id` and tenant values only from the verified credential, never from a client-set header or query parameter.
+- Set `reusable_within_request = True` on the class only if `authenticate` is a pure function of the credential with no response side effects. Then the rate limiter's verified result is reused instead of verifying twice.
+
+### `authorize(identity, permission, resource=None)`
+
+- Optional and `async`. The default is `identity.can(permission)`, which applies the built-in RBAC.
+- `permission` is `resource:action`, for example `threads:read`. `resource` is the id the request targets (thread id, memory id, namespace, file id, or the task name for a background task), or `None`.
+- It takes no request, so the jobs worker can call it too.
+- Return `True` to allow or `False` to answer 403. If it raises, the request fails. It never counts as allowed.
+- If you override it and also set `roles`, the roles apply only when your code calls `await super().authorize(...)`. Boot warns about this.
+
+```python
+class MyAuth(BaseAuth):
+    def authenticate(self, request, response, credential): ...
+
+    async def authorize(self, identity, permission, resource=None):
+        if not await super().authorize(identity, permission, resource):
+            return False  # keep the role table as the first gate
+        return await my_extra_rule(identity, permission, resource)
+```
+
+A custom `authorize` decides permissions only. Reach still comes from the identity, which `auth.roles` resolves from your claims. Recipes with a database, Casbin and Cerbos are [below](#recipes-for-a-custom-authorize).
 
 ## Revoke tokens
 
@@ -166,55 +308,192 @@ With auth on, set `cache_store.token_revocation` to `true` and the server refuse
 
 If the cache store is unreachable, the server refuses to boot and requests that need the check answer 503. See [Token revocation](/docs/reference/api-cli/auth#token-revocation) for the object form.
 
-## Custom authentication
 
-Use custom auth when you already have an identity provider, API keys, or internal identity systems. Subclass `BaseAuth` and return a dict with at least `user_id`:
+## Boot-time refusals
 
-```python title="auth/custom_auth.py"
-from tenxgraph_api import BaseAuth
-from fastapi import HTTPException
+One validator runs at boot, in `10xgraph config`, `10xgraph audit` and `10xgraph build`. A setup the server would refuse cannot be saved in the editor, fails `audit`, and shows as a warning in `build`.
 
-class ApiKeyAuth(BaseAuth):
-    def authenticate(self, request, response, credential):
-        api_key = request.headers.get("X-API-Key")
-        if not api_key or not verify_key(api_key):
-            raise HTTPException(status_code=401, detail="Invalid API key")
-        return {"user_id": "service-account", "roles": ["service"]}
-```
+| Setup | Result |
+|---|---|
+| `auth` null or `none` with any RBAC key | Refused: set `auth.method` or remove the RBAC keys. |
+| Top-level `authorization` key (any value) | Refused. The key is removed. See [Migrating from authorization](#migrating-from-authorization). |
+| Top-level `graph_introspection` key | Refused. Reading the graph is the `graph:read` permission. |
+| `method: custom` without `path`, or `path` not a `BaseAuth` subclass | Refused, naming the path. |
+| `path` with `method` `jwt` or `none` | Refused: `path` is only for `custom`. |
+| `roles` (or `roles_claim`) together with `permissions_claim` | Refused: pick one permission source. |
+| `roles_claim` without `roles` | Refused. |
+| `default_role`, an `inherits` entry or a `system_identities` role not in `roles` | Refused, naming the role. |
+| Inheritance cycle | Refused, naming the cycle. |
+| Unknown permission in a role | Refused. |
+| Missing or unknown `reach` on a role | Refused. |
+| Role with reach `tenant` and no `tenant_claims` | Refused. |
+| `tenant_claims` and the tenant columns on the checkpointer or store do not match | Refused with `MODE=production`, warning otherwise. Declare the same names on both sides. |
+| Custom class overrides `authorize` and `roles` is set | Allowed, with a warning. |
+| Role with reach `all` | Allowed, with a warning that lists the roles. |
+| `MODE=production` with auth off | Allowed, with a warning from `build`, `config` and `audit`. |
 
-Point the config at it with the object form. The `path` accepts `auth_app:Cls`, `auth_app.py:Cls`, `pkg.mod:Cls` and `pkg/mod.py:Cls`:
+At request time a token without a configured tenant claim, or with a malformed roles or permissions claim, is 401.
 
-```json title="10xgraph.json"
+## Migrating from authorization
+
+The top-level `authorization` key and `AuthorizationBackend` are removed. A leftover `authorization` key stops the server at boot and names `auth.method: custom` and `auth.roles` as the replacement. Stored data does not change: ownership is read from the same thread rows as before.
+
+| Before | Now |
+|---|---|
+| `"authorization": "ownership"` | Delete the key. With auth on, every thread, memory and file is private to its owner (reach `own`), and a foreign id answers 404 (it used to answer 403). |
+| `"authorization": "allow_all"` | No equivalent. To let a group read each other's data, give their role reach `tenant`. Reads, lists and deletes widen; runs stay on the caller's own threads. |
+| `{"backend": "rbac", "roles": {...}, "default_scopes": [...]}` | `auth.roles`, each role with `permissions` and `reach`. `isolation: "owner"` is reach `own`. |
+| `"authorization": "module:MyBackend"` | `"auth": {"method": "custom", "path": "module:MyAuth"}` and override `authorize` on your `BaseAuth` class. |
+| `authorize(user, resource, action, resource_id)` | `authorize(identity, "resource:action", resource)` |
+| `isolation_scope(user)` returning `"owner"`, `"none"` or `["org_id"]` | Role `reach`: `own`, `all` or `tenant`, with `tenant_claims`. |
+| `scopes_for(user)` | `permissions_claim`, or `roles_claim` with a role table. |
+| `"graph_introspection": "scoped"` | Delete the key. Grant `graph:read` only to the roles that may read the graph. |
+| `"graph_introspection": "open"` | Delete the key. The default set already includes `graph:read`. |
+| `checkpointer:read`, `checkpointer:write`, `checkpointer:delete` | `threads:read`, `threads:write`, `threads:delete` |
+| `checkpointer:import` and `POST /v1/threads/{id}/messages` | Removed. There is no history import route. |
+| `graph:setup` | Removed. |
+| `files:upload`, `files:read` | Same, plus `files:delete`. |
+| `tasks:invoke` | `tasks:trigger` |
+| `config["authz"]`, `get_authz`, `has_scope`, `isolation_scope`, `build_authz` | `config["user"]` as an `Identity`: `get_identity(config)`, `identity.can("resource:action")`, `identity.reach`. |
+| Redis ownership cache | Removed. Nothing to configure. |
+
+A typical role setup, before and after:
+
+```json title="before"
 {
-  "auth": { "method": "custom", "path": "auth.custom_auth:ApiKeyAuth" }
-}
-```
-
-Every key you return (e.g. `roles`, `scopes`, `email`) is merged into `config["user"]`. Derive the `user_id` only from the verified credential, never from a client-set header or query parameter.
-
-## Role-based access control
-
-For finer-grained control without writing code, use the RBAC config block. It layers scope enforcement on top of thread ownership:
-
-```json title="10xgraph.json"
-{
+  "auth": "jwt",
   "authorization": {
     "backend": "rbac",
-    "roles": {
-      "admin": ["*"],
-      "member": ["graph:invoke", "graph:stream", "checkpointer:read"],
-      "viewer": ["graph:read"]
-    },
+    "roles": {"admin": ["*"], "member": ["graph:invoke", "graph:stream", "checkpointer:read"]},
     "default_scopes": ["graph:read"]
   }
 }
 ```
 
-Each endpoint requires a scope like `"graph:invoke"` or `"store:write"`. A role granting `"*"` gets every scope. `default_scopes` applies to everyone, including users with no role. If a user's resolved scopes is empty, they are locked out of everything (commonly a mistake with RBAC). Give `default_scopes` a sensible floor and test on staging first.
+```json title="after"
+{
+  "auth": {
+    "method": "jwt",
+    "roles": {
+      "admin": {"permissions": ["*"], "reach": "own"},
+      "member": {"permissions": ["graph:invoke", "graph:stream", "graph:read", "threads:read"], "reach": "own"}
+    },
+    "default_role": "member"
+  }
+}
+```
 
-Scopes also come from the token. The server reads the `scope` claim (space-separated) and the `scopes` claim (a list or a space-separated string) and matches by exact name. No scope claim means the token is not restricted. `scope=""` restricts it to nothing.
+The old `default_scopes` applied to everyone. `default_role` applies only to a token with no roles claim. For a floor that every user gets, list those permissions in each role, or `inherits` from a base role.
 
-Available scopes: `graph:{invoke,stream,stop,fix,setup,read}`, `checkpointer:{read,write,delete}`, `store:{read,write,delete}`, `files:{upload,read}`, `config:read`.
+For direct SDK use, `config["user"]` takes an `Identity` or a dict that validates into one (`user_id`, `tenant`, `roles`, `permissions`, `reach`, `kind`, `claims`). An unknown key in that dict raises. `permissions=None` means unrestricted.
+
+## Recipes for a custom `authorize`
+
+`authorize` is where checks that need a lookup belong. The recipes below show the pattern for a database, Casbin and Cerbos.
+
+### Database lookup
+
+Use this when access rules live in your own table. The query uses `asyncpg` with a pool you create once at startup. It keeps the built-in role check as the first gate.
+
+```python title="auth/db_auth.py"
+import asyncpg
+from tenxgraph_api import BaseAuth
+
+class DbAuth(BaseAuth):
+    pool: asyncpg.Pool  # create once, for example at app startup
+
+    def authenticate(self, request, response, credential):
+        ...  # verify the credential, return {"user_id": ..., "org_id": ...}
+
+    async def authorize(self, identity, permission, resource=None):
+        if not await super().authorize(identity, permission, resource):
+            return False
+        if permission.startswith("threads:") and resource is not None:
+            return bool(await self.pool.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM project_members WHERE user_id = $1 AND thread_id = $2)",
+                identity.user_id, resource,
+            ))
+        return True
+```
+
+The lookup runs on every guarded request, so index it and cache short-lived answers yourself if it is hot. Storage still filters by reach after `authorize` passes.
+
+### Casbin
+
+[Casbin](https://casbin.apache.org/docs/get-started/) keeps the policy in a model file and a policy file. This follows its Python quick start: `casbin.Enforcer(model, policy)` and `e.enforce(sub, obj, act)`.
+
+```ini title="auth/model.conf"
+[request_definition]
+r = sub, obj, act
+
+[policy_definition]
+p = sub, obj, act
+
+[policy_effect]
+e = some(where (p.eft == allow))
+
+[matchers]
+m = r.sub == p.sub && r.obj == p.obj && r.act == p.act
+```
+
+```csv title="auth/policy.csv"
+p, alice, threads, read
+p, alice, graph, invoke
+```
+
+```python title="auth/casbin_auth.py"
+import casbin
+from tenxgraph_api import BaseAuth
+
+class CasbinAuth(BaseAuth):
+    def __init__(self):
+        self.enforcer = casbin.Enforcer("auth/model.conf", "auth/policy.csv")
+
+    def authenticate(self, request, response, credential):
+        ...  # verify the credential, return {"user_id": ...}
+
+    async def authorize(self, identity, permission, resource=None):
+        resource_name, _, action = permission.partition(":")
+        return bool(self.enforcer.enforce(identity.user_id, resource_name, action))
+```
+
+This version replaces the built-in role check, so do not set `roles` with it. For role mapping inside Casbin, see its docs.
+
+### Cerbos
+
+[Cerbos](https://docs.cerbos.dev/cerbos/latest/api/) runs as a separate policy service. This calls its HTTP API, `POST /api/check/resources` on the default HTTP port 3592, with `httpx`.
+
+```python title="auth/cerbos_auth.py"
+import httpx
+from tenxgraph_api import BaseAuth
+
+CERBOS_URL = "http://localhost:3592/api/check/resources"
+
+class CerbosAuth(BaseAuth):
+    def authenticate(self, request, response, credential):
+        ...  # verify the credential, return {"user_id": ..., "roles": [...]}
+
+    async def authorize(self, identity, permission, resource=None):
+        kind, _, action = permission.partition(":")
+        body = {
+            "principal": {
+                "id": identity.user_id,
+                "roles": sorted(identity.roles) or ["user"],
+                "attr": dict(identity.tenant),
+            },
+            "resources": [{
+                "resource": {"id": resource or "*", "kind": kind, "attr": {}},
+                "actions": [action],
+            }],
+        }
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            reply = await client.post(CERBOS_URL, json=body)
+        reply.raise_for_status()
+        effect = reply.json()["results"][0]["actions"][action]
+        return effect == "EFFECT_ALLOW"
+```
+
+A network error raises, so the request fails instead of passing. Write Cerbos policies for the resource kinds `graph`, `threads`, `store`, `files`, `config` and `tasks`. The recipe uses the HTTP API directly; it does not use the Cerbos Python SDK.
 
 ## Production deployment checklist
 
@@ -230,26 +509,26 @@ curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
 
 Expected: HTTP 401, code `REVOKED_TOKEN`, before any graph execution.
 
-Then test with a valid token:
+Then check who the server thinks you are:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
-  -H "Authorization: Bearer <TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]}'
+curl http://127.0.0.1:8000/v1/me -H "Authorization: Bearer <TOKEN>"
 ```
 
-Expected: HTTP 200, normal graph response.
+Expected: HTTP 200 with your `user_id`, `roles`, `permissions` and `reach`. Then ask for a thread another user owns and expect 404.
 
 ### Common failures to expect
 
-| Error code | Likely cause | Fix |
+| Error | Likely cause | Fix |
 |---|---|---|
-| `REVOKED_TOKEN` | No credential presented | Attach `Authorization: Bearer <token>` |
-| `EXPIRED_TOKEN` | Token `exp` is in the past | Refresh the token; check server/issuer clock skew |
-| `INVALID_TOKEN` | Bad signature or no `user_id` claim | Verify `JWT_SECRET_KEY`, `JWT_ALGORITHM`, and that issuer emits `user_id` |
-| Startup `ValueError`: "JWT_SECRET_KEY and JWT_ALGORITHM must be set" | One of the two env vars is missing with `"auth": "jwt"` | Set both `JWT_SECRET_KEY` and `JWT_ALGORITHM` |
-| `Missing required scope: <resource>:<action>` | Identity lacks scope for this endpoint | Add scope to the role, or widen `default_scopes` |
+| 401 `REVOKED_TOKEN` | No credential presented | Attach `Authorization: Bearer <token>` |
+| 401 `EXPIRED_TOKEN` | Token `exp` is in the past | Refresh the token; check server and issuer clock skew |
+| 401 `INVALID_TOKEN` | Bad signature or no `user_id` claim | Verify `JWT_SECRET_KEY`, `JWT_ALGORITHM`, and that the issuer emits `user_id` |
+| 401 "Invalid token, please login again" | A configured tenant claim is missing, or the roles or permissions claim is malformed | Add the claim, or fix its type (list of strings or one space-separated string) |
+| 403 `Missing required permission: <resource>:<action>` | The caller's roles do not grant it | Add the permission to a role, or give the user the role |
+| 404 on a thread you expect to exist | It belongs to another user or tenant, or does not exist | Check `GET /v1/me` for reach and the token's tenant claim |
+| Startup `ValueError`: "JWT_SECRET_KEY and JWT_ALGORITHM must be set" | One of the two env vars is missing with JWT | Set both |
+| Refuses to boot, naming `authorization` or `graph_introspection` | Removed keys | See [Migrating from authorization](#migrating-from-authorization) |
 
 ### Boot guard
 
@@ -260,19 +539,22 @@ RuntimeError: Refusing to start: the following routes are not protected:
   - POST /v1/my-new-endpoint
 ```
 
-This is intentional: a forgotten guard becomes a deploy-time error, not a silent open endpoint.
+This is intentional: a forgotten guard becomes a deploy-time error, not a silent open endpoint. `/ping` and `/health/ready` are the only public paths.
 
 ## Production recommendations
 
-1. Always set `"auth"` in production; never leave it `null`
+1. Always set `"auth"` in production; never leave it `null` unless a gateway does the check
 2. Use HTTPS everywhere
 3. Keep `JWT_SECRET_KEY` outside version control; inject it at deploy time
 4. Use short-lived tokens and rotate secrets intentionally
-5. Set `MODE=production` to disable `/docs` and `/redocs` (enable only if intentional)
-6. Test both successful and rejected requests before release, asserting on the error code
+5. Give reach `all` to as few roles as you can; boot logs each one
+6. Set `MODE=production` to disable `/docs` and `/redocs` (enable only if intentional)
+7. Test both successful and rejected requests before release, asserting on the status and error code
 
 ## See also
 
-- [Configure the API server](/docs/server/configure): Set auth, authorization, and other keys in `10xgraph.json`
+- [Authorization scopes](/docs/guides/authorization-scopes): Read the caller and check permissions inside tools and nodes
+- [Multi-tenant data](/docs/guides/multi-tenant-data): Tenant columns and reach in storage
+- [Configure the API server](/docs/server/configure): Set `auth` and other keys in `10xgraph.json`
 - [Troubleshooting auth](/docs/troubleshooting/api-server): Debug auth and CORS failures
 - [REST API: auth reference](/docs/reference/api-cli/auth): Full interface and status codes

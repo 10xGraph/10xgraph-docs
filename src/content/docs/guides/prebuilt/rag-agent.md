@@ -574,10 +574,10 @@ rag = RAGAgent(store=store, agent=agent, store_config_builder=company_search_con
 
 ## Tenant stores
 
-When the store has tenant columns (`PgVectorStore(tenant_columns=...)`), `RAGAgent` forwards only `config["user"]` from the run config to `store.asearch`, so knowledge-base searches stay inside the caller's tenant. It never forwards `config["authz"]`: a caller whose isolation scope is `none` must not widen a knowledge-base search to every tenant. The tenant values are read from the run config only, never from state, messages or model output.
+When the store has tenant columns (`PgVectorStore(tenant_columns=...)`), `RAGAgent` forwards only `config["user"]` from the run config to `store.asearch`, so knowledge-base searches stay inside the caller's tenant. The search always runs inside the knowledge base's own owner, so a caller with a wider reach (`tenant` or `all`) is not widened into other users' rows. The tenant values are read from the run config only, never from state, messages or model output.
 
 - Documents indexed with tenant values are visible only inside that tenant.
-- To share one knowledge base across tenants, set `"authz"` yourself in `store_config` or the `store_config_builder` output with a scope that does not pick the tenant columns, or use a store without tenant columns. In the second case compile with `allow_tenant_mismatch=True` when the checkpointer declares tenant columns.
+- To share one knowledge base across tenants, use a store without tenant columns. In the second case compile with `allow_tenant_mismatch=True` when the checkpointer declares tenant columns.
 
 See [Multi-tenant data](/docs/guides/multi-tenant-data#ragagent-and-tenant-stores).
 

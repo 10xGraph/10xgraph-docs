@@ -13,7 +13,7 @@ order: 30
 updated: "2026-10-27"
 faq:
   - q: Who can approve a refund?
-    a: By default only the user who owns the thread, because the server refuses anyone else with 403. That fits "the customer confirms the amount". For a back-office reviewer, write a custom AuthorizationBackend that lets a reviewer role resume other users' threads. The guide shows the owner-only case.
+    a: By default only the user who owns the thread, because the thread does not exist for anyone else (404). That fits "the customer confirms the amount". A role with reach `tenant` or `all` cannot resume other users' threads either, because runs always stay on the caller's own threads. For a back-office reviewer, build the approval step so the reviewer's decision reaches the owner's run through your own code. The guide shows the owner-only case.
   - q: Is the refund exactly once?
     a: No tool framework can promise that on its own. A finished tool call that is recorded in the checkpointer is not run again. A crash before the tool returns, or in the moment between the return and the record, can still run it twice. Send your payment provider an idempotency key built from the order id to cover those cases.
   - q: What happens if the approver never answers?
@@ -139,7 +139,7 @@ The requests below ran against a real `10xgraph dev` server in production mode w
 |---|---|
 | Resume with the wrong `interrupt_id` | **409** `interrupt_id 'int_wrong' does not match the open interrupt 'int_fdc3...'` |
 | Resume with `{"approved": "yes"}` | **422** `Resume value does not match the response schema of interrupt '...': $.approved: expected boolean, got str` |
-| A different user resumes the thread | **403** `Not authorized to invoke graph`, before the graph starts |
+| A different user resumes the thread | **404** `Thread not found`, before the graph starts |
 | The right user resumes with `{"approved": true}` | **200**, the refund ran once |
 | The same answer is sent again | **409** `Nothing to resume: this thread is not paused at an interrupt` |
 | A new user message is sent to a paused thread | **422** (a generic "Invalid input provided." in production): a paused thread wants an answer, not a message |
@@ -180,7 +180,7 @@ Releases 0.10.3 (core) and 0.9.0 (API) have `interrupt()`, `resume`, the tool le
 
 | Covered here | Still yours |
 |---|---|
-| A pause before money moves, saved in the checkpoint | Who the approver is: owner-only by default, a custom `AuthorizationBackend` for reviewers |
+| A pause before money moves, saved in the checkpoint | Who the approver is: owner-only by default; a reviewer needs your own routing |
 | An answer tied to one interrupt and checked against a schema | The rules inside your tool, such as limits above which a second approver is needed |
 | A recorded tool call is not re-run after a replay | An idempotency key in the call to the payment provider |
 | One run per thread, 409 otherwise | Telling your front end to treat 409 as "someone else is already working on this" |

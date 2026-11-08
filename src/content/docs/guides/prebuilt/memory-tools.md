@@ -91,7 +91,7 @@ agent = ReactAgent(
 app = agent.compile(store=store)
 ```
 
-Import `Message` from `tenxgraph.core.state` for the invoke call below. The `user_memory_tool` is now available to the LLM. It is scoped to the `user_id` from the run config at invocation (unless you set `UserMemoryConfig(user_id=...)`, which overrides it):
+Import `Message` from `tenxgraph.core.state` for the invoke call below. The `user_memory_tool` is now available to the LLM. It is scoped to the caller. With an authenticated identity (`config["user"]`, which the API server sets from the verified token), the identity's `user_id` always wins, and a `UserMemoryConfig(user_id=...)` value is ignored, so a fixed id never shares one user's memory with every caller. Without an identity (direct SDK use), `UserMemoryConfig(user_id=...)` replaces `config["user_id"]`, and otherwise the run config's `user_id` is used. User memory is always the caller's own, whatever their reach:
 
 ```python
 result = await app.ainvoke(

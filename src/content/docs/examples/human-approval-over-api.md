@@ -53,7 +53,7 @@ app = ReactAgent(
 ```
 
 ```json title="10xgraph.json"
-{ "agent": "graph.agent:app", "auth": "jwt", "authorization": "ownership" }
+{ "agent": "graph.agent:app", "auth": "jwt" }
 ```
 
 ```bash
@@ -152,7 +152,7 @@ if (pending) {
 | Resume sent to a thread that is not paused (also a repeated resume) | 409 | `Nothing to resume: this thread is not paused at an interrupt` |
 | The answer breaks the schema (`"approved": "yes"`) | 422 | `Resume value does not match the response schema of interrupt '...': $.approved: expected boolean, got str` |
 | A new message sent to the paused thread | 422 | `Thread is paused at interrupt '...' in node 'TOOL'. Resume it with {'resume': value}.` |
-| Another user's token on this thread | 403 | `Not authorized to invoke graph` |
+| Another user's token on this thread | 404 | `Thread not found` |
 | Another run is active on the thread for more than 30 s | 409 | `thread is busy` |
 
 A rejected resume records nothing, so the thread stays paused and you can send a corrected answer.

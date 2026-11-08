@@ -54,8 +54,8 @@ If `ag_ui.enabled` is `true` but the extra is missing, the server refuses to sta
 | `messages` | yes | The conversation as the client sees it. Only the new trailing user turn, or tool results for a pending browser tool call, reach the graph |
 | `state` | no | Initial application state for the run. The keys `context`, `context_summary` and `execution_meta` are dropped |
 | `tools` | no | Browser tools offered to the model for this run only. See [Client tools](#client-tools) |
-| `context` | no | Frontend context entries, readable in nodes as `config["ag_ui"]["context"]` |
-| `forwardedProps` | no | Free-form client data, readable as `config["ag_ui"]["forwarded_props"]` |
+| `context` | no | Accepted and validated, not passed to the graph |
+| `forwardedProps` | no | Accepted and validated, not passed to the graph |
 | `resume` | no | Answers to an open `interrupt()`. Each entry has `interruptId`, `status` (`resolved` or `cancelled`) and an optional `payload` |
 | `parentRunId`, `protocolVersion` | no | Accepted and validated, not used |
 

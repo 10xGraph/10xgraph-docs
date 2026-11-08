@@ -17,7 +17,7 @@ Serving your graph with `10xgraph-api` gives you these guarantees without code i
 | Guarantee | What it means | Details |
 | --- | --- | --- |
 | Authentication | JWT or your own `BaseAuth` on every route except `/ping` and `/health/ready`. You must configure it: `auth: null` is allowed, even in production. | [Authentication](/docs/server/auth) |
-| Ownership isolation | In production (and whenever auth is on) a thread is readable and writable only by its creator; a foreign `invoke` is rejected with 403 before the model runs. | [Thread ownership](/docs/server/auth) |
+| Ownership isolation | In production (and whenever auth is on) a thread is readable and writable only by its creator; a foreign `invoke` answers 404 before the model runs. | [Thread ownership](/docs/server/auth) |
 | Scoped authorization | Per-route scopes, and a boot-time route guard that refuses to start if any non-public route has no permission check. | [Authorization scopes](/docs/guides/authorization-scopes) |
 | Input rules | Request size limit, client messages limited to the `user` role, built-in state fields not writable, `current_node` and state values validated. | [Invoke and stream](/docs/server/invoke-and-stream), [CORS and security headers](/docs/server/cors-and-security-headers) |
 | Rate limits and run caps | Sliding-window limits (counters in the cache store: memory or Redis) and a per-run timeout (300 s by default in production). | [Rate limiting](/docs/server/rate-limiting) |
@@ -61,11 +61,11 @@ All endpoints except `/ping` enforce an auth + authorization layer. Your choice 
 - **JWT** (`"auth": "jwt"`): Bearer token checked against a shared secret (`JWT_SECRET_KEY`). Standard, stateless, and suitable for mobile and SPAs.
 - **Custom** (`"auth": {"method": "custom", "path": "module:attr"}`): Your own `BaseAuth` subclass; route requests to any identity provider (LDAP, OAuth2, SAML, API key validation).
 
-Authorization (per-resource access control) is separate and optional:
+Authorization is part of the `auth` setting and applies to any auth class:
 
-- **Ownership** (default in production): A user can access only threads they created. Enforced on every thread operation (invoke, stream, read state, delete).
-- **RBAC** (role-based access control): Custom `AuthorizationBackend` subclass for per-route scopes (such as `graph:invoke` or `store:write`), team scopes, or resource-level rules. Scopes guard routes, not individual tools; to check a scope inside a tool, use `has_scope` in the tool code.
-- **Allow all** (default in development): All authenticated users can access all resources.
+- **Owner-only data** (default whenever auth is on): the default permission set and reach `own`. A user reaches only their own threads, memories and files, and another user's thread answers 404.
+- **Roles**: add `roles` to the `auth` object to map token roles to `resource:action` permissions (such as `graph:invoke` or `store:write`) and a reach of `own`, `tenant` or `all`. Permissions guard routes, not individual tools; to check a permission inside a tool, use `can(config, "store:write")` from `tenxgraph.core.authz`.
+- **Custom rules**: override `BaseAuth.authorize` for rules the role table cannot express.
 
 WebSocket and HTTP endpoints both enforce authentication via the `Authorization: Bearer <token>` header. WebSocket also accepts the token in the `Sec-WebSocket-Protocol` header as `10xgraph-bearer, <token>` (the deprecated `agentflow-bearer` name still works), or as a `?token=` query parameter as a last resort. HTTP routes read only the `Authorization` header. See [Secure your server](/docs/server/auth) for setup and examples.
 
@@ -74,7 +74,7 @@ WebSocket and HTTP endpoints both enforce authentication via the `Authorization:
 The `MODE` environment variable switches the server's security and logging posture:
 
 - **`MODE=development`** (default): Unauthenticated `/ping` accessible, `ORIGINS="*"` (CORS allows any domain), debug mode is on. Use for local development and testing.
-- **`MODE=production`**: Only `/ping` is unauthenticated, a graph run is cancelled after 300 seconds unless you change `runs.timeout`, wildcard CORS with credentials is refused (set `ORIGINS` explicitly), and `/docs` and `/redocs` are disabled unless you set `DOCS_PATH` and `REDOCS_PATH`. debug mode is off, and `graph_introspection` defaults to `"scoped"` (see [Configure the server](/docs/server/configure#control-who-can-read-the-graph-structure)). Security headers (HSTS, X-Frame-Options and others) are on in every mode unless `SECURITY_HEADERS_ENABLED=false`. Use for deployments exposed to the internet.
+- **`MODE=production`**: Only `/ping` is unauthenticated, a graph run is cancelled after 300 seconds unless you change `runs.timeout`, wildcard CORS with credentials is refused (set `ORIGINS` explicitly), and `/docs` and `/redocs` are disabled unless you set `DOCS_PATH` and `REDOCS_PATH`. debug mode is off, and graph introspection needs the `graph:read` permission. Security headers (HSTS, X-Frame-Options and others) are on in every mode unless `SECURITY_HEADERS_ENABLED=false`. Use for deployments exposed to the internet.
 
 Together with `JWT_SECRET_KEY` (a strong, randomly generated secret in production) and an explicit `ORIGINS` list, production mode refuses to start with wildcard CORS and credentials enabled. `STRICT_PRODUCTION_CHECKS` is on by default in production and also refuses a wildcard `ORIGINS`, a wildcard `ALLOWED_HOST` and enabled docs paths, so set `ORIGINS` and `ALLOWED_HOST` to your real values. Set `STRICT_PRODUCTION_CHECKS=false` to opt out.
 

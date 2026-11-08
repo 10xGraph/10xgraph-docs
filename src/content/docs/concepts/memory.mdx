@@ -143,11 +143,11 @@ The `states` table has a unique index on `(thread_id, version)` to enforce one r
 
 ## User isolation and scoping
 
-By default, `enforce_user_isolation=True`. The `states` and `messages` tables carry no `user_id`; ownership lives on `threads`, so queries are scoped through it (`thread_id IN (SELECT thread_id FROM threads WHERE user_id = ?)`) using the `user_id` in the config dict. This prevents one user from reading or writing another user's thread, even if they know the `thread_id`. When the API server supplies an authorization policy in the config, that policy decides whether isolation applies.
+By default, `enforce_user_isolation=True`. The `states` and `messages` tables carry no `user_id`; ownership lives on `threads`, so queries are scoped through it (`thread_id IN (SELECT thread_id FROM threads WHERE user_id = ?)`) using the `user_id` in the config dict. This prevents one user from reading or writing another user's thread, even if they know the `thread_id`. When the API server supplies an identity in `config["user"]`, the identity's reach (`own`, `tenant` or `all`) decides which rows a query can match.
 
 `PgCheckpointer` raises a `ValueError` on a read or write if `user_id` is missing from the config. The API server fills `user_id` from the authenticated request (or sets it to `"anonymous"` if no auth is configured). Turn off isolation only for single-tenant deployments where all threads are logically shared.
 
-For several organizations or projects in one database, declare `tenant_columns` (such as `org_id`) and `extra_columns` on `PgCheckpointer`. They are columns on `threads`, set once when the thread is created and read only from `config["user"]`. The same scoping then runs through the thread row, so a caller's isolation scope can match on `org_id` and `project_id` as well as `user_id`. Threads created before you added a tenant column hold `NULL` there and are hidden from scopes that pick it until you backfill them. See [Multi-tenant data](/docs/guides/multi-tenant-data).
+For several organizations or projects in one database, declare `tenant_columns` (such as `org_id`) and `extra_columns` on `PgCheckpointer`. They are columns on `threads`, set once when the thread is created and read only from `config["user"]`. The same scoping then runs through the thread row, so a caller's reach can match on `org_id` and `project_id` as well as `user_id`. Threads created before you added a tenant column hold `NULL` there and are hidden from callers whose reach filters on it until you backfill them. See [Multi-tenant data](/docs/guides/multi-tenant-data).
 
 ## Cache invalidation on conflict
 
@@ -187,7 +187,7 @@ For multi-worker services, use `PgCheckpointer` with Postgres and Redis. See [Se
 
 - **Durability and concurrency**: For handling StaleStateError, thread isolation, and optimistic concurrency patterns, see [Durability and concurrency](/docs/guides/durability-and-concurrency).
 - **Thread lifecycle**: For the config dict, thread_id, and user_id, see [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
-- **Multi-tenant data**: Tenant and extra columns on `threads`, isolation scopes and filters, see [Multi-tenant data](/docs/guides/multi-tenant-data).
+- **Multi-tenant data**: Tenant and extra columns on `threads`, reach and filters, see [Multi-tenant data](/docs/guides/multi-tenant-data).
 - **Long-term memory**: The checkpointer is thread-scoped. For memories shared across threads, see [Long-term memory](/docs/concepts/memory-and-store).
 - **Replay-safe tools**: How the tool ledger uses durable writes to prevent tools from running twice on resume, see [Replay-safe tools](/docs/concepts/replay-safe-tools).
 

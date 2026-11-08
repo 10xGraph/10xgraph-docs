@@ -80,11 +80,11 @@ If auth is not configured (`"auth": null`), credentials are not required. Missin
 
 ## Permission model
 
-Each endpoint declares one `(resource, action)` pair. On every request the server calls `authorize(user, resource, action)` on the configured `AuthorizationBackend`. The built-in `DefaultAuthorizationBackend` allows any request whose user has a `user_id`, so write your own backend for real access control.
+Each endpoint declares one `(resource, action)` pair. On every request the server calls `authorize(identity, "resource:action", resource_id)` on your `BaseAuth`. The default implementation checks the permissions on the caller's `Identity`: everything except `admin:*` when no roles are configured, or what the caller's roles grant. A missing permission answers `403`. A thread, message, memory, file or run that the caller's reach does not cover answers `404`. See [authentication and authorization](/docs/server/auth).
 
 ### Permission reference
 
-The table lists every `(resource, action)` pair the server enforces. `POST /v1/ag-ui` exists only when `ag_ui.enabled` is true in `10xgraph.json`.
+The table lists every `(resource, action)` pair the server enforces. `POST /v1/ag-ui` exists only when `ag_ui.enabled` is true in `10xgraph.json`, and the `/v1/tasks` routes only when background tasks are configured.
 
 | Endpoint | Resource | Action |
 | --- | --- | --- |
@@ -99,17 +99,16 @@ The table lists every `(resource, action)` pair the server enforces. `POST /v1/a
 | `GET /v1/graph:StateSchema` | `graph` | `read` |
 | `POST /v1/graph/stop` | `graph` | `stop` |
 | `POST /v1/graph/fix` | `graph` | `fix` |
-| `GET /v1/threads/{id}/state` | `checkpointer` | `read` |
-| `PUT /v1/threads/{id}/state` | `checkpointer` | `write` |
-| `DELETE /v1/threads/{id}/state` | `checkpointer` | `delete` |
-| `GET /v1/threads/{id}/messages` | `checkpointer` | `read` |
-| `GET /v1/threads/{id}/messages/{msg}` | `checkpointer` | `read` |
-| `POST /v1/threads/{id}/messages` | `checkpointer` | `import` (explicit grant, admin only) |
-| `PUT /v1/threads/{id}/messages/{msg}` | `checkpointer` | `write` |
-| `DELETE /v1/threads/{id}/messages/{msg}` | `checkpointer` | `delete` |
-| `GET /v1/threads` | `checkpointer` | `read` |
-| `GET /v1/threads/{id}` | `checkpointer` | `read` |
-| `DELETE /v1/threads/{id}` | `checkpointer` | `delete` |
+| `GET /v1/threads/{id}/state` | `threads` | `read` |
+| `PUT /v1/threads/{id}/state` | `threads` | `write` |
+| `DELETE /v1/threads/{id}/state` | `threads` | `delete` |
+| `GET /v1/threads/{id}/messages` | `threads` | `read` |
+| `GET /v1/threads/{id}/messages/{msg}` | `threads` | `read` |
+| `PUT /v1/threads/{id}/messages/{msg}` | `threads` | `write` |
+| `DELETE /v1/threads/{id}/messages/{msg}` | `threads` | `delete` |
+| `GET /v1/threads` | `threads` | `read` |
+| `GET /v1/threads/{id}` | `threads` | `read` |
+| `DELETE /v1/threads/{id}` | `threads` | `delete` |
 | `POST /v1/store/memories` | `store` | `write` |
 | `POST /v1/store/search` | `store` | `read` |
 | `POST /v1/store/memories/{id}` | `store` | `read` |
@@ -122,6 +121,10 @@ The table lists every `(resource, action)` pair the server enforces. `POST /v1/a
 | `GET /v1/files/{id}/info` | `files` | `read` |
 | `GET /v1/files/{id}/url` | `files` | `read` |
 | `GET /v1/config/multimodal` | `config` | `read` |
+| `GET /v1/tasks/{id}` | `tasks` | `read` |
+| `POST /v1/tasks/{name}` and `PATCH /v1/tasks/{id}` | `tasks` | `trigger` |
+| `POST /v1/tasks/{id}/cancel` | `tasks` | `cancel` |
+| `GET /v1/me` | (identity only) | (none) |
 | `GET /ping` | (none) | (none) |
 
 The `/ping` row is the complete public allowlist. Every other route must carry a `RequirePermission` guard, and the server refuses to start if one does not.

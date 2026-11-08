@@ -117,7 +117,7 @@ Get the id from the `interrupt` object of the `interrupted` update chunk, or fro
 - A blank or missing `thread_id` also means "start a new thread".
 - With the default `runs.thread_ids` of `"server"`, a `thread_id` that does not exist is refused like a thread you do not own. Do not invent ids. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 - `resume` runs require `config.thread_id`.
-- When auth is enabled, the thread is owner-checked before each run. An unauthorized or unknown thread gets an `error` chunk with `Not authorized to stream thread ...` and the socket stays open.
+- When auth is enabled, the thread is read through the caller's scope before each run. A foreign or unknown thread gets an `error` chunk with code `THREAD_NOT_FOUND` and the socket stays open.
 
 ### One run per thread
 
@@ -173,7 +173,7 @@ Client → Server:
 }
 ```
 
-`/v1/graph/live` follows `runs.thread_ids` like the other routes. With the default `"server"`, a `thread_id` the server never issued is refused with a `not_authorized` error event and close code `1008`. Omit `thread_id` (or send `"new"` or a blank value) and the server creates the thread. Every session starts with a `session_started` event that carries the id, so send that id back on reconnect to continue the thread. The TypeScript client does this for you and exposes the id as `session.threadId`.
+`/v1/graph/live` follows `runs.thread_ids` like the other routes. With the default `"server"`, a `thread_id` the server never issued is refused with a `THREAD_NOT_FOUND` error event and close code `1008`. Omit `thread_id` (or send `"new"` or a blank value) and the server creates the thread. Every session starts with a `session_started` event that carries the id, so send that id back on reconnect to continue the thread. The TypeScript client does this for you and exposes the id as `session.threadId`.
 
 The `model` override is honored only if it is listed in `websocket.realtime_models`; otherwise it is ignored and the agent's own model is used. A bad value (for example an invalid `modalities` entry) returns a fatal `error` event with code `invalid_config`.
 

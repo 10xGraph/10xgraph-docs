@@ -30,7 +30,7 @@ flowchart LR
   W1 & W2 & W3 --> M[(Media store)]
 ```
 
-Workers hold no conversation state between requests. They hold caches (a short-lived thread-ownership cache) and, with the in-memory cache store, per-process counters, which is why a shared cache store (Redis by default) matters once you run more than one worker. See [Scaling and reliability](/docs/production/scaling) for exactly what it shares, and [Bring your own backend](/docs/server/bring-your-own-backend) for replacing it.
+Workers hold no conversation state between requests. With the in-memory cache store they hold per-process counters, which is why a shared cache store (Redis by default) matters once you run more than one worker. See [Scaling and reliability](/docs/production/scaling) for exactly what it shares, and [Bring your own backend](/docs/server/bring-your-own-backend) for replacing it.
 
 ## The request path
 
@@ -45,7 +45,7 @@ This is the order a request travels, outermost layer first. The middleware order
 | 5 | Rate limit | Runs only when `rate_limit` is set in `10xgraph.json`. Counters live in the API's cache store (in-memory, Redis or your own). |
 | 6 | Request size | Rejects bodies over `MAX_REQUEST_SIZE`. The upload route gets room for `MEDIA_MAX_SIZE_MB`. |
 | 7 | Gzip | Compresses responses over 1000 bytes, except `/v1/graph/stream`, which must send data as it is produced. |
-| 8 | Route guard | `RequirePermission` authenticates the caller (JWT or your `BaseAuth`), checks token revocation if configured, then asks the authorization backend. The default `ownership` backend lets a thread be read or run only by its owner. A foreign thread is a 403 before the graph is touched. |
+| 8 | Route guard | `RequirePermission` authenticates the caller (JWT or your `BaseAuth`), checks token revocation if configured, then calls `BaseAuth.authorize` for the route's permission (403 if missing). Each thread route then reads the thread through the caller's reach, so by default a thread is visible only to its owner. A foreign thread is a 404 before the graph is touched. |
 | 9 | Per-thread run lock | One run at a time on a thread. A busy thread is waited on for up to 30 seconds, then a 409. `on_busy: "cancel"` asks the active run to stop first. |
 | 10 | Per-user run cap | `runs.max_concurrent_per_user` (default 10) bounds runs in flight for a user. Over the cap is a 429. |
 | 11 | Graph run | Your compiled graph runs, bounded by `runs.timeout` if set (invoke returns 504, a stream ends with an error chunk). |

@@ -38,7 +38,6 @@ Each of the three has an abstract `aping()`. The server calls it at startup and 
 | Run cap (`runs.max_concurrent_per_user`) | Timed slots | Fails open |
 | WebSocket caps (`websocket.max_connections`, `max_connections_per_user`) | Timed slots | Fails open |
 | Idempotency | The running lease and the stored records | Fails open |
-| Ownership cache (L2) | Keys with a TTL | Fails open: lookups fall back to the checkpointer |
 | Token revocation | Keys with a TTL; a per-user cutoff that only moves forward | Fails closed: the request gets `503` |
 | Rate limiting | Timed slots that are never released | Follows `rate_limit.fail_open` (default `true`); `false` answers `503` `RATE_LIMIT_UNAVAILABLE` with `Retry-After: 5` |
 
@@ -100,7 +99,7 @@ When the cache store is down and no fail-closed feature uses it, the server logs
 
 ## The `BaseCacheStore` contract
 
-Two primitives cover every feature above. **Timed slots** (`acquire`, `renew`, `release`) are a set of expiring slots per key, capped at `limit`. A lock is a slot set with `limit=1`; a rate limit is a slot set whose slots are never released and expire after the window. **Keys with a TTL** (`get`, `set`, `delete`) hold values such as idempotency records, ownership entries and revocations.
+Two primitives cover every feature above. **Timed slots** (`acquire`, `renew`, `release`) are a set of expiring slots per key, capped at `limit`. A lock is a slot set with `limit=1`; a rate limit is a slot set whose slots are never released and expire after the window. **Keys with a TTL** (`get`, `set`, `delete`) hold values such as idempotency records and revocations.
 
 | Method | Meaning |
 |---|---|

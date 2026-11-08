@@ -141,8 +141,7 @@ These features have their own guides and require coordination:
 
 | Feature | Guide | What it controls |
 |---|---|---|
-| `auth` | [Authentication](/docs/server/auth) | Who can call the server (JWT, custom) |
-| `authorization` | [Authentication](/docs/server/auth) | Who can access each thread (ownership, RBAC) |
+| `auth` | [Authentication](/docs/server/auth) | Who can call the server (JWT, custom), what each role may do, and how far each role sees (`own`, `tenant`, `all`) |
 | `cache_store.rate_limit` | [Rate limiting](/docs/server/rate-limiting) | How many requests per window |
 | `cache_store.token_revocation` | [Authentication](/docs/server/auth) | Refuse tokens you revoked |
 
@@ -152,7 +151,6 @@ A minimally secured production config looks like this:
 {
   "agent": "graph.react:app",
   "auth": "jwt",
-  "authorization": "ownership",
   "cache_store": {
     "type": "redis",
     "rate_limit": {
@@ -167,12 +165,12 @@ A minimally secured production config looks like this:
 ```
 
 - `"auth": "jwt"` requires `JWT_SECRET_KEY` (at least 32 characters; shorter keys are rejected in production) and `JWT_ALGORITHM` (for example `HS256`) in the environment. See [Authentication](/docs/server/auth) for custom auth.
-- `"authorization": "ownership"` makes threads private to their creator. With the default `runs.thread_ids` of `"server"`, it also refuses thread ids the server did not create (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)). With `allow_all`, any authenticated user who knows a thread ID can read it.
+- With auth on, threads, memories and files are private to their owner by default (reach `own`). A thread outside the caller's reach answers 404. With the default `runs.thread_ids` of `"server"`, ids the server did not create are refused too (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)). Add `auth.roles` to grant fewer permissions or a wider reach. The old `authorization` key is removed and refuses to boot.
 - `"cache_store": {"type": "redis"}` gives the API a Redis cache store, which shares the rate limit (and the run locks, caps and revocations) across all replicas. Without it the counters live in each process, so three replicas allow three times the configured limit, which is unsuitable for production.
 
 ## Choose the cache store
 
-The API keeps everything it shares between workers in one **cache store**: the per-thread run lock, run and WebSocket caps, idempotency state, the ownership cache, token revocation and rate-limit counters. One `cache_store` object picks it and also holds the two settings the store backs, `rate_limit` and `token_revocation`:
+The API keeps everything it shares between workers in one **cache store**: the per-thread run lock, run and WebSocket caps, idempotency state, token revocation and rate-limit counters. One `cache_store` object picks it and also holds the two settings the store backs, `rate_limit` and `token_revocation`:
 
 | Key | Meaning |
 |---|---|
@@ -203,7 +201,7 @@ This table shows what each setting does when its key is absent from `10xgraph.js
 | Setting | Key absent | Quick Start template | Production template |
 |---|---|---|---|
 | Auth | Off: every request is accepted | `null` (off) | `jwt` |
-| Authorization | `ownership` when auth is set or `MODE=production`, otherwise `allow_all` | not written | `ownership` |
+| Roles and reach | Default permission set (all but `admin:*`), reach `own`, when auth is on. Nothing when auth is off | not written | not written (default set, reach `own`) |
 | Cache store | In-memory, per process | not written (in-memory) | `type: redis`, URL from `REDIS_URL` |
 | Rate limiting | Off | off | on: 100 requests per 60 seconds, by user, `fail_open` false |
 | Token revocation | Off | off | on |
@@ -299,23 +297,13 @@ When a shared cache store is configured (`cache_store` of type `redis` or `custo
 
 ## Control who can read the graph structure
 
-`graph_introspection` decides who may call `GET /v1/graph`, `GET /v1/graph/tools` and `GET /v1/graph:StateSchema`, which expose node names, tool schemas and the state schema:
+`GET /v1/graph`, `GET /v1/graph/tools` and `GET /v1/graph:StateSchema` expose node names, tool schemas and the state schema. They need the `graph:read` permission. The default permission set includes it. To hide the graph structure from a role, leave `graph:read` out of that role's `permissions` in `auth.roles`; a refusal is `403`. With auth off there is no identity, so these routes stay open.
 
-- `"open"`: any authenticated user.
-- `"scoped"`: only identities that carry the `graph:read` scope (from JWT claims or an RBAC role). An identity with no scopes is refused with `403`.
-
-The default is `"scoped"` when `MODE=production` and `"open"` otherwise. With auth off there is no identity, so these routes stay open in either mode.
-
-```json
-{
-  "agent": "graph.react:app",
-  "graph_introspection": "open"
-}
-```
+The old `graph_introspection` key is removed and refuses to boot. See [Migrating from authorization](/docs/server/auth#migrating-from-authorization).
 
 ## Keys the server owns in request config
 
-A client can send a `config` object with a run, and your nodes and tools can read its keys. The server drops these keys from client config before the graph sees them (no error is returned): `authz`, `user`, `user_id`, `remote_tools`, `ag_ui`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection`, and any key that starts with `_`. Identity comes from the verified token, never from config. To narrow the rest, list allowed keys in `runs.config_keys` and `runs.state_keys`. See [Invoke and stream](/docs/server/invoke-and-stream).
+A client can send a `config` object with a run, and your nodes and tools can read its keys. The server drops these keys from client config before the graph sees them (no error is returned): `user`, `user_id`, `remote_tools`, `ag_ui`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection`, and any key that starts with `_`. Identity comes from the verified token, never from config. To narrow the rest, list allowed keys in `runs.config_keys` and `runs.state_keys`. See [Invoke and stream](/docs/server/invoke-and-stream).
 
 ## Environment variable expansion in the cache store URL
 
@@ -357,8 +345,7 @@ A typical dev config:
 ```json
 {
   "agent": "graph.agent:app",
-  "env": ".env",
-  "authorization": "allow_all"
+  "env": ".env"
 }
 ```
 
@@ -369,7 +356,6 @@ A typical prod config (see production checklist below):
   "agent": "graph.agent:app",
   "env": ".env",
   "auth": "jwt",
-  "authorization": "ownership",
   "store": "graph.dependencies:store",
   "cache_store": {
     "type": "redis",
@@ -395,9 +381,9 @@ Before deploying to production, make five explicit decisions:
 
 With `auth` unset or `null`, every request is accepted. This is fine for internal development. In production, set `"auth": "jwt"` with `JWT_SECRET_KEY` (at least 32 characters) and `JWT_ALGORITHM` in the environment, or point at a custom `BaseAuth` subclass. See [Authentication](/docs/server/auth).
 
-### 2. Set authorization policy
+### 2. Set roles and reach
 
-If `authorization` is unset, the server uses `ownership` whenever auth is configured or `MODE=production`, and `allow_all` only with auth off in development. With `allow_all`, any authenticated user who knows a thread ID can read that conversation. In production, set `"authorization": "ownership"` so threads are visible only to their creator. Alternatively, implement a custom `AuthorizationBackend` for role-based access control. A custom backend isolates users by default, because `isolation_scope()` returns `"owner"`. Return `"none"` from it only if users should share threads and memories. In development, `"allow_all"` is fine. Set it explicitly rather than relying on the `MODE` default.
+With auth on, every user gets the default permission set and sees only their own data. A thread, message, memory or file outside the caller's reach answers 404. To give some users fewer permissions or a wider reach, add `auth.roles` with a `permissions` list and a `reach` (`own`, `tenant` or `all`) per role. Reach `tenant` and `all` widen reads, lists and deletes only; runs always stay on the caller's own threads. For checks that need a database or a policy service, use `"method": "custom"` and override `authorize`. See [Authentication](/docs/server/auth). The `authorization` key from earlier versions is removed and refuses to boot; [the migration table](/docs/server/auth#migrating-from-authorization) shows the replacement for each setting.
 
 ### 3. Use a shared, durable checkpointer
 
@@ -450,6 +436,7 @@ Finally, verify that persistence survives a restart: start a thread by invoking 
 | Checkpointer connection fails | The Postgres DSN is correct and the database is reachable. Test: `psql <dsn>`. The Redis URL is reachable: `redis-cli -u <url> ping`. |
 | `JWT_SECRET_KEY and JWT_ALGORITHM must be set` | Export both variables, or set `"env": ".env"` and add them there. The secret needs at least 32 characters. |
 | Rate limiting not working on multi-replica setup | Set `"cache_store": {"type": "redis"}` (with `REDIS_URL` set, or a `url`) so the cache store is shared. Ensure all replicas point to the same Redis instance. |
-| Threads visible to users who did not create them | Set `"authorization": "ownership"` or implement a custom `AuthorizationBackend`. Check that all replicas use the same setting. |
+| Threads visible to users who did not create them | Check that `auth` is on and that no role has reach `tenant` or `all` for them. `GET /v1/me` shows the resolved reach. Check that all replicas use the same config. |
+| Refuses to boot naming `authorization` | The key is removed. See [Migrating from authorization](/docs/server/auth#migrating-from-authorization). |
 
 For a complete list of configuration keys, defaults, and types, see the [configuration reference](/docs/reference/api-cli/configuration).

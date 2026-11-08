@@ -13,27 +13,29 @@ Validators are checks that run on incoming messages before a graph executes them
 
 A 10xGraph system needs protection at two distinct boundaries, each with different tools.
 
-**Server boundary: who may call what.** The API server controls access using JWT authentication or custom auth logic. Each authenticated request carries a `user_id` and a set of `scopes`. Every API endpoint checks scope permissions using the `resource:action` format (e.g., `graph:invoke`, `checkpointer:read`, `files:upload`). Inside a direct Python invocation (no API), the developer sets authorization in `config["authz"]`. The server also enforces CORS policies, request-size limits, and rate limits.
+**Server boundary: who may call what.** The API server controls access using JWT authentication or custom auth logic. Each authenticated request becomes an `Identity` with a `user_id`, permissions and a reach. Every API endpoint checks one permission in the `resource:action` format (e.g., `graph:invoke`, `threads:read`, `files:upload`). Inside a direct Python invocation (no API), the developer passes the identity in `config["user"]`. The server also enforces CORS policies, request-size limits, and rate limits.
 
 **Model boundary: what text reaches the model.** A user can inject instructions into a message, or a tool can fetch a document containing an attack. Validators run before the model sees input and reject suspicious content. Callbacks that inspect model output, tool calls, and tool results provide a second line of defense. Neither layer catches all attacks (indirect injection through tool results, for example), but combined they substantially reduce the attack surface.
 
 ## Authorization model
 
-Authorization inside 10xGraph is built on two concepts: **isolation scope** and **scopes**.
+Authorization inside 10xGraph is built on two concepts: **reach** and **permissions**. Both live on the `Identity` in `config["user"]`, which the API builds from the verified token. Direct SDK callers may pass a dict that validates into an `Identity`.
 
-**Isolation scope** controls multi-tenant data isolation. It can be `"owner"` (each user sees only their own threads and long-term data) or `"none"` (no isolation; data is not filtered by user, used in single-user deployments). When no explicit scope is set, storage backends apply their own default isolation policy.
+**Reach** controls multi-tenant data isolation. It is `"own"` (the caller sees only their own threads and long-term data), `"tenant"` (every user with the same tenant values) or `"all"`. Reach widens reads, lists and deletes only; runs and writes always stay on the caller's own data. Storage applies it in every query, so another user's thread answers 404. A reach that is missing or unknown raises, it never widens silently. With no identity, storage backends apply their own default.
 
-**Scopes** are fine-grained permission strings in the format `resource:action`. A caller holds a list of scopes (e.g., `["graph:invoke", "checkpointer:read", "files:upload"]`). These are checked at three layers: the API server rejects calls that lack the required scope at the endpoint, nodes inside the graph can call `tenxgraph.core.authz.has_scope(config, "resource:action")` to check permissions, and tools receive the full authorization block in `config["authz"]` to enforce their own rules.
+**Permissions** are fine-grained strings in the format `resource:action`. A caller holds a set of them (e.g., `{"graph:invoke", "threads:read", "files:upload"}`), and `*` and `resource:*` are wildcards. They are checked at three layers: the API server rejects calls that lack the required permission at the endpoint (403), nodes inside the graph can call `tenxgraph.core.authz.can(config, "resource:action")` to check permissions, and tools can read the identity with `get_identity(config)` to enforce their own rules.
 
-The canonical scope set (verified in `tenxgraph.core.authz`):
+The permission registry (in `10xgraph-api`):
 
 - **Graph execution:** `graph:invoke`, `graph:stream`, `graph:stop`, `graph:fix`, `graph:read`
-- **Thread state and checkpointing:** `checkpointer:read`, `checkpointer:write`, `checkpointer:delete`, and the admin-only `checkpointer:import`
+- **Thread state and checkpointing:** `threads:read`, `threads:write`, `threads:delete`
 - **Long-term memory (store):** `store:read`, `store:write`, `store:delete`
 - **Files and media:** `files:read`, `files:upload`, `files:delete`
 - **Configuration:** `config:read`
+- **Background tasks:** `tasks:trigger`, `tasks:read`, `tasks:cancel`
+- **Admin:** `admin:read`, `admin:write`
 
-If no authorization is present (common in direct SDK usage), the defaults are permissive: isolation is not enforced and all scopes are allowed. This means existing code without explicit auth continues to work unchanged.
+If no identity is present (common in direct SDK usage), the defaults are permissive: no reach filter is applied by the core and all permissions are allowed. This means existing code without explicit auth continues to work unchanged.
 
 ## How validators run
 
@@ -202,7 +204,7 @@ The template also sets up `10xgraph.json` with an `auth` entry; choose the mode 
 
 - **Indirect injection is yours to place.** Input validators do not see tool, MCP or RAG output. If a tool fetches a document or web page containing malicious instructions, you decide where to check it: an `after_invoke` callback on `InvocationType.TOOL` and `InvocationType.MCP` can validate, edit or replace any result before the model reads it, and you can reuse a validator inside it. See [Validate tool, MCP and RAG output](/docs/guides/protect-against-prompt-injection#validate-tool-mcp-and-rag-output).
 
-- **Validators do not replace authorization.** Narrow tool permissions, check scopes inside tools with `has_scope()`, and design tool side effects (refunds, deletions) to be idempotent and replay-safe so that authorization failures do not leave data in an inconsistent state.
+- **Validators do not replace authorization.** Narrow tool permissions, check permissions inside tools with `can()`, and design tool side effects (refunds, deletions) to be idempotent and replay-safe so that authorization failures do not leave data in an inconsistent state.
 
 - **Validators add latency.** Each message passes through every validator before the graph runs. Keep them fast; avoid I/O and LLM calls inside validators.
 
@@ -221,5 +223,5 @@ The template also sets up `10xgraph.json` with an `auth` entry; choose the mode 
 
 - [Callbacks and Command](/docs/concepts/callbacks-and-command): Inspect and transform messages at other execution points.
 - [Validate input and guard prompts](/docs/guides/protect-against-prompt-injection): Practical guide to using validators and callbacks.
-- [Read the caller's identity and scopes](/docs/guides/authorization-scopes): How to check scopes and isolation inside nodes and tools.
-- [Server authentication and authorization](/docs/server/auth): API server setup for JWT, custom auth, and authorization backends.
+- [Read the caller's identity and scopes](/docs/guides/authorization-scopes): How to check permissions and reach inside nodes and tools.
+- [Server authentication and authorization](/docs/server/auth): API server setup for JWT, custom auth, roles, permissions and reach.

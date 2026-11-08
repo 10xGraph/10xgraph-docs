@@ -82,6 +82,7 @@ console.log((await client.ping()).data); // server pong string
 | Method | Returns | Description |
 |---|---|---|
 | `ping()` | `Promise<PingResponse>` | Health check. Returns `{ data, metadata }` where `data` is the server's pong string. |
+| `me()` | `Promise<MeResponse>` | Who the caller is: `{ user_id, tenant, roles, permissions, reach }`, or `{ auth: 'off' }` when the server has auth off. See [Client authentication](/docs/reference/client/auth#who-am-i-me). |
 | `graph()` | `Promise<GraphResponse>` | Fetch graph metadata including `id_type`, `id_generator`, and state schema information. |
 | `graphStateSchema()` | `Promise<StateSchemaResponse>` | Fetch the schema of the graph's state type. |
 | `stopGraph(threadId, config?)` | `Promise<StopGraphResponse>` | Interrupt a running graph execution for `threadId`. |
@@ -115,7 +116,6 @@ See [Graph](/docs/reference/client/graph) for full details on the graph-control 
 | `updateThreadState(threadId, config, state)` | `Promise<UpdateThreadStateResponse>` | Write a new state snapshot for a thread. |
 | `clearThreadState(threadId)` | `Promise<ClearThreadStateResponse>` | Delete all checkpointed state for a thread. |
 | `threadMessages(threadId, request?)` | `Promise<ThreadMessagesResponse>` | List messages in a thread with optional search and pagination. |
-| `addThreadMessages(threadId, messages, config?, metadata?)` | `Promise<AddThreadMessagesResponse>` | Deprecated. Append messages to a thread's history. Needs the admin scope `checkpointer:import`. |
 | `updateThreadMessageFeedback(threadId, messageId, feedback)` | `Promise<UpdateThreadMessageFeedbackResponse>` | Set `metadata.feedback` on a message. |
 | `singleMessage(threadId, messageId)` | `Promise<ThreadMessageResponse>` | Fetch a single message by ID. |
 | `deleteMessage(threadId, messageId, config?)` | `Promise<DeleteThreadMessageResponse>` | Delete a message by ID. |

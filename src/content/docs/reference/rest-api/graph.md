@@ -49,7 +49,7 @@ Run the graph and return the complete result when all nodes finish.
 }
 ```
 
-`content` is a list of content blocks, not a plain string. A string gets `422`. The example sends no `config.thread_id`, so the server starts a new thread and returns its id in `data.meta.thread_id`. Send that id as `config.thread_id` in the next request to continue the thread. With the default `runs.thread_ids` of `server`, naming an id that does not exist answers `403`.
+`content` is a list of content blocks, not a plain string. A string gets `422`. The example sends no `config.thread_id`, so the server starts a new thread and returns its id in `data.meta.thread_id`. Send that id as `config.thread_id` in the next request to continue the thread. With the default `runs.thread_ids` of `server`, naming an id that does not exist answers `404`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -59,8 +59,8 @@ Run the graph and return the complete result when all nodes finish.
 | `on_busy` | string | no | `wait` (default) or `cancel`. What to do when another run is active on the thread (see [One run per thread](#one-run-per-thread)). |
 | `initial_state` | object | no | Initial state for the run. Custom fields and `current_node` are allowed; built-in fields are not (see input rules below). Nested no deeper than 64 levels. |
 | `config` | object | no | Run configuration. Nested no deeper than 64 levels. |
-| `config.thread_id` | string | no | Id of an existing thread to continue. Must match `^[A-Za-z0-9._:@-]{1,128}$`, else `422`. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.meta.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `403`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
-| `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `authz`, `collection` and `_`-prefixed keys. A client cannot choose a memory collection; it is ignored, not refused. See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). |
+| `config.thread_id` | string | no | Id of an existing thread to continue. Must match `^[A-Za-z0-9._:@-]{1,128}$`, else `422`. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.meta.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `404`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
+| `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `collection` and `_`-prefixed keys. A client cannot choose a memory collection; it is ignored, not refused. See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). |
 | `recursion_limit` | integer | no | Maximum graph iterations. Default `25`, range `1`-`100`. |
 | `response_granularity` | string | no | `full`, `partial`, or `low`. Default `low`. |
 

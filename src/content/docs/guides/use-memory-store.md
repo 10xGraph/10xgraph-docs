@@ -236,7 +236,7 @@ async def my_tool(config: dict, store: BaseStore):
 
 The `store` and `config` parameters are injected by name and hidden from the model; no manual wiring needed. `asearch` takes the run `config` first (it carries `user_id`), then the query.
 
-Every store call needs a non-empty `user_id` in `config`. A missing or blank one raises `ValueError`. Reads under the admin authz scope `"none"` skip the user filter; writes and `aforget_memory` never do. For shared data with no user, use `system_user_id(name)` from `tenxgraph.storage`. See the [Memory stores reference](/docs/reference/python/memory-stores#the-user_id-rule-and-system_user_id).
+Every store call needs a non-empty `user_id` in `config`. A missing or blank one raises `ValueError`. Reads by an identity with reach `all` skip the user filter; writes and `aforget_memory` never do. For shared data with no user, use `system_user_id(name)` from `tenxgraph.storage`. See the [Memory stores reference](/docs/reference/python/memory-stores#the-user_id-rule-and-system_user_id).
 
 ---
 

@@ -441,7 +441,7 @@ A Qdrant **collection** is a separate set of vectors. Use collections to keep ki
 
 Within one collection, `user_id` already separates owners. A separate collection adds physical separation on top: a search in one collection can never return rows from another.
 
-**A client never chooses the collection.** The API drops `collection` from the client's `config` on every route: invoke, stream, `/v1/graph/ws`, AG-UI and the store routes. The value is ignored, not refused, and the drop is logged at debug level. This is the same rule as for the other server-owned keys (`user_id`, `user`, `authz`, `remote_tools`, `file_tool_root`, and so on). Only your code picks collections.
+**A client never chooses the collection.** The API drops `collection` from the client's `config` on every route: invoke, stream, `/v1/graph/ws`, AG-UI and the store routes. The value is ignored, not refused, and the drop is logged at debug level. This is the same rule as for the other server-owned keys (`user_id`, `user`, `remote_tools`, `file_tool_root`, and so on). Only your code picks collections.
 
 ### Where you set the collection
 

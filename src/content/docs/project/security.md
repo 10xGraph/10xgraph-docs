@@ -88,6 +88,6 @@ Before exposing an agent to untrusted users:
 5. Configure [rate limiting](/docs/server/rate-limiting), and
    make sure your proxy hop count is correct so the limit cannot be bypassed
    with a forged `X-Forwarded-For`.
-6. Restrict per-tool access with an `AuthorizationBackend` if any tool can spend
+6. Restrict per-tool access by checking `can(config, ...)` in the tool, or by overriding `BaseAuth.authorize`, if any tool can spend
    money, send messages, or reach internal systems.
 7. Keep secrets out of the image; pass them at runtime.
