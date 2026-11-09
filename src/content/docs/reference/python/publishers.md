@@ -57,6 +57,7 @@ from tenxgraph.core.graph import StateGraph
 from tenxgraph.runtime.publisher import BasePublisher, ConsolePublisher
 from tenxgraph.runtime.publisher.events import Event, EventType, ContentType, EventModel
 from tenxgraph.runtime.publisher import publish_event
+from tenxgraph.runtime.publisher.base_publisher import PublisherKind
 
 # Optional backends
 from tenxgraph.runtime.publisher import RedisPublisher     # pip install "10xgraph[redis]"
@@ -217,6 +218,8 @@ For a streaming call, the span ends when the stream ends, not when the first chu
 
 ```python
 class BasePublisher(ABC):
+    kind: PublisherKind = "events"
+
     def __init__(self, config: dict[str, Any])
 
     @abstractmethod
@@ -229,11 +232,26 @@ class BasePublisher(ABC):
     def sync_close(self) -> None
 ```
 
+| Attribute | Type | Default | Description |
+|---|---|---|---|
+| `kind` | `PublisherKind` | `"events"` | What the publisher is for. See [`PublisherKind`](#publisherkind). |
+
 | Method | Returns | Raises | Description |
 |---|---|---|---|
 | `publish(event)` | `Any` | `RuntimeError` (built-in publishers) | Publish one event. Built-in publishers raise if the publisher is closed. |
 | `close()` | `None` | - | Release connections and resources (idempotent, async). |
 | `sync_close()` | `None` | - | Release connections and resources (idempotent, synchronous). |
+
+### `PublisherKind`
+
+`PublisherKind = Literal["events", "observability"]`. It tells the runtime what a publisher is for.
+
+| Value | Meaning |
+|---|---|
+| `"events"` | An event stream for your consumers: Console, Redis, Kafka, RabbitMQ or a custom publisher. The default. |
+| `"observability"` | A tracing backend that turns events into spans. `OtelPublisher` sets it, so `LogfirePublisher`, `LangsmithPublisher` and `PhoenixPublisher` have it too. |
+
+Set `kind = "observability"` on a class attribute for a custom tracing backend. See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability#publishers-ai-tracing-and-metrics).
 
 **Example:**
 
@@ -734,6 +752,7 @@ def publish_event(
     event: EventModel,
     publisher: BasePublisher | None = Inject[BasePublisher],
     task_manager: BackgroundTaskManager = Inject[BackgroundTaskManager],
+    only: PublisherKind | None = None,
 ) -> None
 ```
 
@@ -742,8 +761,9 @@ def publish_event(
 | `event` | `EventModel` | (required) | The event to publish. |
 | `publisher` | `BasePublisher \| None` | `Inject[BasePublisher]` | Injected. Leave it unset. |
 | `task_manager` | `BackgroundTaskManager` | `Inject[BackgroundTaskManager]` | Injected. Leave it unset. |
+| `only` | `PublisherKind \| None` | `None` | Send the event only to publishers of this kind. It works inside a `CompositePublisher`, also when nested. `None` sends to every publisher. |
 
-**Returns:** `None`.
+**Returns:** `None`. With `only="events"`, tracing publishers do not get the event. With `only="observability"`, event publishers do not.
 
 **Example:**
 
@@ -765,7 +785,8 @@ def shout(query: str) -> str:
             content=result,
             content_type=[ContentType.TEXT],
             data={"query": query, "result_length": len(result)},
-        )
+        ),
+        only="events",  # keep this app event out of tracing backends
     )
     return result
 ```

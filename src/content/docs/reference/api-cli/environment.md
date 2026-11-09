@@ -191,6 +191,10 @@ See [ID Generator](/docs/reference/python/id-generator) for the constructor cont
 | `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing |
 | `OTEL_SERVICE_NAME` | `10xgraph-api` | Service name reported in spans |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `null` | OTLP collector endpoint. Unset: spans print to the console in development; with `MODE=production` nothing is exported and a warning is logged |
+| `OTEL_EXPORTER_OTLP_HEADERS` | none | Standard OpenTelemetry variable. Auth headers for OTLP trace and metric export from the `observability.otlp` and `metrics` blocks, as `key=value,key2=value2` |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | none | OTLP HTTP trace URL, used when `observability.otlp.endpoint` is `null`. `OTEL_EXPORTER_OTLP_ENDPOINT` is not used for this |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | none | OTLP HTTP metrics URL, used when `metrics.otlp.endpoint` is not set |
+| `OTEL_SEMCONV_STABILITY_OPT_IN` | `http` | The server sets it to `http` when unset, so HTTP metrics use the stable names. See [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana) |
 | `OTEL_LEVEL` | `standard` | Trace detail: `spans`, `standard`, or `full` |
 
 OpenTelemetry needs the extra: `pip install "10xgraph-api[otel]"`, which also brings the FastAPI instrumentation and the OTLP exporter.

@@ -143,7 +143,7 @@ class EventCounter(BasePublisher):
     # A plain list works. CompositePublisher(publishers) is the explicit equivalent, and it
 ```
 
-A plain list becomes a `CompositePublisher`. Each publisher receives every event, and one failing publisher does not block the others. `CompositePublisher(publishers)` is the explicit form and adds `add_publisher()` and `remove_publisher()` for changing sinks at runtime.
+A plain list becomes a `CompositePublisher`. Each publisher receives every event, and one failing publisher does not block the others. `OtelPublisher` and its subclasses have `kind = "observability"`; the other publishers here are event publishers (`kind = "events"`). See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability#publishers-ai-tracing-and-metrics). `CompositePublisher(publishers)` is the explicit form and adds `add_publisher()` and `remove_publisher()` for changing sinks at runtime.
 
 ### otel_tracing.py
 

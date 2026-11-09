@@ -389,7 +389,7 @@ The string format for class references is `module.path:ClassName` (dot-separated
 
 ## Event stream extension
 
-You extend `BasePublisher` to send execution events to a custom endpoint: your internal event bus, a webhook, a monitoring system, or a custom log aggregator. Multiple publishers can run together: pass a list to `StateGraph(publisher=[...])` or wrap them in `CompositePublisher`.
+You extend `BasePublisher` to send execution events to a custom endpoint: your internal event bus, a webhook, a monitoring system, or a custom log aggregator. Multiple publishers can run together: pass a list to `StateGraph(publisher=[...])` or wrap them in `CompositePublisher`. A custom publisher is an event publisher (`kind = "events"`) by default. Set `kind = "observability"` for a custom tracing backend. See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability#publishers-ai-tracing-and-metrics).
 
 ```python
 from tenxgraph.runtime.publisher.base_publisher import BasePublisher

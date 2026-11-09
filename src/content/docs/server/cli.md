@@ -124,6 +124,8 @@ See [Deployment guide](/docs/server/deploy) for more.
 
 The sidebar groups the pages as Get running, Before production (Auth, Cache store, Observability), Runs and streaming, Project wiring (Checkpointer, ID generation, Thread naming, Memory store, Dependency injection) and Developer tools. The Cache store page holds the type (Memory, Redis, Custom) and the Rate limiting and Token revocation tabs. See the [command reference](/docs/reference/api-cli/commands#config).
 
+The Observability page has "Send AI traces to" (None first, then Logfire, LangSmith, Phoenix or an OTLP endpoint, one card per destination) and "Export metrics" (None, OTLP push or Prometheus scrape). See [Send traces to an OTLP endpoint](/docs/guides/send-traces-to-otlp) and [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana).
+
 The editor is loopback-only for security. See [Configure the server](/docs/server/configure) for the full configuration schema.
 
 ### Verify the environment

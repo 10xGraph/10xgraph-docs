@@ -151,7 +151,7 @@ Install the OTEL extra:
 pip install "10xgraph-api[otel]"
 ```
 
-When `OTEL_ENABLED=true`, the API and the background worker do this for you: they install a `MeterProvider` that exports to `OTEL_EXPORTER_OTLP_ENDPOINT` (the console when it is unset outside production) and call `setup_otel_metrics()`, so the metrics below, and the task metrics in [background tasks](/docs/server/background-tasks), reach your collector along with the traces. Point the collector at Prometheus; there is no separate Prometheus setup.
+When `OTEL_ENABLED=true`, the API and the background worker do this for you: they install a `MeterProvider` that exports to `OTEL_EXPORTER_OTLP_ENDPOINT` (the console when it is unset outside production) and call `setup_otel_metrics()`, so the metrics below, and the task metrics in [background tasks](/docs/server/background-tasks), reach your collector along with the traces. To export metrics to Prometheus or Grafana without the legacy settings, use the `metrics` block instead. See [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana). When the block is enabled, it owns metrics and this path sends traces only.
 
 In your own process, call `setup_otel_metrics()` once at startup, after your application has configured an OTEL `MeterProvider` with an exporter:
 
@@ -184,6 +184,8 @@ The `tool` attribute is the tool name only when the node can run that tool. A na
 | `tenxgraph.tool.errors` | counter | `node`, `tool` |
 | `tenxgraph.tool.timeouts` | counter | `node`, `tool` |
 | `tenxgraph.tool.duration` | timer | `node`, `tool`, `outcome` |
+| `tenxgraph.llm.duration` | timer | `provider`, `model`, `status` |
+| `tenxgraph.llm.tokens` | counter | `provider`, `model`, `type` |
 | `background_task_manager.tasks_created` | counter | - |
 | `background_task_manager.tasks_completed` | counter | - |
 | `background_task_manager.tasks_failed` | counter | - |
@@ -352,7 +354,7 @@ logger = logging.getLogger("tenxgraph")
 # ... build your StateGraph here and export the compiled graph as `app`
 ```
 
-For per-node spans sent to Logfire or LangSmith, see [Send traces to Logfire or LangSmith](/docs/guides/send-traces-to-logfire-langsmith).
+For per-node spans sent to any OTLP endpoint, see [Send traces to an OTLP endpoint](/docs/guides/send-traces-to-otlp). For Prometheus and Grafana, see [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana). For per-node spans sent to Logfire, LangSmith or Arize Phoenix, see [Send traces to Logfire or LangSmith](/docs/guides/send-traces-to-logfire-langsmith) and [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix).
 
 ## What is in your traces
 
@@ -361,6 +363,7 @@ Spans carry `user_id`, `thread_id` and `run_id`. Set `"observability": {"user_id
 ## Related docs
 
 - [Send traces to Logfire or LangSmith](/docs/guides/send-traces-to-logfire-langsmith)
+- [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix)
 - [Authentication and authorization](/docs/server/auth)
 - [Production checklist](/docs/server/production-checklist)
 - [Logging utilities reference](/docs/reference/python/runtime-utilities)

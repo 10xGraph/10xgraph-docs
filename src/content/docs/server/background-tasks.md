@@ -223,27 +223,26 @@ The run executes as `Identity(kind="system", user_id="__system__:nightly")` with
 
 ## Monitoring and errors
 
-The worker logs every task and sends the same steps as events to the publisher bound in your container (`metadata.source` is `task`, `metadata.phase` names the TaskIQ hook):
+The worker logs every task and sends the same steps as events to the event publishers bound in your container (Kafka, Redis, RabbitMQ, console or custom). AI tracing backends (Phoenix, Logfire, LangSmith, OTEL) do not receive them, because a task is not a graph run. A failed task is not published at all (`metadata.source` is `task`, `metadata.phase` names the TaskIQ hook):
 
 | Hook | Event type | Phase | Notes |
 | --- | --- | --- | --- |
 | `post_send` | `update` | `queued` | Sent from the process that queued the task (the API). |
 | `pre_execute` | `start` | `started` | |
-| `on_error` | `error` | `failed` | `is_error` is true. Data: `error` (class name), `message` (first 500 characters), `duration`, `attempt`. The full traceback is in the worker log. |
 | `on_error` | `interrupted` | `cancelled` | A cancelled task (`TaskCancelled`). Logged as info, not as an error. |
 | `post_execute` | `end` | `finished` | Success only, with `duration`. |
 | `post_save` | `result` | `saved` | No return value in the event. |
 
-A failed task is reported once, by `on_error`. Task errors are logged at ERROR level with the traceback.
+A failed task sends no event. `on_error` logs it at ERROR level with the traceback and counts it in `tenxgraph.task.runs` with `status="failure"`. See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability).
 
 Metrics and traces come through OpenTelemetry, set up like the API (one setup shared by the API and the worker): `OTEL_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_LEVEL`. Each task becomes a span, and two metrics are exported:
 
 | Metric | Type | Attributes | Recorded by |
 |---|---|---|---|
 | `tenxgraph.task.runs` | counter | `task`, `status` (`queued`, `success`, `failure`, `cancelled`) | `queued` by the process that sends the task (the API for HTTP calls), the rest by the worker. A retried task counts one `failure` per attempt. |
-| `tenxgraph.task.duration_ms` | histogram | `task` | The worker, once per attempt, whatever the outcome. |
+| `tenxgraph.task.duration` | histogram | `task` | The worker, once per attempt, whatever the outcome. |
 
-The metrics go to the same endpoint as the traces (OTLP gRPC), or to the console when no endpoint is set outside production. There is no separate Prometheus option: point the endpoint at an OpenTelemetry collector and export from the collector to Prometheus (collector -> Prometheus). `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds, default 60000) sets how often metrics are pushed.
+With the `metrics` block in `10xgraph.json` enabled, the worker exports these metrics itself, by OTLP push or a Prometheus scrape port (`metrics.prometheus.worker_port`). See [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana). Without the block, the metrics go to the same endpoint as the traces (OTLP gRPC), or to the console when no endpoint is set outside production; point that endpoint at an OpenTelemetry collector and export from the collector to Prometheus. `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds, default 60000) sets how often metrics are pushed.
 
 ## Cancel and progress
 

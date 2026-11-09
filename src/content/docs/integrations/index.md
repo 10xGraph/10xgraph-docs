@@ -51,7 +51,7 @@ Read [Models](/docs/integrations/models) first. Then:
 ### I want to observe and debug in production
 
 - [Publishers guide](/docs/guides/use-publishers): emit events to Redis, Kafka, RabbitMQ, or composite publishers.
-- [Traces guide](/docs/guides/send-traces-to-logfire-langsmith): send traces to Logfire or LangSmith for inspection.
+- [Traces guide](/docs/guides/send-traces-to-logfire-langsmith): send traces to Logfire or LangSmith for inspection. See also [Arize Phoenix](/docs/guides/send-traces-to-phoenix), [any OTLP endpoint](/docs/guides/send-traces-to-otlp) and [Prometheus and Grafana metrics](/docs/guides/metrics-prometheus-grafana).
 - [Observability reference](/docs/server/observability): logs, metrics, OTEL, and secret redaction on the API server.
 
 ### I'm building Claude Code skills
@@ -86,6 +86,9 @@ The core library includes support for many backends. Install only the extras you
 | OpenTelemetry | Traces and metrics | `otel` | you use OTEL in your infrastructure |
 | Logfire | Pydantic-hosted observability | `logfire` | you want a managed OTEL collector |
 | LangSmith | LangChain's observability | `langsmith` | you already use LangSmith for tracing |
+| Arize Phoenix | Open-source AI observability | `phoenix` | you want traces in a local or cloud Phoenix |
+| OTLP endpoint | Traces to a collector, Tempo or Jaeger | `otlp` | you already run an OpenTelemetry backend |
+| Prometheus and Grafana | Request, task and LLM metrics | `10xgraph-api[metrics]` | you want dashboards and alerts |
 | **Multimodal** |
 | Images | Processing and cloud offload | `images` | you send images to models or store them |
 | Cloud storage | S3, GCS, Azure offload | `cloud-storage` | you offload media to cloud buckets |

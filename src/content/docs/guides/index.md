@@ -108,6 +108,9 @@ Monitor agents in production. Covers logging, tracing, metrics, graceful shutdow
 
 - [Use publishers](/docs/guides/use-publishers): Stream events to observability platforms
 - [Send traces to Logfire and LangSmith](/docs/guides/send-traces-to-logfire-langsmith): Production tracing and debugging
+- [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix): Trace to a local or cloud Phoenix
+- [Send traces to an OTLP endpoint](/docs/guides/send-traces-to-otlp): Trace to a collector, Tempo or Jaeger
+- [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana): Request, task and LLM metrics by push or scrape
 - [Configure ID generation](/docs/guides/configure-id-generator): Snowflake IDs for distributed systems
 - [Graceful shutdown](/docs/guides/graceful-shutdown): Finish inflight requests before stopping
 

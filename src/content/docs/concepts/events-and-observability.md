@@ -126,6 +126,32 @@ The API server's `10xgraph.json` has an `observability` block for the OTEL-based
 
 Secrets stay in the environment: set `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY`. The `level` value is one of `spans`, `standard` or `full` and falls back to `standard` if unrecognized.
 
+## Publishers, AI tracing and metrics
+
+Three kinds of sink receive information. Event publishers (Kafka, Redis, RabbitMQ, console, or your own) are an event stream for your consumers. AI tracing backends (OTEL, Logfire, LangSmith, Phoenix) turn graph, node, LLM and tool events into spans. Metrics are counters and timers.
+
+| What | Event publishers | AI tracing | Metrics | Logs |
+|---|---|---|---|---|
+| Graph, node, LLM and tool events, including AI errors | Yes | Yes | Unchanged | Yes |
+| Task lifecycle: queued, started, finished, saved, cancelled | Yes | No | Unchanged | Yes |
+| Task failure | No, not published | No | `tenxgraph.task.runs{status="failure"}` | ERROR log |
+| API HTTP errors | Not published | Not published | In the HTTP metrics | Yes |
+
+Task lifecycle events are not graph runs, so AI tracing backends never get them. A failed task is counted and logged, but no event is sent.
+
+Every publisher has a `kind` attribute. It is `"events"` by default, so a custom publisher is an event publisher. Built-in tracing publishers (`OtelPublisher`, `LogfirePublisher`, `LangsmithPublisher`, `PhoenixPublisher`) set `"observability"`. For a custom tracing backend, set it yourself:
+
+```python
+from tenxgraph.runtime.publisher import BasePublisher
+
+
+class MyTracingPublisher(BasePublisher):
+    kind = "observability"
+    # publish, close and sync_close as usual
+```
+
+`publish_event` takes an optional `only` argument. `publish_event(event, only="events")` sends the event to event publishers only and skips tracing publishers, also inside a `CompositePublisher`. `only="observability"` does the reverse. Without `only`, every publisher gets the event.
+
 ## Metrics: counters and latency timers
 
 The `tenxgraph.utils.metrics` module provides a lightweight, zero-dependency metrics system. You can emit counters (counts of events) and timers (latency measurements) from anywhere in your code.

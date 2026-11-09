@@ -10,6 +10,10 @@ updated: "2026-10-27"
 
 [Pydantic Logfire](https://pydantic.dev/logfire) and [LangSmith](https://docs.langchain.com/langsmith/) are production-grade observability platforms for monitoring AI applications. Both implement OpenTelemetry, the industry-standard protocol for distributed tracing. 10xGraph automatically instruments your graphs with spans at every layer, graph execution, node transitions, LLM invocations, token usage, and tool execution, including GenAI semantic conventions (`gen_ai.usage.input_tokens`, `gen_ai.request.model`, `session.id`, and more). The `OtelPublisher` routes these spans through an OpenTelemetry `TracerProvider` to your chosen backend. You need only configure which exporter to use; no vendor-specific instrumentation is required.
 
+Using Arize Phoenix? See [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix). Using a collector, Tempo or Jaeger? See [Send traces to an OTLP endpoint](/docs/guides/send-traces-to-otlp). For request and task metrics, see [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana).
+
+Logfire and LangSmith are observability publishers. They receive graph, node, LLM and tool spans, AI errors included. They do not receive task lifecycle events or API and worker errors: those are in metrics and logs. See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability#publishers-ai-tracing-and-metrics).
+
 ## Prerequisites and installation
 
 Install 10xGraph with the observability extra you need:
@@ -17,7 +21,7 @@ Install 10xGraph with the observability extra you need:
 ```bash
 pip install '10xgraph[logfire]'        # Logfire only
 pip install '10xgraph[langsmith]'      # LangSmith
-pip install '10xgraph[observability]'  # Both, plus OTEL
+pip install '10xgraph[observability]'  # Logfire, LangSmith and Phoenix, plus OTEL
 pip install '10xgraph[openai]'         # Provider used by the Agent in the examples
 ```
 
@@ -213,7 +217,7 @@ When serving a graph through the 10xGraph API server using `10xgraph dev`, you d
 
 Keep `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY` in your `.env` file, never in `10xgraph.json`. If a backend is enabled but its package is missing or its API key is not set, the server logs a warning and continues without that exporter rather than failing to start.
 
-`observability.user_id_mode` is also in the `10xgraph config` editor (Observability section, "User id in traces"). It applies to the server's OTEL publisher both for the `observability` block and for `OTEL_ENABLED`. If the installed core is too old to support it, the server keeps raw ids and logs a warning.
+`observability.user_id_mode` is also in the `10xgraph config` editor (Observability page, "User id in traces"). The same page has "Send AI traces to" (None first) for the destinations and "Export metrics" for the `metrics` block. It applies to the server's OTEL publisher both for the `observability` block and for `OTEL_ENABLED`. If the installed core is too old to support it, the server keeps raw ids and logs a warning.
 
 All config keys are optional. You can enable just Logfire, just LangSmith, or both. The default `level` is `"standard"` if not specified.
 

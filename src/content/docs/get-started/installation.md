@@ -105,8 +105,12 @@ Beyond model providers, optional extras unlock advanced features:
 | `logfire` | logfire | Send traces to Logfire |
 | `images` | Pillow | Image handling in multimodal messages |
 | `langsmith` | langsmith | Send traces to LangSmith |
+| `phoenix` | opentelemetry-sdk, OTLP HTTP exporter | Send traces to Arize Phoenix |
+| `otlp` | opentelemetry-sdk, OTLP HTTP exporter | Send traces to any OTLP HTTP endpoint (collector, Tempo, Jaeger) |
 
 `pip install "10xgraph[pgvector]"` adds only the Python packages. The pgvector extension itself must exist in your database (`CREATE EXTENSION vector;`, which `PgVectorStore.asetup()` tries for you). A text-only store (`embedding=None`) does not need it. See [How to use PgVectorStore](/docs/guides/use-pgvector-store).
+
+`10xgraph-api` has its own extras. `pip install '10xgraph-api[metrics]'` adds the OpenTelemetry metrics SDK, the OTLP HTTP and Prometheus exporters and `prometheus-client`, for the `metrics` block. See [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana).
 
 The `all` extra installs every other extra at once and is useful for local development and CI, but pin specific versions before shipping to production.
 

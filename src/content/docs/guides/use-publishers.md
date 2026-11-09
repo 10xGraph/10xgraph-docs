@@ -18,6 +18,27 @@ In development, you might test your agent locally and call it once. In productio
 
 ---
 
+## Two kinds of publishers
+
+A publisher has a `kind`. An event publisher (`kind = "events"`) is an event stream for your own consumers: Kafka, Redis, RabbitMQ, the console, or a class you write. A tracing publisher (`kind = "observability"`) turns graph, node, LLM and tool events into spans for Logfire, LangSmith, Phoenix or an OTLP endpoint. Task lifecycle events from the API worker go to event publishers only. See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability#publishers-ai-tracing-and-metrics) for what each one receives.
+
+A custom publisher is an event publisher unless you say otherwise. To write a custom tracing backend, set `kind = "observability"`. To send an app event to event publishers only, pass `only="events"` to `publish_event`:
+
+```python
+from tenxgraph.runtime.publisher import BasePublisher, publish_event
+
+
+class MyTracingPublisher(BasePublisher):
+    kind = "observability"
+    # publish, close and sync_close as usual
+
+
+# Reaches Kafka or Redis publishers, not tracing publishers
+publish_event(event, only="events")
+```
+
+---
+
 ## Add a publisher to your graph
 
 ### Prerequisites
@@ -389,7 +410,7 @@ print([e for e in EventType])  # all event phases
 
 ## Send traces to a backend
 
-For OpenTelemetry-based tracing to Logfire, LangSmith, or other backends, see [Send traces to Logfire and LangSmith](/docs/guides/send-traces-to-logfire-langsmith). That guide covers the `OtelPublisher` and helper functions to instrument your graph with full tracing.
+For OpenTelemetry-based tracing to Logfire, LangSmith, Arize Phoenix, or other backends, see [Send traces to Logfire and LangSmith](/docs/guides/send-traces-to-logfire-langsmith) and [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix). The first guide covers the `OtelPublisher` and helper functions to instrument your graph with full tracing.
 
 ---
 
@@ -400,6 +421,7 @@ For OpenTelemetry-based tracing to Logfire, LangSmith, or other backends, see [S
 - `ConsolePublisher` is for development; use Redis, Kafka, or RabbitMQ in production.
 - `RedisPublisher` supports Pub/Sub (live subscribers) and Streams (durable log).
 - `CompositePublisher` sends events to multiple transports simultaneously.
+- Publishers have a `kind`: `"events"` (default) or `"observability"` for tracing. `publish_event(..., only=...)` picks one kind.
 - Every event has a source, phase, node name, and structured data for downstream processing.
 
 ## Run it in production
