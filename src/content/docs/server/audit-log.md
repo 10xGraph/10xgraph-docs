@@ -17,7 +17,7 @@ One event per decision or change, with ids and outcomes only:
 
 - Every permission check and thread, file or task access check: allowed, denied or not found.
 - Authentication failures: a missing, invalid or expired token, rejected claims, a reserved identity, a revoked token.
-- Successful changes: deleting a thread, message, memory or file, uploading a file, starting, cancelling or rescheduling a task, and revoking a token or user (through the API and `10xgraph revoke`).
+- Successful changes: writing or clearing thread state, message feedback, deleting a thread or message, writing or deleting a memory, uploading or deleting a file, stopping or fixing a run, starting, cancelling or rescheduling a task, and revoking a token or user (through the API and `10xgraph revoke`).
 
 ## What it never records
 
@@ -39,7 +39,7 @@ Prompts, answers, message text, file contents, tokens, and claims other than ids
 | `ts` | UTC timestamp. |
 | `event` | `access`, `auth` or `change`. |
 | `request_id` | The request id, also returned on the response. |
-| `transport` | `http` or WebSocket. |
+| `transport` | `http` or `ws` (WebSocket). |
 | `user_id` | The verified caller. `null` when the caller is unknown, for example a failed authentication, or when auth is off. |
 | `tenant` | The tenant claims resolved from the verified identity, never client input. |
 | `roles` | The caller's resolved roles. |
@@ -47,7 +47,7 @@ Prompts, answers, message text, file contents, tokens, and claims other than ids
 | `resource` | The resource named by the request, such as `thread/<id>`. |
 | `result` | See the event types below. |
 | `reason` | Why an authentication failed. `null` otherwise. |
-| `client_ip` | The client address, using the same trusted-proxy settings as the [rate limiter](/docs/server/rate-limiting). |
+| `client_ip` | The client address the [rate limiter](/docs/server/rate-limiting) uses, with its trusted-proxy settings. Without a rate limit, the socket peer address. |
 | `count` | On `change` events, how many items the service reports it changed, when it returns a count. |
 
 ## Event types
@@ -80,12 +80,12 @@ Unknown keys under `audit` refuse to boot, like `cache_store`. With auth off the
 
 ### JSON application logs
 
-`LOG_FORMAT=text|json` (default `text`) sets the format of every application log line. With `json`, each line is one JSON object with time, level, logger, message, `request_id` and `user_id` when known. The secret sanitizer still applies. `10xgraph build` writes `LOG_FORMAT=json` into the generated compose and Kubernetes environment for production.
+`LOG_FORMAT=text|json` (default `text`) sets the format of every application log line. With `json`, each line is one JSON object with `ts`, `level`, `logger` and `message`, plus `request_id`, `transport` and `user_id` when known and `exc_info` for an exception. The secret sanitizer still applies. `10xgraph build` sets `LOG_FORMAT=json` in the generated Dockerfile, Compose file and Kubernetes manifest, next to `MODE=production`.
 
 ## Sinks
 
 - **`log`**: writes one JSON line per event to the logger `tenxgraph_api.audit` on stdout. These lines are always JSON, whatever `LOG_FORMAT` says. The write is synchronous, so there is nothing to flush on shutdown. This is the record.
-- **`publisher`**: also sends each event through the publisher you configured (Kafka, Redis, RabbitMQ or OTEL). It is best effort and fire-and-forget: events in flight at SIGTERM may be lost. Treat the `log` sink as the record and the publisher copy as a convenience. See [Use publishers](/docs/guides/use-publishers).
+- **`publisher`**: also sends each event through the event publisher you configured (Kafka, Redis, RabbitMQ or a custom one). AI tracing publishers (OpenTelemetry, Logfire, Phoenix) are skipped, so audit events never reach a tracing backend. With no event publisher configured, the sink is skipped with a warning at boot. It is best effort and fire-and-forget: events in flight at SIGTERM may be lost. Treat the `log` sink as the record and the publisher copy as a convenience. See [Use publishers](/docs/guides/use-publishers).
 - **`"module:Class"`**: your own sink, a subclass of `BaseAuditSink`.
 
 A minimal custom sink:

@@ -192,7 +192,7 @@ Install locations: `.agents/skills/10xgraph` (Codex), `.claude/skills/10xgraph` 
 
 ## audit
 
-Read-only environment check: Python version, installed packages, core evaluation API, `10xgraph.json` validity, a security check and whether the default port is free. The security check reads only the JSON file and reports production-readiness gaps (auth, rate limiting, token revocation) as warnings; they never fail the command. Exits 1 if any check fails, so it works as a CI gate.
+Read-only environment check: Python version, installed packages, core evaluation API, `10xgraph.json` validity, a security check, an audit log check and whether the default port is free. The security check reads only the JSON file and reports production-readiness gaps (auth, rate limiting, token revocation) as warnings; they never fail the command. With `MODE=production`, the audit log check warns when `audit.enabled` is not `true` (see [Audit log](/docs/server/audit-log)). Exits 1 if any check fails, so it works as a CI gate.
 
 ```bash
 10xgraph audit [--config FILE]

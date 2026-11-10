@@ -4,7 +4,7 @@ description: "Set up structured logging, metrics collection, error tracking with
 section: "Observability"
 order: 10
 label: Logs and server telemetry
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 The API server gives you the signals an operator needs: application logs on stdout with a request id, an optional audit log, metrics, error tracking and tracing. Logs are on by default. Metrics are off until you add a `metrics` block to `10xgraph.json`. Sentry, the audit log and tracing are optional. This page covers logs, metrics, secret redaction, Sentry setup, and the REST API endpoint to inspect run traces. For per-node spans in Logfire or LangSmith, see the link at the end.
@@ -15,7 +15,7 @@ Logs and metrics are independent of each other and of tracing: you can enable an
 
 The API server writes its application logs to stdout, with secrets redacted. Each request gets an id, returned in the `X-Request-ID` response header and attached to the log lines of that request.
 
-Set `LOG_FORMAT=json` to write every log line as one JSON object (time, level, logger, message, `request_id`, and `user_id` when known). The default is `text`. Use `json` in production so your log pipeline can parse and index the lines.
+Set `LOG_FORMAT=json` to write every log line as one JSON object (`ts`, `level`, `logger`, `message`, plus `request_id`, `transport` and `user_id` when known and `exc_info` for an exception). The default is `text`. Use `json` in production so your log pipeline can parse and index the lines.
 
 ```bash
 LOG_FORMAT=json
