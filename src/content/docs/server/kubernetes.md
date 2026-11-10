@@ -1,10 +1,9 @@
 ---
 title: Deploy on Kubernetes
 description: "Generate a Kubernetes Deployment and Service with 10xgraph build --k8s, tuned for long-running agent operations."
-section: "API server"
-group: "Operate"
-order: 160
-label: Deploy on Kubernetes
+section: "Deploy"
+order: 20
+label: Kubernetes
 updated: "2026-10-27"
 faq:
   - question: "Why does the termination grace period need to be so long?"

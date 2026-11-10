@@ -1,7 +1,7 @@
 ---
 title: "Invoke and stream over REST"
 description: "Call your graph over HTTP: synchronous invoke, streaming with NDJSON, thread management, stop and fix operations."
-order: 90
+order: 60
 group: "Interfaces"
 section: "API server"
 updated: "2026-10-27"

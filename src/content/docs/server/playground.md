@@ -3,7 +3,7 @@ title: Playground
 description: Test your agent with the 10xGraph playground, a hosted UI for interactive development and debugging.
 section: "API server"
 group: "Tools"
-order: 190
+order: 110
 updated: "2026-10-27"
 faq:
   - question: "Is the playground hosted locally or on the web?"

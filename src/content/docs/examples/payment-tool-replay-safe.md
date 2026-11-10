@@ -4,7 +4,7 @@ seoTitle: "Replay-safe payment tool with approval"
 description: A charge_card tool that asks for approval with interrupt(), sends an idempotency key, and relies on the checkpointer tool ledger so a resumed run never charges twice.
 section: Examples
 group: Production
-order: 12
+order: 30
 label: Replay-safe payment tool
 updated: "2026-10-27"
 faq:

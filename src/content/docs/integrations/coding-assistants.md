@@ -4,7 +4,7 @@ seoTitle: "10xGraph skills for Codex, Claude, Copilot"
 description: Install the bundled 10xGraph skill for Codex, Claude, or GitHub Copilot so they understand the framework and write correct code.
 section: Integrations
 group: "Coding assistants"
-order: 90
+order: 80
 updated: "2026-10-26"
 faq:
   - question: "Do I need to install the skill?"

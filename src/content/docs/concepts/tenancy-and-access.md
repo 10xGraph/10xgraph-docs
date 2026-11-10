@@ -3,8 +3,8 @@ title: Tenancy and access
 seoTitle: "Tenancy, roles and reach in 10xGraph"
 description: How 10xGraph turns a verified identity into roles, permissions and reach, maps tenant claims to tenant columns, filters data in storage, and what stays your job.
 section: Concepts
-group: "Serving"
-order: 171
+group: "Platform"
+order: 180
 updated: "2026-11-10"
 faq:
   - q: "Is 10xGraph multi-tenant by default?"

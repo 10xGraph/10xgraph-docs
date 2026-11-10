@@ -1,8 +1,9 @@
 ---
 title: Deploy with Docker and Kubernetes
 description: Generate a Dockerfile, docker-compose.yml and Kubernetes manifest with 10xgraph build, then ship them with a production environment checklist.
-section: "API server"
-order: 150
+section: "Deploy"
+order: 10
+label: "Docker and Compose"
 updated: "2026-10-27"
 faq:
   - q: Why does the generated config wait so long to shut down?
@@ -13,7 +14,6 @@ faq:
     a: No. It looks for a requirements file or pyproject.toml, and the container reads 10xgraph.json at runtime, so your code and config must be copied into the image.
   - q: The 10xgraph-api package contains CLI code, project templates and a browser config editor. Is that a security risk in production?
     a: No. The server never imports or serves any of it, and the generated Dockerfile deletes the templates and the config editor from the image after installing dependencies. The only CLI file the server loads is a small constants module.
-group: "Operate"
 ---
 
 `10xgraph build` generates a production-ready `Dockerfile` and `.dockerignore` for your agent, and with flags also a `docker-compose.yml` and a `k8s.yaml` manifest. The images run Gunicorn with Uvicorn workers in `MODE=production`. This guide covers building, configuring, and shipping your deployment with a release checklist.

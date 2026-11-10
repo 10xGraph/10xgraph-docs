@@ -3,7 +3,7 @@ title: Security and Validators
 description: "How input validators and PromptInjectionValidator work, the authorization model, and what the production template enables against injection and misuse."
 section: Concepts
 order: 170
-group: Serving
+group: "Platform"
 updated: "2026-10-29"
 ---
 

@@ -541,6 +541,8 @@ The factories `create_local_qdrant_store`, `create_remote_qdrant_store` and `cre
 - With auth off there is no `user` dict, so use `.get` as above and decide what a missing tenant means. The examples raise an error. If you prefer a default, return a fixed name such as `"company_public"` that holds no private data.
 - A tenant id becomes part of a collection name. Keep it to letters, digits, `_` and `-`, and validate it in your auth backend.
 
+Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
+
 ## Accessing memory in the REST API
 
 When a store is configured in `10xgraph.json`, the server exposes memory endpoints:
@@ -571,6 +573,8 @@ Point the API server to a memory store:
 ```
 
 The `store` key expects a `module:attribute` path pointing to a `BaseStore` instance. The server uses it for the `/v1/store` endpoints.
+
+Reference: [BaseStore](/docs/reference/python/memory-stores) · Source: [base_store.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/store/base_store.py)
 
 ---
 

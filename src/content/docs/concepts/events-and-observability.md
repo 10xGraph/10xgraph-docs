@@ -2,8 +2,8 @@
 title: Events and observability
 description: How 10xGraph emits structured events, publishes them to external systems, and exposes metrics and tracing for production monitoring.
 updated: "2026-10-27"
-order: 180
-group: "Serving"
+order: 190
+group: "Platform"
 section: Concepts
 faq:
   - q: "How do I export events to LangSmith or Logfire?"

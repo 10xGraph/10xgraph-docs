@@ -3,7 +3,7 @@ title: Build a Coding AI Agent in Python
 description: "Build a plan-first coding agent with read, search, test and diff-proposing tools, so every file change is reviewed by a human before it lands."
 section: Examples
 group: "Use cases"
-order: 250
+order: 370
 label: Coding
 updated: "2026-10-08"
 faq:

@@ -1,9 +1,9 @@
 ---
 title: Send traces to Arize Phoenix
 description: Send 10xGraph spans to Arize Phoenix over OpenTelemetry using a helper, a publisher, or API server configuration.
-section: "Build agents"
-group: "Observability and operations"
-order: 401
+section: "Observability"
+group: "Tracing"
+order: 40
 label: Phoenix tracing
 updated: "2026-11-09"
 ---

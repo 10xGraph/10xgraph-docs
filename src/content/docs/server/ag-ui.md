@@ -4,7 +4,7 @@ seoTitle: "Serve a 10xGraph agent over AG-UI (CopilotKit)"
 description: "Enable AG-UI support in 10xGraph to connect chat frontends like CopilotKit, test the endpoint, configure for production."
 section: "API server"
 group: "Interfaces"
-order: 110
+order: 80
 label: Serve over AG-UI
 updated: "2026-10-27"
 faq:

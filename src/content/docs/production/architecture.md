@@ -61,6 +61,8 @@ This is the order a request travels, outermost layer first. The middleware order
 | 12 | Nodes and tools | Each node and tool call can have its own timeout (`node_timeout` and `tool_timeout`, no default), and tools run in parallel up to a cap (default 10). |
 | 13 | Persistence | The checkpointer saves state at each step. Stores and media are read and written as the graph asks. |
 
+Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
+
 Both lock and cap are taken before the response starts, so a busy or over-cap request gets a real 409 or 429 status, not an error halfway through a stream. See [Security model](/docs/production/security-model) for what steps 3, 4, 8 and 9 protect against.
 
 ## Where state lives
@@ -74,6 +76,8 @@ Both lock and cap are taken before the response starts, so a busy or over-cap re
 | Postgres | Durable thread history. Each write appends a new version under a per-thread row lock; a write based on an out-of-date version raises `StaleStateError` and the API returns 409. Also the tool-call ledger. | `PgCheckpointer` | Until you delete the thread |
 | Vector memory store | Long-term memory across threads (PgVectorStore or Qdrant). | The `BaseStore` you pass to the graph, served at `/v1/store` | Until you delete it |
 | Media store | Uploaded and generated files, referenced by `graph://media/` URLs. | The media store you configure | Until deleted; by default a file is deleted with the last thread that references it (`media.delete_with_thread`) |
+
+Reference: [BaseStore](/docs/reference/python/memory-stores) · Source: [base_store.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/store/base_store.py)
 
 Postgres is the source of truth. Redis is a cache and a coordination tool, not a second copy you must back up. The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. For the full model see [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
 

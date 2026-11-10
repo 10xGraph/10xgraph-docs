@@ -43,6 +43,8 @@ This page lists what the platform provides, what you switch on, and what it does
 | [Playground](/docs/server/playground) | Opens with `10xgraph dev` | Not for production; run trace is off in production mode | Use by end users |
 | [Evals](/docs/testing) | `10xgraph eval` writes JSON and HTML reports | Eval sets and criteria you write | Eval endpoints in the API |
 
+Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
+
 ## What the server does by default, and what you configure
 
 | Concern | What the server does by default | What you configure | Read more |

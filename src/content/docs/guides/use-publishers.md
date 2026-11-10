@@ -1,10 +1,10 @@
 ---
 title: Emit events from your graph
 description: "Forward structured events to observability systems using Redis, Kafka, RabbitMQ and more."
-section: "Build agents"
-group: "Observability and operations"
-order: 390
-label: Publishers
+section: "Observability"
+group: "Events"
+order: 60
+label: "Publishers (Kafka, Redis, RabbitMQ)"
 updated: "2026-10-29"
 ---
 

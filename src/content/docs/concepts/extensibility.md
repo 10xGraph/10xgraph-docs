@@ -3,8 +3,8 @@ title: Extension points
 seoTitle: "Extending 10xGraph with base classes"
 description: "Abstract base classes in 10xGraph let you customize storage, auth, LLM integration, and event publishing without changing graph logic."
 section: Concepts
-order: 210
-group: "Serving"
+order: 220
+group: "Platform"
 updated: "2026-10-08"
 faq:
   - q: "Why extend a base class instead of modifying the code?"
@@ -97,6 +97,8 @@ flowchart LR
 
 A checkpointer persists your graph's state and thread history to a backend. You extend `BaseCheckpointer` when your deployment requires a specific database (DynamoDB for AWS shops, Firestore for Google Cloud, or something custom like a legacy oracle system). All of the async methods below are abstract (`aping()` since 1.0.0rc4), so a subclass must implement every one; the synchronous wrappers (`put_state()` and similar) are provided by the base class.
 
+Reference: [BaseCheckpointer](/docs/reference/python/checkpointers) · Source: [base_checkpointer.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/checkpointer/base_checkpointer.py)
+
 ```python
 from tenxgraph.storage.checkpointer.base_checkpointer import BaseCheckpointer
 
@@ -127,6 +129,8 @@ compiled = graph.compile(checkpointer=DynamoCheckpointer())
 ### BaseStore: long-term vector memory
 
 A store holds embeddings and metadata for long-term retrieval across conversation threads. You extend `BaseStore` to integrate with a vector database your team already uses (Pinecone, Weaviate, your own Postgres pgvector setup). Your store methods handle the read/write/search lifecycle.
+
+Reference: [BaseStore](/docs/reference/python/memory-stores) · Source: [base_store.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/store/base_store.py)
 
 ```python
 from tenxgraph.storage.store.base_store import BaseStore
@@ -315,6 +319,8 @@ Server-layer ABCs are wired via `10xgraph.json` (), with no code changes to the 
 
 Extend `BaseAuth` when you need custom authentication beyond JWT: API key lookup, LDAP integration, OAuth2 with your identity provider, or a legacy auth system. The `authenticate` method is synchronous and receives the request, response, and credential. Return a dict with at least `user_id`, or raise an exception to reject the request.
 
+Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
+
 ```python
 from tenxgraph_api import BaseAuth
 
@@ -344,6 +350,8 @@ For simple role-to-permission mapping, you do not need a class. Add `roles` to t
 ### BaseCacheStore
 
 The API keeps everything it shares between workers in one `BaseCacheStore`: the per-thread run lock, run and WebSocket caps, idempotency, token revocation and rate-limit counters. `RedisCacheStore` is used when `cache_store.type` is `redis` (Valkey, Dragonfly and KeyDB work through the URL); `InMemoryCacheStore` is the default for one process. You extend `BaseCacheStore` when the shared state has to live in something that does not speak the Redis protocol.
+
+Reference: [BaseCacheStore](/docs/reference/api-cli/cache-store) · Source: [base.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/cache_store/base.py)
 
 ```python
 from tenxgraph_api import BaseCacheStore, SlotResult

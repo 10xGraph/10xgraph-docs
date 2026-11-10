@@ -1,10 +1,9 @@
 ---
 title: Observability
 description: "Set up structured logging, metrics collection, error tracking with Sentry, and inspect runs via the observability API."
-section: "API server"
-group: "Operate"
-order: 140
-label: Observability
+section: "Observability"
+order: 10
+label: Logs and server telemetry
 updated: "2026-10-27"
 ---
 

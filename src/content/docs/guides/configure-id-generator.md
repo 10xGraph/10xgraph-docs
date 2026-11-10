@@ -1,10 +1,9 @@
 ---
 title: Configure ID generators
 description: Control the format of thread IDs and run IDs using built-in or custom generators to match your storage backend and observability requirements.
-section: "Build agents"
-group: "Observability and operations"
-order: 410
-label: Configure ID generators
+section: "Deploy"
+order: 40
+label: "ID generators for many replicas"
 updated: "2026-10-27"
 ---
 

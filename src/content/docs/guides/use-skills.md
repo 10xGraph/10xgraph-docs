@@ -3,7 +3,7 @@ title: Give an agent Agent Skills
 description: Add Agent Skills (SKILL.md folders with scripts, references and assets) to a 10xGraph Agent, validate them, and observe when the model uses them.
 section: "Build agents"
 group: "Agent Skills"
-order: 430
+order: 320
 label: Skills
 updated: "2026-10-27"
 ---

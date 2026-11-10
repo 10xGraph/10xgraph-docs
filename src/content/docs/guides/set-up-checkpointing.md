@@ -203,6 +203,8 @@ app = FastAPI(lifespan=lifespan)
 
 Every checkpointer has `await checkpointer.aping()`. It returns when the backends answer and raises when they do not. For `PgCheckpointer` it runs `SELECT 1`, checks that the schema version is not older than the code expects, and pings Redis. It never creates the schema, so call `asetup()` first. The API server calls it at startup and on `/health/ready`. A custom `BaseCheckpointer` must implement it (abstract since 1.0.0rc4); see [Checkpointers](/docs/reference/python/checkpointers#aping).
 
+Reference: [BaseCheckpointer](/docs/reference/python/checkpointers) · Source: [base_checkpointer.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/checkpointer/base_checkpointer.py)
+
 ### Multi-user isolation
 
 By default, `PgCheckpointer` treats `user_id` as an **ownership boundary**. Threads, state, messages, and the [tool ledger](/docs/concepts/replay-safe-tools) are scoped to the authenticated user, so even if an attacker knows another user's `thread_id`, they cannot read, write, or delete it. This is critical in multi-tenant deployments.
@@ -258,6 +260,8 @@ checkpointer = PgCheckpointer(
 - The names `user_id`, `kind`, `tenant`, `roles`, `permissions`, `reach` and `claims` cannot be column names.
 
 Native row-level security, the full `BaseAuth` example, isolation scopes and the filter reference are in [Multi-tenant data](/docs/guides/multi-tenant-data).
+
+Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
 
 ### State history retention
 

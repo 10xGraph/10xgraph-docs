@@ -3,7 +3,7 @@ title: Batch LLM calls
 description: Use OpenAI and Anthropic batch APIs for cost-effective processing of large request volumes.
 label: Batch LLM calls
 updated: "2026-10-27"
-order: 350
+order: 310
 group: Streaming, media and realtime
 section: Build agents
 faq:

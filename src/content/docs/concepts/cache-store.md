@@ -33,6 +33,8 @@ You pick the store with `cache_store.type`:
 | `redis` | Production with several workers or pods. Valkey, Dragonfly and KeyDB work through the URL. | Yes |
 | `custom` | A backend that does not speak the Redis protocol; `path` points to a `BaseCacheStore` | Depends on your backend |
 
+Reference: [BaseCacheStore](/docs/reference/api-cli/cache-store) · Source: [base.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/cache_store/base.py)
+
 With `memory`, a lock taken in one process is invisible to another, a rate limit of 100 requests becomes 100 per process, and a revocation applies only where it was made. The Redis URL comes from `cache_store.url` or the `REDIS_URL` environment variable. `REDIS_URL` alone does not select Redis; set the type. The production template writes a Redis store with rate limiting and token revocation.
 
 ## When the store fails

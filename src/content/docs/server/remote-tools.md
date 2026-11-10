@@ -1,7 +1,7 @@
 ---
 title: "Remote tools"
 description: "Configure client-executed tools on the server: define them in 10xgraph.json, attach them to graph nodes, and let clients run them."
-order: 130
+order: 100
 group: "Interfaces"
 section: "API server"
 updated: "2026-10-27"

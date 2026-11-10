@@ -3,8 +3,8 @@ title: "Add human approval with interrupt()"
 seoTitle: "Pause for human approval: interrupt()"
 description: "Pause a graph mid-execution for human approval, correction, or choice from inside a node or tool. Resume when the decision is made."
 section: "Build agents"
-group: "Multi-agent and control flow"
-order: 290
+group: "Control flow"
+order: 260
 label: "Pause for human input"
 updated: "2026-10-27"
 ---

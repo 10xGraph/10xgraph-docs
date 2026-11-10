@@ -1,10 +1,10 @@
 ---
 title: Send traces to Logfire and LangSmith
 description: Send 10xGraph spans to Pydantic Logfire or LangSmith over OpenTelemetry using helpers, publishers, or configuration.
-section: "Build agents"
-group: "Observability and operations"
-order: 400
-label: Logfire & LangSmith tracing
+section: "Observability"
+group: "Tracing"
+order: 50
+label: Logfire and LangSmith tracing
 updated: "2026-10-27"
 ---
 

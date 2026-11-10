@@ -4,7 +4,7 @@ seoTitle: "Safe file and web tools for agents"
 description: Give a support agent a read-only knowledge base with create_file_tools, a host-restricted fetch_url wrapper, and a MediaFetchPolicy for customer-supplied image URLs.
 section: Examples
 group: Production
-order: 15
+order: 60
 label: Safe file and web tools
 updated: "2026-10-27"
 faq:

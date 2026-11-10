@@ -81,6 +81,8 @@ my_store = QdrantStore(embedding=OpenAIEmbedding(), path="./qdrant_data")
 
 The loader validates that the attribute is a `BaseStore` instance and fails at startup with a clear error if not. For tests, use `tenxgraph.qa.testing.InMemoryStore`, which satisfies the same interface.
 
+Reference: [BaseStore](/docs/reference/python/memory-stores) · Source: [base_store.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/store/base_store.py)
+
 ## Wire up dependency injection
 
 The `injectq` key points at an InjectQ container. Use it to inject services at startup that your nodes and tools need, such as a database session factory, an HTTP client, or configuration objects:
@@ -179,6 +181,8 @@ The API keeps everything it shares between workers in one **cache store**: the p
 | `path` | Type `custom` only, required. A `module:attr` path to your `BaseCacheStore` (an instance or a zero-argument factory). See [Bring your own backend](/docs/server/bring-your-own-backend). |
 | `rate_limit` | The rate limit object. See [Rate limiting](/docs/server/rate-limiting). |
 | `token_revocation` | `true`, `false` or an object. See [Authentication](/docs/server/auth). |
+
+Reference: [BaseCacheStore](/docs/reference/api-cli/cache-store) · Source: [base.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/cache_store/base.py)
 
 ```json
 {
@@ -380,6 +384,8 @@ Before deploying to production, make five explicit decisions:
 ### 1. Turn on authentication
 
 With `auth` unset or `null`, every request is accepted. This is fine for internal development. In production, set `"auth": "jwt"` with `JWT_SECRET_KEY` (at least 32 characters) and `JWT_ALGORITHM` in the environment, or point at a custom `BaseAuth` subclass. See [Authentication](/docs/server/auth).
+
+Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
 
 ### 2. Set roles and reach
 

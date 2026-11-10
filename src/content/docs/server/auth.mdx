@@ -243,6 +243,8 @@ Use a durable, shared checkpointer such as `PgCheckpointer` in production. Tenan
 
 Subclass `BaseAuth` and implement `authenticate`. Optionally override `authorize`.
 
+Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
+
 ```python title="auth/custom_auth.py"
 from fastapi import HTTPException
 from tenxgraph_api import BaseAuth

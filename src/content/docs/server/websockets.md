@@ -1,7 +1,7 @@
 ---
 title: "WebSocket streaming and realtime"
 description: "Bidirectional WebSocket endpoints for turn-based agent streaming and realtime audio."
-order: 100
+order: 70
 group: "Interfaces"
 section: "API server"
 updated: "2026-10-27"

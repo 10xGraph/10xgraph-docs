@@ -4,7 +4,7 @@ seoTitle: "Send images, audio and documents to LLM models"
 description: Send images, audio, and documents to your models from Python using content blocks, MediaRef, and storage backends.
 section: "Build agents"
 group: "Streaming, media and realtime"
-order: 330
+order: 290
 label: Send media
 updated: "2026-10-27"
 faq:

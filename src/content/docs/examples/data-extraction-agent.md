@@ -3,7 +3,7 @@ title: Build a Data Extraction AI Agent in Python
 description: Build a data extraction agent in Python that turns unstructured text into validated Pydantic records and retries when validation fails, with 10xGraph.
 section: Examples
 group: "Use cases"
-order: 240
+order: 360
 label: Data Extraction
 updated: "2026-10-08"
 faq:

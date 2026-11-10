@@ -1,9 +1,9 @@
 ---
 title: Send traces to an OTLP endpoint
 description: Send 10xGraph spans to any OTLP HTTP trace receiver, such as a collector, Tempo, Jaeger or Grafana Cloud.
-section: "Build agents"
-group: "Observability and operations"
-order: 402
+section: "Observability"
+group: "Tracing"
+order: 30
 label: OTLP tracing
 updated: "2026-11-09"
 ---

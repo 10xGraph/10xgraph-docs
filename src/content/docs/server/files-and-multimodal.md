@@ -3,7 +3,7 @@ title: Handle files and multimodal input
 description: Enable clients to upload images, audio, and documents to your agent via the file API.
 section: API server
 group: Interfaces
-order: 120
+order: 90
 label: Files and multimodal
 updated: "2026-10-27"
 faq:

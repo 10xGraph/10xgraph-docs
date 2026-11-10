@@ -3,7 +3,7 @@ title: Stream graph responses
 description: "Stream token-by-token output using astream(), handle StreamChunk events, and pause with interrupts"
 section: "Build agents"
 group: "Streaming, media and realtime"
-order: 320
+order: 280
 label: Stream responses
 updated: "2026-10-27"
 faq:

@@ -3,9 +3,8 @@ title: "Graceful shutdown"
 description: "Handle agent shutdown cleanly with signal handlers, timeout coordination, and protected cleanup sections."
 label: "Graceful shutdown"
 updated: "2026-10-27"
-order: 420
-group: "Observability and operations"
-section: "Build agents"
+order: 30
+section: "Deploy"
 ---
 
 When you deploy an agent application to production, you need a way to shut it down cleanly without losing work in progress. 10xGraph provides `GracefulShutdownManager` and related utilities to intercept shutdown signals, protect critical sections from interruption, and orchestrate cleanup with timeouts.
