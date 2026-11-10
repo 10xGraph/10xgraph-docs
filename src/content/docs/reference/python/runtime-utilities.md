@@ -310,7 +310,7 @@ Build the list of message dicts you send to an LLM from system prompts, the stat
 
 ### convert_messages(system_prompts, state, extra_messages)
 
-Convert system prompts, agent state, and extra messages into one list of dicts. The order is: system prompts, then `state.context_summary` (as an `assistant` message) if set, then each message in `state.context`, then `extra_messages`. System prompt strings may use `{field}` placeholders, filled from `state.model_dump()`. If a placeholder names a field the state lacks, the original prompt is used and a warning is logged. Messages with multimodal content get OpenAI-style content parts.
+Convert system prompts, agent state, and extra messages into one list of dicts. The order is: system prompts, then `state.context_summary` (as an `assistant` message) if set, then each message in `state.context`, then `extra_messages`. System prompt strings and `extra_messages` text may use `{field}` placeholders, filled from `state.model_dump()`. A missing field or bad placeholder stays as written, the rest is still filled, and a warning is logged. Use `{{` and `}}` for literal braces. Messages with multimodal content get OpenAI-style content parts.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|

@@ -69,12 +69,7 @@ Authorization: Bearer <token>
 new WebSocket("ws://host/v1/graph/ws", ["10xgraph-bearer", token]);
 ```
 
-```text
-# Last-resort fallback (WebSocket only): the token lands in URLs and access logs
-/v1/graph/ws?token=<token>
-```
-
-The server echoes the `10xgraph-bearer` sentinel back on accept, which browsers require to complete the handshake. The older `agentflow-bearer` sentinel is accepted until 2.0. The `?token=` query parameter is read only on WebSocket connections.
+The server echoes the `10xgraph-bearer` sentinel back on accept, which browsers require to complete the handshake. The older `agentflow-bearer` sentinel is accepted until 2.0. A `?token=` query parameter is not accepted: a token in the URL would land in access logs. The subprotocol is read only on WebSocket connections.
 
 If auth is not configured (`"auth": null`), credentials are not required. Missing, invalid or expired credentials return HTTP `401`. A permission failure returns `403`. On WebSocket routes both become close code `1008`. See [authentication](/docs/server/auth) for setup.
 

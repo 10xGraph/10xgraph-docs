@@ -78,7 +78,7 @@ def __init__(
 | `tools` | `Iterable[Callable] \| None` | `None` | Tools available to the agent. |
 | `client` | `Any` | `None` | MCP client (fastmcp) for tool discovery. |
 | `pass_user_info_to_mcp` | `bool` | `False` | Include caller's user_id in MCP tool requests. |
-| `extra_messages` | `list[Message] \| None` | `None` | Additional messages prepended to every run. |
+| `extra_messages` | `list[Message] \| None` | `None` | Additional messages sent after the history on every call. Text supports `{field}` state placeholders. See [Per-request context and prompt caching](/docs/guides/configure-agent#per-request-context-and-prompt-caching). |
 | `trim_context` | `bool` | `False` | Enable automatic context message trimming. |
 | `tools_tags` | `set[str] \| None` | `None` | Filter tools by tag (only if tools come from Skills). |
 | `reasoning_config` | `dict \| bool \| None` | `True` | Extended thinking config (provider-dependent). |
@@ -356,7 +356,7 @@ def __init__(
 | `reflect_reasoning_config` | `dict \| bool \| None` | `None` | Override reasoning config for reflector. |
 | `client` | `Any` | `None` | MCP client. |
 | `pass_user_info_to_mcp` | `bool` | `False` | Include user_id in MCP requests. |
-| `extra_messages` | `list[Message] \| None` | `None` | Prepended messages. |
+| `extra_messages` | `list[Message] \| None` | `None` | Messages sent after the history. Text supports `{field}` state placeholders. |
 | `trim_context` | `bool` | `False` | Enable automatic trimming. |
 | `tools_tags` | `set[str] \| None` | `None` | Filter tools by tag. |
 | `reasoning_config` | `dict \| bool \| None` | `True` | Reasoning config for all phases. |
@@ -452,7 +452,7 @@ def __init__(
 | `output_type` | `str` | `"text"` | Output format. |
 | `client` | `Any` | `None` | MCP client. |
 | `pass_user_info_to_mcp` | `bool` | `False` | Include user_id in MCP requests. |
-| `extra_messages` | `list[Message] \| None` | `None` | Prepended messages. |
+| `extra_messages` | `list[Message] \| None` | `None` | Messages sent after the history. Text supports `{field}` state placeholders. |
 | `trim_context` | `bool` | `False` | Enable automatic trimming. |
 | `tools_tags` | `set[str] \| None` | `None` | Filter tools by tag. |
 | `reasoning_config` | `dict \| bool \| None` | `True` | Reasoning config. |

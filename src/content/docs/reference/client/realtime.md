@@ -174,7 +174,7 @@ type RealtimeEvent =
 
 The bearer token is sent using the browser-safe `10xgraph-bearer` WebSocket subprotocol, and it is never placed in the URL. On Node runtimes the `Authorization` header is also set. You provide the token the same way as for every other client call, via `authToken` or `auth` on the `TenxGraphClient` config (see [`reference/client/auth`](/docs/reference/client/auth)); `realtime()` reuses it automatically.
 
-The server accepts the token via the `Authorization` header, the `10xgraph-bearer` subprotocol, or a `?token=` query fallback. The client uses the subprotocol so the token is never logged in a URL.
+The server accepts the token via the `Authorization` header or the `10xgraph-bearer` subprotocol. A `?token=` query parameter is not accepted. The client uses the subprotocol so the token is never logged in a URL.
 
 ---
 

@@ -89,6 +89,8 @@ agent = Agent(
 # At runtime the placeholder is replaced with state.user_name, state.occasion
 ```
 
+A missing field stays as written and the rest is still filled. `extra_messages` text is filled the same way, which is the right place for values that change mid-conversation; see [prompt caching](/docs/guides/configure-agent#per-request-context-and-prompt-caching).
+
 ### Skills
 
 A skill is a folder with a `SKILL.md` (instructions plus a short description) and optional bundled files such as scripts and reference docs. Skills follow the [Agent Skills specification](https://agentskills.io/specification). With `skills=SkillConfig(skills_dir=...)`:

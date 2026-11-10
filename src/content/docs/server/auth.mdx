@@ -115,7 +115,7 @@ const ws = new WebSocket(
 );
 ```
 
-The subprotocol list works as: the server looks for `10xgraph-bearer` (or the legacy `agentflow-bearer`), treats the next item as the token, and responds with the matching subprotocol. The server also accepts the `Authorization` header and, as a last resort, a `?token=` query parameter, which lands in URLs and logs. The subprotocol and `?token=` work on WebSocket routes only; HTTP routes take the `Authorization` header alone. If no credential is found, the connection is rejected with close code `1008` (policy violation).
+The subprotocol list works as: the server looks for `10xgraph-bearer` (or the legacy `agentflow-bearer`), treats the next item as the token, and responds with the matching subprotocol. The server also accepts the `Authorization` header. A `?token=` query parameter is not accepted, because it would land in URLs and logs. The subprotocol works on WebSocket routes only; HTTP routes take the `Authorization` header alone. If no credential is found, the connection is rejected with close code `1008` (policy violation).
 
 
 ## How does the user reach your code?
@@ -267,6 +267,8 @@ class ApiKeyAuth(BaseAuth):
   }
 }
 ```
+
+To call other services as the user, the server also puts a `UserCredential` in `config["credential"]` (the verified bearer token by default). Override `async BaseAuth.downstream_credential(self, connection, credential, claims)` to supply a different one, such as a session cookie or API key. Clients cannot set `credential` themselves. See [Calling services as the user](/docs/guides/call-services-as-the-user).
 
 The `path` accepts `auth_app:Cls`, `auth_app.py:Cls`, `pkg.mod:Cls` and `pkg/mod.py:Cls`.
 
@@ -558,6 +560,7 @@ This is intentional: a forgotten guard becomes a deploy-time error, not a silent
 
 - [Authorization scopes](/docs/guides/authorization-scopes): Read the caller and check permissions inside tools and nodes
 - [Multi-tenant data](/docs/guides/multi-tenant-data): Tenant columns and reach in storage
+- [Calling services as the user](/docs/guides/call-services-as-the-user): Token exchange, M2M and self-issued tokens for MCP and local tools
 - [Configure the API server](/docs/server/configure): Set `auth` and other keys in `10xgraph.json`
 - [Troubleshooting auth](/docs/troubleshooting/api-server): Debug auth and CORS failures
 - [REST API: auth reference](/docs/reference/api-cli/auth): Full interface and status codes

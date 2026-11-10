@@ -131,7 +131,7 @@ app = agent.compile()
 | `trim_context` | `bool` | `False` | Trim old messages from context when it grows long, keeping recent messages. Helps control token usage on long runs. |
 | `client` | `Any` | `None` | FastMCP client instance for MCP-hosted tools. |
 | `pass_user_info_to_mcp` | `bool` | `False` | Include user info (user_id, etc.) in MCP tool calls. |
-| `extra_messages` | `list[Message]` | `None` | Initial messages added to every run's context (e.g., examples or constraints). |
+| `extra_messages` | `list[Message]` | `None` | Messages sent after the history on every call (e.g., examples or constraints). Text supports `{field}` state placeholders; see [prompt caching](/docs/guides/configure-agent#per-request-context-and-prompt-caching). |
 | `tools_tags` | `set[str]` | `None` | Filter tools by tags; only tools matching these tags are offered. |
 | `skills` | `SkillConfig` | `None` | Agent Skills configuration; enables dynamic skill discovery and activation. |
 | `multimodal_config` | `MultimodalConfig` | `None` | Multimodal settings for image, audio, and document handling. |

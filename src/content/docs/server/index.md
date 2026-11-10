@@ -67,7 +67,7 @@ Authorization is part of the `auth` setting and applies to any auth class:
 - **Roles**: add `roles` to the `auth` object to map token roles to `resource:action` permissions (such as `graph:invoke` or `store:write`) and a reach of `own`, `tenant` or `all`. Permissions guard routes, not individual tools; to check a permission inside a tool, use `can(config, "store:write")` from `tenxgraph.core.authz`.
 - **Custom rules**: override `BaseAuth.authorize` for rules the role table cannot express.
 
-WebSocket and HTTP endpoints both enforce authentication via the `Authorization: Bearer <token>` header. WebSocket also accepts the token in the `Sec-WebSocket-Protocol` header as `10xgraph-bearer, <token>` (the deprecated `agentflow-bearer` name still works), or as a `?token=` query parameter as a last resort. HTTP routes read only the `Authorization` header. See [Secure your server](/docs/server/auth) for setup and examples.
+WebSocket and HTTP endpoints both enforce authentication via the `Authorization: Bearer <token>` header. WebSocket also accepts the token in the `Sec-WebSocket-Protocol` header as `10xgraph-bearer, <token>` (the deprecated `agentflow-bearer` name still works). A `?token=` query parameter is not accepted, so a token never lands in URLs or logs. HTTP routes read only the `Authorization` header. See [Secure your server](/docs/server/auth) for setup and examples.
 
 ## Development vs. production modes
 

@@ -129,13 +129,13 @@ A token using `sub` instead of `user_id` is rejected with 401. A token with no `
 
 ## Sending auth over WebSocket
 
-WebSocket routes check three places in order for a credential:
+WebSocket routes check two places in order for a credential:
 
 1. **`Authorization: Bearer <token>`**: for non-browser clients.
 2. **`Sec-WebSocket-Protocol: 10xgraph-bearer, <token>`**: preferred for browsers (the token stays in headers, never in URLs or logs). The server echoes the sentinel back on accept, which browsers require.
-3. **`?token=<jwt>`**: last resort for WebSocket only; the token appears in URLs and access logs.
+A `?token=` query parameter is not accepted: a token in the URL would land in access logs, proxy logs and trace spans, so it is ignored.
 
-HTTP routes read the `Authorization` header only. The subprotocol and the `?token=` parameter are honoured on WebSocket connections and nowhere else.
+HTTP routes read the `Authorization` header only. The subprotocol is honoured on WebSocket connections and nowhere else.
 
 Example:
 
@@ -146,7 +146,7 @@ const ws = new WebSocket(
 );
 ```
 
-The subprotocol offer must be exactly two entries with the sentinel first. Anything else falls through to the query parameter.
+The subprotocol offer must be exactly two entries with the sentinel first. With anything else, no credential is found and the handshake is refused with close code `1008`.
 
 The older sentinel `agentflow-bearer` is still accepted until 2.0, and the server echoes whichever one you send. The TypeScript client sends `10xgraph-bearer`.
 

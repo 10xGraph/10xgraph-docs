@@ -18,11 +18,12 @@ Base URL: `ws://<host>/v1/graph/live`
 
 ## Authentication
 
-Uses `RequirePermission("graph", "stream")`. The server looks for a bearer token in three places, in this order:
+Uses `RequirePermission("graph", "stream")`. The server looks for a bearer token in two places, in this order:
 
 1. **`Authorization: Bearer <token>` header** for non-browser clients (Python, server-to-server).
 2. **`Sec-WebSocket-Protocol: 10xgraph-bearer, <token>`** (preferred for browsers). The token rides in a request header, so it never lands in URLs, access logs, or browser history. The server echoes the sentinel back on `accept()`, which browsers require.
-3. **`?token=<jwt>` query parameter** as a last-resort fallback. The token is exposed in URLs and access logs; use (2) instead when you can.
+
+A `?token=` query parameter is not accepted: a token in the URL would land in access logs, proxy logs and trace spans. If no header or subprotocol carries a credential, the handshake is refused.
 
 ```javascript title="browser.js"
 // Browser: preferred subprotocol transport
@@ -30,11 +31,6 @@ const ws = new WebSocket(
   "ws://localhost:8000/v1/graph/live",
   ["10xgraph-bearer", jwt],
 );
-```
-
-```text
-# Query fallback
-ws://localhost:8000/v1/graph/live?token=<jwt>
 ```
 
 The older `agentflow-bearer` sentinel is still accepted until 2.0.
@@ -344,9 +340,11 @@ import websockets
 from tenxgraph.core.realtime.base import OUTPUT_SAMPLE_RATE
 
 async def main():
-    uri = "ws://localhost:8000/v1/graph/live?token=<jwt>"
+    uri = "ws://localhost:8000/v1/graph/live"
+    token = "<jwt>"
 
-    async with websockets.connect(uri) as ws:
+    # The token rides in the Sec-WebSocket-Protocol header, never in the URL.
+    async with websockets.connect(uri, subprotocols=["10xgraph-bearer", token]) as ws:
         # 1. Send init frame.
         await ws.send(json.dumps({
             "thread_id": "demo-001",

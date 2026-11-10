@@ -204,6 +204,8 @@ result = app.invoke(
 )
 ```
 
+`pass_user_info_to_mcp` never sends the user's credential, and a server should trust `meta["user"]` only from a caller it has already authenticated. To authenticate the MCP call itself as the user (token exchange, a service token, a short-lived signed token), pass `mcp_auth=` to `ToolNode`. See [Calling services as the user](/docs/guides/call-services-as-the-user).
+
 ## Tune how a `ToolNode` uses an MCP server
 
 These `ToolNode` options bound what an MCP server can put in front of the model. All are optional.

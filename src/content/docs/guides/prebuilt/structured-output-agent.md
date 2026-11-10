@@ -142,7 +142,7 @@ Advanced options (passed to the inner `Agent`):
 | `reasoning_config` | `dict \| bool` | `True` | Extended thinking configuration. When `True`, enables default reasoning. Pass a dict for fine-grained control (e.g., `{"effort": "medium"}`). |
 | `retry_config` | `Any` | `True` | Retry strategy for LLM call failures. When `True`, uses exponential backoff. Pass a custom config for finer control. |
 | `fallback_models` | `list[str \| tuple[str, str]]` | `None` | List of backup models. If the primary model fails, the agent tries these in order. Each entry is a model string or a tuple of `(model, provider)`. |
-| `extra_messages` | `list[Message]` | `None` | Additional messages to prepend to the conversation. Useful for few-shot examples or context. |
+| `extra_messages` | `list[Message]` | `None` | Additional messages sent after the history. Useful for few-shot examples or context. Text supports `{field}` state placeholders; see [prompt caching](/docs/guides/configure-agent#per-request-context-and-prompt-caching). |
 | `multimodal_config` | `MultimodalConfig` | `None` | Multimodal input configuration for images, audio, and documents. |
 
 ---

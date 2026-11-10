@@ -272,6 +272,7 @@ The thread is outside the caller's reach: another user's thread, or another tena
 ## Related pages
 
 - [API authentication](/docs/server/auth): Configure roles, reach and custom `authorize` on the API server.
+- [Calling services as the user](/docs/guides/call-services-as-the-user): Use the caller's credential for downstream calls.
 - [Multi-tenant data](/docs/guides/multi-tenant-data): Tenant columns and how reach filters storage.
 - [Protect against prompt injection](/docs/guides/protect-against-prompt-injection): Additional safety patterns for input validation.
 - [Use dependency injection](/docs/guides/use-dependency-injection): Access config and other dependencies in nodes and tools.

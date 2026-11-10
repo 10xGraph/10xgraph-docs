@@ -24,11 +24,12 @@ WebSocket shines for:
 
 ## Authentication
 
-Both endpoints use the same credential methods as REST APIs. The bearer token can come from:
+Both endpoints use the same credential methods as REST APIs. The bearer token can come from one of two places:
 
 1. **`Authorization` HTTP header** (standard): `Authorization: Bearer <token>`
 2. **`10xgraph-bearer` Sec-WebSocket-Protocol** (recommended for browsers): browsers cannot set an `Authorization` header on a WebSocket, and this keeps the token out of the URL
-3. **`?token=` query parameter** (fallback): the token is visible in logs and browser history, so avoid in production
+
+A `?token=` query parameter is not accepted, because a token in the URL lands in access logs, proxy logs and trace spans.
 
 At the WebSocket handshake, the server verifies the token. Before every graph run on `/v1/graph/ws` (the client can send several messages on one socket), the token is verified again: if it expires or is revoked between runs, the server sends an error chunk and closes the socket with code 1008.
 
@@ -341,7 +342,7 @@ socket.onclose = (event) => {
 ## Troubleshooting
 
 **Connection refused or 403 forbidden**
-- Check that your token is valid and not expired. Verify it is passed via the `Authorization` header, the `10xgraph-bearer` subprotocol, or `?token=` query. A rejected handshake closes with code 1008.
+- Check that your token is valid and not expired. Verify it is passed via the `Authorization` header or the `10xgraph-bearer` subprotocol (a `?token=` query is ignored). A rejected handshake closes with code 1008.
 - Confirm authentication is enabled and configured in `10xgraph.json` (`"auth": "jwt"` or custom).
 
 **Socket closes with code 1008**

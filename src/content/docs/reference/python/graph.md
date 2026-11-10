@@ -526,7 +526,7 @@ agent = Agent(
 | `provider` | `str or None` | `None` | Explicit provider override. Inferred from model if not set. |
 | `system_prompt` | `list[dict] or None` | `None` | System prompt as a list of message dicts. |
 | `tool_node` | `str, ToolNode, or None` | `None` | ToolNode instance or name of an existing graph node whose func is a ToolNode. |
-| `extra_messages` | `list[Message] or None` | `None` | Additional messages to prepend to the context. |
+| `extra_messages` | `list[Message] or None` | `None` | Additional messages sent after the history. Text supports `{field}` state placeholders. |
 | `client` | `Any` | `None` | Escape hatch: custom LLM client. |
 | `base_url` | `str or None` | `None` | For OpenAI-compatible APIs (Ollama, vLLM). |
 | `trim_context` | `bool` | `False` | Whether to trim long contexts. |

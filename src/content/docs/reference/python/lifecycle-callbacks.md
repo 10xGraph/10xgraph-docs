@@ -321,6 +321,20 @@ class ObserveTransitionHook(GraphLifecycleHook):
         return None
 ```
 
+To react to one tool's result, read `ToolResultBlock.name` on the messages the node added:
+
+```python
+from tenxgraph.core.state.message_block import ToolResultBlock
+
+class SearchResultHook(GraphLifecycleHook):
+    async def on_state_update(self, context, node_name, old_state, new_state, step):
+        for message in new_state.context[len(old_state.context):]:
+            for block in message.content:
+                if isinstance(block, ToolResultBlock) and block.name == "search":
+                    print(f"search finished (error={block.is_error})")
+        return None
+```
+
 ---
 
 ### on_turn_start and on_turn_end

@@ -230,6 +230,7 @@ Migration steps:
   `execute`, or `RAGAgent` raises `TypeError`.
 - **Skill and memory text is no longer run through `str.format`.** Only your own
   `system_prompt` is interpolated, and a bad placeholder is logged instead of failing the run.
+- **`extra_messages` text is now formatted like `system_prompt`.** `{field}` placeholders are filled from state on every request, and `{{`/`}}` give literal braces. Existing extra messages that contain `{{`, `}}` or `{identifier}` text change. A missing field now leaves only that placeholder as written, and the other fields are still filled (a system prompt used to stay entirely unfilled).
   Remove any reliance on `{placeholder}` expansion inside skill or memory text.
 - **`BaseStore.aping()` is now abstract (new in 1.0).** A custom store must implement
   `async def aping(self) -> None`: return when its backend is reachable, raise when it is not.
