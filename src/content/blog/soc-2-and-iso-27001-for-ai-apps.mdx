@@ -1,0 +1,135 @@
+---
+title: "SOC 2 and ISO 27001 for AI apps: what an auditor asks and what 10xGraph covers"
+seoTitle: "SOC 2 and ISO 27001 for AI apps"
+description: "What auditors ask of an AI backend, which controls 10xGraph supports in software, and which stay with your organization. Includes a short team checklist."
+date: 2026-11-10
+updated: 2026-11-10
+author: Shudipto Trafder
+kind: engineering
+tags: [security, compliance, soc-2, iso-27001]
+faq:
+  - q: Can a framework hold a SOC 2 report?
+    a: No. SOC 2 is an audit of an organization, and ISO 27001 certifies an organization's management system. 10xGraph is software you run, so the auditor examines your deployment. The control mapping page lists which features you can point to as evidence.
+  - q: Does 10xGraph store my audit log?
+    a: No. It writes metadata-only JSON events to the logger tenxgraph_api.audit on stdout. Your log pipeline collects them, and you choose the storage and the retention period.
+  - q: Does 10xGraph delete old data automatically?
+    a: No. Automatic retention is not provided. You can delete threads, messages, memories and files on demand through the API, and you run your own scheduled job for retention.
+---
+
+The questionnaire arrives a week before the deal closes. A business customer wants to know how your AI product controls access, separates one customer's data from another's, logs activity and handles deletion. Or your SOC 2 or ISO 27001 audit has started, and the auditor has reached the AI backend you added last quarter.
+
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
+
+Its claim here is narrow: it is built for teams going through SOC 2 and ISO 27001 audits. This post shows what that means in practice, control by control, with what the software gives you and what you still own. It is not legal advice, and your auditor decides what evidence is enough.
+
+## Why no framework can have a SOC 2 report
+
+SOC 2 is an attestation about an organization. A CPA firm examines your systems and your processes over a period and writes a report about you. ISO 27001 works the same way in spirit: a certification body certifies an organization's information security management system (ISMS), not a library.
+
+So an open-source package cannot hold either one. What a package can do is give you features an auditor accepts as part of your evidence: an access check that is enforced on every route, a log of access decisions, a startup check that refuses unsafe settings. The auditor then looks at how you configured and operated them. The [control mapping page](/docs/production/control-mapping) lists those features row by row, each with its default and what stays yours.
+
+Every feature below carries one of three labels from that page:
+
+- **on**: active without configuration.
+- **production template**: written by `10xgraph init --template production`, or set by `MODE=production`.
+- **opt-in**: you enable it.
+
+Auth is off in the bare library. The production template turns it on.
+
+## What an auditor asks of an AI backend
+
+### Access control
+
+The question: how do you make sure only authorized people and systems reach the data, and that each gets the least access they need?
+
+**What 10xGraph provides.** Bearer JWT verification with an algorithm allowlist, an unsigned `none` token refused, a minimum secret length in production and a required `exp` claim. Role-based access with permissions from one registry and a required reach per role: `own`, `tenant` or `all`. Token scopes can only narrow access. A role with reach `all` is logged at boot, and `GET /v1/me` shows what a caller's access resolves to, which helps with access reviews. Token revocation works per token or per user and fails closed. This supports SOC 2 CC6.1, CC6.2 and CC6.3, and ISO 27001:2022 controls 5.15 and 8.2. Auth is on in the production template. Without roles, every user gets the default permissions with reach `own`.
+
+**What you still own.** The identity provider, token issuing, MFA, secret storage, role design, role assignment and periodic access reviews. 10xGraph verifies tokens and does not issue them. It has no user registry, so your joiner, mover and leaver process, and calling revoke when someone leaves, are yours.
+
+Docs: [Authentication and authorization](/docs/server/auth).
+
+### Tenant separation
+
+The question: can customer A ever see customer B's data?
+
+**What 10xGraph provides.** Every storage read is filtered by the caller's owner and tenant scope, and a thread outside the caller's reach answers 404. You declare tenant columns on the checkpointer and store; they are filled from the verified identity, never from client input. Native Postgres row-level security is available as an opt-in. This supports SOC 2 CC6.1 and ISO 27001 control 8.3. Scoping applies with auth on, and row-level security is opt-in.
+
+**What you still own.** The tenant claim design: which claims identify an organization, and whether the declared columns match them. Tenant isolation is not automatic. It rests on columns you declare, and you decide how data is shared between users.
+
+Docs: [Multi-tenant data](/docs/guides/multi-tenant-data).
+
+### Logging and monitoring
+
+The question: can you show who accessed or changed what, and would you notice an attack?
+
+**What 10xGraph provides.** The audit log records each permission check, thread, file or task access check, authentication failure and successful change as a JSON line. It holds metadata only: ids and outcomes, never prompts, answers, file contents or tokens. You turn it on with the `audit` block in `10xgraph.json`, and the production template writes it enabled. The default `log` sink writes to the logger `tenxgraph_api.audit` on stdout. JSON application logs, switched on with `LOG_FORMAT=json`, carry request and user ids, and the generated deploy files set that variable. Tracing, metrics and Sentry are opt-in. This supports SOC 2 CC7.2 and ISO 27001 control 8.15.
+
+**What you still own.** 10xGraph stores no audit data. You collect the stdout lines with your log pipeline, store them, protect them, set the retention period, write alert rules and staff the on-call. The mapping page is blunt about 8.15: 10xGraph produces the logs, it does not store or protect them.
+
+Docs: [Audit log](/docs/server/audit-log).
+
+### Change and configuration management
+
+The question: how do you keep secure settings from drifting, and how are changes tested and approved?
+
+**What 10xGraph provides.** The production template defines a secure baseline. `10xgraph audit` checks the environment and `10xgraph.json`, and `10xgraph config` and `10xgraph build` warn about settings that are unsafe for production. With `MODE=production` the server refuses unsafe settings at boot. `10xgraph test` and `10xgraph eval` support your own change testing, and the Postgres schema is versioned with advisory-lock migrations. This supports SOC 2 CC8.1 and ISO 27001 controls 8.9 and 8.32. The CLI checks run when you run them.
+
+**What you still own.** Change approval, code review, the deployment pipeline, config in version control, drift detection and rollback. A schema upgrade needs stop, migrate, start, and a rollback needs a restore.
+
+Docs: [Production checklist](/docs/server/production-checklist).
+
+### Data retention and deletion
+
+The question: when a customer leaves or asks for deletion, what happens to their data, and how long do you keep it otherwise?
+
+**What 10xGraph provides.** Delete on demand. Thread delete releases the thread, its files and its traces and reports any step that did not finish. Message delete, memory delete, forget by filter and file delete are available, and snapshot pruning with `state_history_limit` is on. The audit log holds no message text, so deleting a user's data does not leave it behind in the audit stream. This supports SOC 2 C1.2 and ISO 27001 control 8.10.
+
+**What you still own.** The retention schedule and running it. Automatic retention is not provided, and the next section says what to do instead. Backup expiry is yours too.
+
+Docs: [Threads API](/docs/reference/rest-api/threads).
+
+### Availability
+
+The question: what happens when a worker dies, a deploy rolls, or the database restarts?
+
+**What 10xGraph provides.** A durable Postgres checkpointer, graceful shutdown, run locks and caps held as leases that expire if a worker dies, liveness `/ping` and readiness `/health/ready`, Docker `HEALTHCHECK` and Kubernetes probes, and startup backend checks with retry. This supports SOC 2 A1.2 and is on without configuration.
+
+**What you still own.** Backups, restore tests, disaster recovery, database high availability and capacity.
+
+Docs: [Backup and restore](/docs/server/backup-and-restore).
+
+## What 10xGraph does not provide
+
+An auditor may ask for these. The control mapping page lists them as not provided, partial, or yours to supply:
+
+- **Automatic retention.** Not provided. Run your own job or a scheduled background task, and delete through the thread delete path so files and traces are released too.
+- **Erasing everything for one user or tenant in one call.** Partial. The per-thread, memory and file deletes exist; a full erase is a script against the REST API.
+- **Export of one user's data.** Partial. List and read endpoints exist, but there is no single export call.
+- **Log storage and retention.** Yours. Ship the audit and application logs to a store you control.
+- **An identity provider.** Not provided: no MFA, user provisioning or access reviews. There is no JWKS URL fetch either, though a custom `BaseAuth` can fetch asymmetric keys.
+- **Backup and restore.** Your infrastructure: Postgres, Redis and object storage.
+- **Encryption at rest.** Your infrastructure. The app does no field encryption.
+- **PII redaction in logs and telemetry.** Not provided. Only secrets are masked.
+- **Malware scanning of uploads.** Not provided. Uploads get signature, type, size and page checks.
+- **Per-tool authorization enforced by the framework.** Partial. Permissions apply per route, and a tool can call the core `can` check itself.
+- **A per-run usage and cost record.** Partial. OpenTelemetry spans and metrics carry usage.
+
+The project also has no signed releases, build provenance or SBOM yet, and CodeQL is not enabled on the core repository. If your auditor requires those, plan your own scanning of the packages you install.
+
+## A checklist for your team
+
+1. Set `auth` to `jwt` or a custom `BaseAuth` class. Auth is off until you do, including with `MODE=production`.
+2. Define roles with a reach each. Review who holds reach `all`.
+3. Declare tenant columns, make `tenant_claims` match them, and consider row-level security.
+4. Set `cache_store` to Redis, so rate limits and token revocation work across workers.
+5. Turn on `LOG_FORMAT=json` and the `audit` block, and ship the `tenxgraph_api.audit` lines to your log pipeline with a retention period you chose.
+6. Run your own retention job, and test an erase and an export script.
+7. Back up Postgres, Redis and object storage, and test a restore.
+8. Terminate TLS at your proxy, and use it for Postgres, Redis and brokers too.
+9. Put `10xgraph audit` in your pipeline and keep `10xgraph.json` in version control.
+
+Hand your auditor the control mapping page along with your own configuration and logs, and let them decide what is sufficient.
+
+## Where to go next
+
+Read the full [SOC 2 and ISO 27001 control mapping](/docs/production/control-mapping), with every row, default and gap, then the [security overview](/docs/security) and the [security model](/docs/production/security-model).

@@ -5,7 +5,7 @@ export const SITE = {
   url: 'https://10xgraph.com',
   tagline: '10xGraph by 10xScale: graph engineering for production AI agents.',
   description:
-    'Open-source Python multi-agent framework. Write the agent and 10xGraph generates its production server: auth, rate limits, replay-safe tools and Kubernetes.',
+    'Open-source, self-hosted infrastructure for AI applications: API server, auth and roles, tenant isolation, durable state, background jobs, metrics and deploy files.',
   // Canonical repo URLs. The docs repo moved from 10xHub/agentflow-docs; GitHub redirects the
   // old URL, but "Edit this page" links should not depend on the redirect.
   github: 'https://github.com/10xGraph/10xGraph',

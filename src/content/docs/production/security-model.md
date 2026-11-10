@@ -8,7 +8,7 @@ label: Security Model
 updated: "2026-11-10"
 faq:
   - question: "Is a 10xGraph server secure by default?"
-    answer: "The request surface is hardened by default: every route needs a guard, threads belong to their owner by default (a role can widen reads, lists and deletes with reach `tenant` or `all`) and files are owner-only, client input is shaped, and production hides internal errors. Authentication itself is not forced: with auth set to null in production the server starts open, so you must configure it."
+    answer: "The request surface is hardened by default: every route needs a guard, threads and files belong to their owner by default (a role can widen reads, lists, deletes and stop with reach `tenant` or `all`), client input is shaped, and production hides internal errors. Authentication itself is not forced: with auth set to null in production the server starts open, so you must configure it."
   - question: "Can a client set its own user id?"
     answer: "No. Identity comes from the authenticated token. A user_id or user key sent in the request config is dropped, and an identity that starts with the reserved __system__ prefix is refused."
   - question: "Does the server stop prompt injection?"

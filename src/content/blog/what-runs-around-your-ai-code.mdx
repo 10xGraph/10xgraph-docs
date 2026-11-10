@@ -1,0 +1,146 @@
+---
+title: "What runs around your AI code: the infrastructure 10xGraph ships"
+seoTitle: "Self-hosted infrastructure for AI applications"
+description: "Follow one request through 10xGraph: API server, access control, data and state, background jobs, observability and deploy. What you write and what runs for you."
+date: 2026-11-10
+updated: 2026-11-10
+author: Shudipto Trafder
+kind: engineering
+tags: [infrastructure, production, security, multi-tenant]
+faq:
+  - q: Is 10xGraph a multi-agent framework?
+    a: It runs multi-agent graphs, but the category is infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs the API server, access control, state, jobs, telemetry and deploy files around them.
+  - q: Is there a hosted version of 10xGraph?
+    a: No. 10xGraph is self-hosted and MIT licensed. You run it on your own infrastructure, or nobody does.
+  - q: Does 10xGraph make my deployment SOC 2 or ISO 27001 compliant?
+    a: No. It is built for teams going through SOC 2 and ISO 27001 audits, and the control mapping page says which controls the platform supports. The auditor examines your deployment, and some controls stay with you.
+---
+
+Every team that ships an AI feature ends up building a second project. The first one is the agent: prompts, tools, a model call. The second one is everything the agent needs to run for real users: an API with streaming, authentication, per-customer data separation, durable conversation state, background jobs, telemetry and a deploy path. The second project is usually larger than the first, and it is rarely the part anyone wanted to write.
+
+10xGraph exists to take the second project off your plate. This is how the project describes itself:
+
+> 10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
+
+If you know 10xGraph as a multi-agent framework, that still works: agents are the core workload, and handoff and orchestration are features. But the product is the infrastructure around them. The rest of this post follows one request through each layer and says, for each, what you write and what runs for you.
+
+## The API server
+
+A request first reaches the server that `10xgraph-api` generates from your graph. You point `10xgraph.json` at your compiled graph; you do not write routes. The server exposes REST, SSE streaming and WebSocket routes, plus liveness (`/ping`) and readiness (`/health/ready`) probes. Run it locally with `10xgraph dev`, which also opens the playground.
+
+**You write:** the graph and its tools. **Runs for you:** routing, streaming, input limits, run timeouts and production-mode startup checks. See [the server docs](/docs/server).
+
+## Security and access
+
+With auth configured, every non-public route requires an identity and a permission. A JWT carries a `user_id`, and roles in the `auth` object map to permissions such as `graph:invoke` or `tasks:trigger`. Each role also has a reach: `own`, `tenant` or `all`. Reach widens reads, lists, deletes and stop. Runs and writes always stay with the owner, admins included.
+
+Ownership is enforced in storage, not in a middleware you could forget. Every query filters by the caller's reach, so a thread, message, memory or file outside that reach answers 404, the same as one that does not exist. The server also refuses to boot if a non-public route has no permission guard.
+
+**You write:** the role table and, if you need it, a `BaseAuth` subclass. **Runs for you:** token checks, permission guards, scoped queries and input hardening. See [security and access](/docs/security).
+
+## Data and state
+
+Next the run needs state. `PgCheckpointer` stores thread state in Postgres with Redis as a hot cache, and uses versioned writes so two runs on one thread cannot overwrite each other. `PgVectorStore` keeps long-term memory and RAG in the same Postgres, so there is one database to back up and operate.
+
+Tenant isolation here is something you declare. You name `tenant_columns` on the checkpointer and the store; they become real indexed columns, filled from the verified identity and never from client input. Names in `tenant_claims` must match, and a mismatch refuses to boot in production. The API's `cache_store` holds run locks, rate-limit counters and token revocation: in memory for one process, or Redis for several. If you have your own backends, you can bring your own `BaseCheckpointer`, `BaseStore` or `BaseCacheStore`.
+
+**You write:** the column names and the choice of backends. **Runs for you:** schema setup, scoped filters and the compare-and-swap writes. See [data and state](/docs/data).
+
+## Background jobs
+
+Some work should not live inside a request. Write a task with `@broker.task`, import the broker from `tenxgraph_api.jobs`, and run `10xgraph worker` for tasks and `10xgraph scheduler` for schedules. The layer is thin TaskIQ, so the semantics are TaskIQ's. Delivery on Redis and RabbitMQ is at-least-once, which means a task can run again after a worker dies, so write tasks that tolerate a rerun.
+
+Jobs run under the same auth. With auth on, the worker rebuilds the caller's identity and checks `tasks:trigger` before the task executes.
+
+**You write:** the tasks. **Runs for you:** the broker wiring, status, cancel, schedules and the identity check. See [background jobs](/docs/jobs).
+
+## Observability
+
+Tracing goes to Logfire, LangSmith, Phoenix or any OTLP endpoint. Metrics go to Prometheus by scrape or to OTLP by push, for both the API and the worker. Set `LOG_FORMAT=json` and every log line is one JSON object with a request id. The audit log records access, authentication failures and changes as metadata only, never message content, and your log pipeline stores it; see [the audit log](/docs/server/audit-log). Tracing and metrics are opt-in.
+
+**You write:** the choice of backends. **Runs for you:** the instrumentation and the event formats. See [observability](/docs/observability).
+
+## Deploy
+
+`10xgraph build --docker-compose --k8s` writes a Dockerfile, a `docker-compose.yml` and a Kubernetes manifest. The image is multi-stage and runs as non-root. The cluster, TLS, secrets and backups stay yours.
+
+**You write:** the infrastructure the files run on. **Runs for you:** the generated files and the probes. See [deploy](/docs/deploy).
+
+## What the setup looks like
+
+Here is a `10xgraph.json` for a multi-tenant support agent with roles, Redis and a worker:
+
+```json
+{
+  "agent": "app.graph:app",
+  "auth": {
+    "method": "jwt",
+    "roles_claim": "roles",
+    "tenant_claims": ["org_id"],
+    "roles": {
+      "member": {
+        "permissions": ["graph:*", "threads:*", "store:*", "tasks:trigger", "tasks:read"],
+        "reach": "own"
+      },
+      "org_admin": {"inherits": ["member"], "permissions": ["admin:read"], "reach": "tenant"}
+    },
+    "default_role": "member"
+  },
+  "cache_store": {
+    "type": "redis",
+    "url": "${REDIS_URL}",
+    "rate_limit": {"enabled": true, "requests": 100, "window": 60, "by": "user"}
+  },
+  "worker": {
+    "broker": {"type": "redis_stream", "url": "${REDIS_URL}"},
+    "tasks": ["app.tasks"]
+  }
+}
+```
+
+And the Python side: two tools, compiled with a `PgCheckpointer` that declares the same tenant column as `tenant_claims`:
+
+```python
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import PgCheckpointer
+
+
+def lookup_order(order_id: str) -> dict:
+    """Look up an order by id and return its status and total."""
+    return {"order_id": order_id, "status": "delivered", "total": 59.0}
+
+
+def refund_order(order_id: str, amount: float) -> str:
+    """Refund an order. This moves money, so it must run once per request."""
+    return f"Refunded {amount:.2f} for order {order_id}"
+
+
+checkpointer = PgCheckpointer(
+    postgres_dsn="postgresql://user:pass@localhost:5432/mydb",
+    redis_url="redis://localhost:6379/0",
+    tenant_columns={"org_id": "text"},
+)
+app = ReactAgent(
+    model="claude-sonnet-5-5",
+    tools=[lookup_order, refund_order],
+).compile(checkpointer=checkpointer)
+```
+
+Everything in the JSON file and the checkpointer is infrastructure you declare once. The tools are the only code that is about your business.
+
+## Built for teams going through SOC 2 and ISO 27001 audits
+
+If an auditor asks for access control, logging and change evidence, 10xGraph provides the pieces: roles, scoped storage, the audit log and JSON logs. The [control mapping](/docs/production/control-mapping) lists which controls the platform supports and which stay with you. An auditor examines your deployment and your organization, so 10xGraph supports your controls and does not replace them.
+
+## What to know before you adopt it
+
+- 1.0 is a release candidate until the final ships. Pin versions and read the changelog.
+- There is no hosted service. You run it, or nobody does.
+- Auth is off until you configure it. The production template, `10xgraph init --template production`, turns it on.
+- Tenant isolation needs the columns you declare. It is not automatic.
+- Permissions apply per route, not per tool. A tool that reads customer data must check the caller itself.
+- The community is smaller than LangGraph's or CrewAI's, and there are fewer integrations.
+
+## Where to start
+
+Run through [Get started](/docs/get-started) to have a graph behind the API server in a few minutes. Then read the [Platform overview](/docs/production), which lists what is on by default, what is opt-in and what is not provided.

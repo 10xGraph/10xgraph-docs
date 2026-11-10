@@ -2,12 +2,11 @@
 title: "Bounded by design: timeouts, tool caps, request limits and one run per thread"
 seoTitle: "Bounded agent runs: timeouts, caps, limits"
 description: "The limits a 10xGraph run has by default: parallel tool cap, run, node and tool timeouts, per-user run cap, one run per thread, request size limits and paging caps."
-date: 2026-10-27
-updated: 2026-10-27
+date: 2026-11-10
+updated: 2026-11-10
 author: Shudipto Trafder
 kind: engineering
 tags: [reliability, scaling, limits, production]
-draft: true
 faq:
   - q: What is the default run timeout?
     a: With MODE=production and no runs.timeout in 10xgraph.json, a run is cancelled after 300 seconds. In development there is no limit. An explicit number overrides the default, and an explicit null removes the limit in either mode.
@@ -18,6 +17,8 @@ faq:
 ---
 
 Agents are loops that call a model and a set of tools, and nobody wrote down in advance how long the loop will take or how many tools one turn will start. A hung tool, a model that emits hundreds of calls in one message, two tabs sending to the same thread and a client that posts a huge body are all ordinary events once real users arrive. If nothing bounds them, the first one that happens takes the worker down.
+
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
 
 This post lists the bounds that 10xGraph and `10xgraph-api` apply by default, with the numbers from the code. They are a backstop against runaway work, not a latency budget. The operating guidance is on the [scaling page](/docs/production/scaling).
 
@@ -48,30 +49,34 @@ Send `on_busy` with the request to choose what a waiting request does:
 - `"wait"` (the default) waits for the active run to finish.
 - `"cancel"` first asks the active run to stop, and repeats the request every second while it waits, in case the run had not saved its state yet.
 
-With Redis configured the lock is a lease that a background task renews while the run is alive. If the worker dies, the lease expires on its own, so a crashed worker cannot hold a thread forever. Without Redis the lock is per process.
+With a Redis `cache_store` the lock is a lease that a background task renews while the run is alive. If the worker dies, the lease expires on its own (60 seconds after the last renewal), so a crashed worker cannot hold a thread forever. With the default in-memory cache store the lock is per process.
 
 ## Per-user run cap
 
-`runs.max_concurrent_per_user` caps the HTTP graph runs (invoke, stream, AG-UI) that one verified user can have in flight at once. The default is 10, and `0` or `null` means unlimited. Over the cap the request gets 429 before the response starts. Requests without a verified user, which means auth is off, are not capped. Like the thread lock, the count is shared across workers only when Redis is configured.
+`runs.max_concurrent_per_user` caps the HTTP graph runs (invoke, stream, AG-UI) that one verified user can have in flight at once. The default is 10, and `0` or `null` means unlimited. Over the cap the request gets 429 before the response starts. Requests without a verified user, which means auth is off, are not capped. Like the thread lock, the count is shared across workers only when `cache_store` is `redis`.
 
 ## Request size limits
 
 Limits on what a client can post are fixed. They have no setting, on purpose.
 
-- Body size: `MAX_REQUEST_SIZE`, 10 MB by default. A declared `Content-Length` over the limit is rejected before any body is read, and a streamed body is cut off as soon as it passes the limit. The upload route has its own limit sized to `MEDIA_MAX_SIZE_MB` (25 by default). WebSocket frames use the same cap.
+- Body size: `MAX_REQUEST_SIZE`, 10 MB by default. A declared `Content-Length` over the limit is rejected before any body is read, and a streamed body is cut off as soon as it passes the limit. The upload route has its own limit sized to `MEDIA_MAX_SIZE_MB` (25 by default). WebSocket frames on `/v1/graph/ws` use the same cap, and frames on the realtime route `/v1/graph/live` are capped at 1 MiB.
 - Per request: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text across all text blocks.
 - AG-UI clients resend the whole conversation on every run. The trailing turn gets the limits above, and the full history gets a looser cap of 10,000 messages.
 
-## Paging and the rate limiter
+## WebSocket connections
+
+The `websocket` block in `10xgraph.json` caps open connections: `max_connections` is 1000 for the server and `max_connections_per_user` is 10 for one verified user. Like the run cap, these counts are shared across workers only with a Redis `cache_store`.
+
+## Paging and the in-memory cache store
 
 Checkpointer list endpoints default to 100 rows, cap `limit` at 1000 whatever the client sends, and the core checkpointers lower an explicit `limit` above `MAX_LIST_LIMIT` (also 1000) and raise `ValueError` for a negative `limit` or `offset`. Passing no limit to the Python API still returns everything, which is for code you control, not for a client.
 
-The in-memory rate limiter keeps at most 50,000 keys. It used to sweep every key when a new one arrived at the cap, which blocked the event loop for about 2.5 ms per new key. Keys are now held in least-recently-used order, so the oldest entry is dropped from the front in constant time, and idle-key cleanup runs in the background. The "bucket cap reached" warning is logged at most once a minute. For more than one worker, use the Redis backend.
+The in-memory cache store, which holds rate-limit counters and run caps when no Redis is configured, keeps at most 50,000 slot keys. At the cap it drops expired entries first, then evicts the least recently used key that is not protected, and logs a warning at most once a minute. Thread locks, run and WebSocket caps and token revocations are protected, so a flood of distinct client addresses cannot evict them. For more than one worker, set `cache_store` to `redis`.
 
 ## What is not bounded
 
 Be clear about the gaps.
 
 - Node and tool timeouts are off until you set them. Without them, `runs.timeout` is the only deadline on a run.
-- Counts such as the per-user cap and the thread lock are per process until you add Redis.
+- Counts such as the per-user cap, the WebSocket caps and the thread lock are per process until `cache_store` is `redis`.
 - These bounds protect the server. They do not cap what a model costs you. Set provider-side spend limits too.

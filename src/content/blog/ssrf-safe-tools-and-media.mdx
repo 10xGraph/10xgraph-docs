@@ -1,13 +1,12 @@
 ---
 title: "Agents that fetch URLs: SSRF-safe tools and media by default"
 seoTitle: "SSRF-safe URL fetching for AI agents"
-description: "How fetch_url and client-supplied media links are limited to public addresses in 10xGraph: pinned connections, checked redirects, a MediaFetchPolicy and a pre-run 400."
-date: 2026-10-27
-updated: 2026-10-27
+description: "How fetch_url and client-supplied media links are limited to public addresses in 10xGraph: pinned connections, checked redirects, MediaFetchPolicy and a pre-run 400."
+date: 2026-11-10
+updated: 2026-11-10
 author: Shudipto Trafder
 kind: engineering
 tags: [security, tools, media, ssrf]
-draft: true
 faq:
   - q: Can the model fetch http://localhost or a cloud metadata address with fetch_url?
     a: No. Every address a name resolves to must be globally routable, and the connection goes to the exact address that was checked. Redirects are followed by hand, up to 5, and each hop is checked again.
@@ -19,7 +18,9 @@ faq:
 
 An agent that browses or reads files from links sends requests that you did not write, to hosts that a model or a user chose. On a server, that is a request-forgery risk: if the URL points at `127.0.0.1`, at a private network address or at a cloud metadata endpoint, the server fetches it from inside your network and may hand the answer back to the model, and from there to the user.
 
-Two places in 10xGraph fetch a URL on behalf of someone else: the prebuilt `fetch_url` tool, and the media path that downloads a link a client put in a message. Both now use the same small HTTP client with fixed rules. This post lists the rules, the policy you can tune, and the check the API does before a run starts. Reference: [Web tools](/docs/guides/prebuilt/web-tools) and the [security model](/docs/production/security-model).
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
+
+Two places in 10xGraph fetch a URL on behalf of someone else: the prebuilt `fetch_url` tool, and the media path that downloads a link a client put in a message. Both use the same small HTTP client with fixed rules. This post lists the rules, the policy you can tune, and the check the API does before a run starts. Reference: [Web tools](/docs/guides/prebuilt/web-tools) and the [security model](/docs/production/security-model).
 
 ## What the rules are
 
@@ -34,9 +35,9 @@ The shared client (`tenxgraph.utils.safe_http`) follows these rules, and none of
 
 ## `fetch_url`
 
-`fetch_url` is a prebuilt tool with the tags `web`, `fetch` and `network`. It returns normalised page text, caps `max_chars` at 20,000, and runs the blocking client in a worker thread so it does not stall the event loop.
+`fetch_url` is a prebuilt tool with the tags `web`, `fetch` and `network`. It returns normalised page text, caps `max_chars` at 20,000, clamps the timeout to between 1 and 30 seconds, and runs the blocking client in a worker thread so it does not stall the event loop.
 
-Before this change it checked the first host only, then let `urllib` follow redirects anywhere, and it resolved the name twice. A public page could redirect to an internal address, and DNS rebinding could change the answer between the check and the connection. Both are closed by the rules above.
+Two attacks matter for a fetch tool. A public page can redirect to an internal address, and DNS rebinding can change the answer between the check and the connection. Hop-by-hop checks and the pinned connection close both. If you want the tool limited to named sites, `create_fetch_url(allowed_hosts)` builds a `fetch_url` that only fetches those hosts, and the address rules still apply on top.
 
 ## Client-supplied media links
 
@@ -69,15 +70,15 @@ app = graph.compile(
 
 `allow_private_for_allowed_hosts` is for on-premises setups where a listed host really lives on a private address. Cloud metadata addresses stay blocked even then. Without a policy, the default one applies.
 
-A refused or failed download does not fail the run. It becomes a `[Failed to load image]` or `[Failed to load media]` text part, and the warning logs the URL without its query string, since signed URLs carry secrets there.
+On the Google GenAI path, a refused or failed download does not fail the run. It becomes a `[Failed to load image]`, `[Failed to load audio]` or `[Failed to load media]` text part, and the warning logs the URL without its query string, since signed URLs carry secrets there.
 
 One behaviour change to plan for: on Google graphs, audio and video links stop downloading until you allow those content types in the policy.
 
-`gs://` URLs are passed through to Vertex AI unchanged, and Vertex AI reads them with the server's own credentials. That is why the bucket list exists. The bucket list is enforced by `check_url`, not by the converters.
+The server never downloads `gs://` URLs itself. They are passed through to Vertex AI, which reads them with the server's own credentials. That is why the bucket list exists: `check_url` rejects any `gs://` bucket not in `allowed_gcs_buckets`, and the converters do not enforce it.
 
 ## The API refuses bad URLs before the run starts
 
-When you serve with `10xgraph-api`, every external media URL in an incoming message goes through the graph's `media_policy.check_url` before anything runs. The check touches no network: it looks at the enabled flag, the scheme, the host allow-list and, for an IP literal, whether the address may be reached. A blocked URL returns 400 with the policy's message. Names are resolved at download time, and their addresses are checked then.
+When you serve with `10xgraph-api`, every external media URL in an incoming message goes through the graph's `media_policy.check_url` before anything runs. The check touches no network: it looks at the enabled flag, the scheme, credentials in the URL (refused), the host allow-list and, for an IP literal, whether the address may be reached. A blocked URL raises `MediaURLBlockedError` and the API answers 400 with the policy's message. The same check runs when a client puts thread state. The policy lives in core and is set with `compile(media_policy=...)`; the API has no config for it. Names are resolved at download time, and their addresses are checked then.
 
 So there are two layers. The API rejects URLs that are wrong on their face, cheaply and early. The download client then checks what a name actually resolves to, on every hop.
 
