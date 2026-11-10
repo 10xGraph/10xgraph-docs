@@ -5,7 +5,7 @@ group: "Errors"
 section: Reference
 order: 570
 label: Error Codes
-updated: "2026-10-28"
+updated: "2026-11-10"
 faq:
   - q: "Which 10xGraph errors can I retry?"
     a: "TransientStorageError (STORAGE_TRANSIENT_000) is retryable with backoff. StaleStateError (STORAGE_CONFLICT_000) is retryable after you reload the latest state. NodeTimeoutError is sometimes retryable, depending on whether the hang was transient."
@@ -347,11 +347,11 @@ The server maps exceptions to responses in `tenxgraph_api/src/app/core/exception
 | `StateFormatVersionError` | 500 (message says to upgrade) |
 | `ResumeValidationError` | 422 |
 
-`RATE_LIMIT_UNAVAILABLE` is a `503` from the rate limiter, not a core exception: the cache store behind the rate limiter raised an error and `fail_open` is `false`. It carries `Retry-After: 5`. The code `RATE_LIMIT_EXCEEDED` (429) stays for a real limit hit. Added in 1.0.0rc3.
+`RATE_LIMIT_UNAVAILABLE` is a `503` from the rate limiter, not a core exception: the cache store behind the rate limiter raised an error and `fail_open` is `false`. It carries `Retry-After: 5`. The code `RATE_LIMIT_EXCEEDED` (429) stays for a real limit hit.
 
 A `429` is not a core exception either. The server returns it when the `rate_limit` window is used up (`error.code` `RATE_LIMIT_EXCEEDED`, with a `Retry-After` header) or when one user has more than `runs.max_concurrent_per_user` runs in flight (standard body, code `HTTPException`, no `Retry-After`).
 
-In production the message of a 5xx response is replaced by a generic text and the real error goes to the server log. Messages of 4xx `HTTPException` errors are kept. Handled 4xx errors are logged at `WARNING` with no traceback, and 5xx errors at `ERROR` with the traceback, so alert rules for 4xx traffic must match `WARNING` (`10xgraph-api` 1.0.0rc2). A missing checkpointer answers `503` (`Checkpointer is not configured`), a thread state update with a bad `context` answers `422`, and a message id missing from a thread answers `404`.
+In production the message of a 5xx response is replaced by a generic text and the real error goes to the server log. Messages of 4xx `HTTPException` errors are kept. Handled 4xx errors are logged at `WARNING` with no traceback, and 5xx errors at `ERROR` with the traceback, so alert rules for 4xx traffic must match `WARNING`. A missing checkpointer answers `503` (`Checkpointer is not configured`), a thread state update with a bad `context` answers `422`, and a message id missing from a thread answers `404`.
 
 A `409` with the message `thread is busy` is not a core exception. The server returns it when another run is still active on the thread after 30 seconds. It uses the standard error body (`error.code` `HTTPException`), not the `state_conflict` shape.
 

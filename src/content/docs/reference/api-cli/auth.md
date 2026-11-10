@@ -6,7 +6,7 @@ section: Reference
 group: "CLI and configuration"
 order: 440
 label: Authentication
-updated: "2026-11-08"
+updated: "2026-11-10"
 ---
 
 By default, the 10xGraph API accepts all requests without authentication (suitable for local development). For production, set the `auth` key to JWT or to a custom `BaseAuth` class to verify identity, and add roles to control what each user may do and how far their data reaches. This page is the reference. For a guided walk-through and the migration from the removed `authorization` key, see [Set up API authentication](/docs/server/auth).
@@ -148,7 +148,7 @@ const ws = new WebSocket(
 
 The subprotocol offer must be exactly two entries with the sentinel first. Anything else falls through to the query parameter.
 
-The older sentinel `agentflow-bearer` is still accepted until 2.0, and the server echoes whichever one you send. The TypeScript client sends `10xgraph-bearer` since 0.6.0.
+The older sentinel `agentflow-bearer` is still accepted until 2.0, and the server echoes whichever one you send. The TypeScript client sends `10xgraph-bearer`.
 
 ## Custom authentication backend
 

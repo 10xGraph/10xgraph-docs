@@ -5,7 +5,7 @@ description: "Complete reference for the rate_limit block in 10xgraph.json: the 
 section: Reference
 group: "CLI and configuration"
 order: 450
-updated: "2026-10-31"
+updated: "2026-11-10"
 ---
 
 The `rate_limit` object inside `cache_store` in `10xgraph.json` turns on a sliding-window limiter for the API server. It counts REST requests, WebSocket handshakes and WebSocket graph runs against one bucket per client. The limiter is off unless the block exists; this page lists every option, header and error.
@@ -92,7 +92,7 @@ When a client exceeds the limit, the server responds with status `429 Too Many R
 }
 ```
 
-When the cache store raises an error and `fail_open` is `false`, the server responds with `503 Service Unavailable` and `Retry-After: 5` instead of 429. A real limit hit stays 429. Added in 1.0.0rc3.
+When the cache store raises an error and `fail_open` is `false`, the server responds with `503 Service Unavailable` and `Retry-After: 5` instead of 429. A real limit hit stays 429.
 
 ```json
 {

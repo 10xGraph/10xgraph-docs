@@ -10,9 +10,9 @@ outcome:
   - Threads stored in Postgres with a Redis cache
   - Tests that run without a model API key
   - A Dockerfile and docker-compose.yml with Postgres and Redis
-versions: 10xGraph 0.10.3, API and CLI 0.9.0
+versions: 10xGraph 1.0, API and CLI 1.0
 order: 10
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - q: Can I use OpenAI or Claude instead of Gemini?
     a: Yes. Change the model and provider arguments of ReactAgent, for example provider="openai" or provider="anthropic", and install the matching extra (openai or anthropic) instead of google-genai. The tools, graph and server stay the same.
@@ -47,11 +47,11 @@ pip install "10xgraph[google-genai,pg_checkpoint]" "10xgraph-api[jwt,redis]"
 10xgraph init --yes --template production 
 ```
 
-The template writes a working agent with JWT auth, thread ownership checks and a Redis cache store (`"cache_store": {"type": "redis"}`, read from `REDIS_URL`) with a rate limit and token revocation already set in `10xgraph.json`:
+The template writes a working agent with JWT auth (every user reaches only their own threads) and a Redis cache store (`"cache_store": {"type": "redis"}`, read from `REDIS_URL`) with a rate limit and token revocation already set in `10xgraph.json`:
 
 <FileTree>
 
-- **10xgraph.json** Server config: agent entry point, auth, authorization, rate limit
+- **10xgraph.json** Server config: agent entry point, auth, cache store with rate limit and token revocation
 - .env.example Settings and secrets, copied to .env
 - pyproject.toml Dependencies, ruff and pytest settings
 - graph/
@@ -160,13 +160,13 @@ def refund_order(order_id: str, reason: str, config: dict | None = None) -> dict
 
 Three details carry the weight here:
 
-- **`config` is injected, not chosen by the model.** 10xGraph fills parameters named `config`, `state` or `tool_call_id` itself and leaves them out of the schema the model sees. The API server puts the `user_id` from the verified JWT into `config`, so the model cannot ask for another customer's order by guessing an id. Thread ownership in `10xgraph.json` protects conversations; checks like `_owned_order` protect your business data.
+- **`config` is injected, not chosen by the model.** 10xGraph fills parameters named `config`, `state` or `tool_call_id` itself and leaves them out of the schema the model sees. The API server puts the `user_id` from the verified JWT into `config`, so the model cannot ask for another customer's order by guessing an id. Reach-scoped access (own by default) in `10xgraph.json` protects conversations; checks like `_owned_order` protect your business data.
 - **The idempotency key comes from the business action.** `refund:{order_id}` means one refund per order. A key built from the tool call id would not work, because models reuse ids such as `call_1` on every turn. [Your agent charged the card twice](/blog/your-agent-charged-the-card-twice) explains that failure.
 - **Errors are raised.** The tool stops and the result is marked failed. The model sees `Tool '<name>' failed with an internal error (reference <ref>)`, and your message goes to the server log under the same reference. That keeps database errors and paths away from the model. If you want the model to explain a refusal to the customer in your own words, return the message as a string instead of raising.
 
 <Callout type="warning" title="Reserved keys in tool results">
 
-In 10xGraph 0.10.3, when a tool returns a dictionary, the keys `error`, `status`, `is_error` and `success` are read as result metadata and removed. That is why the lookup returns `order_status`, not `status`, and why errors are raised (or returned as a plain string) instead of returned as `{"error": ...}`.
+In 10xGraph 1.0, when a tool returns a dictionary, the keys `error`, `status`, `is_error` and `success` are read as result metadata and removed. That is why the lookup returns `order_status`, not `status`, and why errors are raised (or returned as a plain string) instead of returned as `{"error": ...}`.
 
 </Callout>
 
@@ -343,7 +343,7 @@ Now check the boundaries:
 
 - No token, or an expired one, returns `401`.
 - A token for `user-7` that asks about `A-1001` gets the tool result "No order A-1001 found for this customer.", because the tool checks the owner.
-- Reading `GET /v1/threads/ticket-1/messages` with the `user-7` token returns none of `user-42`'s messages.
+- Reading `GET /v1/threads/ticket-1/messages` with the `user-7` token answers 404 when the thread belongs to `user-42`, so it returns none of that user's messages.
 - Asking for the same refund twice returns the same `refund_id`. Money moves once.
 
 ## 7. Test without a model key
@@ -472,7 +472,7 @@ Values under `environment` override the same names from `env_file`, so inside Co
 <CardGrid>
 
 <LinkCard title="Replay-safe tools" href="/docs/concepts/replay-safe-tools" description="How the tool ledger stops repeated side effects after a crash." eyebrow="Concept" />
-<LinkCard title="Auth and authorization" href="/docs/server/auth" description="Custom auth backends, role scopes and owner-only threads." eyebrow="How-to" />
+<LinkCard title="Auth and authorization" href="/docs/server/auth" description="Custom auth backends, role scopes and reach-scoped threads." eyebrow="How-to" />
 <LinkCard title="Deployment" href="/docs/server/deploy" description="Workers, Kubernetes and reverse proxies." eyebrow="How-to" />
 <LinkCard title="Evaluation" href="/docs/testing/evaluation" description="Score the agent on real conversations before each release." eyebrow="Testing" />
 </CardGrid>

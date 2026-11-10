@@ -183,7 +183,7 @@ Most real tool nodes run several calls at once, and 10xGraph runs them in parall
 
 **Parallelism is capped.** A single model turn can request many tool calls. The tool node runs at most 10 at once by default; set `max_parallel_tool_calls` in the run config or the `TENXGRAPH_MAX_PARALLEL_TOOL_CALLS` environment variable to change it. When you serve with `10xgraph-api`, clients cannot override this key.
 
-**Ledger reads are owner-scoped.** With `PgCheckpointer`, `aget_tool_result` applies the same owner filter as the message reads when `enforce_user_isolation` is on (the default). A caller who names another user's thread gets no recorded result. This is in the core changelog under the next release after 0.10.3.
+**Ledger reads are owner-scoped.** With `PgCheckpointer`, `aget_tool_result` applies the same owner filter as the message reads when `enforce_user_isolation` is on (the default). A caller who names another user's thread gets no recorded result.
 
 **Malformed arguments are reported to the model.** If a model produces invalid JSON for a tool's arguments, the call returns a tool error saying so, rather than failing the whole node with a decode error.
 
@@ -272,7 +272,7 @@ You can turn this off with `"durable_checkpoint_every_step": False` in the run c
 
 ## Current limits
 
-These are the limits we know about as of 0.10.3.
+These are the limits we know about as of 1.0.
 
 - **At least once, not exactly once.** The window between a side effect and its ledger record is small but real. See the section above.
 - **The ledger records outcomes, not intent.** A tool that starts a long external job and crashes before returning has no record, so it is started again on replay. For long-running work, have the tool return a job handle quickly and track the job's progress separately.

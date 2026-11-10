@@ -6,7 +6,7 @@ section: "API server"
 group: "Basics"
 order: 50
 label: CLI
-updated: "2026-10-28"
+updated: "2026-11-10"
 ---
 
 The `10xgraph` command-line interface (`10xgraph-api` package) is your complete toolkit for building and operating 10xGraph agents in production. From initial scaffolding through deployment and evaluation, each command handles a specific phase of agent development.
@@ -167,9 +167,9 @@ Output example:
 
 ```
 10xgraph-api
-  Version: 1.0.0rc4
+  Version: 1.0.0
 10xgraph (core)
-  Version: 1.0.0rc4
+  Version: 1.0.0
 ```
 
 ### Preview animations

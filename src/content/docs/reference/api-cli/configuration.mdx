@@ -3,7 +3,7 @@ title: 10xgraph.json configuration reference
 description: Every key the 10xgraph.json config file accepts, with defaults, types, purposes, and complete examples for rate limiting, auth, and servers.
 section: Reference
 order: 420
-updated: "2026-10-27"
+updated: "2026-11-10"
 group: "CLI and configuration"
 faq:
   - q: Which key is required in 10xgraph.json?
@@ -16,7 +16,7 @@ faq:
 
 `10xgraph.json` is the configuration file for the 10xGraph API server and CLI. It specifies which graph to serve, how to authenticate, where state lives, and server behavior. Only the `agent` key is required; every other key is optional. The file is plain JSON. Edit it by hand or with `10xgraph config` (a browser editor).
 
-Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: the CLI and the server read it when `10xgraph.json` is missing from the same directory. The keys are identical, so migration is a rename (`mv agentflow.json 10xgraph.json`) or a save from `10xgraph config`.
+Projects created before the rename to 10xGraph use `agentflow.json`. It still works until 2.0: the CLI and the server read it when `10xgraph.json` is missing from the same directory. The keys are identical, so migration is a rename (`mv agentflow.json 10xgraph.json`) or a save from `10xgraph config`.
 
 ## Which keys does it accept?
 

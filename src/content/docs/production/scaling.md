@@ -83,7 +83,7 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 - A tool can still run twice if a run crashes in the short gap between the tool finishing and its ledger record being written, or if the run was cut off while the tool was running. Use idempotency keys for tools with side effects.
 - With the in-memory cache store, every cap and lock in the table above is per process.
 - There are no published benchmarks for throughput or latency. Load-test your own graph, model and tools.
-- Pin versions and read the changelog before upgrading. 1.0 is a release candidate until the final ships; from 1.0 breaking changes come only in a major release.
+- Pin versions and read the changelog before upgrading. From 1.0 breaking changes come only in a major release.
 
 ## Related
 

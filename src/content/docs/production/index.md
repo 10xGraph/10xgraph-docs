@@ -8,7 +8,7 @@ label: Platform overview
 updated: "2026-11-10"
 faq:
   - q: "Is 10xGraph production ready?"
-    a: "The server enforces reach-scoped thread access (own thread by default), permission checks, input limits, run limits and production-mode checks by default, and stores state durably with Postgres. It is at its 1.0 release candidate, and you still own auth configuration, secrets, TLS, backups and your tools' own authorization. The limits page lists what it does not protect."
+    a: "The server enforces reach-scoped thread access (own thread by default), permission checks, input limits, run limits and production-mode checks by default, and stores state durably with Postgres. You still own auth configuration, secrets, TLS, backups and your tools' own authorization. The limits page lists what it does not protect."
   - q: "Do I have to write the API server myself?"
     a: "No. You write the graph and point 10xgraph.json at it. 10xgraph-api generates the REST and WebSocket server, and 10xgraph build generates the Dockerfile, compose file and Kubernetes manifest."
   - q: "What happens if I run in production without auth?"
@@ -17,7 +17,7 @@ faq:
 
 10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
 
-This page lists what the platform provides, what you switch on, and what it does not provide. It is at its 1.0 release candidate.
+This page lists what the platform provides, what you switch on, and what it does not provide.
 
 ## Capabilities
 

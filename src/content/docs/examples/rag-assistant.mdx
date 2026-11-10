@@ -6,7 +6,7 @@ section: Examples
 group: Apps
 order: 380
 label: RAG docs assistant
-updated: "2026-10-28"
+updated: "2026-11-10"
 faq:
   - q: "Why does this example use three different model providers?"
     a: "Each job gets the model that suits it. Claude handles the conversation and tool use, OpenAI produces the embeddings stored in Qdrant, and Gemini rewrites the question into a search query. 10xGraph picks the client from the model string, so mixing companies needs no extra wiring."
@@ -967,7 +967,7 @@ business days.
     "preview": "vite preview"
   },
   "dependencies": {
-    "10xgraph-client": "^0.6.0",
+    "10xgraph-client": "^1.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

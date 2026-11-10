@@ -5,7 +5,7 @@ section: "Data and state"
 group: "Threads and state"
 order: 10
 label: Set up checkpointing
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 A checkpointer persists your graph state after every node so that multi-turn conversations can resume across separate requests, and interrupted executions can pick up where they left off. Without a checkpointer, every `invoke()` call starts fresh with an empty state. This guide shows you how to choose the right checkpointer for your deployment and configure it completely.
@@ -201,7 +201,7 @@ app = FastAPI(lifespan=lifespan)
 
 ### Check that the checkpointer is reachable
 
-Every checkpointer has `await checkpointer.aping()`. It returns when the backends answer and raises when they do not. For `PgCheckpointer` it runs `SELECT 1`, checks that the schema version is not older than the code expects, and pings Redis. It never creates the schema, so call `asetup()` first. The API server calls it at startup and on `/health/ready`. A custom `BaseCheckpointer` must implement it (abstract since 1.0.0rc4); see [Checkpointers](/docs/reference/python/checkpointers#aping).
+Every checkpointer has `await checkpointer.aping()`. It returns when the backends answer and raises when they do not. For `PgCheckpointer` it runs `SELECT 1`, checks that the schema version is not older than the code expects, and pings Redis. It never creates the schema, so call `asetup()` first. The API server calls it at startup and on `/health/ready`. A custom `BaseCheckpointer` must implement it; see [Checkpointers](/docs/reference/python/checkpointers#aping).
 
 Reference: [BaseCheckpointer](/docs/reference/python/checkpointers) · Source: [base_checkpointer.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/checkpointer/base_checkpointer.py)
 

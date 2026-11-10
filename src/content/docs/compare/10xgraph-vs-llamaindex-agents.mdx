@@ -5,7 +5,7 @@ description: "10xGraph vs LlamaIndex Agents compared with sources: server, auth,
 section: Compare
 order: 50
 label: vs LlamaIndex Agents
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - q: Can I use my LlamaIndex indexes inside a 10xGraph agent?
     a: Yes. Wrap your query engine in a Python function, hand it to a ToolNode, and the agent calls it like any other tool. Your indexing and retrieval stack stays the same.
@@ -177,7 +177,6 @@ console.log(result.messages.at(-1)?.text());
 ## Weak spots of 10xGraph
 
 - Smaller community and fewer integrations.
-- Pre-1.0: pin versions and read changelogs before upgrading.
 - Renamed from Agentflow, so the 10xGraph name has little search history yet.
 - No built-in retrieval stack and no visual tooling. The playground is a test chat.
 - Code-first only, and Python 3.12 or newer.

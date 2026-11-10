@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 510
 label: "realtime()"
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 `client.realtime()` opens a realtime, audio-to-audio session over the server's `/v1/graph/live` WebSocket and returns a `RealtimeSession`. You stream PCM16 microphone audio up and receive PCM16 model audio back, plus transcripts, tool calls, and lifecycle events.
@@ -337,7 +337,7 @@ Constants `REALTIME_INPUT_SAMPLE_RATE` (16000) and `REALTIME_OUTPUT_SAMPLE_RATE`
 - `client.realtime(init, options?)` returns a transport-only `RealtimeSession` over `/v1/graph/live`.
 - Send PCM16 @ 16 kHz with `sendAudio`; receive PCM16 @ 24 kHz on the `'audio'` channel; capture and playback are your responsibility.
 - Subscribe to typed events (`output_transcript`, `tool_call`, `interrupted`, ...) with `session.on(...)`.
-- Auth uses the browser-safe `10xgraph-bearer` subprotocol automatically (needs `10xgraph-api` 0.7.0 or later); pass `webSocketImpl` on Node < 21.
+- Auth uses the browser-safe `10xgraph-bearer` subprotocol automatically (needs `10xgraph-api` 1.0); pass `webSocketImpl` on Node < 21.
 - The session auto-reconnects with backoff and resumes the same `thread_id`, unless you call `close()` or a fatal error occurs.
 
 ## Next step

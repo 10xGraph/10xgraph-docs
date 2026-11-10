@@ -4,7 +4,7 @@ description: "Catch, classify, and recover from errors in the TypeScript client.
 section: "TypeScript client"
 group: "Features"
 order: 110
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 Every API call from the client can fail: the server can reject authentication, return validation errors, encounter internal issues, or experience temporary storage outages. The 10xGraph TypeScript client exports a hierarchy of error classes to help you classify failures and respond appropriately.
@@ -167,7 +167,7 @@ const result = await retryWithBackoff(() =>
 
 The server returns 429 when the `rate_limit` window is used up, or when one user has more graph runs in flight than `runs.max_concurrent_per_user` allows (default 10). The rate-limit response includes a `Retry-After` header in seconds and ends its message with `Retry after <n>s.` The run-cap response has no `Retry-After` header. The client has no class for 429, so it throws a plain `TenxGraphError` with `statusCode` 429, and it does not keep the response headers.
 
-If the server's cache store (Redis) is down and `fail_open` is `false`, it answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead. Retry on 503 the same way you retry on 429. Added in 1.0.0rc3.
+If the server's cache store (Redis) is down and `fail_open` is `false`, it answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead. Retry on 503 the same way you retry on 429.
 
 ```ts
 import { TenxGraphError } from '10xgraph-client';

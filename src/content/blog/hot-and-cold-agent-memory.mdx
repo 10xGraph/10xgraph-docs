@@ -288,12 +288,12 @@ For single-tenant deployments, or setups with no real user identity, set `enforc
 
 ## Since this post
 
-Changes in core after this post was first written:
+Changes in core since this post was first written, all in 1.0:
 
-- **Write-through on `aput_state` (0.10.1).** A state written between runs now refreshes the cache too. Before, `PgCheckpointer` left the old version in Redis, and the next run's first write raised `StaleStateError`. The refresh is version-guarded and best-effort, so a Redis outage still never fails the write.
-- **Message ids are unique per thread.** The Postgres key is `(thread_id, message_id)`, so one user claiming an id cannot make another thread's checkpoint fail. This is in the core changelog under the next release after 0.10.3.
-- **Paging is capped.** `alist_messages` and `alist_threads` lower an explicit `limit` to 1000 and reject negative values. `limit=None` or `0` still returns everything. Same release.
-- **Ledger reads are owner-scoped.** `aget_tool_result` applies the same owner filter as message reads. Same release.
+- **Write-through on `aput_state`.** A state written between runs now refreshes the cache too. Before, `PgCheckpointer` left the old version in Redis, and the next run's first write raised `StaleStateError`. The refresh is version-guarded and best-effort, so a Redis outage still never fails the write.
+- **Message ids are unique per thread.** The Postgres key is `(thread_id, message_id)`, so one user claiming an id cannot make another thread's checkpoint fail.
+- **Paging is capped.** `alist_messages` and `alist_threads` lower an explicit `limit` to 1000 and reject negative values. `limit=None` or `0` still returns everything.
+- **Ledger reads are owner-scoped.** `aget_tool_result` applies the same owner filter as message reads.
 - **Isolation stays on by default.** `enforce_user_isolation` is still `True` unless you pass `False`.
 
 ## Failure matrix

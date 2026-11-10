@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 220
 label: Memory stores
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 A memory store keeps facts, preferences and past interactions across conversation threads, so an agent can recall them later. This page documents the `tenxgraph.storage.store` API: embeddings, `PgVectorStore`, `QdrantStore`, memory configuration, retrieval helpers and factories. A checkpointer, by contrast, saves state within one thread.
@@ -377,12 +377,12 @@ Abstract base class that every store backend implements. Every method takes a `c
 | `adelete` | `async (config, memory_id, **kwargs) -> Any` | Delete a memory by ID. |
 | `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. `QdrantStore` and `PgVectorStore` also narrow by the keyword arguments `memory_type`, `category` and `filters` (combined with AND). On `QdrantStore` a `filters` value that is not a string, integer or boolean raises `ValueError`; on `PgVectorStore` see [filters](/docs/guides/multi-tenant-data#filters). |
 | `asetup` | `async () -> Any` | Create the collection or other backing resources. Implemented by `QdrantStore` and `PgVectorStore`; the base class raises `NotImplementedError`. |
-| `aping` | `async () -> None` | Abstract. Return when the store's backend is reachable, raise when it is not. Must be read-only and cheap, because a server may call it on every readiness probe. An in-process store just returns. `10xgraph-api` calls it for `/health/ready` and at startup. A custom store that does not implement it raises `TypeError` when created. Added in 1.0.0rc3. |
+| `aping` | `async () -> None` | Abstract. Return when the store's backend is reachable, raise when it is not. Must be read-only and cheap, because a server may call it on every readiness probe. An in-process store just returns. `10xgraph-api` calls it for `/health/ready` and at startup. A custom store that does not implement it raises `TypeError` when created. |
 | `arelease` | `async () -> None` | Release connections. Not abstract, but the base implementation raises `NotImplementedError`; `PgVectorStore` overrides it. |
 
 There is no bulk `abatch_store`; call `astore` in a loop or with `asyncio.gather`.
 
-`QdrantStore.aping()` lists the collections on the server, `PgVectorStore.aping()` runs `SELECT 1`, and `InMemoryStore.aping()` returns at once. Added in 1.0.0rc3.
+`QdrantStore.aping()` lists the collections on the server, `PgVectorStore.aping()` runs `SELECT 1`, and `InMemoryStore.aping()` returns at once.
 
 ### Sync wrappers
 

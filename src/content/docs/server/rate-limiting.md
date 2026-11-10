@@ -5,7 +5,7 @@ section: "Security and access"
 group: "Protect the server"
 order: 40
 label: "Rate limiting"
-updated: "2026-10-31"
+updated: "2026-11-10"
 faq:
   - question: Do I need rate limiting in development?
     answer: "In development, you can run without limits. In any production environment, rate limiting protects your infrastructure from both accidental overuse and abuse."
@@ -328,7 +328,7 @@ With `fail_open: false`, a cache store outage (for example Redis) denies request
 }
 ```
 
-A real limit hit stays `429 RATE_LIMIT_EXCEEDED`. With `fail_open: true` requests pass during the outage. The limiter logs a traceback for the first error of an outage and one line for each error after it. Clients that retried on 429 should retry on 503 too. Added in 1.0.0rc3.
+A real limit hit stays `429 RATE_LIMIT_EXCEEDED`. With `fail_open: true` requests pass during the outage. The limiter logs a traceback for the first error of an outage and one line for each error after it. Clients that retried on 429 should retry on 503 too.
 
 Clients can check `X-RateLimit-Remaining` before sending the next request to avoid hitting the limit, and use `Retry-After` to back off intelligently.
 

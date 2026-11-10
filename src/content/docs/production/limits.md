@@ -74,7 +74,7 @@ What to do: send an idempotency key derived from stable inputs (an order id, not
 
 ## Versioning
 
-10xGraph 1.0 is a release candidate until the final ships. From 1.0 the public API is stable under a deprecation policy: breaking changes only in a major release, after at least one minor of deprecation. The deprecated `agentflow` aliases stay until 2.0. The community is smaller than the older frameworks'.
+From 1.0 the public API is stable under a deprecation policy: breaking changes only in a major release, after at least one minor of deprecation. The deprecated `agentflow` aliases stay until 2.0. The community is smaller than the older frameworks'.
 
 What to do: pin exact versions, read the changelog before each upgrade, and run your tests and evals in CI first. See [Test before production](/docs/testing/before-production) and the [upgrade guides](/docs/project).
 

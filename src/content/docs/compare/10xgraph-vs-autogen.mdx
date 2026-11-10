@@ -5,7 +5,7 @@ description: 10xGraph vs Microsoft AutoGen compared with sources. AutoGen is in 
 section: Compare
 order: 40
 label: vs Microsoft AutoGen
-updated: "2026-10-28"
+updated: "2026-11-10"
 faq:
   - q: Is AutoGen still actively developed?
     a: According to the AutoGen repository, AutoGen is in maintenance mode. It receives no new features and is community managed, and Microsoft recommends Microsoft Agent Framework for new projects.
@@ -49,7 +49,7 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 | Docker Compose and Kubernetes manifests | `10xgraph build --docker-compose --k8s` writes `Dockerfile`, `docker-compose.yml`, `k8s.yaml` | Not documented |
 | License | MIT, including API/CLI and client | MIT and CC-BY-4.0 dual license per the repository ([repository](https://github.com/microsoft/autogen)). `autogen-agentchat` on PyPI lists MIT ([PyPI](https://pypi.org/project/autogen-agentchat/)) |
 | TypeScript client | Typed `10xgraph-client` | Not documented |
-| Project status | Pre-1.0, actively developed | Maintenance mode, community managed ([repository](https://github.com/microsoft/autogen)) |
+| Project status | 1.0, actively developed | Maintenance mode, community managed ([repository](https://github.com/microsoft/autogen)) |
 | Orchestration | Typed `StateGraph` with conditional edges and sub-graphs | Group chat teams, including `SelectorGroupChat` where a model picks the next speaker, and `GraphFlow` for structured workflows ([teams docs](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/teams.html)) |
 | State persistence | `InMemoryCheckpointer`, `PgCheckpointer` (Postgres plus Redis), SQLite, keyed by `thread_id` | `save_state()` and `load_state()` on agents and teams, with no built-in database persistence ([state docs](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/state.html)) |
 | Python version | 3.12 or newer | 3.10 or newer ([PyPI](https://pypi.org/project/autogen-agentchat/)) |
@@ -59,7 +59,7 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 1. **The server layer is included.** AutoGen's own README points developers to build their own application with authentication and security. 10xGraph generates the endpoints and the auth, ownership and rate-limit settings.
 2. **Side effects survive crashes.** 10xGraph's tool ledger skips tools that already ran when a run resumes. See [replay-safe tools](/docs/concepts/replay-safe-tools).
 3. **One state, one history.** Every node reads the same `AgentState`, and the checkpointer stores it per thread.
-4. **Active development.** 10xGraph is at its 1.0 release candidate and under active development, while AutoGen is in maintenance mode.
+4. **Active development.** 10xGraph is at 1.0 and under active development, while AutoGen is in maintenance mode.
 
 ## A planner and coder loop in 10xGraph
 
@@ -206,7 +206,6 @@ for await (const chunk of client.stream(
 ## Weak spots of 10xGraph
 
 - Smaller community and fewer integrations than the Microsoft ecosystem.
-- Pre-1.0: pin versions and read changelogs before upgrading.
 - Renamed from Agentflow, so the 10xGraph name has little search history yet.
 - No Studio-style visual builder. The playground is a test chat.
 - Code-first only, and Python 3.12 or newer.

@@ -6,7 +6,7 @@ section: "API server"
 group: "Basics"
 order: 20
 label: Run the API Server
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - question: "Can I use 10xgraph dev in production?"
     answer: "No. The 10xgraph dev command runs a single-worker development server with reload. There is no separate production command. For production, use Docker with Gunicorn and multiple Uvicorn workers. Generate production files with 10xgraph build --docker-compose."
@@ -50,11 +50,9 @@ The server binds to `http://127.0.0.1:8000` and restarts whenever you edit any P
 10xgraph dev
 ```
 
-Flags: `--config`/`-c`, `--host`/`-H`, `--port`/`-p`, `--reload/--no-reload`, `--open/--no-open`, `--verbose`/`-v` and `--quiet`/`-q`. The commands `10xgraph api` and `10xgraph play` were removed in `10xgraph-api` 0.9.0; use `10xgraph dev`.
+Flags: `--config`/`-c`, `--host`/`-H`, `--port`/`-p`, `--reload/--no-reload`, `--open/--no-open`, `--verbose`/`-v` and `--quiet`/`-q`. The commands `10xgraph api` and `10xgraph play` were removed before 1.0; use `10xgraph dev`.
 
 ### Run `10xgraph dev` against Docker backends
-
-Added in 1.0.0rc3.
 
 When Postgres, Redis or Qdrant run in Docker Compose and `10xgraph dev` runs on your host, the host reaches them through published ports. Publish each port on `127.0.0.1` only, so nothing else on your network can connect:
 

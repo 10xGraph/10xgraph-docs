@@ -9,7 +9,7 @@ kind: engineering
 tags: [production, security, server, deployment]
 faq:
   - q: Is 10xGraph production ready?
-    a: The server enforces reach-scoped thread access, permission checks, input limits, run limits and production-mode checks by default, and keeps state durably with PostgreSQL. It is at its 1.0 release candidate, and you still own auth configuration, secrets, TLS, backups and your tools' own authorization.
+    a: The server enforces reach-scoped thread access, permission checks, input limits, run limits and production-mode checks by default, and keeps state durably with PostgreSQL. You still own auth configuration, secrets, TLS, backups and your tools' own authorization.
   - q: Does the server force me to configure authentication?
     a: No. With auth set to null the server starts and is open, also with MODE=production. Nothing refuses it, so set auth to jwt or a custom BaseAuth class before you expose the server.
   - q: Does 10xGraph stop prompt injection?
@@ -117,7 +117,7 @@ Regardless of how many boxes above are ticked:
 - **Prompt injection is not solved.** Validators and approval steps bound what a model can be talked into. They do not remove it.
 - **Your tools are your code.** The server cannot know what a tool should be allowed to read.
 - **Secrets, TLS, backups, retention** are infrastructure you run.
-- **1.0 is a release candidate**, 10xGraph needs Python 3.12 or newer, and has a smaller community than LangGraph or CrewAI. Pin versions and read the [changelog](/changelog).
+- 10xGraph needs Python 3.12 or newer and has a smaller community than LangGraph or CrewAI. Pin versions and read the [changelog](/changelog).
 - **Exactly-once is not on offer.** Replayed tools and jobs are at-least-once. Send idempotency keys to anything that moves money.
 
 ## Where to go next

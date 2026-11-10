@@ -1,12 +1,12 @@
 ---
 slug: project/upgrade-to-1.0
-title: Upgrade to 1.0
+title: Upgrade from 0.x to 1.0
 seoTitle: "Upgrade 10xGraph to 1.0: breaking changes"
 description: Migration guide from 10xgraph 0.10, 10xgraph-api 0.9 and 10xgraph-client 0.6 to 1.0, with every breaking change grouped by package and what to do about it.
 section: Project
 order: 20
 label: Upgrade to 1.0
-updated: "2026-10-31"
+updated: "2026-11-10"
 ---
 
 1.0 is the release where the public API is stable under a deprecation policy. The core
@@ -18,18 +18,14 @@ upgrading a deployment.
 This page covers 0.10.x (core), 0.9.x (API) and 0.6.x (client). If you are on 0.8 or earlier,
 read [Upgrade to 0.9](/docs/project/upgrade-to-0.9) first.
 
-## Install the release candidate
-
-1.0 ships first as a release candidate. Pip skips pre-releases unless you pass `--pre`, and the
-client candidate is published under the `next` dist-tag.
+## Install 1.0
 
 ```bash
-pip install -U --pre "10xgraph==1.0.0rc4" "10xgraph-api==1.0.0rc4"
-npm install 10xgraph-client@next
+pip install -U 10xgraph 10xgraph-api
+npm install 10xgraph-client
 ```
 
-`npm install 10xgraph-client` still installs 0.6.0 until 1.0.0 is released. `10xgraph-api`
-1.0 requires `10xgraph` 1.0.
+`10xgraph-api` 1.0 requires `10xgraph` 1.0.
 
 ## Versioning from 1.0
 
@@ -43,7 +39,7 @@ npm install 10xgraph-client@next
 
 ## Auth, roles and reach
 
-These changes ship in 1.0.0 and replace the authorization notes in the sections below. Read them if you set `authorization` in `10xgraph.json`, wrote an `AuthorizationBackend`, or put an `authz` block in `config`. The full guide is [Authentication and authorization](/docs/server/auth).
+These changes replace the authorization notes in the sections below. Read them if you set `authorization` in `10xgraph.json`, wrote an `AuthorizationBackend`, or put an `authz` block in `config`. The full guide is [Authentication and authorization](/docs/server/auth).
 
 - **The top-level `authorization` key is removed,** and so are `AuthorizationBackend`, its built-in backends and the `graph_introspection` setting. A config that still has the `authorization` key refuses to start, with a pointer to `auth.roles`. Roles, claims and tenant settings now live in the `auth` object. `"auth": "jwt"` alone still works: every caller gets the default permission set and reach `own`.
 - **One class.** Subclass `BaseAuth`. `authenticate` returns the claims; the optional `authorize(identity, permission, resource=None)` defaults to the built-in role-based check and takes no request, so background jobs can call it.
@@ -56,9 +52,9 @@ These changes ship in 1.0.0 and replace the authorization notes in the sections 
 
 ---
 
-## After 1.0.0rc4: Postgres memory, tenant columns and safer scopes
+## Postgres memory, tenant columns and safer scopes
 
-These changes ship in 1.0.0. Read them if you use stores, `PgCheckpointer` or `RAGAgent`. The isolation scope and `AuthorizationBackend` notes in this section are replaced by [Auth, roles and reach](#auth-roles-and-reach).
+Read them if you use stores, `PgCheckpointer` or `RAGAgent`. The isolation scope and `AuthorizationBackend` notes in this section are replaced by [Auth, roles and reach](#auth-roles-and-reach).
 
 - **`Mem0Store` and the `mem0` extra are removed,** with no stub. Move to `PgVectorStore`
   (`pip install "10xgraph[pgvector]"`) or `QdrantStore`. Memories saved in Mem0 are not
@@ -106,7 +102,7 @@ These changes ship in 1.0.0. Read them if you use stores, `PgCheckpointer` or `R
 
 ---
 
-## From 1.0.0rc3 to 1.0.0rc4
+## Shared state: the cache store
 
 The API's shared state (run locks and caps, idempotency, token revocation
 and rate limiting) now lives behind one class, `BaseCacheStore`, configured by one `cache_store`
@@ -141,8 +137,8 @@ Other changes:
 - **The startup check and `/health/ready` only call `aping()`.** The cache store stops the boot,
   and fails readiness, only when a fail-closed feature uses it: `cache_store.token_revocation` is on,
   or `cache_store.rate_limit` is on with `fail_open` set to `false`. Otherwise an unreachable cache store logs
-  one WARNING and the server starts. This fixes a bug in rc3 where a leftover `REDIS_URL` blocked
-  boot for a setup that needed no Redis. The `/health/ready` keys are `checkpointer`, `store` and
+  one WARNING and the server starts. A leftover `REDIS_URL` no longer blocks
+  boot for a setup that needs no Redis. The `/health/ready` keys are `checkpointer`, `store` and
   `cache`; the key `redis` is gone. Update probes or monitors that read it.
 - **Failure behaviour.** Run locks, caps and idempotency fail open. Token
   revocation fails closed (503). Rate limiting follows `cache_store.rate_limit.fail_open` (default `true`;
@@ -235,7 +231,7 @@ Migration steps:
 - **Skill and memory text is no longer run through `str.format`.** Only your own
   `system_prompt` is interpolated, and a bad placeholder is logged instead of failing the run.
   Remove any reliance on `{placeholder}` expansion inside skill or memory text.
-- **`BaseStore.aping()` is now abstract (added in 1.0.0rc3).** A custom store must implement
+- **`BaseStore.aping()` is now abstract (new in 1.0).** A custom store must implement
   `async def aping(self) -> None`: return when its backend is reachable, raise when it is not.
   Keep it read-only and cheap, because `10xgraph-api` calls it on `/health/ready` and at
   startup. An in-process store just returns. A store without it raises `TypeError` when
@@ -414,8 +410,7 @@ Migration steps:
   on history.
 - **Assistant and system messages, and `context_summary` and `execution_meta`, are rejected
   with 422** on the client routes.
-- **`POST /v1/threads/{thread_id}/messages` was admin-only at rc4 and is removed
-  in 1.0.0.** Send normal messages through invoke or stream, and use the new
+- **`POST /v1/threads/{thread_id}/messages` is removed in 1.0.** Send normal messages through invoke or stream, and use the new
   `PUT .../messages/{message_id}` for feedback.
 
 ### Production startup and timeouts
@@ -435,8 +430,6 @@ Migration steps:
   (`tool_timeout`, `node_timeout`) lost their defaults.
 
 ### Startup check and rate limiter outages
-
-Added in 1.0.0rc3.
 
 - **The server refuses to start while a configured backend is unreachable.** At boot it pings
   the checkpointer's Postgres and Redis, the API's Redis, the rate limiter's own Redis and the
@@ -546,7 +539,7 @@ The extras raise these floors. A fresh install resolves them; an existing enviro
 
 After upgrading, before sending production traffic:
 
-1. `10xgraph version` reports 1.0.0rc4 for core and the CLI.
+1. `10xgraph version` reports 1.0.0 for core and the CLI.
 2. The server starts with `MODE=production` and explicit `ALLOWED_HOST` and `ORIGINS`.
 3. A new conversation without a `thread_id` succeeds, and a client-invented id for a new thread
    gets 404 (unless you set `runs.thread_ids` to `"client"`).

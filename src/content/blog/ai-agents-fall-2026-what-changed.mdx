@@ -603,7 +603,7 @@ If you plan to standardize agent tracing on OpenTelemetry, note that the GenAI s
 
 ### Why it matters
 
-Dashboards, alerts and cost reports built on `gen_ai.*` attribute names can break when the conventions change. Treat them like any other pre-1.0 dependency: pin the version and plan for renames.
+Dashboards, alerts and cost reports built on `gen_ai.*` attribute names can break when the conventions change. Treat them like any other fast-moving dependency: pin the version and plan for renames.
 
 ### Publish traces with OtelPublisher
 
@@ -829,7 +829,7 @@ Here are the gaps that matter for this post:
 - **No built-in model comparison command.** `10xgraph eval` runs one agent. Comparing models means the loop shown in section 2.
 - **No automatic per-tool permissions.** Permissions apply per route. A check such as "only `support_lead` may refund" is code you write inside the tool with `get_identity`.
 - **New MCP spec support follows the libraries.** It arrives as `mcp` and `fastmcp` ship it.
-- **A smaller ecosystem.** There are fewer integrations, tutorials and answered questions than for LangGraph or CrewAI, and 1.0 is still a release candidate, so pin versions and read the [changelog](/changelog).
+- **A smaller ecosystem.** There are fewer integrations, tutorials and answered questions than for LangGraph or CrewAI. Pin versions and read the [changelog](/changelog).
 
 ## A checklist for this quarter
 

@@ -6,7 +6,7 @@ section: Reference
 group: "CLI and configuration"
 order: 1770
 label: Environment Variables
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 The 10xGraph API server and CLI read configuration from environment variables. This page lists every variable with its default and effect, grouped by area. Set server variables in a `.env` file referenced by `10xgraph.json` or in the process environment. CLI variables control terminal output.
@@ -59,8 +59,6 @@ The settings model allows extra variables, so unknown names in the environment a
 ---
 
 ## Startup check variables
-
-Added in 1.0.0rc3.
 
 | Variable | Default | Description |
 | --- | --- | --- |

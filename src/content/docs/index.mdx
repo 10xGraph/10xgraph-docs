@@ -4,10 +4,10 @@ seoTitle: 10xGraph documentation and introduction
 description: "10xGraph (formerly Agentflow) is open-source, self-hosted infrastructure for AI apps: API server, auth and roles, tenant isolation, durable state, jobs and tracing."
 section: "Get started"
 order: 0
-updated: "2026-10-28"
+updated: "2026-11-10"
 faq:
   - q: "Is 10xGraph production-ready?"
-    a: "The production layer ships today in the `10xgraph-api` package: an API server with JWT or custom auth, role-based access with own, tenant or all reach (own is the default), rate limits, durable checkpointing with Postgres or SQLite, replay-safe tools, and Docker and Kubernetes files from `10xgraph build`. Background jobs run on `10xgraph worker` and `10xgraph scheduler`. Some of it you must configure: with `auth` unset the server runs open, even with `MODE=production`. From 1.0 the public API is stable under a deprecation policy (breaking changes only in a major release, after at least one minor of deprecation), and 1.0 is a release candidate until the final ships. Pin exact versions and read the changelog before each upgrade. See the Platform overview for what is covered and what is not."
+    a: "The production layer ships today in the `10xgraph-api` package: an API server with JWT or custom auth, role-based access with own, tenant or all reach (own is the default), rate limits, durable checkpointing with Postgres or SQLite, replay-safe tools, and Docker and Kubernetes files from `10xgraph build`. Background jobs run on `10xgraph worker` and `10xgraph scheduler`. Some of it you must configure: with `auth` unset the server runs open, even with `MODE=production`. From 1.0 the public API is stable under a deprecation policy (breaking changes only in a major release, after at least one minor of deprecation). Pin exact versions and read the changelog before each upgrade. See the Platform overview for what is covered and what is not."
   - q: "Do I need LangChain to use 10xGraph?"
     a: "No. 10xGraph has no LangChain dependency. You build graphs with its own StateGraph and Agent classes and call model providers through its own interface."
   - q: "Which models does 10xGraph support?"

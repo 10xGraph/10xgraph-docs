@@ -5,7 +5,7 @@ description: "Security, persistence, scaling, and monitoring checklist before sh
 section: "Platform"
 order: 70
 label: Production checklist
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - question: "What is the minimum checklist for production?"
     answer: "Set MODE=production, use explicit ORIGINS, configure Postgres+Redis for persistence, enable rate limiting, and run at least two API instances."
@@ -29,7 +29,7 @@ With `MODE=production`, the server does these for you. You do not configure them
 - Scopes graph introspection (`GET /v1/graph`, `/v1/graph/tools`, `/v1/graph:StateSchema`) to callers with the `graph:read` permission.
 - Gives every authenticated user reach `own` unless a role says otherwise, so each user reaches only their own threads.
 - Turns debug mode off.
-- Pings every configured backend at boot and refuses to start while one is unreachable (see [Startup check](#startup-check)). Added in 1.0.0rc3.
+- Pings every configured backend at boot and refuses to start while one is unreachable (see [Startup check](#startup-check)).
 - Ships a hardened image when you use `10xgraph build`: non-root user, Gunicorn with `TenxGraphUvicornWorker` and long graceful timeouts, health check on `/ping`. On SIGTERM `/health/ready` answers 503 while open runs finish.
 
 For why these matter, see the [security model](/docs/production/security-model) and [scaling and reliability](/docs/production/scaling).
@@ -187,8 +187,6 @@ A leftover `REDIS_URL` never blocks boot: it only matters to a `cache_store` of 
 
 `STARTUP_CHECKS=false` skips the check. It runs the same probes as `/health/ready`, with a different outcome: at startup an unreachable checkpointer or store stops the server, while at runtime `/health/ready` answers 503 so the load balancer stops sending traffic until the backend returns. See [Ping and health](/docs/reference/rest-api/ping#get-healthready).
 
-Added in 1.0.0rc3.
-
 ### Redis caching
 
 Redis acts as a hot cache in front of Postgres. `PgCheckpointer` requires a Redis connection, but the durable data lives in Postgres. After a Redis connection failure, `PgCheckpointer` skips Redis for a short cool-down (`redis_breaker_cooldown`, 5 seconds by default, `0` disables it) and uses Postgres at once, so a Redis outage does not slow every run step.
@@ -327,7 +325,7 @@ done
 # After threshold, requests should return 429 Too Many Requests
 ```
 
-With `fail_open` set to `false` and the cache store unreachable, the API answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead of 429. See [Rate limiting](/docs/server/rate-limiting). Added in 1.0.0rc3.
+With `fail_open` set to `false` and the cache store unreachable, the API answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead of 429. See [Rate limiting](/docs/server/rate-limiting).
 
 ## 8. Proxy buffering and request handling
 

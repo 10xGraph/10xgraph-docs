@@ -22,9 +22,9 @@ issue: real demand reorders the list.
 
 ---
 
-## Shipping in 1.0
+## In 1.0
 
-These ship in 1.0. They are not in 1.0.0rc4; check the [changelog](/changelog) for the release candidate that includes each one.
+These ship in 1.0.
 
 - **Background jobs, worker and scheduler.** `10xgraph worker`, `10xgraph scheduler`, the `/v1/tasks` routes and the `worker` config key, on a TaskIQ broker. See [Run background tasks with a worker](/docs/server/background-tasks).
 - **Audit log and JSON logs.** Metadata-only audit events (the `audit` config block) and `LOG_FORMAT=json`. 10xGraph writes the lines to stdout and stores nothing; your log pipeline keeps them. See [Audit log](/docs/server/audit-log).
