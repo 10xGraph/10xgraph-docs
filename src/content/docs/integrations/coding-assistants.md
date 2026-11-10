@@ -52,11 +52,15 @@ The same base skill bundle is copied into the assistant-specific directory. Each
 
 | Assistant | Install path |
 |---|---|
-| Claude Code | `.claude/skills/10xgraph/` |
-| Codex | `.agents/skills/10xgraph/` |
+| Claude Code | `.claude/skills/10xgraph/` and a section in `CLAUDE.md` |
+| Codex | `.agents/skills/10xgraph/` and a section in `AGENTS.md` |
 | GitHub Copilot | `.github/skills/10xgraph/` and `.github/instructions/10xgraph.instructions.md` |
 
 The CLI also writes a manifest file (`.10xgraph-skill.json`) into the installed directory, recording the target agent, CLI version, and installation timestamp.
+
+Skills load only when the assistant decides they match the task, so an assistant can write 10xGraph code without ever loading the skill. For Claude Code and Codex the CLI therefore also writes a short 10xGraph section into the project-root `CLAUDE.md` or `AGENTS.md`, which those assistants read at the start of every session. It tells the assistant, and every subagent it starts, to load the skill first, and sets the default shape: start from `ReactAgent`, build one agent, keep business rules in tools, and pass the signed-in user to MCP servers as request metadata.
+
+The section sits between `<!-- 10xgraph:start -->` and `<!-- 10xgraph:end -->` markers. A missing file is created with just the section; an existing section is replaced; otherwise the section is appended after one blank line. Text outside the markers is never changed, so your own instructions stay as they are. An existing `CLAUDE.md` or `AGENTS.md` does not count as an installed skill and needs no `--force`. A symlinked `CLAUDE.md` or `AGENTS.md` is refused.
 
 For GitHub Copilot, the `.github/instructions/10xgraph.instructions.md` file is a single instruction file that points Copilot at the full skill bundle under `.github/skills/10xgraph/`. This lets Copilot understand the 10xGraph skill even if it does not read all the reference documents.
 
