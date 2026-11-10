@@ -5,7 +5,7 @@ description: "The limits of the 10xGraph server: prompt injection, tool logic, o
 section: "Production"
 order: 40
 label: What it does not protect
-updated: "2026-10-28"
+updated: "2026-11-10"
 faq:
   - q: "Does 10xGraph stop prompt injection?"
     a: "No. Validators, approval through interrupt() and tool allow-lists bound what an injected instruction can do, but a model can still be talked into using the tools you gave it. Give it only the tools it needs and require approval for tools with side effects."
@@ -15,7 +15,7 @@ faq:
     a: "Yes. The tool ledger is consulted on both the invoke and the streaming path. A crash in the short gap between a tool finishing and its record being written can still repeat the tool, so give side-effecting tools an idempotency key."
 ---
 
-10xGraph enforces a lot at the server, and the [readiness table](/docs/production) says which. This page lists what it does not do, so you can plan for it. Each item says what to do.
+10xGraph enforces a lot at the server, and the [platform overview](/docs/production) says which. This page lists what it does not do, so you can plan for it. Each item says what to do. For a control-by-control view of SOC 2 and ISO 27001, with every gap marked "not provided", see the [control mapping](/docs/production/control-mapping).
 
 ## Prompt injection is bounded, not removed
 
@@ -38,7 +38,7 @@ What to do: inside each tool, check that the authenticated user may touch the ob
 
 ## `auth: null` starts an open server
 
-If `auth` is `null`, the server serves every route to anyone who can reach it. With `MODE=production` it still starts. Nothing refuses it. Owner-scoped queries need an identity, so with no auth there is nobody to own a thread.
+If `auth` is `null`, the server serves every route to anyone who can reach it. With `MODE=production` it still starts. Nothing refuses it. Reach-scoped queries (own, tenant or all) need an identity, so with no auth there is nobody to own a thread.
 
 What to do: set `"auth": "jwt"` with a strong `JWT_SECRET_KEY`, or a custom `BaseAuth` class, before the server is reachable. The `10xgraph init` production template does this for you. See [Auth](/docs/server/auth) and the [production checklist](/docs/server/production-checklist).
 
@@ -52,7 +52,7 @@ What to do: use your platform's secret store, keep `.env` out of the image and t
 
 The container serves plain HTTP. The server sets security headers and can emit HSTS, but it does not terminate TLS, filter by network, or protect against volumetric attacks.
 
-What to do: terminate TLS at your load balancer or ingress, set `ALLOWED_HOST` and `ORIGINS`, and if you use client IP rate limiting behind a proxy, set `rate_limit.trusted_proxies`. See [CORS and security headers](/docs/server/cors-and-security-headers) and [Kubernetes](/docs/server/kubernetes).
+What to do: terminate TLS at your load balancer or ingress, set `ALLOWED_HOST` and `ORIGINS`, and if you use client IP rate limiting behind a proxy, set `cache_store.rate_limit.trusted_proxies`. See [CORS and security headers](/docs/server/cors-and-security-headers) and [Kubernetes](/docs/server/kubernetes).
 
 ## The default cache store is per process
 
@@ -62,9 +62,9 @@ What to do: set `cache_store.type` to `redis` (or `custom` for your own store) f
 
 ## Data retention and backups
 
-Threads, messages and uploaded files stay until something deletes them. Deleting a thread or message also releases the files it referenced, but 10xGraph sets no retention period and does not back up your database.
+Threads, messages and uploaded files stay until something deletes them. Deleting a thread or message also releases the files it referenced, but 10xGraph sets no retention period and does not back up your database. The same holds for audit and JSON log lines: 10xGraph writes them to stdout and stores nothing, so retention, access control and tamper protection for them belong to your log pipeline.
 
-What to do: back up PostgreSQL, decide a retention policy, and delete threads when users ask. See [Backup and restore](/docs/server/backup-and-restore).
+What to do: back up PostgreSQL, decide a retention policy for data and for logs, and delete threads when users ask. See [Backup and restore](/docs/server/backup-and-restore).
 
 ## Tools run at least once
 

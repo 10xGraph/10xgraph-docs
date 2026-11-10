@@ -1,0 +1,40 @@
+---
+title: What Is an Audit Log?
+seoTitle: "What is an audit log for an AI application?"
+description: An audit log is a record of who did what and when. See what an AI application should log, why metadata only is safer, and how 10xGraph emits audit events.
+section: Glossary
+order: 150
+label: What is an audit log?
+updated: "2026-11-10"
+faq:
+  - q: Does the audit log store prompts and replies?
+    a: No. 10xGraph audit events carry metadata only, such as who, what action, which resource and the outcome. They hold no message content.
+  - q: Where is the audit log stored?
+    a: Not in 10xGraph. It emits events to the sinks you configure, such as a logger or your publisher, and you keep and protect them in your own system.
+  - q: Is an audit log a compliance certificate?
+    a: No. It is evidence you can show an auditor. 10xGraph is built for teams going through SOC 2 and ISO 27001 audits, and your own environment is what gets audited.
+---
+
+**An audit log is an append-only record of who did what, to which resource, when, and with what result.** It answers questions after the fact: who read this thread, who deleted that file, who started this job.
+
+## Why does it matter for agents?
+
+An agent server acts on behalf of users and can change data in many places. Metrics tell you how the system performs; an audit log tells you who acted. Auditors for frameworks such as SOC 2 and ISO 27001 ask for this kind of evidence.
+
+## What should it contain?
+
+Keep the record small: the actor, the action, the resource id, the time and the outcome. Leave message content out. A log full of prompts and replies becomes another store of sensitive data that needs its own protection.
+
+## How does 10xGraph do it?
+
+In `10xgraph-api`, the `audit` key in `10xgraph.json` turns on audit events with `enabled`, `sinks` (`log`, `publisher` or `module:Class`) and `include_reads`. Events go to the `tenxgraph_api.audit` logger, and `LOG_FORMAT=json` makes them machine-readable. 10xGraph emits the events and does not store them; retention and access control are yours. See the [audit log guide](/docs/server/audit-log).
+
+## Next steps
+
+<CardGrid>
+
+<LinkCard title="Audit log" href="/docs/server/audit-log" description="Configure sinks and read events." eyebrow="Guide" />
+<LinkCard title="Tenancy and access" href="/docs/concepts/tenancy-and-access" description="The identity an event records." eyebrow="Concept" />
+<LinkCard title="Events and observability" href="/docs/concepts/events-and-observability" description="Publishers, metrics and tracing." eyebrow="Concept" />
+
+</CardGrid>

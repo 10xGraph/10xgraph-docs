@@ -9,7 +9,7 @@ label: Backup and restore
 updated: "2026-10-27"
 faq:
   - question: "What happens if I restore an old Postgres backup with Redis still running?"
-    answer: "The Redis cache can hold state newer than the restored database. Postgres is the source of truth and a failed version check invalidates the cache entry, but flush the 10xGraph Redis database before restoring so no stale entries survive."
+    answer: "The Redis cache can hold state newer than the restored database. Postgres is the source of truth and a failed version check invalidates the cache entry, but clear the checkpointer cache keys before restoring so no stale entries survive."
   - question: "Can I restore a single thread without a full restore?"
     answer: "Yes. Restore the dump into a scratch database, then copy that thread's rows from the thread tables into production using SQL."
   - question: "How often should I test my restore process?"
@@ -25,7 +25,7 @@ For how durable state supports restarts and multiple replicas, see [scaling and 
 | Layer | Contents | Durable | Back up |
 | --- | --- | --- | --- |
 | **Postgres** | Threads, state, messages, tool-execution ledger, schema version | Yes | **Yes** |
-| **Redis** | Hot cache of recent state, default TTL 24h | No | No |
+| **Redis** | Checkpointer hot cache of recent state, default TTL 24h. If it is also your API cache store: token revocations, rate-limit counters, run locks, idempotency state | Cache: no. Cache store: revocations are lost on a flush | Cache: no. Cache store: snapshot it if you need to keep revocations |
 | **Vector store** (PgVectorStore, Qdrant) | Long-term memories | PgVectorStore: yes, in your Postgres (back it up like any table). Qdrant: in that system | Yes, with the database's or that system's own tooling |
 | **Media store** | Uploaded files | Depends on backend | Yes, if local disk |
 
@@ -35,11 +35,16 @@ Redis is a read-through cache in front of Postgres, not a second source of truth
 
 However, restoring Postgres from an older snapshot while Redis and workers are still running is unsafe. Each state row has a per-thread `version` that increases on every write, and writes are compare-and-swap: a write that expected a version the database no longer has is rejected with `StaleStateError` (HTTP 409 from the API). Reads of the latest state come from Postgres, and the checkpointer drops the cached entry when it hits a conflict. Even so, a run that started before the restore can fail, and cached entries can still reflect pre-restore state until they expire.
 
-Flush the cache before restoring. `FLUSHDB` clears the whole Redis database selected by the URL, so only run it if that database is dedicated to 10xGraph:
+Flush the checkpointer cache before restoring. The checkpointer writes its cache keys under `state_cache:` and `generic_cache:` (with the `redis_key_prefix` option in front, if you set one). Delete only those, so nothing else in Redis is touched:
 
 ```bash
-redis-cli -u "$REDIS_URL" FLUSHDB
+redis-cli -u "$REDIS_URL" --scan --pattern 'state_cache:*' | xargs -r redis-cli -u "$REDIS_URL" DEL
+redis-cli -u "$REDIS_URL" --scan --pattern 'generic_cache:*' | xargs -r redis-cli -u "$REDIS_URL" DEL
 ```
+
+If you set `redis_key_prefix`, put it in front of each pattern.
+
+`FLUSHDB` also works, but it clears the whole Redis database selected by the URL. When the API server uses the same Redis as its cache store, that database also holds token revocations, rate-limit counters, run locks and idempotency state. A flush therefore un-revokes every revoked token and user (a revoked token is accepted again until it expires) and resets rate limits. Only run `FLUSHDB` on a database dedicated to the checkpointer cache. If you did flush a shared one, revoke the affected tokens and users again with `10xgraph revoke`, or restore the cache store data from your own Redis snapshot.
 
 ## Tables and schema
 
@@ -148,8 +153,11 @@ This is the safe restore procedure:
 # 1. Stop all traffic. Scale workers to zero instead of draining gracefully.
 kubectl scale deployment/my-agent --replicas=0
 
-# 2. Flush the Redis cache so it cannot serve stale versions.
-redis-cli -u "$REDIS_URL" FLUSHDB
+# 2. Clear the checkpointer cache so it cannot serve stale versions.
+#    Do not use FLUSHDB on a Redis shared with the cache store: it also clears
+#    token revocations and rate-limit counters.
+redis-cli -u "$REDIS_URL" --scan --pattern 'state_cache:*' | xargs -r redis-cli -u "$REDIS_URL" DEL
+redis-cli -u "$REDIS_URL" --scan --pattern 'generic_cache:*' | xargs -r redis-cli -u "$REDIS_URL" DEL
 
 # 3. Restore the dump.
 pg_restore --clean --if-exists --no-owner \
@@ -215,7 +223,7 @@ DELETE FROM threads WHERE user_id = 'user-123';
 
 Then handle related data outside Postgres:
 
-1. **Redis:** Deleting a thread through the checkpointer clears its cache entry. If you delete rows with SQL, remove the cached keys yourself or flush the cache.
+1. **Redis:** Deleting a thread through the checkpointer clears its cache entry. If you delete rows with SQL, remove the cached keys yourself (the `state_cache:` and `generic_cache:` keys), not the whole database.
 2. **Vector store:** Delete the user's memories with `store.aforget_memory(...)` (or `POST /v1/store/memories/forget`), or with that system's own tooling for Qdrant.
 3. **Media store:** Delete uploaded files from cloud storage or local disk.
 

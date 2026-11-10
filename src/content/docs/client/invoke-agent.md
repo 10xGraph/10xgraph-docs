@@ -15,7 +15,7 @@ faq:
     answer: Pass an onPartialResult callback to invoke(). It fires after each iteration, telling you if tool calls were made and when the run completes.
 ---
 
-`client.invoke()` sends a message to your agent and waits for the final response. It handles multiple tool calls automatically, returns full state information, and supports persistent threads so conversations can span multiple API calls. This guide walks you through the core operations.
+`client.invoke()` sends a message to your agent and waits for the final response. It handles multiple tool calls automatically, returns full state information, and supports persistent threads so conversations can span multiple API calls. The call runs under the caller's identity, so a thread belongs to the user whose token sent it. This guide walks you through the core operations.
 
 ## Prerequisites
 

@@ -1,11 +1,11 @@
 ---
-title: "Why 10xGraph: you build the agent, we ship the server"
+title: "Why 10xGraph: you write the AI logic, it runs the infrastructure"
 seoTitle: "Production AI agent API server in Python"
-description: "You write the agent. 10xGraph generates a secure, scalable, production-ready API server around it, and every part (auth, access, limits) is replaceable."
+description: "You write the agents, tools and tasks. 10xGraph runs them behind an API server with auth, role-based access, tenant isolation, durable state, jobs, metrics and deploy files, and every part is replaceable."
 section: "Get started"
 order: 10
 label: Why 10xGraph
-updated: "2026-10-28"
+updated: "2026-11-10"
 faq:
   - q: "What do I have to write myself?"
     a: "Your graph (agents, tools, state) and a 10xgraph.json file that points at it. The server, endpoints, authentication, access control, rate limits, concurrency control, health checks, Dockerfile and Kubernetes manifest come from 10xGraph."
@@ -14,14 +14,14 @@ faq:
   - q: "Does the server scale horizontally?"
     a: "Yes, once state is outside the process: use a durable checkpointer such as PgCheckpointer and set REDIS_URL. Thread locks, rate limits, per-user run caps, WebSocket caps and token revocation then work across every worker and replica."
   - q: "Is it secure by default?"
-    a: "The server refuses to start if any route lacks a permission guard, and production mode refuses wildcard CORS and hosts, short JWT secrets and public API docs. Threads are owner-only, and client input is stripped of reserved keys and forged assistant or system turns."
+    a: "The server refuses to start if any route lacks a permission guard, and production mode refuses wildcard CORS and hosts, short JWT secrets and public API docs. Authentication itself is off until you set the auth key (the production template turns it on). With auth on, threads default to owner-only access (reach own), and client input is stripped of reserved keys and forged assistant or system turns."
   - q: "Can I add my own FastAPI routes to the server?"
     a: "Not as a supported API today. Run your own FastAPI service next to it and call the 10xGraph server over HTTP, or use the TypeScript client."
 ---
 
 Most agent frameworks stop at the graph. The moment you want real users, you start a second project: a FastAPI wrapper, authentication, per-user data isolation, rate limits, concurrency control for parallel requests on the same conversation, health checks, a Docker image, Kubernetes manifests, graceful shutdown. That second project is where most agent prototypes stall.
 
-**10xGraph's claim is simple: you build the agent, and 10xGraph builds the production server around it.** The server is secure by default, scales horizontally, and is ready to deploy. Every part of it is replaceable when the default does not fit your stack.
+10xGraph is open-source, self-hosted infrastructure for AI applications. **You write the agents, tools and tasks, and 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files.** The server is hardened by default, scales horizontally, and is ready to deploy. Authentication is off until you configure it, and the production template turns it on. Every part is replaceable when the default does not fit your stack.
 
 The server, the `10xgraph` CLI and a ready-made playground come with it. `10xgraph dev` starts the server and opens the playground in your browser, so your first run needs no frontend code.
 
@@ -36,12 +36,19 @@ You write two things: a compiled graph and a config file.
 from tenxgraph.prebuilt.agent import ReactAgent
 from tenxgraph.storage.checkpointer import PgCheckpointer
 
-def get_weather(city: str) -> str:
-    """Return the current weather for a city."""
-    return f"It is sunny in {city}."
+def lookup_order(order_id: str) -> dict:
+    """Look up an order by id and return its status and total."""
+    return {"order_id": order_id, "status": "delivered", "total": 59.0}
+
+def refund_order(order_id: str, amount: float) -> str:
+    """Refund an order. This moves money, so it must run once per request."""
+    return f"Refunded {amount:.2f} for order {order_id}"
 
 checkpointer = PgCheckpointer(postgres_dsn="postgresql://...", redis_url="redis://...")
-app = ReactAgent(model="claude-sonnet-5-5", tools=[get_weather]).compile(checkpointer=checkpointer)
+app = ReactAgent(
+    model="claude-sonnet-5-5",
+    tools=[lookup_order, refund_order],
+).compile(checkpointer=checkpointer)
 ```
 
 ```json
@@ -63,19 +70,21 @@ Then run `10xgraph dev` locally, or `10xgraph build --docker-compose --k8s` for 
 | File uploads | Upload, download and signed URLs under `/v1/files`, with size and type limits |
 | AG-UI | `POST /v1/ag-ui` for CopilotKit and other AG-UI clients (opt-in) |
 | Health | `/ping` for liveness, `/health/ready` for readiness (checks checkpointer, store and cache store) |
-| Security | Auth, scoped authorization, owner-only threads, token revocation, rate limits, security headers, size limits |
+| Security | Auth (when configured), role-based access with own, tenant or all reach, token revocation, rate limits, security headers, size limits |
+| Background jobs | `10xgraph worker` and `10xgraph scheduler`, `/v1/tasks` routes ([Background tasks](/docs/server/background-tasks)) |
+| Metrics | Prometheus scrape or OTLP push ([Metrics guide](/docs/guides/metrics-prometheus-grafana)) |
 | Deployment | Hardened Dockerfile, Docker Compose file, Kubernetes manifest |
 | Tooling | Playground, config editor, `test`, `eval` and `audit` commands |
 
-## Claim 1: secure by default
+## Claim 1: hardened by default
 
-Security is not a checklist you finish later. These protections are on unless you turn them off:
+Security is not a checklist you finish later. These protections are on unless you turn them off. One exception matters: **authentication is off until you set the `auth` key**, so a server started with `auth` unset is open, even with `MODE=production`. The production template (`10xgraph init --template production`) turns auth on. See [Limits](/docs/production/limits).
 
 - **No unguarded routes.** Every route declares the permission it needs. At startup the server checks every route and refuses to boot if one is missing its guard.
 - **Authentication.** Built-in JWT (`"auth": "jwt"`) verifies the signature, requires `exp` and `user_id`, and checks `iss` and `aud` when you set them. In production, a JWT secret under 32 bytes stops the server from starting.
-- **Owner-only threads.** With auth on, a conversation thread belongs to the user who created it. Another user cannot read, run, stop or delete it: the thread answers 404 because every query is scoped to the caller.
+- **Owner-only threads by default.** With auth on, a conversation thread belongs to the user who created it. Another user cannot read, run, stop or delete it: the thread answers 404 because every query is scoped to the caller. A role can widen reads, lists, deletes and stop to its tenant or to all users (`reach`); runs and writes always stay with the owner.
 - **Scoped permissions.** Every route maps to a permission such as `graph:invoke` or `threads:delete`. Tokens that carry `scope` or `scopes` are limited to them. Role-based access is one config block away: see [authentication and authorization](/docs/server/auth).
-- **Token revocation.** Revoke a single token or every token a user holds, backed by Redis. If the revocation store is unreachable, requests fail closed with 503.
+- **Token revocation.** Revoke a single token or every token a user holds, kept in the cache store (Redis for more than one worker). If the revocation store is unreachable, requests fail closed with 503.
 - **Hardened input.** Clients can only send user messages; forged assistant or system turns are refused. Reserved config keys (`user_id`, `user`, timeouts and others) are stripped, message ids are regenerated server-side, and external media URLs pass an SSRF guard.
 - **Production guards.** In production mode the server refuses to start with wildcard CORS origins, wildcard allowed hosts or public API docs.
 - **Security headers and size limits.** HSTS, CSP, frame, content-type and referrer headers on every response. Request bodies over 10 MiB (25 MB for uploads) are rejected with 413, including chunked bodies.
@@ -102,13 +111,13 @@ To scale out, you need a durable checkpointer (`PgCheckpointer`), `REDIS_URL`, a
 
 ## Claim 3: production-ready
 
-- **One switch between dev and production.** `MODE=production` turns off debug and API docs, enforces the strict checks above, defaults to owner-only access, adds a 300-second run timeout, and hides graph introspection behind a scope. The same image runs in both modes.
+- **One switch between dev and production.** `MODE=production` turns off debug and API docs, enforces the strict checks above, and adds a 300-second run timeout unless you set `runs.timeout`. The same image runs in both modes.
 - **Graceful shutdown.** On SIGTERM the server calls `graph.aclose()` (active runs finish, are stopped or are cancelled, each saved; background work such as event publishing and checkpoint writes is drained), then releases Redis, rate-limit and revocation clients. The readiness probe answers 503 from the moment SIGTERM arrives, so the load balancer stops sending new requests. The generated image gives in-flight runs up to 600 seconds to finish (open streams end with an "interrupted" chunk before that), and the Kubernetes manifest sets a longer termination grace period and a `preStop` delay. A run that is cut off leaves a thread the next message can use. See [Graceful shutdown](/docs/guides/graceful-shutdown).
-- **Replay-safe tools.** After a crash, the run resumes and completed tool calls are not executed again, so a payment tool does not charge twice. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
+- **Replay-safe tools.** After a crash, the run resumes and a tool call whose record was written is not executed again. The record is written when the tool returns, so a crash before the tool returns, or in the short gap before the record is written, can repeat the tool. Send an idempotency key derived from stable inputs (an order id) to payment and email providers. See [Replay-safe tools](/docs/concepts/replay-safe-tools) and [Tools run at least once](/docs/production/limits#tools-run-at-least-once).
 - **Hardened containers.** Multi-stage Docker build, non-root user (uid 10001), pip removed from the runtime image, health check built in. The Kubernetes manifest runs with a read-only root filesystem, dropped capabilities, `seccomp` and no service account token.
-- **Observability.** OpenTelemetry tracing (`OTEL_ENABLED`), Sentry error reporting (`SENTRY_DSN`, no PII, 5xx only), and Logfire or LangSmith through the `observability` config block. Every response carries an `X-Request-ID`.
+- **Observability.** OpenTelemetry tracing (`OTEL_ENABLED`), Sentry error reporting (`SENTRY_DSN`, no PII, 5xx only), and Logfire, LangSmith or Phoenix through the `observability` config block. Prometheus metrics come from the `metrics` block, by scrape or OTLP push. `LOG_FORMAT=json` writes structured logs, and the `audit` block writes an audit log of access decisions (metadata only; 10xGraph stores no audit data). Every response carries an `X-Request-ID`. See [Observability](/docs/server/observability).
 - **Checks before you ship.** `10xgraph audit` validates your environment and config and exits non-zero on failure, so it works as a CI gate. `10xgraph test` runs your tests with coverage thresholds, and `10xgraph eval` runs agent evaluations with a pass-rate gate.
-- **Scaffolded for production.** `10xgraph init --template production` generates an auth class, prompt-injection validators, lifecycle hooks, tests, evals and a production `10xgraph.json` with Redis-backed rate limits.
+- **Scaffolded for production.** `10xgraph init --template production` generates an auth class, prompt-injection validators, lifecycle hooks, tests, evals and a production `10xgraph.json` with auth on and a Redis-backed cache store for rate limits and token revocation.
 
 ## Customize every part
 
@@ -117,10 +126,10 @@ Defaults are there to get you to production quickly, not to lock you in. Each pa
 | Part | Default | Replace it with | How |
 |---|---|---|---|
 | Authentication | Off, or built-in JWT | Any identity provider or API keys | Subclass `BaseAuth`; `"auth": {"method": "custom", "path": "auth.my_auth:MyAuth"}` |
-| Authorization | Owner-only threads, default permission set | Roles with permissions and reach, or your own rules | `roles` inside the `auth` object, or override `BaseAuth.authorize` |
-| Token revocation | Off | Kept in the API's cache store (Redis, memory or your own) | `"token_revocation": true` plus `redis` or `cache_store` |
-| Rate limiting | Off | Counters in the API's cache store (memory, Redis or your own) | `rate_limit` block plus `redis` or `"cache_store": "module:attr"` |
-| Shared state (locks, caps, idempotency) | One process | Redis, Valkey, Dragonfly, KeyDB or your own `BaseCacheStore` | `redis`, `REDIS_URL` or `cache_store`; see [Bring your own backend](/docs/server/bring-your-own-backend) |
+| Authorization | Default permission set with reach own (owner-only threads) | Roles with permissions and reach, or your own rules | `roles` inside the `auth` object, or override `BaseAuth.authorize` |
+| Token revocation | Off | Kept in the API's cache store (Redis, memory or your own) | `cache_store.token_revocation` |
+| Rate limiting | Off | Counters in the API's cache store (memory, Redis or your own) | `cache_store.rate_limit` |
+| Shared state (locks, caps, idempotency) | One process | Redis, Valkey, Dragonfly, KeyDB or your own `BaseCacheStore` | `cache_store` (`type`, `url` or `REDIS_URL`); see [Bring your own backend](/docs/server/bring-your-own-backend) |
 | Persistence | In-memory checkpointer | Postgres + Redis, SQLite or your own | Pass it to `compile(checkpointer=...)` |
 | Long-term memory | None | `PgVectorStore`, Qdrant or your own `BaseStore` | `"store": "module:instance"` |
 | Events and tracing | None | Console, Redis, Kafka, RabbitMQ, OTel, Logfire, LangSmith | Bind a publisher, or use the `observability` block |
@@ -204,7 +213,7 @@ class TeamAccess(BaseAuth):
 
 A production claim is only useful if it is honest about its edges. Today:
 
-- **Metrics:** there is no Prometheus endpoint, and logs are plain text, not JSON. Use OpenTelemetry tracing and Sentry, or a publisher, for telemetry.
+- **Metrics and logs:** Prometheus metrics are opt-in through the `metrics` block (install `10xgraph-api[metrics]`), and logs are plain text unless you set `LOG_FORMAT=json`. Neither is on by default.
 - **Autoscaling:** the generated Kubernetes manifest has a fixed replica count. Add a HorizontalPodAutoscaler and an Ingress for your cluster.
 - **Per-tool permissions:** permissions apply per route, not per tool. Restrict tools with tool tags or separate graphs.
 - **Custom routes:** mounting the server into your own FastAPI app, or adding routes to it, is not a supported API. Run your own service alongside it.

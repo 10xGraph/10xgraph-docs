@@ -14,7 +14,7 @@ faq:
     a: "The endpoint is off by default. Enable it by setting ag_ui in 10xgraph.json with enabled true, install the ag-ui extra, and restart."
 ---
 
-AG-UI is an open event protocol that connects agent backends to chat frontends. The 10xGraph API server can speak AG-UI to serve agents over `/v1/ag-ui`, enabling frontends like CopilotKit that already understand the protocol. If you are building a custom frontend, the [TypeScript client](/docs/client) over `/v1/graph/stream` is the direct path. This guide covers the server side of AG-UI. For frontend integration with CopilotKit, see [10xGraph with CopilotKit](/docs/integrations/copilotkit). For complete endpoint and event documentation, see the [AG-UI endpoint reference](/docs/reference/rest-api/ag-ui).
+AG-UI is an open event protocol that connects agent backends to chat frontends. The API server can expose AG-UI at `/v1/ag-ui` (off by default), so chat frontends such as CopilotKit connect under the same authentication and permission checks as the other routes. If you are building a custom frontend, the [TypeScript client](/docs/client) over `/v1/graph/stream` is the direct path. This guide covers the server side of AG-UI. For frontend integration with CopilotKit, see [10xGraph with CopilotKit](/docs/integrations/copilotkit). For complete endpoint and event documentation, see the [AG-UI endpoint reference](/docs/reference/rest-api/ag-ui).
 
 ## Prerequisites
 

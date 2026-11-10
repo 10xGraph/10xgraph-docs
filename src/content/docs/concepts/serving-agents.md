@@ -190,7 +190,7 @@ class TenantAuth(BaseAuth):
         return await super().authorize(identity, permission, resource)
 ```
 
-Role tables go in the `auth` object (`roles`, `roles_claim`, `tenant_claims`). With `"auth": "jwt"` alone, every caller gets the default permission set and reach `own`: a user reads, runs, stops and fixes only their own threads, and another user's thread answers 404. A missing permission answers 403. See [Authentication and authorization](/docs/server/auth) for roles, reach and tenants.
+Role tables go in the `auth` object (`roles`, `roles_claim`, `tenant_claims`). With `"auth": "jwt"` alone, every caller gets the default permission set and reach `own`: a user reads, runs, stops and fixes only their own threads, and another user's thread answers 404. See [Tenancy and access](/docs/concepts/tenancy-and-access) for how reach and tenant columns fit together. A missing permission answers 403. See [Authentication and authorization](/docs/server/auth) for roles, reach and tenants.
 
 ## Rate limiting
 

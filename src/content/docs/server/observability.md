@@ -8,9 +8,22 @@ label: Observability
 updated: "2026-10-27"
 ---
 
-10xGraph provides multiple observability surfaces to monitor agent execution, debug issues, and track performance in production. Logs and metrics are built in; Sentry integration and tracing are optional. This page covers logs, metrics, secret redaction, Sentry setup, and the REST API endpoint to inspect run traces. For per-node spans in Logfire or LangSmith, see the link at the end.
+The API server gives you the signals an operator needs: application logs on stdout with a request id, an optional audit log, metrics, error tracking and tracing. Logs are on by default. Metrics are off until you add a `metrics` block to `10xgraph.json`. Sentry, the audit log and tracing are optional. This page covers logs, metrics, secret redaction, Sentry setup, and the REST API endpoint to inspect run traces. For per-node spans in Logfire or LangSmith, see the link at the end.
 
 Logs and metrics are independent of each other and of tracing: you can enable any combination, and a failure in one does not affect the others.
+
+## Logs
+
+The API server writes its application logs to stdout, with secrets redacted. Each request gets an id, returned in the `X-Request-ID` response header and attached to the log lines of that request.
+
+Set `LOG_FORMAT=json` to write every log line as one JSON object (time, level, logger, message, `request_id`, and `user_id` when known). The default is `text`. Use `json` in production so your log pipeline can parse and index the lines.
+
+```bash
+LOG_FORMAT=json
+LOG_LEVEL=INFO
+```
+
+Ship stdout to storage you retain and protect (Docker or Kubernetes logging, Fluent Bit, Vector, a SIEM). 10xGraph does not store logs. For a record of who accessed or changed which data, turn on the [audit log](/docs/server/audit-log).
 
 ## Structured logging
 

@@ -4,7 +4,7 @@ description: What 10xGraph does not do yet, which surfaces are incomplete, and w
 section: Project
 order: 30
 label: Roadmap
-updated: "2026-10-08"
+updated: "2026-11-10"
 ---
 
 This page is the honest inventory: things that are announced, half-built, or
@@ -22,7 +22,24 @@ issue: real demand reorders the list.
 
 ---
 
+## Shipping in 1.0
+
+These ship in 1.0. They are not in 1.0.0rc4; check the [changelog](/changelog) for the release candidate that includes each one.
+
+- **Background jobs, worker and scheduler.** `10xgraph worker`, `10xgraph scheduler`, the `/v1/tasks` routes and the `worker` config key, on a TaskIQ broker. See [Run background tasks with a worker](/docs/server/background-tasks).
+- **Audit log and JSON logs.** Metadata-only audit events (the `audit` config block) and `LOG_FORMAT=json`. 10xGraph writes the lines to stdout and stores nothing; your log pipeline keeps them. See [Audit log](/docs/server/audit-log).
+
+The [control mapping](/docs/production/control-mapping) lists what 10xGraph does and does not provide for SOC 2 and ISO 27001 audits. It is a docs page, not a product feature.
+
+---
+
 ## Not implemented yet
+
+### Per-tool permissions
+
+Permissions apply per route (for example `graph:invoke`), not per tool. A role cannot allow one tool and deny another.
+
+**Today:** restrict tools with tool tags or separate graphs, and check authorization inside the tool. See [authentication and authorization](/docs/server/auth).
 
 ### Agent-to-Agent (A2A) serving
 

@@ -1,14 +1,14 @@
 ---
 title: Get Started
 seoTitle: Get started with 10xGraph in Python
-description: "10xGraph is a production-grade Python framework for multi-agent AI systems. Install the library, build an agent, deploy the API server, and call it from TypeScript."
+description: "10xGraph is open-source, self-hosted infrastructure for AI applications. Install the library, build an agent, deploy the API server, and call it from TypeScript."
 section: "Get started"
 order: 20
 label: Get Started
 updated: "2026-10-27"
 ---
 
-You build the agent in Python. `10xgraph-api` serves it with authentication, per-user thread isolation, rate limits, durable state, replay-safe tools and Docker and Kubernetes files. A tool that finished before a crash is not run twice on replay. This section takes you from an empty folder to a secured, running server.
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow. A tool that finished before a crash is not run twice on replay, with the exceptions listed under [limits](/docs/production/limits#tools-run-at-least-once). The [Platform overview](/docs/production) lists everything the server handles. This section takes you from an empty folder to a secured, running server.
 
 ## How you work with 10xGraph
 

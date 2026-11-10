@@ -7,7 +7,7 @@ section: "API server"
 updated: "2026-10-27"
 ---
 
-10xGraph exposes two WebSocket endpoints: `/v1/graph/ws` for turn-based agent interactions and `/v1/graph/live` for realtime audio conversations. WebSockets keep a persistent connection open so the server can stream responses token-by-token, the client can resume from checkpoints, and (for realtime agents) both sides can exchange audio in near-real-time. Both endpoints support the same authentication, rate limiting, and concurrency controls as REST APIs.
+The API server offers two WebSocket endpoints, `/v1/graph/ws` for turn-based runs and `/v1/graph/live` for realtime audio. Both use the same token check and handshake rate limit as HTTP. WebSockets keep a persistent connection open so the server can stream responses token-by-token, the client can resume from checkpoints, and (for realtime agents) both sides can exchange audio in near-real-time. Both endpoints support the same authentication, rate limiting, and concurrency controls as REST APIs.
 
 WebSocket auth and connection limits are part of the [security model](/docs/production/security-model).
 

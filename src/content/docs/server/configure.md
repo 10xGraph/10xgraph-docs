@@ -168,7 +168,7 @@ A minimally secured production config looks like this:
 - With auth on, threads, memories and files are private to their owner by default (reach `own`). A thread outside the caller's reach answers 404. With the default `runs.thread_ids` of `"server"`, ids the server did not create are refused too (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)). Add `auth.roles` to grant fewer permissions or a wider reach. The old `authorization` key is removed and refuses to boot.
 - `"cache_store": {"type": "redis"}` gives the API a Redis cache store, which shares the rate limit (and the run locks, caps and revocations) across all replicas. Without it the counters live in each process, so three replicas allow three times the configured limit, which is unsuitable for production.
 
-## Choose the cache store
+## Choose the cache store (rate limits, run locks, token revocation)
 
 The API keeps everything it shares between workers in one **cache store**: the per-thread run lock, run and WebSocket caps, idempotency state, token revocation and rate-limit counters. One `cache_store` object picks it and also holds the two settings the store backs, `rate_limit` and `token_revocation`:
 
@@ -192,7 +192,7 @@ The API keeps everything it shares between workers in one **cache store**: the p
 
 Leave out `url` to read `REDIS_URL`. `REDIS_URL` alone never selects Redis: a setup with no `cache_store` uses the in-memory store even when the variable is set. Top-level `redis`, `rate_limit` and `token_revocation` keys do not exist; a config that has one stops at load with an error that says where the setting goes.
 
-The server logs one INFO line at boot that names the store and the config key it came from. Valkey, Dragonfly and KeyDB work through the Redis URL. With an in-memory store, each replica keeps its own locks, caps and view of which user owns each thread, so use a shared store once you run more than one worker.
+The server logs one INFO line at boot that names the store and the config key it came from. Valkey, Dragonfly and KeyDB work through the Redis URL. With an in-memory store, each replica keeps its own locks, caps, rate-limit counters and token revocations, so use a shared store once you run more than one worker.
 
 ## What is on by default
 

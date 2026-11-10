@@ -14,7 +14,7 @@ faq:
     answer: "Yes. Create the client once at module level and import it wherever needed. Sharing a single instance reduces memory overhead and enables consistent request handling."
 ---
 
-The `10xgraph-client` TypeScript package lets you invoke agents and manage threads from Node.js, browsers, and frameworks like React and Next.js. This guide shows how to install, configure, and authenticate the client for your 10xGraph API server.
+`10xgraph-client` is the typed, authenticated connection from your app to a 10xGraph API server: REST, streaming, WebSocket, threads, files and memory. It runs in Node.js, browsers and frameworks like React and Next.js. This guide shows how to install, configure, and authenticate the client for your 10xGraph API server.
 
 ## Prerequisites
 

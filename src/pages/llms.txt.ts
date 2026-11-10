@@ -9,13 +9,13 @@ export const GET: APIRoute = async () => {
   const out: string[] = [
     `# ${SITE.name}`,
     '',
-    `> ${SITE.name} is an open-source Python framework for production multi-agent AI. You write the agent, and ${SITE.name} generates the production server around it: authentication, scoped access control, owner-only threads, rate limits, and Docker and Kubernetes deployment. Memory has two tiers, with hot data in a Redis cache and cold data in PostgreSQL. MIT licensed, made by ${SITE.org.name}. Formerly named ${SITE.formerName}.`,
+    `> ${SITE.name} is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; ${SITE.name} runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by ${SITE.org.name}. Formerly ${SITE.formerName}.`,
     '',
     `Current version: ${SITE.version}. Install: \`pip install 10xgraph 10xgraph-api\`. Source: ${SITE.github}`,
     '',
-    `Start here: [Why ${SITE.name}](${absolute(docMarkdownHref('get-started/why-10xgraph'))}) explains what the generated API server does (security, horizontal scaling, production defaults), how to replace each part (authentication, authorization, rate limits, storage), and its current limits.`,
+    `Start here: [Why ${SITE.name}](${absolute(docMarkdownHref('get-started/why-10xgraph'))}) explains what the generated API server does (security, horizontal scaling, production defaults), how to replace each part (authentication, authorization, rate limits, storage), and its current limits. The [Platform overview](${absolute(docMarkdownHref('production'))}) lists every concern the server handles.`,
     '',
-    `Learn from examples: [${SITE.name} examples](${absolute(docMarkdownHref('examples'))}) indexes 30 runnable examples, each with a code walkthrough and the full source of every file: getting started, tools and MCP, production features (graceful shutdown, resilience, human-in-the-loop, persistence, callbacks, observability), memory and RAG, multi-agent, testing and evaluation, two use cases and two full-stack apps ([RAG assistant](${absolute(docMarkdownHref('examples/rag-assistant'))}), [CopilotKit over AG-UI](${absolute(docMarkdownHref('examples/copilotkit-agui'))})).`,
+    `Learn from examples: [${SITE.name} examples](${absolute(docMarkdownHref('examples'))}) indexes 38 runnable examples, each with a code walkthrough and the full source of every file: getting started, tools and MCP, production features (graceful shutdown, resilience, human-in-the-loop, persistence, callbacks, observability), memory and RAG, multi-agent, testing and evaluation, two use cases and two full-stack apps ([RAG assistant](${absolute(docMarkdownHref('examples/rag-assistant'))}), [CopilotKit over AG-UI](${absolute(docMarkdownHref('examples/copilotkit-agui'))})).`,
     '',
   ];
   if (builds.length) {

@@ -379,11 +379,11 @@ Wire any of these in `10xgraph.json`. Auth (with its authorization rules), threa
 {
   "auth": { "method": "custom", "path": "auth.my_auth:ApiKeyAuth" },
   "thread_name_generator": "services.naming:DatePrefixNameGenerator",
-  "cache_store": "services.cache:store"
+  "cache_store": { "type": "custom", "path": "services.cache:store" }
 }
 ```
 
-The string format for class references is `module.path:ClassName` (dot-separated module path, colon, then the class or instance name). `cache_store` accepts an instance or a zero-argument factory (a class or function) that returns one.
+The string format for class references is `module.path:ClassName` (dot-separated module path, colon, then the class or instance name). `cache_store.path` accepts an instance or a zero-argument factory (a class or function) that returns one.
 
 ---
 

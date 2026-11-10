@@ -17,7 +17,7 @@ faq:
 
 ## The problem: long runs and short timeouts
 
-A typical agent invocation chains several operations: the client calls the server, the server awaits an LLM response (up to 10 minutes for some models), the LLM might trigger tool calls, tools execute, results return to the LLM, and the response streams back to the client. The entire request can stay open for 20 minutes or more.
+A typical agent invocation chains several operations: the client calls the server, the server awaits an LLM response (up to 10 minutes for some models), the LLM might trigger tool calls, tools execute, results return to the LLM, and the response streams back to the client. The entire request can stay open for 20 minutes or more. In production the server cancels a run after 300 seconds unless you set `runs.timeout` in `10xgraph.json`, so raise it to match your slowest runs.
 
 Kubernetes' default pod lifecycle is hostile to this. When you trigger a rolling deploy, the kubelet gives a pod 30 seconds to shut down gracefully before sending SIGKILL. If the app is still in an LLM call, the pod dies mid-request, and the client's stream breaks.
 

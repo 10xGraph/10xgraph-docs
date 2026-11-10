@@ -1,9 +1,9 @@
 ---
 title: Concepts
-description: Understand how 10xGraph works, from its three-layer architecture to request flow, the execution model, and production patterns.
+description: How 10xGraph runs your agents, tools and tasks behind an API server with auth, tenant isolation, durable state, background jobs and observability, and the graph model inside it.
 section: Concepts
 order: 1
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - q: "Do I need the API server and TypeScript client to use 10xGraph?"
     a: "No. The Python library works on its own, so you can run a compiled graph in a script or embed it in your own app. Add the API server to serve it over HTTP and the client to call it from a frontend."
@@ -11,16 +11,18 @@ faq:
     a: "A node is a function that does work and returns a message or state update. An edge connects two nodes and decides which one runs next, either always (static) or based on the state (conditional)."
 ---
 
-The Concepts section explains how 10xGraph works: the three-layer architecture (library, server, client), how a request flows from client through the server to your graph, the execution model (state, messages, nodes, edges), and advanced patterns for memory, reliability, and production deployments. Read this section to understand the mental model before building. To see what the server adds once your agent is built (auth, limits, durability, scaling), go to [Production](/docs/production).
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files.
 
-## Why graphs?
+This section explains both halves. Around your code sit the API server, [security and access](/docs/concepts/tenancy-and-access), [data and state](/docs/concepts/checkpointing-and-threads), [background jobs](/docs/concepts/background-jobs), [observability](/docs/concepts/events-and-observability) and deployment. Inside it is the agent model: a graph of nodes that share state and messages. Read the pages in either order. For what the server gives you once your agent is built (auth, limits, durability, scaling), go to [Platform](/docs/production).
+
+## Why a graph inside the platform?
 
 10xGraph uses a graph-based execution model instead of a linear pipeline or free-form function calls. This model gives you:
 
 - **Reproducibility**: The workflow is an explicit graph, so the same state takes the same route. Tool calls are [replay-safe](/docs/concepts/replay-safe-tools), so if a tool runs and the process crashes, resuming the same thread does not re-execute the finished call.
 - **Durability**: Intermediate state is [checkpointed](/docs/concepts/checkpointing-and-threads) at each step, so you can pause an agent for human approval, resume it later, and it continues from exactly where it left off.
 - **Observability**: Execution emits events you can stream, log, or send to tracing systems (see [Events and observability](/docs/concepts/events-and-observability)).
-- **Control**: You route between nodes using conditional logic you define, so complex multi-step and multi-agent workflows are explicit and testable.
+- **Control**: You route between nodes using conditional logic you define, so complex multi-step workflows, including multi-agent ones, are explicit and testable.
 - **Concurrency**: Tools run in parallel by default, and the graph engine scales across stateless servers with per-thread durability.
 
 ## Three-layer architecture
@@ -226,7 +228,7 @@ Calling `invoke` again with the same `thread_id` resumes that thread from its la
 
 ## What's in this section
 
-The Concepts section is organized into three groups:
+The Concepts section is organized into three groups. The platform group comes first because it covers what runs around your code.
 
 ### Foundations
 
@@ -241,6 +243,20 @@ Start here to understand the execution model in depth: state graphs, messages, a
 - [Dependency injection](/docs/concepts/dependency-injection): Why DI vs globals, and the injectable parameters you can request.
 - [Streaming](/docs/concepts/streaming): Python streaming granularity, why stream, and transport summary.
 
+### Platform: serving, access and operations
+
+What runs around your code: the API server, who may do what, tenant isolation, background jobs, the shared cache store, observability, media handling, and extensibility.
+
+- [Serving agents](/docs/concepts/serving-agents): How the API server loads graphs, request lifecycle, server processes, and config vs code.
+- [Tenancy and access](/docs/concepts/tenancy-and-access): Identity, roles, reach, tenant columns and row-level security.
+- [Background jobs](/docs/concepts/background-jobs): In-process tasks vs the TaskIQ worker and scheduler.
+- [Cache store](/docs/concepts/cache-store): Run locks, idempotency, revocation and rate-limit counters.
+- [Security and validators](/docs/concepts/security-and-validators): Input validation, authorization models, and reach.
+- [Events and observability](/docs/concepts/events-and-observability): The event model, publishers, metrics, and tracing.
+- [Remote tools](/docs/concepts/remote-tools): When to use remote tool execution.
+- [Media and files](/docs/concepts/media-and-files): Media refs, offload policies, storage backends, and provider file APIs.
+- [Extension points](/docs/concepts/extensibility): The base classes you can subclass: BaseAgent, BaseCheckpointer, BaseStore, BaseAuth, and more.
+
 ### Memory and reliability
 
 Build robust agents: checkpointing threads, long-term memory stores, context trimming, error handling, and tool replay safety.
@@ -252,23 +268,12 @@ Build robust agents: checkpointing threads, long-term memory stores, context tri
 - [Replay-safe tools](/docs/concepts/replay-safe-tools): How tool ledgers prevent duplicate execution on resume.
 - [Errors and limits](/docs/concepts/errors-and-limits): Exception types, recursion limits, timeouts, and retry policies.
 
-### Serving
-
-Production patterns: serving agents over HTTP, auth, observability, media handling, and extensibility.
-
-- [Serving agents](/docs/concepts/serving-agents): How the API server loads graphs, request lifecycle, workers, and config vs code.
-- [Security and validators](/docs/concepts/security-and-validators): Input validation, authorization models, and reach.
-- [Events and observability](/docs/concepts/events-and-observability): The event model, publishers, metrics, and tracing.
-- [Remote tools](/docs/concepts/remote-tools): When to use remote tool execution.
-- [Media and files](/docs/concepts/media-and-files): Media refs, offload policies, storage backends, and provider file APIs.
-- [Extension points](/docs/concepts/extensibility): The base classes you can subclass: BaseAgent, BaseCheckpointer, BaseStore, BaseAuth, and more.
-
 ## Recommended reading order
 
 1. **First read** (15 min): [StateGraph](/docs/concepts/state-graph) to see how the workflow engine chains nodes.
 2. **Then read** (30 min): [State and messages](/docs/concepts/state-and-messages), [Agents and tools](/docs/concepts/agents-and-tools), and [Streaming](/docs/concepts/streaming) to understand the execution model and granularity.
 3. **Go build** in the [Get started](/docs/get-started) section. Build a graph in Python, serve it with `10xgraph dev`, and call it from TypeScript. The tutorial is more hands-on.
-4. **Return here** to dive deeper: checkpointing, memory, context management, error handling, auth, observability.
+4. **Return here** to dive deeper into the platform: [tenancy and access](/docs/concepts/tenancy-and-access), [background jobs](/docs/concepts/background-jobs), [cache store](/docs/concepts/cache-store), checkpointing, memory, error handling and observability.
 
 ## Next steps
 

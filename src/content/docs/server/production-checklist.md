@@ -394,7 +394,7 @@ See [Backup and restore](/docs/server/backup-and-restore) for table-scoped dumps
 
 ### Logging
 
-Set `LOG_LEVEL=INFO` in production. The server generates a request ID per request and returns it in the `X-Request-ID` response header; log it on the client side to correlate with server logs.
+Set `LOG_LEVEL=INFO` and `LOG_FORMAT=json` in production, turn on the `audit` key (see [Audit log](/docs/server/audit-log)), and ship stdout to retained storage you control; 10xGraph does not keep logs. The [control mapping](/docs/production/control-mapping) shows which audit controls this covers. The server generates a request ID per request and returns it in the `X-Request-ID` response header; log it on the client side to correlate with server logs.
 
 ### Sentry error tracking
 
@@ -511,6 +511,8 @@ curl http://127.0.0.1:8000/ping
 - [Checkpointing and threads](/docs/concepts/checkpointing-and-threads)
 - [Set up checkpointing](/docs/guides/set-up-checkpointing)
 - [Observability](/docs/server/observability)
+- [Audit log](/docs/server/audit-log)
+- [Control mapping](/docs/production/control-mapping)
 - [Deploy](/docs/server/deploy)
 - [Production readiness](/docs/production)
 - [Security model](/docs/production/security-model)

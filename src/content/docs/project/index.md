@@ -5,10 +5,10 @@ description: "How 10xGraph is run: MIT license, maintained by 10xScale, with a c
 section: Project
 order: 10
 label: Overview
-updated: "2026-10-28"
+updated: "2026-11-10"
 ---
 
-This section covers 10xGraph as a project: who maintains it, how releases are announced, how to report a security problem, where to get help and how to contribute. It is MIT licensed, maintained by 10xScale, and at the 1.0 release candidate stage (1.0.0rc4, 2026-10-31) after its October 2026 rename from Agentflow.
+This section covers 10xGraph as a project: who maintains it, how releases are announced, how to report a security problem, where to get help and how to contribute. It is MIT licensed, maintained by 10xScale, and at the 1.0 release candidate stage (1.0.0rc4: `10xgraph` released 2026-10-31, `10xgraph-api` released 2026-11-01) after its October 2026 rename from Agentflow.
 
 ## Start here
 
@@ -29,7 +29,7 @@ If you plan to upgrade across a breaking change, [Upgrade to 1.0](/docs/project/
 
 ## At a glance
 
-- **License:** MIT, for the framework, the CLI, and the client. No paid tier and
+- **License:** MIT, for the framework, the API server and CLI, and the client. No paid tier and
   no hosted-service requirement.
 - **Maintainer:** [10xScale](https://10xscale.ai), which runs 10xGraph in
   production across its own products.

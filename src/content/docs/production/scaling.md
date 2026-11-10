@@ -4,19 +4,19 @@ seoTitle: "Scaling and reliability for a 10xGraph agent"
 description: What Redis shares across API workers, how workers and IDs scale, what is replay-safe, how the server behaves when Redis or Postgres is down, and its honest limits.
 section: Production
 order: 30
-updated: "2026-10-28"
+updated: "2026-11-10"
 faq:
   - q: "Do I need Redis to run more than one worker?"
     a: "You can run without it, but the per-thread run lock, the per-user run cap, WebSocket caps, idempotency, rate limits and token revocation then live in each process (the in-memory cache store). A cap of 10 across 4 workers becomes up to 40. Configure Redis, or your own cache store, for any multi-worker deployment."
   - q: "What happens if Redis goes down?"
-    a: "Rate limiting follows rate_limit.fail_open (default true: requests are allowed; false answers 503 RATE_LIMIT_UNAVAILABLE). The run lock, run cap, WebSocket caps and idempotency fail open. Token revocation fails closed with a 503. The readiness probe reports the cache store as failed, and returns 503 only when token revocation or a fail-closed rate limit uses it."
+    a: "Rate limiting follows cache_store.rate_limit.fail_open (default true: requests are allowed; false answers 503 RATE_LIMIT_UNAVAILABLE). The run lock, run cap, WebSocket caps and idempotency fail open. Token revocation fails closed with a 503. The readiness probe reports the cache store as failed, and returns 503 only when token revocation or a fail-closed rate limit uses it."
   - q: "What happens if Postgres goes down?"
     a: "Runs that need the checkpointer fail, and GET /health/ready returns 503 so an orchestrator takes the pod out of rotation. Liveness (/ping) stays up."
   - q: "Is there a queue for long runs?"
-    a: "No. A run executes in the worker that received the request, bounded by runs.timeout. Size workers and the graceful timeout for your longest run."
+    a: "An interactive run (invoke or stream) executes in the API worker that received the request, bounded by runs.timeout. For work that should outlive a request, enqueue a background job: the API sends it to a TaskIQ broker and a separate 10xgraph worker process runs it. Scale the job workers independently of the API."
 ---
 
-You scale a served 10xGraph agent by running more stateless API workers behind a load balancer, with Postgres for durable state and a shared cache store (Redis by default) for the things workers must share: locks, caps, rate limits and caches. Without one, those features still work but count per process. This page lists exactly what the cache store shares, how reliability works under failure, and where the limits are. For the request path and state layers, read [Architecture](/docs/production/architecture) first.
+You scale a served 10xGraph agent by running more stateless API workers behind a load balancer, with Postgres for durable state and a shared cache store (Redis by default) for the things workers must share: locks, caps, rate limits and caches. Work that should not hold a request open goes to a separately scaled job worker tier. Without a shared cache store, the locks and caps still work but count per process. This page lists exactly what the cache store shares, how reliability works under failure, and where the limits are. For the request path and state layers, read [Architecture](/docs/production/architecture) first.
 
 ## What the cache store shares across workers
 
@@ -38,6 +38,10 @@ The leases expire on their own, so a crashed worker cannot hold a thread or a us
 `10xgraph build` generates a Dockerfile that runs Gunicorn with Uvicorn workers. The worker count comes from `WEB_CONCURRENCY`, set to `2` in the image; override it at deploy time, for example `-e WEB_CONCURRENCY=8`. The image runs `TenxGraphUvicornWorker` and sets a graceful timeout of 600 seconds and a worker timeout of 660 seconds, because an agent run can last minutes and the default 30 seconds would kill runs during a rolling deploy. With `--k8s`, the generated manifest sets `terminationGracePeriodSeconds` above that and a `preStop` sleep so the load balancer stops sending new traffic first.
 
 Each in-flight run holds a connection open and waits on model calls, so size and autoscale on concurrent runs, not CPU alone. Choose the worker count and the per-user cap together: without a shared cache store the cap is per worker.
+
+## Job workers
+
+If you use [background jobs](/docs/server/background-tasks), run `10xgraph worker` as its own deployment next to the API workers, and one `10xgraph scheduler` process if you use schedules. Job workers are stateless like the API workers: they load the same graph, checkpointer, store and cache store, and take tasks from the TaskIQ broker (Redis Streams, RabbitMQ or Kafka). Scale them on queue depth and task duration, not on request rate, and size their count and the API's count separately. Delivery is at least once, so a task whose worker dies can run again on another worker; write tasks so a rerun is safe. The `worker` key in `10xgraph.json` sets the broker and options.
 
 ## Snowflake IDs
 
@@ -63,7 +67,7 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 
 | Failure | What happens |
 |---|---|
-| Redis down: rate limit | Follows `rate_limit.fail_open`. Default `true` allows the request; set `false` to answer `503` `RATE_LIMIT_UNAVAILABLE` with `Retry-After: 5`. |
+| Redis down: rate limit | Follows `cache_store.rate_limit.fail_open`. Default `true` allows the request; set `false` to answer `503` `RATE_LIMIT_UNAVAILABLE` with `Retry-After: 5`. |
 | Redis down: run lock, run cap, WebSocket caps, idempotency | Fail open. The request proceeds and the error is logged, because refusing every request would be an outage of its own. The Postgres version check still protects state. |
 | Redis down: ownership | Falls back to the checkpointer lookup in the database. A request is never failed by the cache. |
 | Redis clock | Lease expiry for the run cap uses the Redis clock (`TIME`), not each pod's own, so clock skew between pods cannot trim a live lease. |
@@ -75,7 +79,7 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 
 ## Honest limits
 
-- Runs execute in the worker that received the request. There is no separate queue or worker tier, so a long run ties up that worker's connection and a deploy waits on the graceful timeout.
+- Interactive runs execute in the API worker that received the request, so a long run ties up that worker's connection and a deploy waits on the graceful timeout. Move work that must outlive a request to a job worker.
 - A tool can still run twice if a run crashes in the short gap between the tool finishing and its ledger record being written, or if the run was cut off while the tool was running. Use idempotency keys for tools with side effects.
 - With the in-memory cache store, every cap and lock in the table above is per process.
 - There are no published benchmarks for throughput or latency. Load-test your own graph, model and tools.

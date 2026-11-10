@@ -1,0 +1,43 @@
+---
+title: What Is Multi-Tenancy?
+seoTitle: "What is multi-tenancy in an AI application?"
+description: Multi-tenancy means one deployment serves many organizations while keeping each one's data apart. See tenant columns, reach and how 10xGraph isolates tenants.
+section: Glossary
+order: 140
+label: What is multi-tenancy?
+updated: "2026-11-10"
+faq:
+  - q: Is multi-tenancy the same as user isolation?
+    a: No. User isolation separates one person's threads from another's. Multi-tenancy adds a group level, such as an organization or project, so many users in one tenant can share data that other tenants cannot see.
+  - q: Is 10xGraph multi-tenant out of the box?
+    a: No. By default a caller reaches only their own data. You declare tenant columns on the checkpointer and store and map tenant claims in auth, and isolation then applies to those columns.
+  - q: Do I need row-level security for multi-tenancy?
+    a: No. The storage filter is always on once tenant columns are declared. Postgres row-level security is an opt-in second layer.
+---
+
+**Multi-tenancy means one deployment serves many organizations, called tenants, while each tenant's data stays invisible to the others.** An AI application stores conversations, memories and files. If those live in shared tables, a missing filter in one query is enough to show one customer another customer's data.
+
+## Why does it matter for agents?
+
+Agents read and write data on every turn, and tools and retrieval can touch several stores in one run. The tenant boundary has to hold in all of them, and it has to come from the verified identity, never from a request field or model output a caller can influence.
+
+## How does 10xGraph do it?
+
+- **Tenant claims.** `auth.tenant_claims` names the token claims that identify the tenant, such as `org_id`. A token without them is rejected.
+- **Tenant columns.** You declare matching columns on `PgCheckpointer` and `PgVectorStore`. Their values are filled only from the verified identity.
+- **Reach.** A role's reach is `own`, `tenant` or `all`. `tenant` matches every user who shares the caller's tenant values.
+- **Storage filtering.** Every query is filtered in storage, and data outside the caller's reach answers 404.
+- **Row-level security.** Optional Postgres RLS enforces the same columns inside the database.
+
+Multi-tenancy is not on by default. Declare the columns before you store tenant data, and backfill older rows.
+
+## Next steps
+
+<CardGrid>
+
+<LinkCard title="Tenancy and access" href="/docs/concepts/tenancy-and-access" description="Identity, roles, reach and tenant columns." eyebrow="Concept" />
+<LinkCard title="Multi-tenant data" href="/docs/guides/multi-tenant-data" description="Declare tenant columns and row-level security." eyebrow="Guide" />
+<LinkCard title="Auth and authorization" href="/docs/server/auth" description="Roles, reach and tenant claims." eyebrow="Guide" />
+<LinkCard title="Thread isolation" href="/docs/glossary/what-is-thread-isolation" description="The per-user layer underneath." eyebrow="Glossary" />
+
+</CardGrid>

@@ -16,7 +16,7 @@ faq:
     answer: "Auto-reload is enabled by default in development. Files are watched and the server reloads when any Python file changes. Disable it with --no-reload."
 ---
 
-The `10xgraph dev` command starts a FastAPI-based development HTTP server that loads your graph and exposes it over REST and WebSocket. This guide covers running the server for development and production, configuring it, and troubleshooting deployment issues.
+`10xgraph dev` runs the same API server that production runs, locally, with reload on. This page covers running it for development and in production. This guide covers running the server for development and production, configuring it, and troubleshooting deployment issues.
 
 For a production setup see the [production checklist](/docs/server/production-checklist); stopping the server without losing runs is covered in [Graceful shutdown](/docs/guides/graceful-shutdown).
 

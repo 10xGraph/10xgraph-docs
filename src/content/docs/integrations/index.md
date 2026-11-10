@@ -7,7 +7,7 @@ label: Overview
 updated: "2026-10-27"
 ---
 
-10xGraph integrations help you connect agent graphs to the stack you already run: your LLM provider, backend framework, data store, and observability tools. The core library is provider-agnostic and supports optional integrations for persistence, memory, messaging, and tracing. This section covers what the library includes and how to wire each integration into your system.
+10xGraph integrations connect the API server to the stack you already run: your LLM provider, backend framework, Postgres and Redis, and observability tools. The core library is provider-agnostic and supports optional integrations for persistence, memory, messaging, and tracing. This section covers what the library includes and how to wire each integration into your system.
 
 ## What you get
 
@@ -19,7 +19,7 @@ updated: "2026-10-27"
 
 **Storage and memory.** Persist thread state to PostgreSQL with Redis as a hot cache, use SQLite for local development, or keep everything in memory for tests. Long-term memory integrations (PgVectorStore, Qdrant) store facts across sessions for your agents to retrieve.
 
-**Observability and debugging.** Publish execution events to Redis, Kafka, or RabbitMQ. Send traces to OpenTelemetry, Logfire, or LangSmith. The API server logs all requests and can redact secrets.
+**Observability and debugging.** Publish execution events to Redis, Kafka, or RabbitMQ. Send traces to OpenTelemetry, Logfire, or LangSmith. The API server writes application logs to stdout with secrets redacted and a request id on each request, and can write JSON logs and an audit log.
 
 ## Organize your reading
 

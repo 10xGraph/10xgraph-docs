@@ -16,7 +16,7 @@ faq:
     answer: "Long-lived HTTP connections for agent streams benefit from Node's socket handling. Edge runtime has strict timeout limits and may not support streaming in all configurations."
 ---
 
-A Python agent backend running 10xGraph plus a Next.js frontend is the most common production stack. The typed TypeScript client is built for this pattern, letting you securely stream agent responses to React components without exposing credentials to the browser.
+This page shows how to call a 10xGraph server from Next.js without putting the server secret in the browser. The typed TypeScript client is built for this pattern, letting you securely stream agent responses to React components without exposing credentials to the browser.
 
 ## Architecture
 

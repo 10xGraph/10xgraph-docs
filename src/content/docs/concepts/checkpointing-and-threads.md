@@ -26,7 +26,7 @@ config = {
 }
 ```
 
-`thread_id` is the primary key for all state, message, and metadata operations. `user_id` scopes thread ownership in a multi-tenant deployment. `PgCheckpointer` enforces it by default (`enforce_user_isolation=True`), so one user cannot read another's threads; the other checkpointers enforce owner-only access only when the API server's authorization policy asks for it. In a multi-tenant deployment you can also declare `tenant_columns` (for example `org_id`) on `PgCheckpointer`, so isolation matches on those columns as well as `user_id`; see [Multi-tenant data](/docs/guides/multi-tenant-data). Each user can have many threads; each thread persists independently until explicitly deleted. When you call the compiled graph from Python, you choose the `thread_id`. Behind the API server, the server picks the id of a new thread (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)), and clients send it back to continue.
+`thread_id` is the primary key for all state, message, and metadata operations. `user_id` scopes thread ownership in a multi-tenant deployment. `PgCheckpointer` enforces it by default (`enforce_user_isolation=True`), so one user cannot read another's threads; the other checkpointers scope by the caller's identity (`config["user"]`, which the API server sets when auth is on) and follow its reach (`own`, `tenant` or `all`). In a multi-tenant deployment you can also declare `tenant_columns` (for example `org_id`) on `PgCheckpointer`, so isolation matches on those columns as well as `user_id`; see [Multi-tenant data](/docs/guides/multi-tenant-data). Each user can have many threads; each thread persists independently until explicitly deleted. When you call the compiled graph from Python, you choose the `thread_id`. Behind the API server, the server picks the id of a new thread (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)), and clients send it back to continue.
 
 ## How checkpointing works
 
@@ -92,7 +92,7 @@ checkpointer = InMemoryCheckpointer()
 app = graph.compile(checkpointer=checkpointer)
 ```
 
-All data is lost when the process exits. Owner-only access applies only when the API server's authorization policy requests it.
+All data is lost when the process exits. Access is scoped by the caller's identity and reach only when `config["user"]` is set, as the API server does when auth is on.
 
 **Pros:** Zero setup, no external dependencies, fast for development.
 
@@ -116,7 +116,7 @@ Data survives process restarts because it is written to disk. However, SQLite se
 
 **Pros:** Durable, zero external dependencies (just a file), simple to deploy with a Python sidecar.
 
-**Cons:** Single-writer serialization, owner-only access only under an authorization policy, scales poorly across workers.
+**Cons:** Single-writer serialization, scoping by identity only when `config["user"]` is set, scales poorly across workers.
 
 **Best for:** client-side agents (desktop apps with Electron or Tauri), single-user CLI agents, edge deployments where each user has their own process and database.
 
