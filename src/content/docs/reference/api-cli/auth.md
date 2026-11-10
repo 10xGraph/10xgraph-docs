@@ -98,7 +98,7 @@ Set `JWT_MAX_TOKEN_AGE_SECONDS` to refuse tokens older than that many seconds, c
 
 | Status | `error_code` | Cause |
 |---|---|---|
-| 401 | `REVOKED_TOKEN` | No credential was presented (missing Authorization header, missing WebSocket auth, missing query param) |
+| 401 | `INVALID_TOKEN` | No credential was presented (missing Authorization header, missing WebSocket auth, missing query param) |
 | 401 | `EXPIRED_TOKEN` | Token `exp` is in the past, or the token is older than `JWT_MAX_TOKEN_AGE_SECONDS` by its `iat` |
 | 401 | `INVALID_TOKEN` | Signature or structure is invalid, `user_id` is missing or malformed, or a `scope` or `scopes` claim has the wrong type |
 | 401 | (message "Invalid token, please login again") | A configured `tenant_claims` claim is missing, or the roles or permissions claim is malformed |

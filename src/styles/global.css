@@ -120,6 +120,7 @@ code, pre { font-family: var(--f-mono); }
   .search-trigger, .theme-toggle { flex: none; }
 }
 /* Phones: GitHub stays in the footer, so the header keeps room for search and the theme toggle. */
+@media (max-width: 1023.98px) { .site-header nav li.nav-wide { display: none; } }
 @media (max-width: 480px) { .site-header nav li:last-child { display: none; } }
 @media (max-width: 360px) { .site-header nav a { padding: 0 6px; } .wordmark span { display: none; } }
 

@@ -92,6 +92,8 @@ Tasks are TaskIQ tasks, so everything in TaskIQ works. What 10xGraph adds:
 - Progress is TaskIQ's `ProgressTracker`.
 - `TaskCancelled` is the error a task cancelled before it started returns to the caller.
 
+An argument typed as a pydantic model is not guaranteed to arrive as one. TaskIQ parses each argument against its type hint, and when parsing fails it logs a warning and passes the raw value (a dict) to your task, which then fails later, for example with `AttributeError`. Tip: call `Model.model_validate(arg)` at the top of the task to fail fast with a clear error.
+
 The task name is the `task_name` you set, here `make_report`. Without it TaskIQ uses `<module>:<function>` (`app.tasks:make_report`).
 
 ## Run the worker and the scheduler

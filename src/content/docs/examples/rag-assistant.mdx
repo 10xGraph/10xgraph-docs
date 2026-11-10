@@ -430,7 +430,7 @@ Two kinds of messages matter. Tool messages carry the `search_docs` JSON, which 
 #### `backend/Dockerfile`
 
 ```dockerfile
-CMD ["gunicorn", "-k", "uvicorn_worker.UvicornWorker", "-b", "0.0.0.0:8000", "--graceful-timeout", "600", "--timeout", "660", "tenxgraph_api.src.app.main:app"]
+CMD ["gunicorn", "-k", "uvicorn_worker.UvicornWorker", "-b", "0.0.0.0:8000", "--graceful-timeout", "600", "--timeout", "660", "--no-control-socket", "tenxgraph_api.src.app.main:app"]
 ```
 
 The image has two stages. The builder installs `requirements.txt` into a virtualenv, adds gunicorn and uvicorn-worker, and strips CLI-only assets. The runtime stage copies only the virtualenv and your code, runs as non-root uid 10001, defaults to `MODE=production` and `WEB_CONCURRENCY=2`, and has a Python-based health check on `/ping`. Gunicorn's graceful timeout is 600 seconds so a long agent run is not cut off during a deploy.
@@ -1537,7 +1537,7 @@ RUN pip install -r requirements.txt
 
 # Production process manager: gunicorn supervising uvicorn workers. These are
 # not dependencies of 10xgraph-api, so the image installs them here.
-RUN pip install "gunicorn>=23,<27" "uvicorn-worker>=0.4,<1"
+RUN pip install "gunicorn>=25.1,<27" "uvicorn-worker>=0.4,<1"
 
 # Strip CLI-only assets the server never loads: project scaffolds, the bundled
 # agent skill, and the local config editor (HTML/JS). Only the server code and
@@ -1601,7 +1601,7 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 # graceful timeout is 30s, so on every rolling deploy SIGTERM would
 # hard-kill runs that were still mid-flight, truncating them. Give
 # in-flight runs time to finish draining instead.
-CMD ["gunicorn", "-k", "uvicorn_worker.UvicornWorker", "-b", "0.0.0.0:8000", "--graceful-timeout", "600", "--timeout", "660", "tenxgraph_api.src.app.main:app"]
+CMD ["gunicorn", "-k", "uvicorn_worker.UvicornWorker", "-b", "0.0.0.0:8000", "--graceful-timeout", "600", "--timeout", "660", "--no-control-socket", "tenxgraph_api.src.app.main:app"]
 ```
 
 </TabItem>

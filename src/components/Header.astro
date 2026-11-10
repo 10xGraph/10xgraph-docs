@@ -14,7 +14,7 @@ const isCurrent = (href: string) => href.startsWith('/') && (path === href || pa
     <nav aria-label="Primary">
       <ul>
         {NAV.map((item) => (
-          <li>
+          <li class={'wideOnly' in item ? 'nav-wide' : undefined}>
             <a href={item.href} aria-current={isCurrent(item.href) ? 'page' : undefined}>{item.label}</a>
           </li>
         ))}

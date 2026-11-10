@@ -398,6 +398,10 @@ if situation == "unusual":
 
 See [`guides/add-human-approval`](/docs/guides/add-human-approval) for task-focused guidance on setting up approval workflows.
 
+## Who can resume
+
+Over the API, only the thread's owner can resume a paused run, whatever their role or reach. The resume value therefore comes from the requester, not from a separate approver. Do not use it as authorization for something the requester must not approve themselves, and do not keep approval decisions in thread state, which clients can set through `initial_state` or `PUT` with `threads:write`. For a support or manager approval, store the decision in your own system from a call that checks the approver's role and tenant, and let the paused run read it. See [Who is allowed to approve](/docs/guides/add-human-approval#who-is-allowed-to-approve).
+
 ## Limitations and gotchas
 
 - **Requires checkpointing:** Interrupts must save the thread state, so a checkpointer is required. `compile()` creates an `InMemoryCheckpointer` by default, but for production use a durable one like `PgCheckpointer`.

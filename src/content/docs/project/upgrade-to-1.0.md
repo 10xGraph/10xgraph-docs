@@ -255,7 +255,7 @@ Migration steps:
 - **Client-visible error text shows only the exception type** for exceptions that are not 10xGraph's own (stream `ERROR` chunk `reason` and `state.error`). Logs keep the full text. `err.context` keeps the real values.
 - **`@tool("name")` works as the name form, and `@tool` works on bound methods.**
 
-- **A `ToolNode` lists its MCP server's tools once.** The list is cached for the life of the node (`mcp_cache_tools=True`), which saves a connect, ping and list call per model call. Tools you add to the server later, and tools you remove, are not seen until you call `await tool_node.refresh_mcp_tools()`. If your server changes its tools while the process runs, build the node with `mcp_cache_tools=False` to list on every model call. A failed listing is never cached.
+- **A `ToolNode` lists its MCP server's tools once.** The list is cached for the life of the node (`mcp_cache_tools=True`), which saves a connect and list call per model call. Tools you add to the server later, and tools you remove, are not seen until you call `await tool_node.refresh_mcp_tools()`. If your server changes its tools while the process runs, build the node with `mcp_cache_tools=False` to list on every model call. A failed listing is never cached.
 - **More `ToolNode` options for MCP, all optional:** `mcp_prefix`, `mcp_max_result_chars`, `mcp_max_description_chars`, `mcp_cache_tools` and `mcp_connect_timeout`. The connect timeout defaults to 30 seconds, so an MCP server that takes longer than that to accept a connection fails the call. Pass `mcp_connect_timeout=None` to wait without a limit. See [Tools](/docs/reference/python/tools).
 
 - **Handoffs need a registered handoff tool.** A `transfer_to_<X>` call only jumps if a tool

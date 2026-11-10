@@ -80,7 +80,7 @@ client = Client("https://my-mcp-server.example.com/mcp")
 
 ## Step 2: Wire the MCP client into ToolNode
 
-Create a `ToolNode` and pass the MCP client. The `ToolNode` queries the client for available tools each time the Agent prepares its tool list before calling the LLM. It pings the server first and offers no MCP tools if the ping fails.
+Create a `ToolNode` and pass the MCP client. The `ToolNode` queries the client for available tools each time the Agent prepares its tool list before calling the LLM. If the server cannot be reached, it offers no MCP tools for that call.
 
 ```python
 from tenxgraph.core.graph import ToolNode
@@ -163,7 +163,7 @@ When the LLM requests a tool, `ToolNode` runs it on the MCP client if the name i
 
 ## Forwarding user context to MCP
 
-Many MCP servers need to know who is calling them (for access control, logging, or per-user state). Set `pass_user_info_to_mcp=True` on `ToolNode` to send the `user` dict from the execution config to the MCP server. It is sent as request metadata (`meta`) on the MCP call, not as a tool argument, and the server reads it from `ctx.request_context.meta`. If the client's `call_tool` has no `meta` parameter, a warning is logged and the user info is not sent. If `config` has no `user` dict but has a `user_id`, the server receives `{"user_id": ...}` instead.
+Many MCP servers need to know who is calling them (for access control, logging, or per-user state). Set `pass_user_info_to_mcp=True` on `ToolNode` to send the caller in `config["user"]` to the MCP server. It is sent as request metadata (`meta`) on the MCP call, not as a tool argument, and the server reads it from `ctx.request_context.meta`. Behind the 10xGraph API, `config["user"]` is the verified `Identity`, and the server receives its JSON form: `user_id`, `kind`, `tenant` (for example `{"org_id": "acme"}`), `roles`, `permissions`, `reach` and the token `claims`. A dict you pass yourself is sent as is. If `config` has no `user` but has a `user_id`, the server receives `{"user_id": ...}` instead. If the client's `call_tool` has no `meta` parameter, a warning is logged and the user info is not sent.
 
 ```python
 tool_node = ToolNode(
@@ -173,7 +173,7 @@ tool_node = ToolNode(
 )
 ```
 
-The MCP server reads it from the request metadata, not from a tool argument. Declare a `ctx: Context` parameter on the server tool. FastMCP injects it and it is not part of the schema the model sees. The user dict is under the key `user` in `ctx.request_context.meta`, which keeps extra fields in `model_extra`:
+The MCP server reads it from the request metadata, not from a tool argument. Declare a `ctx: Context` parameter on the server tool. FastMCP injects it and it is not part of the schema the model sees. The user dict is under the key `user` in `ctx.request_context.meta`. On fastmcp 4.x `meta` is a dict; on 3.x it is a model, so dump it first:
 
 ```python
 # Code on the MCP server (fastmcp)
@@ -184,11 +184,12 @@ mcp = FastMCP("secure")
 @mcp.tool()
 def secure_action(query: str, ctx: Context) -> str:
     meta = ctx.request_context.meta
-    user = (meta.model_extra or {}).get("user") if meta else None
-    user = user or {}
+    if meta is not None and not isinstance(meta, dict):
+        meta = meta.model_dump()  # fastmcp 3.x
+    user = (meta or {}).get("user") or {}
     if "admin" not in user.get("roles", []):
-        raise PermissionError(f"User {user.get('id')} does not have permission")
-    return f"Action completed by {user.get('id')}"
+        raise PermissionError(f"User {user.get('user_id')} does not have permission")
+    return f"Action completed by {user.get('user_id')}"
 ```
 
 Pass the user dict in the invoke config. When requests go through the 10xGraph API server with authentication, the server sets `config["user"]` for you. When you call the graph directly, pass it yourself:

@@ -55,7 +55,7 @@ ToolNode(
 | `mcp_prefix` | `str \| None` | `None` | String put in front of every MCP tool name the model sees (for example `"github_"`), so two `ToolNode`s can expose servers that share a tool name. It is removed again before the server call. `mcp_include` and `mcp_exclude` match the server's own names, without the prefix. |
 | `mcp_max_result_chars` | `int \| None` | `None` | Cap on the text of one MCP tool result. Longer output is cut and a marker is appended. `None` means no cap. |
 | `mcp_max_description_chars` | `int \| None` | `None` | Cap on an MCP tool description, which is sent to the model on every call. A longer description is cut and ends in `...`. `None` means no cap. |
-| `mcp_cache_tools` | `bool` | `True` | List the server's tools once per `ToolNode` and reuse the list, which saves a connect, ping and list round trip per model call. Set `False` to list the server every time. See [MCP tool list caching](#mcp-tool-list-caching). |
+| `mcp_cache_tools` | `bool` | `True` | List the server's tools once per `ToolNode` and reuse the list, which saves a connect and list round trip per model call. Set `False` to list the server every time. See [MCP tool list caching](#mcp-tool-list-caching). |
 | `mcp_connect_timeout` | `float \| None` | `30.0` | Seconds to wait for the MCP connection to open. Only the connect is bounded, never a tool call. If the connect times out, the tool call fails like any other tool error (the model sees a generic failure and the log says `MCP connect timed out after ...s`), and a tool listing that times out returns no MCP tools and is not cached. `None` waits without a limit. |
 
 `tools` may also be a generator. If a different callable is registered under the name of an existing tool, `ToolNode` logs a warning and the new one replaces the old.
@@ -85,7 +85,7 @@ tool_node = ToolNode([], client=client)
 schemas = await tool_node.refresh_mcp_tools()
 ```
 
-If your server changes its tools while the process runs and you want every model call to see the change, construct the node with `mcp_cache_tools=False`. That costs a connect, ping and list round trip per model call.
+If your server changes its tools while the process runs and you want every model call to see the change, construct the node with `mcp_cache_tools=False`. That costs a connect and list round trip per model call.
 
 ### Example
 
