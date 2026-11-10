@@ -2,7 +2,7 @@
 title: Architecture
 seoTitle: "10xGraph architecture: how a served agent works"
 description: How a request moves through a served 10xGraph agent, which parts hold state, and which parts are stateless API workers you can scale out.
-section: Production
+section: "Platform"
 order: 20
 updated: "2026-11-10"
 faq:

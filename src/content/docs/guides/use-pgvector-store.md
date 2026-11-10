@@ -2,9 +2,9 @@
 title: How to use PgVectorStore
 seoTitle: "PgVectorStore: memory and RAG in Postgres"
 description: "Keep long-term memory and RAG in the same Postgres as your checkpointer with PgVectorStore: install, search strategies, settings, embedding fallback and table layout."
-section: "Build agents"
-group: "State, memory and context"
-order: 252
+section: "Data and state"
+group: "Long-term memory"
+order: 40
 label: PgVectorStore
 updated: "2026-11-05"
 ---

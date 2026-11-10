@@ -2,9 +2,9 @@
 title: Backup and restore
 seoTitle: "Back up and restore 10xGraph deployments"
 description: "What 10xGraph persists, how to back up the Postgres tables that hold threads and state, and how to restore or roll back a running deployment safely."
-section: "API server"
-group: "Operate"
-order: 180
+section: "Data and state"
+group: "Your databases"
+order: 80
 label: Backup and restore
 updated: "2026-10-27"
 faq:

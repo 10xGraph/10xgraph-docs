@@ -2,10 +2,9 @@
 title: Production Deployment Checklist
 seoTitle: "Production hardening checklist for 10xGraph"
 description: "Security, persistence, scaling, and monitoring checklist before shipping your 10xGraph API to production."
-section: "API server"
-group: "Operate"
-order: 170
-label: Production Checklist
+section: "Platform"
+order: 70
+label: Production checklist
 updated: "2026-10-27"
 faq:
   - question: "What is the minimum checklist for production?"

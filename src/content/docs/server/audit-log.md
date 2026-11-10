@@ -2,8 +2,9 @@
 title: Audit log
 seoTitle: "Audit log for the 10xGraph API server"
 description: "Metadata-only JSON audit events for access, authentication failures and changes, how to configure sinks, ship the lines to storage, and what stays yours."
-section: "API server"
-order: 195
+section: "Security and access"
+group: "Audit"
+order: 70
 label: Audit log
 updated: "2026-11-10"
 ---

@@ -2,8 +2,8 @@
 title: Security Model
 seoTitle: "10xGraph security model: server vs. your code"
 description: "What 10xgraph-api enforces for you (auth, ownership, input shaping, limits, error hygiene), what a client can and cannot send, and what stays yours."
-section: "Production"
-order: 10
+section: "Platform"
+order: 30
 label: Security Model
 updated: "2026-11-10"
 faq:

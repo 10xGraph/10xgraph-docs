@@ -1,6 +1,6 @@
 ---
 title: Concepts
-description: How 10xGraph runs your agents, tools and tasks behind an API server with auth, tenant isolation, durable state, background jobs and observability, and the graph model inside it.
+description: How 10xGraph runs your agents, tools and tasks behind an API server with auth, tenant isolation, durable state, background jobs and observability.
 section: Concepts
 order: 1
 updated: "2026-11-10"

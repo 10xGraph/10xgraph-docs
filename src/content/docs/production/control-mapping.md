@@ -2,8 +2,8 @@
 title: SOC 2 and ISO 27001 control mapping
 seoTitle: "SOC 2 and ISO 27001 control mapping"
 description: "Which 10xGraph features you can point to as evidence in a SOC 2 or ISO 27001 audit, what is on by default, and what stays with your organization."
-section: "Production"
-order: 50
+section: "Platform"
+order: 60
 label: Control mapping
 updated: "2026-11-10"
 ---

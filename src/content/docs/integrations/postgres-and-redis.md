@@ -2,9 +2,9 @@
 title: "Postgres and Redis checkpointing"
 description: "Set up PgCheckpointer for durable, resumable agent threads: Postgres as the source of truth, Redis as a cache, plus schema, pooling and operations."
 seoTitle: "Postgres and Redis checkpointer"
-section: Integrations
-group: "Storage"
-order: 80
+section: "Data and state"
+group: "Your databases"
+order: 60
 label: "Postgres and Redis"
 updated: "2026-10-08"
 faq:

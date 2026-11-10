@@ -1,8 +1,8 @@
 ---
 title: Platform overview
-seoTitle: "10xGraph platform overview: what runs around your code"
-description: "What 10xGraph provides as infrastructure for AI applications: a capability table (available in 1.0, opt-in, not provided), what the server does by default, and what you still own."
-section: "Production"
+seoTitle: "10xGraph platform: what runs around your code"
+description: "What 10xGraph provides as infrastructure for AI applications: what is on by default in 1.0, what is opt-in, what is not provided, and what you still own."
+section: "Platform"
 order: 0
 label: Platform overview
 updated: "2026-11-10"

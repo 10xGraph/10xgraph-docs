@@ -1,10 +1,10 @@
 ---
 title: Cache store
-seoTitle: "The 10xGraph cache store: locks, rate limits and revocation"
-description: What the API server keeps in its cache store, when to use memory, Redis or a custom backend, what is shared between processes, and how each feature behaves when the store fails.
-section: Concepts
-group: "Serving"
-order: 173
+seoTitle: "10xGraph cache store: locks, limits, revocation"
+description: What the API server keeps in its cache store, when to use memory, Redis or a custom backend, what processes share, and how each feature behaves when the store fails.
+section: "Data and state"
+group: "Shared server state"
+order: 50
 updated: "2026-11-10"
 faq:
   - q: "Do I need Redis?"

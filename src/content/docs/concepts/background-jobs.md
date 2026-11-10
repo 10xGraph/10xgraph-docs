@@ -2,9 +2,9 @@
 title: Background jobs
 seoTitle: "Background jobs and workers in 10xGraph"
 description: When to use in-process background tasks and when to use the TaskIQ worker and scheduler, how tasks are started over HTTP, and how identity carries into each run.
-section: Concepts
-group: "Serving"
-order: 172
+section: "Background jobs"
+order: 10
+label: "How jobs work"
 updated: "2026-11-10"
 faq:
   - q: "When do I need the worker instead of BackgroundTaskManager?"

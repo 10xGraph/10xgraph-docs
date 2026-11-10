@@ -2,8 +2,8 @@
 title: Scaling and reliability
 seoTitle: "Scaling and reliability for a 10xGraph agent"
 description: What Redis shares across API workers, how workers and IDs scale, what is replay-safe, how the server behaves when Redis or Postgres is down, and its honest limits.
-section: Production
-order: 30
+section: "Platform"
+order: 40
 updated: "2026-11-10"
 faq:
   - q: "Do I need Redis to run more than one worker?"

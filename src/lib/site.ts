@@ -42,11 +42,16 @@ export type BlogKind = keyof typeof BLOG_KINDS;
 // else). A doc picks its section with the `section` frontmatter field and, optionally, a `group`.
 export const DOC_SECTIONS = [
   'Get started',
-  'Production',
-  'Concepts',
-  'Build agents',
+  'Platform',
+  'Security and access',
+  'Data and state',
+  'Background jobs',
+  'Observability',
+  'Deploy',
   'API server',
   'TypeScript client',
+  'Concepts',
+  'Build agents',
   'Testing and evaluation',
   'Integrations',
   'Examples',
@@ -64,7 +69,12 @@ export const MAP_HIDDEN: readonly DocSection[] = ['Glossary', 'Compare', 'Projec
 // is shown at the top of the landing page.
 export const SECTION_INFO: Record<DocSection, { slug: string; title: string; blurb: string }> = {
   'Get started': { slug: 'get-started', title: 'Get started with 10xGraph: install and first agent', blurb: 'Install 10xGraph, build and serve a first agent, then follow the tutorial from a hand-built graph to a tested, served agent.' },
-  Production: { slug: 'production', title: 'Production readiness: what 10xgraph-api does for you', blurb: 'What the 10xGraph server enforces by default, what you configure, what you still own, and the path from quickstart to a deployed, secured, scaled agent.' },
+  Platform: { slug: 'production', title: '10xGraph platform: what runs around your code', blurb: 'What 10xGraph runs for you, how it is built, what it secures and scales, what you still own, and the SOC 2 and ISO 27001 control mapping.' },
+  'Security and access': { slug: 'security', title: 'Security and access: auth, roles, tenancy, audit', blurb: 'Authentication, roles and reach, tenant isolation, rate limits, security headers, prompt-injection validators and the audit log.' },
+  'Data and state': { slug: 'data', title: 'Data and state: threads, memory and your databases', blurb: 'Checkpointing, durability, long-term memory, the cache store, Postgres and Redis, your own database, and backup and restore.' },
+  'Background jobs': { slug: 'jobs', title: 'Background jobs: worker, scheduler and tasks', blurb: 'Run Python tasks on a TaskIQ worker with schedules, progress and cancel, as the user who queued them, or in process for small jobs.' },
+  Observability: { slug: 'observability', title: 'Observability: logs, metrics, traces and events', blurb: 'JSON logs and request ids, Prometheus metrics, OpenTelemetry traces to Phoenix, Logfire, LangSmith or OTLP, and event publishers.' },
+  Deploy: { slug: 'deploy', title: 'Deploy 10xGraph: Docker, Compose and Kubernetes', blurb: 'Generate Docker, Compose and Kubernetes files, run many replicas safely, and shut down without losing runs.' },
   Concepts: { slug: 'concepts', title: '10xGraph concepts: graphs, state, memory, serving', blurb: 'How 10xGraph works: graphs and state, agents and tools, interrupts, memory and durability, serving, security and observability.' },
   'Build agents': { slug: 'guides', title: 'Build agents with 10xGraph: Python guides', blurb: 'Task guides for the Python library: agents and graphs, prebuilt agents and tools, MCP, memory, multi-agent flows, streaming, safety and observability.' },
   'API server': { slug: 'server', title: 'The 10xGraph API server: run, secure, deploy', blurb: 'Run your graph as a production API: configuration, auth, rate limits, streaming, WebSockets, AG-UI, files, observability and deployment.' },

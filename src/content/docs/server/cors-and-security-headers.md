@@ -2,10 +2,10 @@
 title: "CORS and security headers"
 description: "Configure cross-origin requests, security headers, request size limits, and trusted proxies."
 seoTitle: "CORS, Security Headers, and Request Limits"
-label: "Security headers"
-order: 80
-group: "Security"
-section: "API server"
+label: "CORS and security headers"
+order: 50
+group: "Protect the server"
+section: "Security and access"
 updated: "2026-10-27"
 faq:
   - question: "Can I use ORIGINS='*' with credentials in production?"

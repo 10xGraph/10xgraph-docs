@@ -1,9 +1,9 @@
 ---
 title: Set up checkpointing
 description: "Choose and configure a checkpointer for state persistence: InMemoryCheckpointer for development, SqliteCheckpointer for client agents, or PgCheckpointer for production."
-section: "Build agents"
-group: "State, memory and context"
-order: 230
+section: "Data and state"
+group: "Threads and state"
+order: 10
 label: Set up checkpointing
 updated: "2026-10-27"
 ---

@@ -2,10 +2,10 @@
 title: Bring your own backend
 seoTitle: "Custom checkpointer, store and cache store"
 description: "The three storage classes behind a 10xGraph server, what each holds, how to plug in a custom one, the aping rules and the BaseCacheStore contract."
-section: "API server"
-group: "Operate"
-order: 175
-label: Bring your own backend
+section: "Data and state"
+group: "Your databases"
+order: 70
+label: "Bring your own database"
 updated: "2026-10-31"
 faq:
   - question: "Do I need a custom cache store to use Valkey, Dragonfly or KeyDB?"

@@ -1,9 +1,10 @@
 ---
 title: Configure Rate Limiting
 description: How to enable and configure the built-in sliding-window rate limiter in the 10xGraph API.
-section: "API server"
-group: "Security"
-order: 70
+section: "Security and access"
+group: "Protect the server"
+order: 40
+label: "Rate limiting"
 updated: "2026-10-31"
 faq:
   - question: Do I need rate limiting in development?

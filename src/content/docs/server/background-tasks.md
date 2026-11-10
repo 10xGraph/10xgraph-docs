@@ -1,9 +1,9 @@
 ---
 title: Run background tasks with a worker
 description: Durable tasks on TaskIQ with the 10xgraph worker and scheduler, started from Python or over HTTP, with schedules, cancel and progress.
-section: "API server"
-group: "Operate"
-order: 165
+section: "Background jobs"
+order: 20
+label: "Worker and scheduler"
 updated: "2026-11-07"
 faq:
   - question: How is this different from BackgroundTaskManager?

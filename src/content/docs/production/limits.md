@@ -2,8 +2,8 @@
 title: What 10xGraph does not protect
 seoTitle: "What 10xGraph does not protect"
 description: "The limits of the 10xGraph server: prompt injection, tool logic, open auth, secrets, TLS, backups, streaming replay, release-candidate status and Python 3.12+."
-section: "Production"
-order: 40
+section: "Platform"
+order: 50
 label: What it does not protect
 updated: "2026-11-10"
 faq:

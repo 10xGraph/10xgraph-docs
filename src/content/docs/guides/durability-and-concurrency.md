@@ -1,9 +1,9 @@
 ---
 title: Durability and concurrency
 description: "Ensure reliable execution: thread isolation, state history, optimistic concurrency, and idempotent tool calls."
-section: "Build agents"
-group: "State, memory and context"
-order: 241
+section: "Data and state"
+group: "Threads and state"
+order: 20
 label: "Durability and concurrency"
 updated: "2026-10-27"
 ---
