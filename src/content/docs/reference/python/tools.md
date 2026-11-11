@@ -17,6 +17,7 @@ ToolNode is a unified registry and executor for Python functions and MCP tools. 
 from tenxgraph.core.graph import ToolNode
 from tenxgraph.core.state import ToolResult
 from tenxgraph.core.graph.tool_node import UnsupportedToolParameterError, HAS_MCP, HAS_FASTMCP
+from tenxgraph.core.graph.tool_node import MCPAuthContext, forward_credential
 from tenxgraph.utils import tool, get_tool_metadata, has_tool_decorator
 ```
 
@@ -41,6 +42,7 @@ ToolNode(
     mcp_max_description_chars=None,
     mcp_cache_tools=True,
     mcp_connect_timeout=30.0,
+    mcp_auth=None,
 )
 ```
 
@@ -48,7 +50,7 @@ ToolNode(
 |---|---|---|---|
 | `tools` | `Iterable[Callable]` | **required** | Local Python functions to register. Each is registered under its `__name__`. Pass an empty list when only serving MCP tools. |
 | `client` | `fastmcp.Client \| None` | `None` | MCP client for remote tool access. Requires `pip install "10xgraph[mcp]"`. |
-| `pass_user_info_to_mcp` | `bool` | `False` | Forward the run config's `user` dict to MCP tool calls as request metadata (`meta`), readable on the server as `ctx.request_context.meta`. It is not sent as a tool argument. It logs a warning if the client's `call_tool` has no `meta` parameter. |
+| `pass_user_info_to_mcp` | `bool` | `False` | Send the caller to MCP tool calls as request metadata (`meta["user"]`), readable on the server as `ctx.request_context.meta`. It is unsigned: the server cannot verify it, so anything that can reach the MCP endpoint can claim any user. Use it only for a trusted internal server or where the identity is informational; for per-user or per-tenant access control use `mcp_auth`. It is not sent as a tool argument. It logs a warning if the client's `call_tool` has no `meta` parameter. |
 | `max_result_chars` | `int \| None` | `None` | Cap on the text a local tool returns. Longer text is cut and a marker is appended, so one huge result is not saved to state and re-sent to the model every turn. `None` means no cap. |
 | `mcp_include` | `Iterable[str] \| None` | `None` | Allow-list of MCP tool names. Only these are shown to the model and callable. `None` means every tool the server lists. |
 | `mcp_exclude` | `Iterable[str] \| None` | `None` | MCP tool names to hide and refuse, applied after `mcp_include`. |
@@ -57,6 +59,7 @@ ToolNode(
 | `mcp_max_description_chars` | `int \| None` | `None` | Cap on an MCP tool description, which is sent to the model on every call. A longer description is cut and ends in `...`. `None` means no cap. |
 | `mcp_cache_tools` | `bool` | `True` | List the server's tools once per `ToolNode` and reuse the list, which saves a connect and list round trip per model call. Set `False` to list the server every time. See [MCP tool list caching](#mcp-tool-list-caching). |
 | `mcp_connect_timeout` | `float \| None` | `30.0` | Seconds to wait for the MCP connection to open. Only the connect is bounded, never a tool call. If the connect times out, the tool call fails like any other tool error (the model sees a generic failure and the log says `MCP connect timed out after ...s`), and a tool listing that times out returns no MCP tools and is not cached. `None` waits without a limit. |
+| `mcp_auth` | `Callable[[MCPAuthContext], Awaitable[dict[str, str]]] \| None` | `None` | Async function that returns HTTP headers for one MCP request, so each call carries its own credentials (for example a short-lived JWT naming the user and the agent as actor, which the server verifies). It runs before every tool listing and tool call, and its headers win over the transport's `auth=` on the same name. Needs a client (`ValueError` otherwise), fastmcp 4.1.7 or later (`ImportError` otherwise) and an HTTP transport, streamable HTTP or SSE (`ValueError` for stdio or in-memory). The tool list is cached per node and shared by all users, so it must not differ per user. See [MCPAuthContext](#mcpauthcontext). |
 
 `tools` may also be a generator. If a different callable is registered under the name of an existing tool, `ToolNode` logs a warning and the new one replaces the old.
 
@@ -86,6 +89,21 @@ schemas = await tool_node.refresh_mcp_tools()
 ```
 
 If your server changes its tools while the process runs and you want every model call to see the change, construct the node with `mcp_cache_tools=False`. That costs a connect and list round trip per model call.
+
+### MCPAuthContext
+
+`mcp_auth` is an async callable `(MCPAuthContext) -> dict[str, str]`. It must return a dict of header names to string values, or the call fails with `TypeError`. `MCPAuthContext` is a frozen dataclass:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `identity` | `Identity \| None` | The caller from `config["user"]`. |
+| `credential` | `UserCredential \| None` | The caller's credential from `config["credential"]`. Its repr is redacted. |
+| `tool_name` | `str \| None` | The server's tool name, or `None` while the tool list is fetched. |
+| `server` | `str \| None` | The server URL of the client's transport, when known. |
+| `thread_id` | `str \| None` | The run's thread id. |
+| `run_id` | `str \| None` | The run id. |
+
+`forward_credential` is a ready-made `mcp_auth` that sends the caller's own token as `Authorization`. Use it only for a server that accepts that same token. For a server that enforces per-user or per-tenant access, sign a short-lived token yourself, or exchange the user's token, and return it from your own function. See [Use MCP tools](/docs/guides/use-mcp#authenticate-each-call-with-mcp_auth) and [Calling services as the user](/docs/guides/call-services-as-the-user).
 
 ### Example
 
@@ -169,7 +187,6 @@ Mark a function as a tool with metadata for schema generation and filtering.
 @tool(
     _func=None,
     *,
-    name: str | None = None,
     description: str | None = None,
     tags: list[str] | set[str] | None = None,
     provider: str | None = None,
@@ -182,7 +199,6 @@ Mark a function as a tool with metadata for schema generation and filtering.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `name` | `str \| None` | `None` | Tool name. If None, uses the function's `__name__`. `@tool("name")` also works as the name form. `@tool` works on bound methods too. |
 | `description` | `str \| None` | `None` | Tool description. If None, uses the function's docstring, or "No description provided." when there is none. |
 | `tags` | `list[str] \| set[str] \| None` | `None` | Tags for categorizing and filtering tools. Examples: `["search", "web"]`. |
 | `provider` | `str \| None` | `None` | Provider or source of the tool (e.g., "local", "mcp", "composio"). |
@@ -193,6 +209,8 @@ Mark a function as a tool with metadata for schema generation and filtering.
 
 **Returns:** The decorated function with metadata attached as private attributes (`_py_tool_*`). The function behaves identically to the original.
 
+**Tool name.** The function name is the tool name the model sees. There is no `name` argument: `@tool(name=...)` raises a `TypeError`. To change the name, rename the function. `@tool` works on bound methods too.
+
 **Raises:** `ValueError` if the decorated object is not callable or if `parameters` is provided but not a dict.
 
 ### Example
@@ -201,8 +219,8 @@ Mark a function as a tool with metadata for schema generation and filtering.
 from tenxgraph.core.graph import ToolNode
 from tenxgraph.utils import tool
 
-@tool(name="lookup_order", tags=["search", "orders"])
-def find_order(order_id: str) -> dict:
+@tool(tags=["search", "orders"])
+def lookup_order(order_id: str) -> dict:
     """Look up an order by ID."""
     return {"order_id": order_id, "status": "shipped"}
 
@@ -211,7 +229,7 @@ async def refund_order(order_id: str, amount: float) -> dict:
     """Refund an order."""
     return {"refund_id": "R-1", "amount": amount}
 
-tool_node = ToolNode([find_order, refund_order])
+tool_node = ToolNode([lookup_order, refund_order])
 ```
 
 ---
@@ -230,20 +248,19 @@ get_tool_metadata(func: Callable) -> dict[str, Any]
 |---|---|---|
 | `func` | `Callable` | A function that may have been decorated with `@tool`. |
 
-**Returns:** Dict with keys: `name`, `description`, `tags` (set), `provider`, `capabilities`, `metadata`, `parameters`. Unset values are `None`; `tags` is an empty set when unset.
+**Returns:** Dict with keys: `description`, `tags` (set), `provider`, `capabilities`, `metadata`, `parameters`. Unset values are `None`; `tags` is an empty set when unset.
 
 ### Example
 
 ```python
 from tenxgraph.utils import tool, get_tool_metadata
 
-@tool(name="my_tool", tags=["test"])
+@tool(tags=["test"])
 def example():
     """Example function."""
     pass
 
 metadata = get_tool_metadata(example)
-print(metadata["name"])  # "my_tool"
 print(metadata["tags"])  # {"test"}
 ```
 

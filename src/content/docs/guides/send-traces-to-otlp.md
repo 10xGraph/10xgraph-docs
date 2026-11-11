@@ -47,9 +47,11 @@ app = graph.compile()
 |---|---|---|---|
 | `graph` | StateGraph or None | `None` | Graph to instrument. `None` configures the provider only (API server use). |
 | `endpoint` | str | `None` | OTLP HTTP base URL. `/v1/traces` is appended unless present. When omitted, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` must be set. |
-| `level` | ObservabilityLevel | `STANDARD` | `SPANS`, `STANDARD` or `FULL`. `FULL` records prompts and completions. |
+| `level` | ObservabilityLevel | `FULL` | `SPANS`, `STANDARD` or `FULL`. See below. |
 | `tracer_provider` | TracerProvider | None | Attach to your own provider instead of creating one. |
 | `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. |
+
+`FULL` (the default) records prompts, completions, tool input and output and the graph state, so message content reaches the collector and whatever stores traces behind it. `STANDARD` drops prompts, completions and tool I/O but still records the graph state on node spans, which can contain the conversation. `SPANS` records timing and structure only. The example above passes `STANDARD` explicitly; omit `level` to get `FULL`.
 
 `setup_otlp()` raises `ValueError` when it has no endpoint and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is unset. `OTEL_EXPORTER_OTLP_ENDPOINT` is not used as a fallback, because it often points at a gRPC port (4317), which this HTTP exporter cannot use.
 
@@ -84,6 +86,8 @@ In `10xgraph.json`:
 | `observability.otlp.enabled` | boolean | `false` | Turn the destination on |
 | `observability.otlp.endpoint` | string or null | `null` | OTLP HTTP base URL. With `null`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` must be set |
 | `observability.otlp.use_metrics_endpoint` | boolean | `false` | Send traces to the same base URL as the metrics (`metrics.otlp.endpoint`, else `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`) |
+
+`level` defaults to `"full"` when omitted. If the graph already has an observability publisher, the server reuses it, logs a warning and does not apply this block, including its `level`.
 
 If the exporter package is missing or no endpoint is set, the server logs a warning ("Observability setup skipped") and starts without AI tracing. Put tokens in `.env`, never in the config file. See [configuration](/docs/reference/api-cli/configuration) for all keys.
 

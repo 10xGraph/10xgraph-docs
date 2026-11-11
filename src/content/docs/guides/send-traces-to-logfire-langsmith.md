@@ -72,7 +72,7 @@ app = graph.compile()
 | `service_name` | str | None | Service name shown in the Logfire UI. |
 | `send_to_logfire` | bool | `True` | Set `False` to emit to console only (for local testing). |
 | `console` | bool or ConsoleOptions | None | Control local console output. Pass `False` to silence it. |
-| `level` | ObservabilityLevel | `STANDARD` | Verbosity: `SPANS` (timing only), `STANDARD` (tokens, model, params), or `FULL` (prompt/completion text). See details below. |
+| `level` | ObservabilityLevel | `FULL` | Verbosity: `SPANS` (timing only), `STANDARD` (tokens, model, params, graph state), or `FULL` (adds prompt/completion text and tool I/O). See details below. |
 | `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See [Hide the user id in traces](#hide-the-user-id-in-traces). |
 | `additional_span_processors` | list | None | Extra `SpanProcessor`s attached alongside the Logfire one. |
 | `**configure_kwargs` | dict | - | Extra keyword arguments passed to `logfire.configure()` (e.g., `environment="staging"`). |
@@ -111,7 +111,7 @@ setup_langsmith(
 | `api_key` | str | `LANGSMITH_API_KEY` | LangSmith API key. Falls back to env var if not passed. |
 | `project` | str | None | LangSmith project name, sent as the `Langsmith-Project` header. |
 | `endpoint` | str | `https://api.smith.langchain.com/otel` | Base OTEL endpoint URL. `/v1/traces` is appended automatically. Override for regional deployments. |
-| `level` | ObservabilityLevel | `STANDARD` | Verbosity: `SPANS`, `STANDARD`, or `FULL`. See details below. |
+| `level` | ObservabilityLevel | `FULL` | Verbosity: `SPANS`, `STANDARD`, or `FULL`. See details below. |
 | `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See [Hide the user id in traces](#hide-the-user-id-in-traces). |
 | `tracer_provider` | TracerProvider | None | Existing `TracerProvider` to attach to. Creates a new global one if not supplied. |
 
@@ -165,10 +165,10 @@ The `level` parameter controls how much detail lands on each span and whether se
 | Level | What is included | PII risk | Use case |
 |---|---|---|---|
 | `SPANS` | Graph/node/LLM/tool structure and timing only | None | Performance profiling; production baseline. |
-| `STANDARD` (default) | + token counts, model name, LLM parameters (temperature, max_tokens). **No message content.** | Low | Default for most production workloads. |
-| `FULL` | + user messages, LLM prompts, completions, tool inputs and results | High | Development and local debugging only. |
+| `STANDARD` | + token counts, model name, LLM parameters (temperature, max_tokens), and the graph state on node spans (`input.value` is the state going in; `output.value` is the state after, the messages produced and the next node). No prompts, completions or tool I/O, but the state can contain the conversation. | Medium | Production when you want token and cost data without prompts and tool results. |
+| `FULL` (default) | + user messages, LLM prompts, completions, tool inputs and results, on top of everything in `STANDARD` | High | Development, debugging, and production backends you trust with this data. |
 
-`FULL` puts your application's prompts and responses on spans. The framework's built-in log redaction (`install_secret_redaction()`) does **not** scrub span content, so treat `FULL` traces as sensitive and restrict who can view them in Logfire or LangSmith. Never use `FULL` in production without understanding the privacy implications.
+`FULL` is the default. It sends message content and graph state to the trace backend. Set `level` to `STANDARD` or `SPANS` to reduce that; note that `STANDARD` still includes graph state, which can contain the conversation, so only `SPANS` leaves message content out entirely. The framework's built-in log redaction (`install_secret_redaction()`) does **not** scrub span content, so treat `FULL` and `STANDARD` traces as sensitive and restrict who can view them in Logfire or LangSmith.
 
 ## Hide the user id in traces
 
@@ -219,7 +219,7 @@ Keep `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY` in your `.env` file, never in `10xg
 
 `observability.user_id_mode` is also in the `10xgraph config` editor (Observability page, "User id in traces"). The same page has "Send AI traces to" (None first) for the destinations and "Export metrics" for the `metrics` block. It applies to the server's OTEL publisher both for the `observability` block and for `OTEL_ENABLED`. If the installed core is too old to support it, the server keeps raw ids and logs a warning.
 
-All config keys are optional. You can enable just Logfire, just LangSmith, or both. The default `level` is `"standard"` if not specified.
+All config keys are optional. You can enable just Logfire, just LangSmith, or both. The default `level` is `"full"` if not specified, which sends message content and graph state; the example above sets `"standard"` to send less. If the graph already has an observability publisher (for example a `PhoenixPublisher`), the server reuses it, logs a warning and does not apply this block, including its `level`.
 
 ## Verifying traces are flowing
 
@@ -255,7 +255,7 @@ Once traces are flowing, visit your observability platform to inspect them:
 - **Logfire**: Log into [logfire.pydantic.dev](https://logfire.pydantic.dev) and navigate to your service name.
 - **LangSmith**: Log into [smith.langchain.com](https://smith.langchain.com) and find your project.
 
-Look for a trace tree showing graph execution, node names, LLM model calls, and tool invocations. If you enabled `STANDARD` or `FULL` level, you will also see token counts and parameters.
+Look for a trace tree showing graph execution, node names, LLM model calls, and tool invocations. If you enabled `STANDARD` or `FULL` level (the default is `FULL`), you will also see token counts and parameters.
 
 ## Common errors
 
@@ -292,7 +292,7 @@ setup_langsmith(graph, api_key="your-api-key", project="my-agent")
 **Spans do not appear in Logfire or LangSmith**
 
 - Verify the token/API key is correct and has write permission.
-- Check that `level` is not `SPANS` (which logs structure only, not content).
+- Check that `level` is not `SPANS` (which logs structure only, not content or graph state).
 - If running locally with `send_to_logfire=False`, traces go to console instead.
 - In the API server, confirm `enabled` is `true` under `observability.logfire` or `observability.langsmith` in `10xgraph.json` and the tokens are in `.env`.
 

@@ -117,14 +117,16 @@ The API server's `10xgraph.json` has an `observability` block for the OTEL-based
 {
   "agent": "graph:app",
   "observability": {
-    "level": "standard",
+    "level": "full",
     "logfire": {"enabled": true, "service_name": "my-agent"},
     "langsmith": {"enabled": true, "project": "my-agent"}
   }
 }
 ```
 
-Secrets stay in the environment: set `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY`. The `level` value is one of `spans`, `standard` or `full` and falls back to `standard` if unrecognized.
+Secrets stay in the environment: set `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY`. The `level` value is one of `spans`, `standard` or `full` and falls back to `full` if unrecognized. `full` is the default and sends message content and graph state to the trace backend; set `standard` or `spans` to send less (see [Observability levels](#observability-levels)).
+
+If the graph already has an observability publisher (for example a `PhoenixPublisher` passed to the graph or agent), the API server reuses it, logs a warning and does not apply the `observability` block, including its `level`.
 
 ## Publishers, AI tracing and metrics
 
@@ -235,21 +237,21 @@ Span timing is set from `EventModel.timestamp`. Attributes are derived from even
 The `OtelPublisher` emits different amounts of data based on the `ObservabilityLevel`:
 
 - **SPANS**: Structure and timing only. No input/output data on spans (fastest, smallest, safest).
-- **STANDARD**: Adds token counts, model name, request parameters when available (default).
-- **FULL**: Adds model input messages, output, tool I/O, system prompt (may contain PII; use only in dev/controlled environments).
+- **STANDARD**: Adds token counts, model name and request parameters when available. It also adds the graph state on node spans: `input.value` is the state going in, `output.value` is the state after the node, plus the messages it produced and the next node. State can contain the conversation, so `STANDARD` is not content-free.
+- **FULL** (default): Adds model input messages, output, tool I/O and the system prompt, on top of everything in `STANDARD`. It sends message content and graph state to the trace backend and may contain PII. Choose `STANDARD` or `SPANS` to reduce what leaves your process; use `FULL` only where the backend is trusted to hold that data.
 
-Set the level when configuring OTEL:
+The default is `FULL`. Set the level when configuring OTEL:
 
 ```python
 from tenxgraph.runtime.publisher import OtelPublisher, ObservabilityLevel
 
-publisher = OtelPublisher(level=ObservabilityLevel.FULL)
+publisher = OtelPublisher(level=ObservabilityLevel.STANDARD)
 graph = StateGraph(AgentState, publisher=publisher)
 # ... add nodes and edges ...
 compiled = graph.compile()
 ```
 
-Or call `setup_tracing(graph, level=ObservabilityLevel.FULL)` before `compile()`. In `10xgraph.json`, the `observability.level` key sets the level for Logfire and LangSmith.
+Or call `setup_tracing(graph, level=ObservabilityLevel.STANDARD)` before `compile()`. In `10xgraph.json`, the `observability.level` key sets the level for the backends in that block.
 
 ### Distributed tracing
 
@@ -265,7 +267,7 @@ When you integrate with an OTEL collector (e.g., Jaeger, Datadog, New Relic), sp
 Content stays in events and spans on purpose, because debugging needs it. What leaves your process depends on the sink:
 
 - **Redis, RabbitMQ and Kafka publishers** send the full event as JSON, including message text and tool inputs and results. Send them only to systems you trust.
-- **OTEL spans** (and so Logfire and LangSmith) carry prompts, completions and tool I/O only at `ObservabilityLevel.FULL`. At `SPANS` and `STANDARD` they carry structure, timing, token counts and model names.
+- **OTEL spans** (and so Logfire and LangSmith) carry prompts, completions and tool I/O at `ObservabilityLevel.FULL`, which is the default. They also carry the graph state on node spans at `FULL` and `STANDARD`, and the state can contain the conversation. Only `SPANS` carries structure, timing and ids alone; `STANDARD` adds token counts, model names and graph state.
 - **Ids.** Spans always carry `user_id`, `thread_id` and `run_id`. Events carry the same ids.
 - **TLS is your choice. 10xGraph never forces it.** We recommend TLS in production whenever you can, because events carry message and tool content. If the broker runs only inside a network you secure yourself (for example a private subnet or VPC, or a service mesh that already encrypts traffic), a plain connection can be fine. For Redis use a `rediss://` URL, for RabbitMQ an `amqps://` URL, and for Kafka the opt-in `security_protocol`, `ssl_*` and `sasl_*` config keys. See [Emit events from your graph](/docs/guides/use-publishers).
 - **`user_id_mode`** changes how `user_id` appears on OTEL spans: `"raw"` (default, unchanged), `"hash"` or `"mask"`. It does not change Redis, RabbitMQ, Kafka or Console events. See [Hide the user id in traces](/docs/guides/send-traces-to-logfire-langsmith#hide-the-user-id-in-traces).

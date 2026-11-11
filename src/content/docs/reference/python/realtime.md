@@ -97,6 +97,7 @@ AudioAgent(
     tools: Iterable[Callable] | None = None,
     client: Any = None,
     pass_user_info_to_mcp: bool = False,
+    mcp_auth: Any = None,
     skills: SkillConfig | None = None,
     memory: MemoryConfig | None = None,
     realtime_client_factory: Callable[[], RealtimeClient] | None = None,
@@ -117,7 +118,8 @@ AudioAgent(
 | `system_prompt` | `list[dict[str, Any]] \| None` | None | System prompt dicts with `role` and `content` keys. |
 | `tools` | `Iterable[Callable] \| None` | None | Callable tools advertised to the provider. |
 | `client` | `Any \| None` | None | MCP client (fastmcp or mcp module). |
-| `pass_user_info_to_mcp` | bool | False | Forward run's user identity to MCP tool calls. |
+| `pass_user_info_to_mcp` | bool | False | Send the run's user as unsigned MCP request metadata. The server cannot verify it; use it only for a trusted internal server. |
+| `mcp_auth` | `Callable[[MCPAuthContext], Awaitable[dict[str, str]]] \| None` | None | Async function returning HTTP headers for each MCP call, such as a short-lived signed token the server verifies. Use it for per-user or per-tenant access control. Needs fastmcp 4.1.7 or later and an HTTP transport. |
 | `skills` | `SkillConfig \| None` | None | Dynamic skill injection config. |
 | `memory` | `MemoryConfig \| None` | None | Long-term memory config. |
 | `realtime_client_factory` | `Callable[[], RealtimeClient] \| None` | None | Custom provider client factory (for testing or pre-auth). |

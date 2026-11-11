@@ -15,7 +15,7 @@ faq:
   - q: "Why call aclose() at the end of a script?"
     a: "Events are published from background tasks. aclose() waits for them to finish and closes the publisher connections, so short scripts do not exit with events still queued."
   - q: "Does OtelPublisher send prompts and responses?"
-    a: "Only at ObservabilityLevel.FULL. SPANS sends timing and structure, STANDARD adds token counts and model names, and FULL adds prompts, responses and tool input and output, which may contain personal data."
+    a: "At ObservabilityLevel.FULL, the default. SPANS sends timing and structure, STANDARD adds token counts, model names and the graph state on node spans (which can contain the conversation), and FULL adds prompts, responses and tool input and output, which may contain personal data."
 ---
 
 This example sends the events of a 10xGraph run to different places: your terminal, several sinks at once, OpenTelemetry, a message broker, and Logfire or LangSmith. Every script runs the same kind of ReAct agent on OpenAI `gpt-5-mini` with one small tool, so the only thing that changes is the publisher.
@@ -161,7 +161,7 @@ Configure a `TracerProvider` as you would for any OpenTelemetry application. The
     publisher = OtelPublisher(level=ObservabilityLevel.STANDARD)
 ```
 
-`ObservabilityLevel.SPANS` sends timing and structure only. `STANDARD` adds token counts, model name and request parameters. `FULL` adds prompts, responses and tool input and output, which may contain personal data.
+`ObservabilityLevel.SPANS` sends timing and structure only. `STANDARD` adds token counts, model name, request parameters and the graph state on node spans, which can contain the conversation. `FULL` is the default and adds prompts, responses and tool input and output on top of that, which may contain personal data. Pass `STANDARD` or `SPANS` to send less.
 
 ```python
     agent = ReactAgent(model="gpt-5-mini", tools=[get_inventory], publisher=publisher)
@@ -404,8 +404,8 @@ async def main() -> None:
     configure_tracer_provider()
 
     # SPANS    -> timing and structure only
-    # STANDARD -> adds token counts, model name and request parameters (default)
-    # FULL     -> adds prompts, responses and tool I/O. May contain personal data.
+    # STANDARD -> adds token counts, model name, request parameters and graph state
+    # FULL     -> adds prompts, responses and tool I/O (the default). May contain personal data.
     publisher = OtelPublisher(level=ObservabilityLevel.STANDARD)
 
     # Pass the publisher when the graph is created: StateGraph(publisher=publisher), or

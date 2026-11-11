@@ -370,7 +370,7 @@ For per-node spans sent to any OTLP endpoint, see [Send traces to an OTLP endpoi
 
 ## What is in your traces
 
-Spans carry `user_id`, `thread_id` and `run_id`. Set `"observability": {"user_id_mode": "hash"}` (or `"mask"`) in `10xgraph.json` to change how the user id appears. It applies to the server's OTEL publisher, for the `observability` block and for `OTEL_ENABLED`. Prompts and tool I/O appear only at `observability.level` `full`. See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
+Spans carry `user_id`, `thread_id` and `run_id`. Set `"observability": {"user_id_mode": "hash"}` (or `"mask"`) in `10xgraph.json` to change how the user id appears. It applies to the server's OTEL publisher, for the `observability` block and for `OTEL_ENABLED`. `observability.level` defaults to `full`, which puts prompts, completions, tool I/O and graph state on spans; `standard` keeps graph state but not prompts, completions or tool I/O, and `spans` carries neither. See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
 
 ## Related docs
 

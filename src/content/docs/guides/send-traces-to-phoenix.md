@@ -55,9 +55,13 @@ app = graph.compile()
 | `api_key` | str | `PHOENIX_API_KEY` | Optional. Sent as `authorization: Bearer <key>`. |
 | `project` | str | None | Falls back to `PHOENIX_PROJECT`, then `PHOENIX_PROJECT_NAME`. See [Project names](#project-names). |
 | `endpoint` | str | `PHOENIX_COLLECTOR_ENDPOINT` | Base URL. Defaults to `http://localhost:6006`. `/v1/traces` is appended unless present. |
-| `level` | ObservabilityLevel | `STANDARD` | `SPANS`, `STANDARD` or `FULL`. `FULL` records prompts and completions. |
+| `level` | ObservabilityLevel | `FULL` | `SPANS`, `STANDARD` or `FULL`. See [What the level sends](#what-the-level-sends). |
 | `tracer_provider` | TracerProvider | None | Attach to your own provider instead of creating one. |
 | `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. |
+
+### What the level sends
+
+`FULL` (the default) records prompts, completions, tool input and output and the graph state, so message content reaches the trace backend. `STANDARD` drops prompts, completions and tool I/O but still records the graph state on node spans, which can contain the conversation. `SPANS` records timing and structure only. The examples on this page pass `STANDARD` explicitly; omit `level` to get `FULL`.
 
 ## Option 2: Use the publisher
 
@@ -91,7 +95,7 @@ In `10xgraph.json`:
 }
 ```
 
-Keep `PHOENIX_API_KEY` in `.env`, never in the config file. If the exporter package is missing, the server logs a warning and continues without it. See [configuration](/docs/reference/api-cli/configuration) for all keys.
+`level` defaults to `"full"` here too. If the graph already has an observability publisher (for example a `PhoenixPublisher` passed to the graph or agent), the server reuses it, logs a warning and does not apply this block, including its `level`. Keep `PHOENIX_API_KEY` in `.env`, never in the config file. If the exporter package is missing, the server logs a warning and continues without it. See [configuration](/docs/reference/api-cli/configuration) for all keys.
 
 ## Phoenix Cloud
 

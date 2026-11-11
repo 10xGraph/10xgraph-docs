@@ -106,14 +106,15 @@ The API server uses the checkpointer carried by the compiled graph. For setup de
 
 ## When is the ledger cleared?
 
-After a run finishes with status completed (the whole loop is done), the graph clears that thread's ledger in the background through its `BackgroundTaskManager`, so the response is not delayed. `graph.aclose()` waits for a pending clear. A failed clear logs a warning, and leftover rows are harmless.
+After a run finishes with status completed (the whole loop is done), the graph clears that run's ledger rows in the background through its `BackgroundTaskManager`, so the response is not delayed. Only rows keyed on the run's own tool-calling messages are deleted, so rows a newer run on the same thread records before the clear executes stay; rows of a message trimmed out of the state earlier also stay until pruned. `graph.aclose()` waits for a pending clear. A failed clear logs a warning, and leftover rows are harmless.
 
 The ledger is not cleared after an interrupt, a stop, a client-tool pause, an error or a cancel. Those runs may resume, and a resume must still find the results of tools that already finished.
 
 You can clear one thread yourself. The call is scoped to the thread's owner and tenant like the other checkpointer calls:
 
 ```python
-await checkpointer.aclear_tool_results(config)  # config carries thread_id
+await checkpointer.aclear_tool_results(config)  # config carries thread_id; every row goes
+await checkpointer.aclear_tool_results(config, ["msg-1"])  # only rows of these message ids
 ```
 
 ## Prune old ledger rows

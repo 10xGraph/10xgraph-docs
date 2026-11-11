@@ -10,7 +10,7 @@ updated: "2026-10-27"
 
 The `@tool` decorator marks a Python function as an agent tool and attaches metadata that 10xGraph uses to build the schema the LLM sees, control tool visibility across agents, and inject context at runtime. Every tool is a regular Python function; the decorator adds no runtime behavior, only metadata that the `ToolNode` reads at schema-generation time.
 
-Without `@tool`, 10xGraph still registers the function and falls back to its `__name__` and docstring. Use `@tool` when you need to override the defaults, provide custom schemas for exotic parameter types, add tags for filtering, or request injected runtime context like streaming progress or the current agent state.
+Without `@tool`, 10xGraph still registers the function and falls back to its `__name__` and docstring. Use `@tool` when you need to override the description, provide custom schemas for exotic parameter types, add tags for filtering, or request injected runtime context like streaming progress or the current agent state.
 
 ---
 
@@ -22,7 +22,7 @@ The `ToolNode` converts your function's type hints and docstring into an OpenAI-
 
 **Argument coercion.** The arguments the model sends are coerced against your type hints in lax mode. A value that converts cleanly is converted (`"5"` becomes `5` for an `int`, a number becomes a string for a `str`), and unknown extra keys are ignored. A value that cannot convert goes back to the model as a failed tool result, and the tool does not run.
 
-**Name forms.** `@tool("name")` works as a shorthand for `@tool(name="name")`, and `@tool` also works on bound methods.
+**Tool name.** The function name is the tool name the model sees. To change it, rename the function; `@tool` has no `name` argument and `@tool(name=...)` raises a `TypeError`. `@tool` also works on bound methods.
 
 **The description** comes from the function's docstring (or the `description` arg). The LLM uses this to decide when and how to call the tool, so be specific: instead of "Fetch data," say "Fetch historical stock prices for a ticker symbol over a date range."
 
@@ -32,7 +32,6 @@ Here is a tool the LLM sees:
 
 ```python
 @tool(
-    name="search_web",
     description="Search the internet and return the top results with titles and summaries.",
 )
 def search_web(
@@ -76,20 +75,19 @@ The LLM will see this tool named `get_weather`, with the docstring as its descri
 
 ---
 
-## Provide a custom name and description
+## Provide a custom description
 
-Override the function name and docstring sent to the LLM:
+Override the description sent to the LLM:
 
 ```python
 @tool(
-    name="weather_lookup",
     description="Fetch live weather data for any city worldwide, in Celsius or Fahrenheit.",
 )
 def get_weather(city: str, units: str = "celsius") -> str:
     return f"Weather in {city}: 22°C"
 ```
 
-The LLM will call this tool as `weather_lookup`, not `get_weather`. Use custom names to disambiguate similar functions or provide a more descriptive name than your Python function name.
+The LLM calls this tool as `get_weather`, the function name. To expose a different name, rename the function.
 
 ---
 
@@ -302,7 +300,6 @@ Use `metadata` for any application-specific fields:
 
 ```python
 @tool(
-    name="process_payment",
     description="Process a payment transaction.",
     tags=["payments"],
     capabilities=["write_database", "external_payment_gateway"],
@@ -334,7 +331,6 @@ from tenxgraph.utils.decorators import get_tool_metadata, has_tool_decorator
 
 if has_tool_decorator(process_payment):
     meta = get_tool_metadata(process_payment)
-    print(meta["name"])          # "process_payment"
     print(meta["tags"])          # {"payments"}
     print(meta["capabilities"])  # ["write_database", ...]
     print(meta["metadata"])      # {...rate_limit...}
@@ -387,7 +383,6 @@ from tenxgraph.utils.decorators import tool
 from tenxgraph.core.state.stream_emitter import StreamEmitter
 
 @tool(
-    name="search_documentation",
     description="Search the product documentation for topics, how-tos, and API references.",
     tags=["search", "documentation"],
     capabilities=["read_files"],

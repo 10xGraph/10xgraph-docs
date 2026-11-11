@@ -199,7 +199,7 @@ The destinations below are AI tracing (observability) publishers. They receive g
 
 | Key | Type | Default | Purpose |
 |---|---|---|---|
-| `observability.level` | string | `standard` | `spans`, `standard` or `full` (`full` may record PII) |
+| `observability.level` | string | `full` | `spans`, `standard` or `full`. `full` (default) sends prompts, completions, tool I/O and graph state to the trace backend and may record PII. `standard` drops prompts, completions and tool I/O but keeps graph state on node spans. `spans` is timing and structure only. If the graph already has an observability publisher, the server reuses it and ignores this block, level included |
 | `observability.user_id_mode` | string | `raw` | How traces carry the user id: `raw`, `hash` or `mask`. See [Hide the user id in traces](/docs/guides/send-traces-to-logfire-langsmith#hide-the-user-id-in-traces) |
 | `observability.logfire` | object | none | Keys include `enabled`, `service_name`, `send_to_logfire`, `console` |
 | `observability.langsmith` | object | none | Keys include `enabled`, `project`, `endpoint` |

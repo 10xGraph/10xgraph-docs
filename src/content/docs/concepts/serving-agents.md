@@ -388,7 +388,7 @@ ORIGINS=https://example.com,https://app.example.com
 OTEL_ENABLED=true
 OTEL_SERVICE_NAME=my-agent
 OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4317
-OTEL_LEVEL=standard    # spans | standard | full
+OTEL_LEVEL=full        # spans | standard | full (default full: sends message content and graph state)
 ```
 
 No code changes needed. The API server automatically:

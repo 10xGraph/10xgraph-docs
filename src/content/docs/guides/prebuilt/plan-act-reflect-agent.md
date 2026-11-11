@@ -130,7 +130,8 @@ app = agent.compile()
 | `fallback_models` | `list` | `None` | Backup models if the primary fails (e.g., `["gpt-4-turbo", "gpt-3.5-turbo"]`). |
 | `trim_context` | `bool` | `False` | Trim old messages from context when it grows long, keeping recent messages. Helps control token usage on long runs. |
 | `client` | `Any` | `None` | FastMCP client instance for MCP-hosted tools. |
-| `pass_user_info_to_mcp` | `bool` | `False` | Include user info (user_id, etc.) in MCP tool calls. |
+| `pass_user_info_to_mcp` | `bool` | `False` | Send the caller as unsigned MCP request metadata. The server cannot verify it; use it only for a trusted internal server. |
+| `mcp_auth` | `Callable[[MCPAuthContext], Awaitable[dict[str, str]]] \| None` | `None` | Async function returning HTTP headers for each MCP call, such as a short-lived signed token the server verifies. Use it for per-user or per-tenant access control. See [Use MCP tools](/docs/guides/use-mcp#authenticate-each-call-with-mcp_auth). |
 | `extra_messages` | `list[Message]` | `None` | Messages sent after the history on every call (e.g., examples or constraints). Text supports `{field}` state placeholders; see [prompt caching](/docs/guides/configure-agent#per-request-context-and-prompt-caching). |
 | `tools_tags` | `set[str]` | `None` | Filter tools by tags; only tools matching these tags are offered. |
 | `skills` | `SkillConfig` | `None` | Agent Skills configuration; enables dynamic skill discovery and activation. |

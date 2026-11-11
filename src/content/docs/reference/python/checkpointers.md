@@ -75,7 +75,7 @@ Each checkpointer keeps a tool execution ledger: the result of every finished to
 
 | Method | Signature | Description |
 |---|---|---|
-| `aclear_tool_results` | `async (config) -> None` | Clear one thread's ledger. Scoped to the thread's owner and tenant. The graph calls it in the background after a run completes. |
+| `aclear_tool_results` | `async (config, origin_message_ids=None) -> int` | Clear one thread's ledger and return the number of rows deleted. With `origin_message_ids`, only rows issued by those assistant messages go (an empty list deletes nothing); `None` clears the whole thread. Scoped to the thread's owner and tenant. The graph calls it in the background after a run completes, with that run's message ids. |
 | `aprune_tool_results` | `async (older_than: timedelta) -> int` | Delete ledger rows older than `older_than` across all threads and return the count. 10xGraph never calls it; schedule it yourself. With `row_level_security=True` on `PgCheckpointer`, run it with a role that bypasses RLS. |
 
 `PgCheckpointer` schema version 7 adds an index on `tool_executions(created_at)`. `asetup()` applies it.

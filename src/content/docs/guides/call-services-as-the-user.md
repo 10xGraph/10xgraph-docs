@@ -38,7 +38,7 @@ The credential stays inside the run. It is not written to logs, publisher events
 
 **1. Forward the user's token.** Token passthrough is forbidden by the MCP spec: a server must only accept tokens issued for itself. The only safe case is your own server that accepts the same token. `forward_credential` exists for that case and nothing else.
 
-**2. M2M token plus asserted identity.** Your app authenticates to the server with its own service token, set on the transport with `auth=`. The user comes along as data: `pass_user_info_to_mcp=True` sends the caller in the MCP request metadata, and the server reads `ctx.request_context.meta["user"]`. The server must authenticate the calling app first and only then trust `_meta.user`. An unauthenticated caller can claim any user. See [Use MCP tools](/docs/guides/use-mcp#forwarding-user-context-to-mcp).
+**2. M2M token plus asserted identity.** Your app authenticates to the server with its own service token, set on the transport with `auth=`. The user comes along as data: `pass_user_info_to_mcp=True` sends the caller in the MCP request metadata, and the server reads `ctx.request_context.meta["user"]`. This metadata is unsigned, so the server cannot verify it. Use this pattern only for a trusted internal server; anything that can reach the endpoint can claim any user. For per-user or per-tenant access, use pattern 3 or 4 so the server verifies a token. See [Use MCP tools](/docs/guides/use-mcp#tell-the-mcp-server-who-is-calling).
 
 **3. Self-issued delegation token.** Your app signs a short-lived token for the user (5 minutes, one audience) and the service verifies it with your public key. The service gets a real, expiring, user-scoped credential without an IdP round trip.
 
@@ -211,6 +211,7 @@ async def delegation_auth(ctx: MCPAuthContext) -> dict[str, str]:
         "aud": ctx.server,
         "sub": ctx.identity.user_id,
         "org_id": (ctx.identity.tenant or {}).get("org_id"),
+        "act": {"sub": "my-agent-app"},  # the agent acting for the user
         "iat": now,
         "exp": now + 300,
     }

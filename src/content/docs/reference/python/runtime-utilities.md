@@ -342,26 +342,25 @@ Read back the metadata that the `@tool` decorator attaches to a function. Both h
 
 ### get_tool_metadata(func)
 
-Return the tool metadata stored on a function as a dict. It works on any callable: an undecorated function yields `None` values and an empty `tags` set.
+Return the tool metadata stored on a function as a dict. It works on any callable: an undecorated function yields `None` values (and `True` for `record_tool_result`) and an empty `tags` set.
 
 | Parameter | Type | Description |
 |---|---|---|
 | `func` | `Callable` | A function that may have been decorated with `@tool`. |
 
-Returns: `dict` with keys `name`, `description`, `tags`, `provider`, `capabilities`, `metadata` and `parameters`. `tags` is a `set` (empty when unset). The other values are `None` when unset.
+Returns: `dict` with keys `description`, `tags`, `provider`, `capabilities`, `metadata` and `parameters`. `tags` is a `set` (empty when unset). The other values are `None` when unset.
 
 Example:
 
 ```python
 from tenxgraph.utils import tool, get_tool_metadata
 
-@tool(name="calculator", tags=["math"])
+@tool(tags=["math"])
 def add(a: int, b: int) -> int:
     """Add two numbers."""
     return a + b
 
 metadata = get_tool_metadata(add)
-print(metadata["name"])      # "calculator"
 print(metadata["tags"])      # {'math'}
 print(metadata["description"])  # Add two numbers.
 ```
