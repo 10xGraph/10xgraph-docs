@@ -1,16 +1,28 @@
 ---
 title: Observability
 description: "Set up structured logging, metrics collection, error tracking with Sentry, and inspect runs via the observability API."
-section: "API server"
-group: "Operate"
-order: 140
-label: Observability
-updated: "2026-10-27"
+section: "Observability"
+order: 10
+label: Logs and server telemetry
+updated: "2026-11-10"
 ---
 
-10xGraph provides multiple observability surfaces to monitor agent execution, debug issues, and track performance in production. Logs and metrics are built in; Sentry integration and tracing are optional. This page covers logs, metrics, secret redaction, Sentry setup, and the REST API endpoint to inspect run traces. For per-node spans in Logfire or LangSmith, see the link at the end.
+The API server gives you the signals an operator needs: application logs on stdout with a request id, an optional audit log, metrics, error tracking and tracing. Logs are on by default. Metrics are off until you add a `metrics` block to `10xgraph.json`. Sentry, the audit log and tracing are optional. This page covers logs, metrics, secret redaction, Sentry setup, and the REST API endpoint to inspect run traces. For per-node spans in Logfire or LangSmith, see the link at the end.
 
 Logs and metrics are independent of each other and of tracing: you can enable any combination, and a failure in one does not affect the others.
+
+## Logs
+
+The API server writes its application logs to stdout, with secrets redacted. Each request gets an id, returned in the `X-Request-ID` response header and attached to the log lines of that request.
+
+Set `LOG_FORMAT=json` to write every log line as one JSON object (`ts`, `level`, `logger`, `message`, plus `request_id`, `transport` and `user_id` when known and `exc_info` for an exception). The default is `text`. Use `json` in production so your log pipeline can parse and index the lines.
+
+```bash
+LOG_FORMAT=json
+LOG_LEVEL=INFO
+```
+
+Ship stdout to storage you retain and protect (Docker or Kubernetes logging, Fluent Bit, Vector, a SIEM). 10xGraph does not store logs. For a record of who accessed or changed which data, turn on the [audit log](/docs/server/audit-log).
 
 ## Structured logging
 
@@ -358,7 +370,7 @@ For per-node spans sent to any OTLP endpoint, see [Send traces to an OTLP endpoi
 
 ## What is in your traces
 
-Spans carry `user_id`, `thread_id` and `run_id`. Set `"observability": {"user_id_mode": "hash"}` (or `"mask"`) in `10xgraph.json` to change how the user id appears. It applies to the server's OTEL publisher, for the `observability` block and for `OTEL_ENABLED`. Prompts and tool I/O appear only at `observability.level` `full`. See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
+Spans carry `user_id`, `thread_id` and `run_id`. Set `"observability": {"user_id_mode": "hash"}` (or `"mask"`) in `10xgraph.json` to change how the user id appears. It applies to the server's OTEL publisher, for the `observability` block and for `OTEL_ENABLED`. `observability.level` defaults to `full`, which puts prompts, completions, tool I/O and graph state on spans; `standard` keeps graph state but not prompts, completions or tool I/O, and `spans` carries neither. See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
 
 ## Related docs
 

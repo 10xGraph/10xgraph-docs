@@ -2,8 +2,8 @@
 title: Route between agents with handoff
 description: "Transfer control between agents in a multi-agent graph using handoff tools and Command routing."
 section: "Build agents"
-group: "Multi-agent and control flow"
-order: 280
+group: "Control flow"
+order: 250
 updated: "2026-10-27"
 faq:
   - q: "When should I use this instead of SwarmAgent?"

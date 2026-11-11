@@ -34,6 +34,8 @@ For connecting an agent to the outside world, read [What is the Model Context Pr
 | [What is agent streaming?](/docs/glossary/what-is-agent-streaming) | Sending AI agent responses token-by-token to a frontend instead of waiting for the full response to complete |
 | [What is thread isolation?](/docs/glossary/what-is-thread-isolation) | Each user can read and run only the conversation threads they own, enforced by the server on every request |
 | [What is prompt injection?](/docs/glossary/what-is-prompt-injection) | Text that makes a model follow an attacker's instructions instead of yours, directly or through content the agent reads |
+| [What is multi-tenancy?](/docs/glossary/what-is-multi-tenancy) | One deployment serving many organizations while each one's data stays invisible to the others, enforced by tenant columns and reach |
+| [What is an audit log?](/docs/glossary/what-is-an-audit-log) | A record of who did what, to which resource and when, kept as metadata without message content |
 
 ## Related
 

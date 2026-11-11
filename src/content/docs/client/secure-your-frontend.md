@@ -5,12 +5,12 @@ description: "How a browser app talks to a production 10xGraph server without a 
 section: "TypeScript client"
 group: "Basics"
 order: 15
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - question: "Can I put the API token in a NEXT_PUBLIC variable?"
     answer: "No. NEXT_PUBLIC variables are written into the JavaScript bundle at build time, so every visitor can read them and they cannot hold a per-user value. Keep a shared token on a server, or issue each user a short-lived token at runtime after they log in."
   - question: "How does a browser authenticate a WebSocket?"
-    answer: "Browsers cannot set headers on a WebSocket. The client sends the bearer token as the second entry of the Sec-WebSocket-Protocol list, after the 10xgraph-bearer sentinel. The token never goes in the URL. This needs 10xgraph-api 0.7.0 or later."
+    answer: "Browsers cannot set headers on a WebSocket. The client sends the bearer token as the second entry of the Sec-WebSocket-Protocol list, after the 10xgraph-bearer sentinel. The token never goes in the URL."
   - question: "Does the client retry a 429 for me?"
     answer: "No. It throws a plain TenxGraphError with statusCode 429 and does not keep the response headers, so the Retry-After value is not available as a field. Back off in your app."
 ---
@@ -48,7 +48,7 @@ Also set `ORIGINS` on the server to your exact frontend origins. With `MODE=prod
 
 A browser cannot set an `Authorization` header on a WebSocket. `wsStream()` therefore opens the socket with the subprotocol list `['10xgraph-bearer', '<token>']`. The server reads the token from the entry after the sentinel and echoes the sentinel back, which the browser requires to finish the handshake. The token is never placed in the URL, so it stays out of access logs.
 
-- This needs `10xgraph-api` 0.7.0 or later. The client sends only the `10xgraph-bearer` sentinel.
+- This needs `10xgraph-api` 1.0. The client sends only the `10xgraph-bearer` sentinel.
 - On Node the client also sets an `Authorization` header.
 - The server re-checks revocation before every WebSocket run when `token_revocation` is configured.
 
@@ -92,7 +92,7 @@ try {
 - No token in any `NEXT_PUBLIC_` variable or committed file.
 - Browser calls go through your proxy, or use a short-lived per-user token fetched at runtime.
 - `ORIGINS` lists your real frontend origins.
-- WebSocket users run `10xgraph-api` 0.7.0 or later.
+- WebSocket users run `10xgraph-api` 1.0.
 - Your UI handles `401`, `403`, `409` and `429` as above.
 - You ran the [pre-production smoke tests](/docs/testing/before-production).
 

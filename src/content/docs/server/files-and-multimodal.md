@@ -3,7 +3,7 @@ title: Handle files and multimodal input
 description: Enable clients to upload images, audio, and documents to your agent via the file API.
 section: API server
 group: Interfaces
-order: 120
+order: 90
 label: Files and multimodal
 updated: "2026-10-27"
 faq:
@@ -15,7 +15,7 @@ faq:
     a: Use cloud storage (S3 or GCS) for any multi-worker deployment. Local storage assumes a shared filesystem and loses data on restart; memory storage loses everything on every restart.
 ---
 
-The 10xGraph API server accepts file uploads from clients and injects the media into your graph's execution. Upload once, reference by ID, and rely on the server to resolve the reference before model calls. This works the same way across REST (`/v1/graph/invoke`, `POST /v1/graph/stream`) and WebSocket (`WS /v1/graph/ws`), with built-in ownership enforcement so users cannot reference each other's files.
+The API server stores uploads with an owner recorded for each file and resolves file references before model calls, so clients never send raw base64 or public URLs. Upload once, reference by ID, and rely on the server to resolve the reference before model calls. This works the same way across REST (`/v1/graph/invoke`, `POST /v1/graph/stream`) and WebSocket (`WS /v1/graph/ws`), with built-in ownership enforcement so users cannot reference each other's files.
 
 Upload ownership and size limits are part of the [security model](/docs/production/security-model).
 
@@ -66,7 +66,7 @@ The server responds with metadata and a unique `file_id`:
 
 ### Permissions and ownership
 
-The uploading user is automatically recorded as the file's owner. Every read operation, including retrieval, metadata queries, and message rewriting, checks ownership and rejects requests from other users (`404` on the file routes, a "File not found" error on message references). This owner recording is immutable and survives as long as the file does.
+The uploading user is automatically recorded as the file's owner. Every read operation (for files that have an owner, which is every file uploaded in production), including retrieval, metadata queries, and message rewriting, checks ownership and rejects requests from other users (`404` on the file routes, a "File not found" error on message references). This owner recording is immutable and survives as long as the file does.
 
 The server reads uploads in 1 MiB chunks, so oversized files are rejected before the entire body is buffered in memory. Two HTTP status codes signal problems:
 
@@ -382,7 +382,7 @@ Before shipping to production, configure the following:
 - **Per-user limits**: Set `MEDIA_MAX_FILES_PER_USER` and `MEDIA_MAX_USER_STORAGE_MB` if users upload freely. Both are off (`0`) by default; set either to a positive number (for example `MEDIA_MAX_FILES_PER_USER=100`) to turn it on. With a quota on, every upload reads the metadata of each stored file to count the user's files, so the cost grows with the number of stored files. `MEDIA_INLINE_MAX_BYTES` (default 50000, `0` is off) moves large inline base64 media in a run request into the store, and `MEDIA_SWEEP_INTERVAL_SECONDS` (default 3600, `0` is off) cleans up files a crash left in the local store.
 - **Storage backend**: Use `cloud` storage (S3 or GCS) for any deployment with multiple workers. The `local` backend requires a shared filesystem and is not suitable for containerized deployments. Memory storage is development-only.
 - **Extraction cache**: Configure a checkpointer (PostgreSQL + Redis recommended) to share document extraction cache across workers. Without it, the same document is extracted per worker per process, wasting CPU.
-- **Ownership enforcement**: Set `MEDIA_REQUIRE_OWNER=true` if you need absolute certainty that no file without a recorded owner can be accessed. Files uploaded before ownership tracking was enabled have no owner and are otherwise allowed with a warning.
+- **Ownership enforcement**: Set `MEDIA_REQUIRE_OWNER=true` if you need absolute certainty that no file without a recorded owner can be accessed. `MEDIA_REQUIRE_OWNER` is on by default with `MODE=production`. In development, files uploaded before ownership tracking was enabled have no owner and are allowed with a warning.
 - **Signed URL TTL**: Adjust `MEDIA_SIGNED_URL_TTL_SECONDS` based on how long clients hold URLs (longer for downloads from slow connections, shorter for security).
 
 ## See also

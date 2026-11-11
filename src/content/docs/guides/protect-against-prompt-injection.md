@@ -1,9 +1,10 @@
 ---
 title: Validate input and guard prompts
 description: How to validate and sanitize user input before it reaches your agent's LLM, protecting against prompt injection, jailbreaks, and other OWASP LLM01:2025 attacks.
-section: "Build agents"
-group: "Safety"
-order: 360
+section: "Security and access"
+group: "Protect the server"
+order: 60
+label: "Prompt-injection validators"
 updated: "2026-10-29"
 faq:
   - question: "What happens when validation fails?"

@@ -3,7 +3,7 @@ title: Playground Troubleshooting
 description: Symptoms, causes, and fixes for hosted playground connection issues when using 10xgraph dev.
 section: Troubleshooting
 order: 60
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 When the hosted playground opened by `10xgraph dev` will not connect, fails silently, or shows a page as unavailable, the cause is usually the local API, the `backendUrl`, or a missing capability on your graph. This page lists each symptom with its likely causes and a fix, then a short checklist.
@@ -40,8 +40,6 @@ The playground is hosted externally. `10xgraph dev` does not run a separate loca
 - verify the browser URL contains the correct `backendUrl`
 
 ## Issue: "Your browser blocked the local server"
-
-Added in 1.0.0rc3.
 
 **Symptoms**
 

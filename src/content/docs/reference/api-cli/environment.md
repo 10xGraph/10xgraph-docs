@@ -6,7 +6,7 @@ section: Reference
 group: "CLI and configuration"
 order: 1770
 label: Environment Variables
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 The 10xGraph API server and CLI read configuration from environment variables. This page lists every variable with its default and effect, grouped by area. Set server variables in a `.env` file referenced by `10xgraph.json` or in the process environment. CLI variables control terminal output.
@@ -49,6 +49,7 @@ MODE=production 10xgraph dev --no-reload
 | `MODE` | `development` | `production` (or `prod`), or `development` (or `dev`, `local`). Trimmed and case-insensitive. Unset means `development`. Any other value stops the server at startup, and `10xgraph dev` exits with code 2; the message lists the accepted values. Drives several defaults, including debug mode (on in development, off in production), the run timeout and the strict startup checks. |
 | `STRICT_PRODUCTION_CHECKS` | on in production | In production, refuse to start on a wildcard `ALLOWED_HOST`, a wildcard `ORIGINS`, or an enabled `DOCS_PATH` or `REDOCS_PATH`. Set `false` to log warnings instead. Has no effect outside production. |
 | `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `LOG_FORMAT` | `text` | `json` writes every application log line as one JSON object (`ts`, `level`, `logger`, `message`, plus `request_id`, `transport` and `user_id` when known and `exc_info` for an exception). Secret redaction still applies. `10xgraph build` sets `json` in the generated production env. See [Observability](/docs/server/observability#logs). |
 | `SUMMARY` | `10xGraph Backend` | One-line service summary shown in the OpenAPI schema |
 | `LOGGER_NAME` | `10xgraph-api` | Name of the root logger the server writes under. Read at import time, so it must be a process environment variable; setting it in `.env` is too late. |
 | `GRAPH_PATH` | `10xgraph.json` | Path to the config file the ASGI app loads. `10xgraph dev --config` sets this for you; set it directly when running the app under an external server such as Gunicorn or Uvicorn. |
@@ -58,8 +59,6 @@ The settings model allows extra variables, so unknown names in the environment a
 ---
 
 ## Startup check variables
-
-Added in 1.0.0rc3.
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -195,7 +194,7 @@ See [ID Generator](/docs/reference/python/id-generator) for the constructor cont
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | none | OTLP HTTP trace URL, used when `observability.otlp.endpoint` is `null`. `OTEL_EXPORTER_OTLP_ENDPOINT` is not used for this |
 | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | none | OTLP HTTP metrics URL, used when `metrics.otlp.endpoint` is not set |
 | `OTEL_SEMCONV_STABILITY_OPT_IN` | `http` | The server sets it to `http` when unset, so HTTP metrics use the stable names. See [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana) |
-| `OTEL_LEVEL` | `standard` | Trace detail: `spans`, `standard`, or `full` |
+| `OTEL_LEVEL` | `full` | Trace detail: `spans`, `standard`, or `full`. `full` sends message content and graph state to the trace backend; `standard` keeps graph state but drops prompts, completions and tool I/O; `spans` is timing and structure only |
 
 OpenTelemetry needs the extra: `pip install "10xgraph-api[otel]"`, which also brings the FastAPI instrumentation and the OTLP exporter.
 

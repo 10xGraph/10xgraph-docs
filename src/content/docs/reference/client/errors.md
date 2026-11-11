@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 560
 label: "Error handling"
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 When the server returns a non-2xx response, `TenxGraphClient` throws an `TenxGraphError` or one of its 15 subclasses. The class is chosen from the response's error code first, then from the HTTP status. Network failures and client timeouts are not API errors: they throw a plain `Error`.
@@ -178,8 +178,6 @@ try {
 ```
 
 ### Rate limiter backend down (503)
-
-Added in 1.0.0rc3.
 
 When the server's cache store is unreachable and `fail_open` is `false`, it answers 503 with `error.code` `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5`, not 429. The client throws a `ServerError` with `statusCode` 503. Retry after a short delay, as for 429.
 

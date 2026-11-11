@@ -92,7 +92,8 @@ AudioAgent accepts most of the same parameters as `ReactAgent`, with provider fi
 | `system_prompt` | `list[dict] \| None` | `None` | List of system-role message dicts (e.g. `[{"role": "system", "content": "..."}]`). Flattened at connect time; supports `{field}` placeholders from state. |
 | `tools` | `Iterable[Callable] \| None` | `None` | Tool functions exposed to the model. Can be plain functions or decorated with `@tool`. Executed in parallel during the session. |
 | `client` | `Any` | `None` | FastMCP client for remote MCP-hosted tools. |
-| `pass_user_info_to_mcp` | `bool` | `False` | Forward `user_id` and `config` to MCP tool calls. |
+| `pass_user_info_to_mcp` | `bool` | `False` | Send the caller as unsigned MCP request metadata. The server cannot verify it; use it only for a trusted internal server. |
+| `mcp_auth` | `Callable[[MCPAuthContext], Awaitable[dict[str, str]]] \| None` | `None` | Async function returning HTTP headers for each MCP call, such as a short-lived signed token the server verifies. Use it for per-user or per-tenant access control. See [Use MCP tools](/docs/guides/use-mcp#authenticate-each-call-with-mcp_auth). |
 | `skills` | `SkillConfig \| None` | `None` | Dynamic skills (Agent Skills spec); flattened into system instruction at connect. Activate new skills mid-session via `activate_skill()`. |
 | `memory` | `MemoryConfig \| None` | `None` | Long-term semantic memory; loaded once at connect as a fenced `<user_memories_...>` block (see [why](/docs/concepts/memory-and-store#why-memories-are-not-system-text)). Use memory tools to add facts mid-session. |
 | `realtime_client_factory` | `Callable[[], RealtimeClient] \| None` | `None` | Override the default Gemini Live client factory. Useful for testing with a mock. |

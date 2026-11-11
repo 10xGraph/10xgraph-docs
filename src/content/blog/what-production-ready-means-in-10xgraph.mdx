@@ -1,24 +1,24 @@
 ---
 title: "What production-ready means in 10xGraph, and what you still have to do"
 seoTitle: "What production-ready means in 10xGraph"
-description: "What is on by default when you serve an agent with 10xgraph-api, the config that turns each protection on, and the honest list of what stays your job."
+description: "What 10xGraph runs around your agent by default, the config that turns each protection on, what 1.0 adds, and the honest list of what stays your job."
 date: 2026-10-27
-updated: 2026-10-27
+updated: 2026-11-10
 author: Shudipto Trafder
 kind: engineering
 tags: [production, security, server, deployment]
 faq:
   - q: Is 10xGraph production ready?
-    a: The server enforces thread ownership, scoped authorization, input limits, run limits and production-mode checks by default, and keeps state durably with PostgreSQL. It is pre-1.0, and you still own auth configuration, secrets, TLS, backups and your tools' own authorization.
+    a: The server enforces reach-scoped thread access, permission checks, input limits, run limits and production-mode checks by default, and keeps state durably with PostgreSQL. You still own auth configuration, secrets, TLS, backups and your tools' own authorization.
   - q: Does the server force me to configure authentication?
     a: No. With auth set to null the server starts and is open, also with MODE=production. Nothing refuses it, so set auth to jwt or a custom BaseAuth class before you expose the server.
   - q: Does 10xGraph stop prompt injection?
     a: No. Validators, approval steps and tool allow-lists bound what a model can be talked into, but they do not remove prompt injection. The limits page lists what the server does not protect.
 ---
 
-"Production ready" is an adjective until you can list what it means. This post lists it for one setup: you write a graph, compile it, and serve it with `10xgraph-api`. For each protection you get the default, the config that changes it, and what stays on your side. It is written for a platform lead comparing frameworks, so the "you still must" parts are as long as the "we do" parts.
+"Production ready" is an adjective until you can list what it means. 10xGraph is open-source, self-hosted infrastructure for AI applications, and this post lists what that infrastructure does for one setup: you write a graph, compile it, and serve it with `10xgraph-api`. For each protection you get the default, the config that changes it, and what stays on your side. It is written for a platform lead evaluating infrastructure, so the "you still must" parts are as long as the "we do" parts.
 
-The short version: you build the agent, and the server owns the request surface, per-user isolation, run limits and startup checks. The one thing it does not decide for you is whether to turn authentication on.
+The short version: you write the agents, tools and tasks, and the server owns the request surface, per-user isolation, run limits and startup checks. The one thing it does not decide for you is whether to turn authentication on. The production template (`10xgraph init --template production`) does.
 
 ## 1. Who is calling: authentication
 
@@ -28,25 +28,25 @@ The short version: you build the agent, and the server owns the request surface,
 
 **You still must:** switch it on, keep the signing secret in a secret store, and make your login service the only place that mints `user_id`. [Security in five minutes](/docs/get-started/security-in-five-minutes) walks through it.
 
-## 2. Who owns what: thread ownership
+## 2. Who owns what: reach and thread access
 
-**Default:** once auth is configured, or `MODE=production`, the `ownership` authorization backend is on. Only a thread's owner can read, run or delete it. A foreign `invoke` or `stream` gets 403 before the graph starts. A client cannot invent a thread id: it starts a thread by omitting the id and uses the one the server returns. The check fails closed: if the checkpointer cannot name a thread's owner, requests are denied, and with auth on the server refuses to boot.
+**Default:** with auth on, every storage query is scoped to the caller. The default reach is `own`: only a thread's owner can read, run or delete it. A role with reach `tenant` or `all` can also read, list, delete and stop other users' threads. Runs and writes always stay with the caller's own threads, admins included. A thread outside the caller's reach answers 404 before the graph starts, so a foreign id looks the same as a missing one. A client cannot invent a thread id: it starts a thread by omitting the id and uses the one the server returns.
 
-**Turn it on or tune it:** pass a checkpointer to `graph.compile(checkpointer=...)`. The `checkpointer` key in `10xgraph.json` is not read by the server. `runs.thread_ids: "client"` opts out of server-made ids. `authorization` takes your own backend.
+**Turn it on or tune it:** pass a checkpointer to `graph.compile(checkpointer=...)`. The `checkpointer` key in `10xgraph.json` is not read by the server. Set `roles` with a `reach` and `tenant_claims` inside the `auth` object. `runs.thread_ids: "client"` opts out of server-made ids.
 
-**You still must:** use a checkpointer that supports owners (`PgCheckpointer`, SQLite, in-memory) and think about who may share data. The companion post [Why a user cannot read another user's thread](/blog/why-a-user-cannot-read-another-users-thread) shows the mechanism in detail.
+**You still must:** use a checkpointer that supports owners (`PgCheckpointer`, SQLite, in-memory), declare `tenant_columns` if you serve several organizations, and think about who may share data. The companion post [Why a user cannot read another user's thread](/blog/why-a-user-cannot-read-another-users-thread) shows the mechanism in detail, and [Multi-tenant data](/docs/guides/multi-tenant-data) covers the columns.
 
-## 3. What a request may do: scoped authorization
+## 3. What a request may do: roles and permissions
 
-**Default:** routes check `resource:action` scopes such as `graph:invoke` from the token's `scope` or `scopes` claim. At startup a route guard refuses to boot if any non-public route has no permission guard. Only `/ping` and `/health/ready` are public. Graph introspection needs `graph:read` in production.
+**Default:** routes check `resource:action` permissions such as `graph:invoke`. At startup a route guard refuses to boot if any non-public route has no permission guard. Only `/ping` and `/health/ready` are public. Graph introspection needs `graph:read`. With no roles configured, every caller gets the default set (all but `admin:*`); a token `scope` or `scopes` claim can only narrow it.
 
-**Config:** put scopes in your tokens, or supply an `authorization` backend. A token with no scope claim is unrestricted, so decide deliberately which of your tokens carry scopes.
+**Config:** add `roles` to the `auth` object, each with permissions and a reach, or override `BaseAuth.authorize`. See [Auth](/docs/server/auth).
 
-**You still must:** issue narrow scopes, and check permissions inside tools that touch sensitive data. The server authorizes the request, not the business logic inside your tool.
+**You still must:** issue narrow roles, and check permissions inside tools that touch sensitive data. Permissions apply per route, not per tool: the server authorizes the request, not the business logic inside your tool.
 
 ## 4. What a client may send: input shaping
 
-**Default:** client messages must have the `user` role. An `assistant` or `system` message is refused with 422, so a forged "I approved it" cannot enter the thread. A `tool` message is accepted only as the answer to a pending remote tool call. `context_summary` and `execution_meta` are never client-writable, the server replaces client message ids, and reserved config keys such as `user_id`, `authz`, `tool_timeout` and `max_parallel_tool_calls` are dropped.
+**Default:** client messages must have the `user` role. An `assistant` or `system` message is refused with 422, so a forged "I approved it" cannot enter the thread. A `tool` message is accepted only as the answer to a pending remote tool call. `context_summary` and `execution_meta` are never client-writable, the server replaces client message ids, and reserved config keys such as `user`, `user_id`, `tool_timeout` and `max_parallel_tool_calls` are rejected.
 
 **Config:** `runs.config_keys` and `runs.state_keys` are allow-lists for request config and state (422 on other keys).
 
@@ -86,7 +86,7 @@ The short version: you build the agent, and the server owns the request surface,
 
 ## 8. Durable and replay-safe state
 
-**Default with `PgCheckpointer`:** state is in PostgreSQL with Redis as a hot cache. Writes are versioned per thread, so a stale run cannot move the cache backwards. A tool call that finished before a crash is recorded in a ledger and not run again on resume (invoke path). Background: [hot and cold agent memory](/blog/hot-and-cold-agent-memory) and [your agent charged the card twice](/blog/your-agent-charged-the-card-twice).
+**Default with `PgCheckpointer`:** state is in PostgreSQL with Redis as a hot cache. Writes are versioned per thread, so a stale run cannot move the cache backwards. A tool call that finished before a crash is recorded in a ledger and not run again on resume (invoke path). A crash before the tool returns can still repeat it. Background: [hot and cold agent memory](/blog/hot-and-cold-agent-memory) and [your agent charged the card twice](/blog/your-agent-charged-the-card-twice).
 
 **Config:** `PgCheckpointer` passed to `compile()`, with `DATABASE_URL` and `REDIS_URL`.
 
@@ -94,22 +94,32 @@ The short version: you build the agent, and the server owns the request surface,
 
 ## 9. Deploy and scale
 
-**Default:** `10xgraph build` writes a Dockerfile that runs Gunicorn as a non-root user, and with flags a `docker-compose.yml` and `k8s.yaml`. `GET /ping` is liveness and `GET /health/ready` is readiness. Workers hold no conversation state; it lives in the checkpointer. With Redis configured, the ownership cache, run caps and thread locks are shared across workers.
+**Default:** `10xgraph build` writes a Dockerfile that runs Gunicorn as a non-root user, and with flags a `docker-compose.yml` and `k8s.yaml`. `GET /ping` is liveness and `GET /health/ready` is readiness. Workers hold no conversation state; it lives in the checkpointer. With Redis configured as the `cache_store`, run caps, thread locks, rate-limit counters and token revocations are shared across workers.
 
 **Config:** `10xgraph build --docker-compose --k8s`, `cache_store` with `type: "redis"` (or `type: "custom"` for your own `BaseCacheStore`), `cache_store.token_revocation: true`.
 
 **You still must:** terminate TLS at your load balancer or ingress, run two or more instances if you need availability, and size your database.
 
+## What 1.0 adds
+
+These ship in 1.0. Each is opt-in through config unless the production template writes it for you.
+
+- **Background jobs.** A thin TaskIQ layer: `10xgraph worker` runs tasks, `10xgraph scheduler` fires scheduled ones, and `/v1/tasks` routes start, read, cancel and reschedule them. With auth on, a task runs under the caller's identity and needs the `tasks:trigger` permission. Delivery is at-least-once: if a worker dies, another runs the task again, so write tasks that are safe to rerun. See [Background tasks](/docs/server/background-tasks).
+- **Metrics.** A `metrics` block in `10xgraph.json` turns on Prometheus scraping or OTLP push for the API and the worker. Dashboards and alert rules are yours. See [Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana).
+- **JSON logs and an audit log.** `LOG_FORMAT=json` makes every application log line one JSON object. The `audit` block adds a metadata-only audit log: one event per permission check, authentication failure or change, with ids and outcomes and never prompts, answers or file contents. 10xGraph produces the stream and does not store it; you ship it to your own sink and own its retention. See [Audit log](/docs/server/audit-log).
+- **A control mapping.** Built for teams going through SOC 2 and ISO 27001 audits: the [control mapping](/docs/production/control-mapping) lists which controls the platform gives you evidence for, what is on by default, and what stays with your organization. 10xGraph holds no audit report of its own.
+
 ## The honest list
 
 Regardless of how many boxes above are ticked:
 
-- **Auth is not forced.** `auth: null` serves everyone, including in production.
+- **Auth is not forced.** `auth: null` serves everyone, including in production. The production template turns it on; the bare server does not.
 - **Prompt injection is not solved.** Validators and approval steps bound what a model can be talked into. They do not remove it.
 - **Your tools are your code.** The server cannot know what a tool should be allowed to read.
 - **Secrets, TLS, backups, retention** are infrastructure you run.
-- **The project is pre-1.0**, needs Python 3.12 or newer, and has a smaller community than LangGraph or CrewAI. Pin versions and read the [changelog](/changelog).
+- 10xGraph needs Python 3.12 or newer and has a smaller community than LangGraph or CrewAI. Pin versions and read the [changelog](/changelog).
+- **Exactly-once is not on offer.** Replayed tools and jobs are at-least-once. Send idempotency keys to anything that moves money.
 
 ## Where to go next
 
-[Production readiness](/docs/production) has the full table with links to each reference page. The [security model](/docs/production/security-model) lists every threat and the six curl checks to verify it yourself, and [What 10xGraph does not protect](/docs/production/limits) expands the list above.
+The [platform overview](/docs/production) has the full table with links to each reference page. The [security model](/docs/production/security-model) lists every threat and the six curl checks to verify it yourself, and [What 10xGraph does not protect](/docs/production/limits) expands the list above.

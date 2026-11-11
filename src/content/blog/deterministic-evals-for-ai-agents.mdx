@@ -3,7 +3,7 @@ title: "Moving past vibe checks: deterministic agent evals in CI"
 seoTitle: "Deterministic agent evals in CI/CD"
 description: "Gate pull requests on what an AI agent did: which tools it called and with what arguments. Uses 10xGraph eval sets, trajectory scoring with no judge model, and pytest."
 date: 2026-10-26
-updated: 2026-10-27
+updated: 2026-11-10
 author: "Shudipto Trafder"
 kind: "engineering"
 tags: [testing, evaluation, ci-cd, reliability, pytest]
@@ -32,7 +32,7 @@ This post shows how to do that with `tenxgraph.qa.evaluation`: record the trajec
 
 Mocking every LLM response gives you fast tests that never exercise the model's choices. Grading every reply with another frontier model on every commit makes pull requests slow, adds judge cost and variance on top of the agent's own, and the scores still drift. Most teams need something in between: run the real agent, but score it by rules that need no judgement.
 
-10xGraph splits its criteria along that line:
+10xGraph, open-source infrastructure for AI applications, splits its eval criteria along that line:
 
 | | Trajectory and string checks | LLM-judged checks |
 |---|---|---|
@@ -338,7 +338,7 @@ def get_eval_set() -> EvalSet:
 10xgraph eval evals/ --parallel --max-concurrency 5 --output eval_reports --open
 ```
 
-The command always writes HTML and JSON reports to the output directory unless you pass `--no-report`. The HTML report shows each case with its criterion scores and reasons, the trajectory steps, the per-node responses and the token usage per node. The command exits non-zero unless every case passes, so it can gate a release on its own. `--threshold` adds a message when the pass rate falls below it, but does not relax the exit code.
+The command always writes HTML and JSON reports to the output directory unless you pass `--no-report`. The HTML report shows each case with its criterion scores and reasons, the trajectory steps, the per-node responses and the token usage per node. The command exits non-zero unless every case passes, so it can gate a release on its own. `--threshold` (or `threshold` in the `evaluation` section of `10xgraph.json`) sets the pass rate the exit code requires: the command exits 0 when the pass rate meets it.
 
 ## Current limits
 

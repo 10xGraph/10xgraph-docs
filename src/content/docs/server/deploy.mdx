@@ -1,9 +1,10 @@
 ---
 title: Deploy with Docker and Kubernetes
 description: Generate a Dockerfile, docker-compose.yml and Kubernetes manifest with 10xgraph build, then ship them with a production environment checklist.
-section: "API server"
-order: 150
-updated: "2026-10-27"
+section: "Deploy"
+order: 10
+label: "Docker and Compose"
+updated: "2026-11-10"
 faq:
   - q: Why does the generated config wait so long to shut down?
     a: An agent run can take minutes, and Gunicorn's default 30 second graceful timeout would kill runs mid-flight on every rolling deploy. The generated files use a 600 second graceful timeout, a 660 second worker timeout, a 660 second Compose stop grace period and a 675 second Kubernetes grace period.
@@ -13,7 +14,6 @@ faq:
     a: No. It looks for a requirements file or pyproject.toml, and the container reads 10xgraph.json at runtime, so your code and config must be copied into the image.
   - q: The 10xgraph-api package contains CLI code, project templates and a browser config editor. Is that a security risk in production?
     a: No. The server never imports or serves any of it, and the generated Dockerfile deletes the templates and the config editor from the image after installing dependencies. The only CLI file the server loads is a small constants module.
-group: "Operate"
 ---
 
 `10xgraph build` generates a production-ready `Dockerfile` and `.dockerignore` for your agent, and with flags also a `docker-compose.yml` and a `k8s.yaml` manifest. The images run Gunicorn with Uvicorn workers in `MODE=production`. This guide covers building, configuring, and shipping your deployment with a release checklist.
@@ -59,8 +59,21 @@ The image and manifests implement the behavior described in [scaling and reliabi
 | `--docker-compose / --no-docker-compose` | off | Also write `docker-compose.yml` and omit `CMD` from the Dockerfile |
 | `--k8s / --no-k8s` | off | Also write `k8s.yaml` |
 | `--service-name` | `10xgraph-api` | Service name in compose and Kubernetes files |
+| `--worker / --no-worker` | asked | Include a background worker. Needs a non-`memory` `worker` key in `10xgraph.json` |
+| `--scheduler / --no-scheduler` | off | Include the scheduler. Needs the worker |
 
 Without `--force`, `build` stops if the Dockerfile exists. It keeps an existing `.dockerignore` but appends any secret patterns it lacks (keys, certificates, cloud credential files), and errors on an existing `docker-compose.yml` or `k8s.yaml`.
+
+### Questions and background jobs
+
+At an interactive terminal, `build` asks up to four questions and skips any that a flag answers or that do not apply:
+
+1. **Where will you deploy?** Docker Compose, Kubernetes or Dockerfile only. Skipped when you pass `--docker-compose` or `--k8s`.
+2. **Run a background worker?** Default yes. Asked only when `10xgraph.json` has a `worker` key whose broker is not `memory`, and the target is Compose or Kubernetes.
+3. **Run the scheduler?** Default no. Asked only after a yes to the worker.
+4. **Overwrite existing files?** Asked only when files exist and you did not pass `--force`. No stops without writing.
+
+Pass `--yes` or `--non-interactive` to skip the questions. Without a terminal, the worker is included when the config has a non-`memory` `worker` key, and the scheduler only with `--scheduler`. `--worker` without a `worker` key, or with the `memory` broker, is an error, and so is `--scheduler` without a worker. With the `memory` broker no worker is generated, because tasks run inside the API, and `build` prints a note. `build` warns when your dependencies do not list `10xgraph-api` with the extra for the broker (`jobs`, `jobs-rabbitmq` or `jobs-kafka`).
 
 ## What files does it generate?
 
@@ -70,12 +83,12 @@ Without `--force`, `build` stops if the Dockerfile exists. It keeps an existing 
   - 10xgraph.json
   - **Dockerfile** python:3.13-slim, non-root user (uid 10001), healthcheck on /ping
   - .dockerignore excludes .env, keys and credential files, caches, venvs, .git, eval_reports, tests, evals and agent skill folders
-  - docker-compose.yml with `--docker-compose`
-  - k8s.yaml with `--k8s`
+  - docker-compose.yml with `--docker-compose`, plus `worker` and `scheduler` services when you include them
+  - k8s.yaml with `--k8s`, plus worker and scheduler Deployments when you include them
 
 </FileTree>
 
-The Dockerfile sets `MODE=production` and `WEB_CONCURRENCY=2`, installs `gunicorn` and `uvicorn`, removes the CLI-only files from the installed package, copies your project, drops to the non-root user `appuser` (fixed uid and gid 10001, set as `USER 10001:10001` so Kubernetes can verify it is not root), and defines a `HEALTHCHECK` that calls `/ping`. Its `CMD` runs `tenxgraph_api.src.app.main:app` under Gunicorn with the `TenxGraphUvicornWorker` class (`tenxgraph_api.src.app.uvicorn_worker.TenxGraphUvicornWorker`), `--graceful-timeout 600` and `--timeout 660`. The worker marks the app as draining on SIGTERM, so `/health/ready` answers 503 while open runs finish. `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` (default 540) sets how long uvicorn waits for open responses; see [Graceful shutdown](/docs/guides/graceful-shutdown).
+The Dockerfile sets `MODE=production` and `WEB_CONCURRENCY=2`, installs `gunicorn` and `uvicorn`, removes the CLI-only files from the installed package, copies your project, drops to the non-root user `appuser` (fixed uid and gid 10001, set as `USER 10001:10001` so Kubernetes can verify it is not root), and defines a `HEALTHCHECK` that calls `/ping`. Its `CMD` runs `tenxgraph_api.src.app.main:app` under Gunicorn with the `TenxGraphUvicornWorker` class (`tenxgraph_api.src.app.uvicorn_worker.TenxGraphUvicornWorker`), `--graceful-timeout 600`, `--timeout 660` and `--no-control-socket` (the gunicorn control server would write `/app/.gunicorn`, and the root filesystem is read-only). The worker marks the app as draining on SIGTERM, so `/health/ready` answers 503 while open runs finish. `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` (default 540) sets how long uvicorn waits for open responses; see [Graceful shutdown](/docs/guides/graceful-shutdown).
 
 ## Does the image ship the CLI and the config editor?
 
@@ -107,7 +120,7 @@ The list has no `templates` or `config_editor` entry.
 
 <Callout type="note" title="Older Dockerfiles">
 
-A Dockerfile generated before `10xgraph-api` 0.7.0 does not have the strip step. Run `10xgraph build --force` to regenerate it, or add the `RUN` line above after your `pip install` step.
+A Dockerfile generated by a 0.x version of `10xgraph-api` does not have the strip step. Run `10xgraph build --force` to regenerate it, or add the `RUN` line above after your `pip install` step.
 
 </Callout>
 
@@ -118,6 +131,8 @@ A Dockerfile generated before `10xgraph-api` 0.7.0 does not have the strip step.
 <TabItem label="Docker Compose">
 
 The compose file defines one service with `build: .`, the production environment, the same Gunicorn command, `stop_grace_period: 660s` and `restart: unless-stopped`. It reads secrets and `ORIGINS`/`ALLOWED_HOST` from `.env` through `env_file`, so they never enter the image. Copy `.env.example` to `.env` and fill it in first.
+
+If you included the worker, the file also has a `worker` service, and with the scheduler a `scheduler` service. Both are built from the same image as the API, read the same `.env`, use the same lockdown settings and publish no ports. They run `10xgraph worker` and `10xgraph scheduler` in the image. The worker waits up to 600 seconds for running tasks on shutdown. The scheduler carries a comment: run exactly one, and remove the service if you have no schedules. See [Background tasks](/docs/server/background-tasks).
 
 ```bash
 docker compose up --build -d
@@ -132,6 +147,8 @@ The container runs with `read_only: true`, `cap_drop: [ALL]` and `no-new-privile
 <TabItem label="Kubernetes">
 
 `k8s.yaml` holds a Deployment with 2 replicas and a Service on port 80 that targets your container port.
+
+If you included the worker, the file also has a `<service>-worker` Deployment, and with the scheduler a `<service>-scheduler` Deployment. They have no Service and no HTTP probes, and use the same security context and Secret as the API. The scheduler runs one replica with `strategy: Recreate`, so a rollout never runs two.
 
 ```bash
 docker build -t registry.example.com/my-agent:1.0 .

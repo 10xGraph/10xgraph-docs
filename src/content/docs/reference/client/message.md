@@ -420,6 +420,7 @@ The result of executing a tool call. When using remote tools the client creates 
 class ToolResultBlock {
   type: 'tool_result';
   call_id: string;
+  name?: string;
   output: any;
   is_error: boolean;
   status?: 'completed' | 'failed';
@@ -437,6 +438,7 @@ new ToolResultBlock({
 | Field | Type | Description |
 |---|---|---|
 | `call_id` | `string` | Must match the `id` of the corresponding `ToolCallBlock` or `RemoteToolCallBlock`. |
+| `name` | `string \| undefined` | Name of the tool that produced the result. Set by the server; absent on results saved before it was recorded. |
 | `output` | `any` | The return value of the tool function. Can be any JSON-serialisable value. |
 | `is_error` | `boolean` | Set to `true` when the tool execution failed. |
 | `status` | `'completed' \| 'failed'` | Status signal sent back to the server. |

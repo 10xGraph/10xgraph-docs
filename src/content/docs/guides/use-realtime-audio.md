@@ -3,7 +3,7 @@ title: How to build a realtime audio agent
 description: "Build a live audio-to-audio agent with AudioAgent and Gemini Live: arealtime sessions, LiveInputQueue, image input, reconnection, and the WebSocket bridge."
 section: "Build agents"
 group: "Streaming, media and realtime"
-order: 340
+order: 300
 label: Realtime audio (Gemini Live)
 updated: "2026-10-29"
 ---

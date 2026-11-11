@@ -3,7 +3,7 @@ title: 10xgraph.json configuration reference
 description: Every key the 10xgraph.json config file accepts, with defaults, types, purposes, and complete examples for rate limiting, auth, and servers.
 section: Reference
 order: 420
-updated: "2026-10-27"
+updated: "2026-11-10"
 group: "CLI and configuration"
 faq:
   - q: Which key is required in 10xgraph.json?
@@ -16,7 +16,7 @@ faq:
 
 `10xgraph.json` is the configuration file for the 10xGraph API server and CLI. It specifies which graph to serve, how to authenticate, where state lives, and server behavior. Only the `agent` key is required; every other key is optional. The file is plain JSON. Edit it by hand or with `10xgraph config` (a browser editor).
 
-Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: the CLI and the server read it when `10xgraph.json` is missing from the same directory. The keys are identical, so migration is a rename (`mv agentflow.json 10xgraph.json`) or a save from `10xgraph config`.
+Projects created before the rename to 10xGraph use `agentflow.json`. It still works until 2.0: the CLI and the server read it when `10xgraph.json` is missing from the same directory. The keys are identical, so migration is a rename (`mv agentflow.json 10xgraph.json`) or a save from `10xgraph config`.
 
 ## Which keys does it accept?
 
@@ -25,7 +25,7 @@ Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: th
 | `agent` | string | required | Compiled graph as `module:attribute`, for example `graph.agent:app` |
 | `env` | string | none | Dotenv file to load before the graph starts, for example `.env` |
 | `auth` | string, object or null | `null` | Authentication: `"jwt"`, or `{"method": "custom", "path": "module:Class"}` |
-| `authorization` | string, object or null | by `MODE` | Access control backend |
+| `authorization` | removed | none | Refused at startup. Use `auth.roles` and `auth.method: custom`. See [auth](#auth) |
 | `injectq` | string or null | none | Import path of an InjectQ container |
 | `store` | string or null | none | Import path of a `BaseStore` for long-term memory |
 | `store_allow_tenant_mismatch` | boolean | `false` | Boot even when the `store` declares different tenant columns than the checkpointer (production refuses otherwise). Use for a store that holds only shared data. See [Multi-tenant data](/docs/guides/multi-tenant-data) |
@@ -40,6 +40,7 @@ Projects created before 0.7.0 use `agentflow.json`. It still works until 2.0: th
 | `ag_ui` | object | disabled | AG-UI protocol endpoint |
 | `observability` | object | absent | Logfire, LangSmith, Arize Phoenix and OTLP tracing |
 | `metrics` | object | absent | Request, task and LLM metrics for Prometheus or Grafana |
+| `audit` | object | absent (off) | Audit log of who accessed or changed what. See [audit](#audit) |
 | `test` | object | absent | Defaults for `10xgraph test` |
 | `evaluation` | object | absent | Defaults for `10xgraph eval` |
 
@@ -198,7 +199,7 @@ The destinations below are AI tracing (observability) publishers. They receive g
 
 | Key | Type | Default | Purpose |
 |---|---|---|---|
-| `observability.level` | string | `standard` | `spans`, `standard` or `full` (`full` may record PII) |
+| `observability.level` | string | `full` | `spans`, `standard` or `full`. `full` (default) sends prompts, completions, tool I/O and graph state to the trace backend and may record PII. `standard` drops prompts, completions and tool I/O but keeps graph state on node spans. `spans` is timing and structure only. If the graph already has an observability publisher, the server reuses it and ignores this block, level included |
 | `observability.user_id_mode` | string | `raw` | How traces carry the user id: `raw`, `hash` or `mask`. See [Hide the user id in traces](/docs/guides/send-traces-to-logfire-langsmith#hide-the-user-id-in-traces) |
 | `observability.logfire` | object | none | Keys include `enabled`, `service_name`, `send_to_logfire`, `console` |
 | `observability.langsmith` | object | none | Keys include `enabled`, `project`, `endpoint` |
@@ -223,6 +224,18 @@ Off by default. See [Metrics with Prometheus and Grafana](/docs/guides/metrics-p
 | `metrics.latency_buckets_ms` | array of numbers | 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000 | Duration histogram buckets in milliseconds. Positive and strictly ascending |
 
 Needs `pip install '10xgraph-api[metrics]'`. Auth headers come from `OTEL_EXPORTER_OTLP_HEADERS`, never from the file. `OTEL_SERVICE_NAME` sets the service name.
+
+## audit
+
+Off unless set. One JSON line per event with ids and results only: no prompts, answers, message text, file contents or tokens. 10xGraph stores nothing; your log pipeline collects and retains the lines. See [Audit log](/docs/server/audit-log).
+
+| Key | Type | Default | Purpose |
+|---|---|---|---|
+| `audit.enabled` | boolean | `false` | Turn the audit log on. The production template writes `true` |
+| `audit.sinks` | array of strings | `["log"]` | `"log"` writes JSON lines to the `tenxgraph_api.audit` logger on stdout. `"publisher"` also sends events through the configured publisher (best effort). `"module:Class"` loads a `BaseAuditSink` subclass |
+| `audit.include_reads` | boolean | `true` | `false` keeps denials, auth failures and changes, and drops allowed reads and invokes to cut volume |
+
+Unknown keys inside `audit` are config errors. With auth off, events carry `user_id: null` and the server warns at boot.
 
 ## media
 
@@ -259,7 +272,7 @@ Each entry declares a tool the model can call that runs in the client. Unknown f
 
 ## Environment variables
 
-The server reads configuration from environment variables, which are listed in full in the [environment variables reference](/docs/reference/api-cli/environment). Common ones include `MODE`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `ORIGINS`, `MAX_REQUEST_SIZE`, `REDIS_URL`, `SENTRY_DSN`, and OTEL/observability settings. Set them as process environment variables or in a `.env` file referenced by the `env` key in `10xgraph.json`.
+The server reads configuration from environment variables, which are listed in full in the [environment variables reference](/docs/reference/api-cli/environment). Common ones include `MODE`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `ORIGINS`, `MAX_REQUEST_SIZE`, `REDIS_URL`, `LOG_FORMAT` (`text` or `json`), `SENTRY_DSN`, and OTEL/observability settings. Set them as process environment variables or in a `.env` file referenced by the `env` key in `10xgraph.json`.
 
 ## What does a complete config look like?
 

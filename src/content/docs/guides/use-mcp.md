@@ -80,7 +80,7 @@ client = Client("https://my-mcp-server.example.com/mcp")
 
 ## Step 2: Wire the MCP client into ToolNode
 
-Create a `ToolNode` and pass the MCP client. The `ToolNode` queries the client for available tools each time the Agent prepares its tool list before calling the LLM. It pings the server first and offers no MCP tools if the ping fails.
+Create a `ToolNode` and pass the MCP client. The `ToolNode` queries the client for available tools each time the Agent prepares its tool list before calling the LLM. If the server cannot be reached, it offers no MCP tools for that call.
 
 ```python
 from tenxgraph.core.graph import ToolNode
@@ -161,9 +161,23 @@ tool_node = ToolNode(
 
 When the LLM requests a tool, `ToolNode` runs it on the MCP client if the name is one of the MCP tools it listed, otherwise it runs the local function. A local function and an MCP tool must not share a name. `ToolNode` raises `ValueError` when an MCP tool has the same name as a local or remote tool, so rename one of them.
 
-## Forwarding user context to MCP
+## Tell the MCP server who is calling
 
-Many MCP servers need to know who is calling them (for access control, logging, or per-user state). Set `pass_user_info_to_mcp=True` on `ToolNode` to send the `user` dict from the execution config to the MCP server. It is sent as request metadata (`meta`) on the MCP call, not as a tool argument, and the server reads it from `ctx.request_context.meta`. If the client's `call_tool` has no `meta` parameter, a warning is logged and the user info is not sent. If `config` has no `user` dict but has a `user_id`, the server receives `{"user_id": ...}` instead.
+Many MCP servers need to know who is calling them (for access control, logging, or per-user state). There are two ways, and they differ in what the server can trust:
+
+| | `pass_user_info_to_mcp=True` | `mcp_auth=` |
+|---|---|---|
+| What is sent | The caller as unsigned request metadata (`meta["user"]`) | HTTP headers from your function, such as a short-lived signed token |
+| Can the server verify it | No | Yes, if the token is signed and the server checks it |
+| Use it for | A trusted internal server inside a network boundary you control, or identity that is informational only | A server that enforces per-user or per-tenant access |
+
+The metadata is not signed. Anything that can reach the MCP endpoint can send `meta={"user": ...}` and claim any user, so a server must not use it for access control unless it already trusts the caller. When the server enforces per-user or per-tenant access, use `mcp_auth` with a short-lived token the server verifies, for example a JWT that names the user and names the agent as the actor. See [Authenticate each call with `mcp_auth`](#authenticate-each-call-with-mcp_auth).
+
+In both cases, never add `user`, `user_id`, `org_id` or tenant arguments to MCP tools: arguments are chosen by the model and can be forged.
+
+## Send user context as metadata
+
+Set `pass_user_info_to_mcp=True` on `ToolNode` to send the caller in `config["user"]` to the MCP server. It is sent as request metadata (`meta`) on the MCP call, not as a tool argument, and the server reads it from `ctx.request_context.meta`. Behind the 10xGraph API, `config["user"]` is the verified `Identity`, and the server receives its JSON form: `user_id`, `kind`, `tenant` (for example `{"org_id": "acme"}`), `roles`, `permissions`, `reach` and the token `claims`. A dict you pass yourself is sent as is. If `config` has no `user` but has a `user_id`, the server receives `{"user_id": ...}` instead. If the client's `call_tool` has no `meta` parameter, a warning is logged and the user info is not sent.
 
 ```python
 tool_node = ToolNode(
@@ -173,7 +187,7 @@ tool_node = ToolNode(
 )
 ```
 
-The MCP server reads it from the request metadata, not from a tool argument. Declare a `ctx: Context` parameter on the server tool. FastMCP injects it and it is not part of the schema the model sees. The user dict is under the key `user` in `ctx.request_context.meta`, which keeps extra fields in `model_extra`:
+The MCP server reads it from the request metadata, not from a tool argument. Declare a `ctx: Context` parameter on the server tool. FastMCP injects it and it is not part of the schema the model sees. The user dict is under the key `user` in `ctx.request_context.meta`. On fastmcp 4.x `meta` is a dict; on 3.x it is a model, so dump it first:
 
 ```python
 # Code on the MCP server (fastmcp)
@@ -184,11 +198,12 @@ mcp = FastMCP("secure")
 @mcp.tool()
 def secure_action(query: str, ctx: Context) -> str:
     meta = ctx.request_context.meta
-    user = (meta.model_extra or {}).get("user") if meta else None
-    user = user or {}
+    if meta is not None and not isinstance(meta, dict):
+        meta = meta.model_dump()  # fastmcp 3.x
+    user = (meta or {}).get("user") or {}
     if "admin" not in user.get("roles", []):
-        raise PermissionError(f"User {user.get('id')} does not have permission")
-    return f"Action completed by {user.get('id')}"
+        raise PermissionError(f"User {user.get('user_id')} does not have permission")
+    return f"Action completed by {user.get('user_id')}"
 ```
 
 Pass the user dict in the invoke config. When requests go through the 10xGraph API server with authentication, the server sets `config["user"]` for you. When you call the graph directly, pass it yourself:
@@ -202,6 +217,41 @@ result = app.invoke(
     },
 )
 ```
+
+`pass_user_info_to_mcp` never sends the user's credential, and the metadata is unsigned, so the server cannot verify it. Use it only for a trusted internal server or where the identity is informational. A server that enforces per-user or per-tenant access should use `mcp_auth` instead.
+
+## Authenticate each call with `mcp_auth`
+
+`mcp_auth` is an async function that receives an `MCPAuthContext` (`identity`, `credential`, `tool_name`, `server`, `thread_id`, `run_id`) and returns the HTTP headers for that one MCP request. It runs before every tool listing and tool call. For the tool list, `tool_name` is `None` and `identity` is whichever run asked first, or `None` when nothing supplied a user (for example `refresh_mcp_tools()` called on its own). The list is shared by all users, so for a listing without a user return a token for the agent alone, one the server lets list tools but not call them. It needs fastmcp 4.1.7 or later and an HTTP transport (streamable HTTP or SSE). This example signs a 60 second token that names the user and the agent as the actor; the server checks the signature, `aud` and `exp`, and takes the user from the token:
+
+```python
+import os
+import time
+
+import jwt  # pip install pyjwt[crypto]
+
+from tenxgraph.core.graph.tool_node import MCPAuthContext
+
+async def mcp_auth(ctx: MCPAuthContext) -> dict[str, str]:
+    now = int(time.time())
+    claims = {"iss": "support-agent", "aud": "my-mcp-server", "iat": now, "exp": now + 60}
+    if ctx.identity is not None:
+        # A tool call on behalf of the signed-in user.
+        claims |= {
+            "sub": ctx.identity.user_id,
+            "org_id": (ctx.identity.tenant or {}).get("org_id"),
+            "act": {"sub": "support-agent"},
+        }
+    else:
+        # Fetching the tool list: the agent alone, which may list tools but not call them.
+        claims |= {"sub": "support-agent", "roles": ["service"]}
+    token = jwt.encode(claims, os.environ["MCP_SIGNING_KEY"], algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
+
+tool_node = ToolNode(tools=[], client=client, mcp_auth=mcp_auth)
+```
+
+`ReactAgent`, `PlanActReflectAgent`, `StructuredOutputAgent` and `AudioAgent` take `mcp_auth=` too. The tool list is cached per node and shared by all users, so the server must not return a different tool list per user. Token exchange, `forward_credential` and a longer `RS256` example are in [Calling services as the user](/docs/guides/call-services-as-the-user).
 
 ## Tune how a `ToolNode` uses an MCP server
 
@@ -322,7 +372,7 @@ agent = ReactAgent(
     model="gpt-4o",
     tools=[],
     client=client,
-    pass_user_info_to_mcp=True,
+    pass_user_info_to_mcp=True,  # trusted internal server; use mcp_auth=... for per-user access control
 )
 app = agent.compile()
 ```
@@ -398,7 +448,7 @@ print(result["messages"][-1].content)
 - Create an MCP client with `fastmcp.Client(config_dict)`, `Client(stdio_command)`, or `Client(http_url)`.
 - Pass the client to `ToolNode(tools=[], client=client)` to offer MCP tools to your agent.
 - Mix local and MCP tools in the same `ToolNode`; the runtime routes each call appropriately.
-- Forward user context to MCP servers with `pass_user_info_to_mcp=True`.
+- Tell an MCP server who is calling with `mcp_auth=` (a short-lived signed token the server verifies) when it enforces per-user or per-tenant access. `pass_user_info_to_mcp=True` sends unsigned metadata, so use it only for a trusted internal server.
 - Filter MCP tools by tag with `tools_tags` on the `Agent`.
 - Test MCP tools without a real server using `MockMCPClient`.
 

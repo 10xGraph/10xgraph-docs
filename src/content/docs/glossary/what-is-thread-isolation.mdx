@@ -12,7 +12,7 @@ faq:
   - q: What does a 404 on a thread mean?
     a: The caller is signed in, but the thread belongs to someone else or does not exist. By default the server answers 404 for both, so a caller cannot probe which ids exist. A 403 means the caller lacks a permission for the route.
   - q: Is thread isolation on by default in 10xGraph?
-    a: When auth is configured or MODE is production, every thread query is scoped to the caller, so only the owner can read or run a thread. With auth off in development there is no identity, so nothing is isolated.
+    a: When auth is configured or MODE is production, every thread query is scoped to the caller's reach. With the default reach `own`, only the owner can read or run a thread; reach `tenant` or `all` widens reads, lists and deletes but never runs. With auth off in development there is no identity, so nothing is isolated.
   - q: Does isolation stop a user from changing their own thread?
     a: No. A user may write to their own thread. Restrict that with permissions such as threads:write, and with runs.state_keys for the state fields a caller may set.
 ---

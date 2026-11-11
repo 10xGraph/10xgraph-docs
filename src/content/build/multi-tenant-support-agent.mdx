@@ -5,20 +5,20 @@ minutes: 25
 level: Intermediate
 outcome:
   - A JWT-protected support agent that serves users from two companies
-  - Proof, with real requests, that one user gets 403 on another user's thread
+  - Proof, with real requests, that one user gets 404 on another user's thread
   - Long-term memories that each user can only search and list for themselves
   - Threads that survive a restart, stored in Postgres through the checkpointer
   - A per-user rate limit that answers 429 with a retry time
-versions: 10xGraph 0.10.3, API and CLI 0.9.0 (steps marked "next release" need the build after that)
+versions: 10xGraph 1.0, API and CLI 1.0
 order: 20
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - q: Does 10xGraph separate tenants?
     a: It separates users. Every thread and every memory belongs to the user_id in the verified token, and another user_id gets 404 or an empty result. Organizations are available as tenant claims, and a role with reach `tenant` can read threads inside one company (see the auth guide), while runs and writes stay with the thread's owner. Make user ids unique across companies, for example by prefixing the company.
   - q: Can a client claim to be another user?
     a: Not through the request. The user comes from the verified JWT. In the run above, a request that put user_id of another user into the config of a store search still only saw its own memories. Identity in your tools should also come from config, never from state or from model arguments.
   - q: Did you test this against Postgres?
-    a: No. The isolation requests in this guide ran against an in-memory checkpointer and an in-memory Qdrant client, which enforce the same ownership rules through the server. The Postgres compile call is shown but was not run for this guide.
+    a: No. The isolation requests in this guide ran against an in-memory checkpointer and an in-memory Qdrant client, which enforce the same access rules through the server. The Postgres compile call is shown but was not run for this guide.
 ---
 
 An agent that works for one person on your laptop is not yet a product. A product answers many customers from one deployment, and the first question a buyer asks is whether customer A can ever see customer B's conversation. This guide serves a support agent to users from two companies and checks that answer with requests you can repeat.
@@ -63,7 +63,7 @@ The production template writes `10xgraph.json` with JWT auth, a Redis cache stor
 }
 ```
 
-"Ownership" means a thread belongs to the user who created it, and only that user can read, continue or delete it. When auth is configured it is the default, and the server refuses to boot if the checkpointer cannot report who owns a thread.
+Reach decides which threads a caller can see. The default is `own`: a thread belongs to the user who created it, and only that user can read, continue or delete it. Anyone else gets 404. `"auth": "jwt"` gives every user this default, and the server refuses to boot if the checkpointer cannot report who owns a thread.
 
 ## 2. Compile the agent with a Postgres checkpointer
 
@@ -134,7 +134,7 @@ store = QdrantStore(
 
 ## 4. Check isolation with real requests
 
-The following checks use a stub agent so you can run them without a model, Postgres or Redis. It answers with the caller's id and company, uses an in-memory checkpointer, and uses an in-memory Qdrant client with a toy embedding (a hash of the text). The ownership and store rules run in the server, so they behave the same with the real stores.
+The following checks use a stub agent so you can run them without a model, Postgres or Redis. It answers with the caller's id and company, uses an in-memory checkpointer, and uses an in-memory Qdrant client with a toy embedding (a hash of the text). The access and store rules run in the server, so they behave the same with the real stores.
 
 ```python title="agent.py"
 import hashlib
@@ -292,25 +292,21 @@ Alice, in the same minute, still got 200, because the bucket is per user. In you
 | Covered here | Still yours |
 |---|---|
 | Identity from a verified JWT, never from the request body | Issuing tokens, and keeping `JWT_SECRET_KEY` secret and 32 bytes or longer |
-| Owner-only threads, 404 on anyone else's | Sharing inside a company: give a role reach `tenant` and set `tenant_claims`, or write a custom `authorize` |
+| Own-reach threads, 404 on anyone else's | Sharing inside a company: give a role reach `tenant` and set `tenant_claims`, or write a custom `authorize` |
 | Memories filtered by the token's user | Your own tables: check `config["user_id"]` in each tool, as in step 2 |
 | Per-user rate limit with a retry time | Choosing the limit; Redis for more than one worker |
 | Threads in Postgres | Backups ([backup and restore](/docs/server/backup-and-restore)) and a managed database |
 
-What was run for this guide: the 401, 403, 200 and 429 requests above against a real `10xgraph dev` server in production mode, with the in-memory checkpointer and an in-memory Qdrant client. What was not run: Postgres, Redis, a real embedding model and the Gemini agent in steps 1 to 3.
+What was run for this guide: the 401, 404, 200 and 429 requests above against a real `10xgraph dev` server in production mode, with the in-memory checkpointer and an in-memory Qdrant client. What was not run: Postgres, Redis, a real embedding model and the Gemini agent in steps 1 to 3.
 
-<Callout type="note" title="Next release">
-
-This guide ran against the repository source after API 0.9.0 and core 0.10.3. Two behaviours come from changes not yet in those releases: `runs.thread_ids` defaulting to `server` (so Bob's invented thread id is refused; on 0.9.0 a client may name a new thread), and the per-thread run lock covered in the [refund approval guide](/build/refund-with-human-approval). Ownership, the store routes and the rate limiter are in 0.9.0.
-
-</Callout>
+Written for 10xGraph 1.0. The per-thread run lock is covered in the [refund approval guide](/build/refund-with-human-approval).
 
 ## Where to next
 
 <CardGrid>
 
 <LinkCard title="Security model" href="/docs/production/security-model" description="What a client can and cannot send, and what the server enforces." eyebrow="Production" />
-<LinkCard title="Auth and authorization" href="/docs/server/auth" description="Custom auth backends, scopes and owner-only threads." eyebrow="How-to" />
+<LinkCard title="Auth and access control" href="/docs/server/auth" description="Custom auth backends, scopes and reach-scoped threads." eyebrow="How-to" />
 <LinkCard title="Rate limiting" href="/docs/server/rate-limiting" description="Backends, proxies and failing open or closed." eyebrow="How-to" />
 <LinkCard title="Long-term memory" href="/docs/concepts/memory-and-store" description="How the memory store and its tools work." eyebrow="Concept" />
 </CardGrid>

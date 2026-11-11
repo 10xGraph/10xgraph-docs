@@ -1,13 +1,13 @@
 ---
 title: Introduction
 seoTitle: 10xGraph documentation and introduction
-description: "10xGraph (formerly Agentflow) is an open-source Python framework for production multi-agent AI: a core library, an API server and CLI, and a TypeScript client."
+description: "10xGraph (formerly Agentflow) is open-source, self-hosted infrastructure for AI apps: API server, auth and roles, tenant isolation, durable state, jobs and tracing."
 section: "Get started"
 order: 0
-updated: "2026-10-28"
+updated: "2026-11-10"
 faq:
   - q: "Is 10xGraph production-ready?"
-    a: "The production layer ships today in the `10xgraph-api` package: an API server with JWT or custom auth, owner-only thread access, rate limits, durable checkpointing with Postgres or SQLite, replay-safe tools, and Docker and Kubernetes files from `10xgraph build`. Some of it you must configure: with `auth` unset the server runs open, even with `MODE=production`. From 1.0 the public API is stable under a deprecation policy (breaking changes only in a major release, after at least one minor of deprecation), and 1.0 is a release candidate until the final ships. Pin exact versions and read the changelog before each upgrade. See Production readiness for what is covered and what is not."
+    a: "The production layer ships today in the `10xgraph-api` package: an API server with JWT or custom auth, role-based access with own, tenant or all reach (own is the default), rate limits, durable checkpointing with Postgres or SQLite, replay-safe tools, and Docker and Kubernetes files from `10xgraph build`. Background jobs run on `10xgraph worker` and `10xgraph scheduler`. Some of it you must configure: with `auth` unset the server runs open, even with `MODE=production`. From 1.0 the public API is stable under a deprecation policy (breaking changes only in a major release, after at least one minor of deprecation). Pin exact versions and read the changelog before each upgrade. See the Platform overview for what is covered and what is not."
   - q: "Do I need LangChain to use 10xGraph?"
     a: "No. 10xGraph has no LangChain dependency. You build graphs with its own StateGraph and Agent classes and call model providers through its own interface."
   - q: "Which models does 10xGraph support?"
@@ -16,7 +16,11 @@ faq:
     a: "Yes. 10xGraph is MIT licensed and self-hosted, with no hosted platform required. The `10xgraph build` command writes a Dockerfile and, with flags, a docker-compose.yml and a Kubernetes manifest so you can run it on your own infrastructure."
 ---
 
-You build the agent. Served with `10xgraph-api`, it gets authentication, per-user thread isolation, rate limits, durable state, replay-safe tools and Docker and Kubernetes deploy files, without you writing that layer. 10xGraph (formerly Agentflow) is an open-source Python framework for production multi-agent AI.
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
+
+Agents stay the core workload. Write your AI logic; 10xGraph runs the infrastructure.
+
+New here? [Find your path on the docs map](/docs/map).
 
 ## How you work with 10xGraph
 
@@ -31,13 +35,14 @@ When you are ready to deploy, `10xgraph build` writes the Dockerfile, and with f
 ## Your path
 
 1. [Quickstart](/docs/get-started/first-agent): build an agent and serve it in ten minutes.
-2. [Production readiness](/docs/production): what you get when you serve with `10xgraph-api`.
+2. [Platform overview](/docs/production): what you get when you serve with `10xgraph-api`, and what you still own.
 3. [Security model](/docs/production/security-model): who can do what, and where each check runs.
-4. [Production checklist](/docs/server/production-checklist): the settings to confirm before you deploy.
-5. [Build a production agent end to end](/build/production-react-agent): a support agent served with JWT auth, rate limits, Postgres memory, tests and Docker files.
+4. [Control mapping](/docs/production/control-mapping): which SOC 2 and ISO 27001 controls the platform supports. Built for teams going through those audits; your deployment is what gets audited.
+5. [Production checklist](/docs/server/production-checklist): the settings to confirm before you deploy.
+6. [Build a production agent end to end](/build/production-react-agent): a support agent served with JWT auth, rate limits, Postgres memory, tests and Docker files.
 
 <Callout type="note" title="Why 10xGraph: you build the agent, we ship the server">
-Most frameworks stop at the graph. 10xGraph gives you the production API server too: secure by default, horizontally scalable and ready to deploy, with every part (authentication, authorization, rate limits, storage) replaceable. [See what the server does for you and how to customize it](/docs/get-started/why-10xgraph).
+Most frameworks stop at the graph. 10xGraph gives you the production API server too: hardened defaults, horizontally scalable and ready to deploy, with every part (authentication, authorization, rate limits, storage) replaceable. Authentication is off until you configure it, and the production template turns it on. [See what the server does for you and how to customize it](/docs/get-started/why-10xgraph).
 </Callout>
 
 ## The three packages
@@ -52,7 +57,7 @@ They work together or standalone.
 
 The fastest path depends on what you want to build.
 
-<Callout type="tip" title="New to multi-agent AI?">
+<Callout type="tip" title="New to AI agents?">
 Start with [Get Started](/docs/get-started) for installation, a quickstart agent, and what the production template generates. Then move to [Concepts](/docs/concepts) to understand state, checkpointing, and the runtime model.
 </Callout>
 
@@ -76,7 +81,7 @@ Navigate by the question you want to answer.
 
 **[Concepts](/docs/concepts).** The mental model: graphs, state, messages, agents, tools, threads, checkpointers, memory, context, interrupts, streaming, serving and events. Understand how 10xGraph works.
 
-**[Production](/docs/production).** What the server gives you and how it works: the security model, architecture, scaling and reliability, and what 10xGraph does not protect. Read this to decide whether to trust it.
+**[Platform](/docs/production).** What the server gives you and how it works: the security model, architecture, scaling and reliability, and what 10xGraph does not protect. Read this to decide whether to trust it.
 
 **[Build Agents](/docs/guides).** How-to guides for building: custom graphs, prebuilt agents, tools, MCP, state, dependency injection, memory, context, multi-agent orchestration, streaming, media, authentication, interrupts, testing and observability. Each guide is a complete recipe with code.
 

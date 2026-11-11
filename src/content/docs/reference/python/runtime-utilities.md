@@ -310,7 +310,7 @@ Build the list of message dicts you send to an LLM from system prompts, the stat
 
 ### convert_messages(system_prompts, state, extra_messages)
 
-Convert system prompts, agent state, and extra messages into one list of dicts. The order is: system prompts, then `state.context_summary` (as an `assistant` message) if set, then each message in `state.context`, then `extra_messages`. System prompt strings may use `{field}` placeholders, filled from `state.model_dump()`. If a placeholder names a field the state lacks, the original prompt is used and a warning is logged. Messages with multimodal content get OpenAI-style content parts.
+Convert system prompts, agent state, and extra messages into one list of dicts. The order is: system prompts, then `state.context_summary` (as an `assistant` message) if set, then each message in `state.context`, then `extra_messages`. System prompt strings and `extra_messages` text may use `{field}` placeholders, filled from `state.model_dump()`. A missing field or bad placeholder stays as written, the rest is still filled, and a warning is logged. Use `{{` and `}}` for literal braces. Messages with multimodal content get OpenAI-style content parts.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -342,26 +342,25 @@ Read back the metadata that the `@tool` decorator attaches to a function. Both h
 
 ### get_tool_metadata(func)
 
-Return the tool metadata stored on a function as a dict. It works on any callable: an undecorated function yields `None` values and an empty `tags` set.
+Return the tool metadata stored on a function as a dict. It works on any callable: an undecorated function yields `None` values (and `True` for `record_tool_result`) and an empty `tags` set.
 
 | Parameter | Type | Description |
 |---|---|---|
 | `func` | `Callable` | A function that may have been decorated with `@tool`. |
 
-Returns: `dict` with keys `name`, `description`, `tags`, `provider`, `capabilities`, `metadata` and `parameters`. `tags` is a `set` (empty when unset). The other values are `None` when unset.
+Returns: `dict` with keys `description`, `tags`, `provider`, `capabilities`, `metadata` and `parameters`. `tags` is a `set` (empty when unset). The other values are `None` when unset.
 
 Example:
 
 ```python
 from tenxgraph.utils import tool, get_tool_metadata
 
-@tool(name="calculator", tags=["math"])
+@tool(tags=["math"])
 def add(a: int, b: int) -> int:
     """Add two numbers."""
     return a + b
 
 metadata = get_tool_metadata(add)
-print(metadata["name"])      # "calculator"
 print(metadata["tags"])      # {'math'}
 print(metadata["description"])  # Add two numbers.
 ```

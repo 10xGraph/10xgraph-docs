@@ -1,14 +1,15 @@
 ---
 title: "Set up API authentication and authorization"
 description: "Enable JWT or custom auth, map roles to permissions, set how far each role can see, and keep every user's data private in 10xGraph."
-section: "API server"
-group: "Security"
-order: 60
+section: "Security and access"
+group: "Identity and roles"
+order: 10
+label: "Authentication and roles"
 updated: "2026-11-08"
 faq:
   - q: "Which claims must my JWT contain?"
     a: "Every token needs `exp` (expiration) and `user_id` claims. If you set JWT_ISSUER or JWT_AUDIENCE, the token must also carry matching `iss` or `aud` claims. A token without `user_id` is rejected with status 401, code `INVALID_TOKEN`."
-  - q: "Why do I get 401 with code REVOKED_TOKEN?"
+  - q: "Why do I get 401 with code INVALID_TOKEN and no token?"
     a: "The request had no Authorization header, or it was not a Bearer credential. Send `Authorization: Bearer <token>` on every HTTP request, or use the `10xgraph-bearer` subprotocol on WebSocket."
   - q: "Does a role with reach all let an admin run inside another user's thread?"
     a: "No. Reach `tenant` and `all` widen reads, lists, deletes and stop. Runs and state or message writes always stay on the caller's own threads, admins included."
@@ -93,7 +94,7 @@ The server reads a standard bearer credential from the `Authorization` header:
 
 | Situation | HTTP status | Error code |
 |---|---|---|
-| No header | 401 | `REVOKED_TOKEN` |
+| No header | 401 | `INVALID_TOKEN` |
 | Expired token | 401 | `EXPIRED_TOKEN` |
 | Bad signature, or mismatched `iss`/`aud` | 401 | `INVALID_TOKEN` |
 | Valid signature but no `user_id` claim | 401 | `INVALID_TOKEN` |
@@ -114,7 +115,7 @@ const ws = new WebSocket(
 );
 ```
 
-The subprotocol list works as: the server looks for `10xgraph-bearer` (or the legacy `agentflow-bearer`), treats the next item as the token, and responds with the matching subprotocol. The server also accepts the `Authorization` header and, as a last resort, a `?token=` query parameter, which lands in URLs and logs. The subprotocol and `?token=` work on WebSocket routes only; HTTP routes take the `Authorization` header alone. If no credential is found, the connection is rejected with close code `1008` (policy violation).
+The subprotocol list works as: the server looks for `10xgraph-bearer` (or the legacy `agentflow-bearer`), treats the next item as the token, and responds with the matching subprotocol. The server also accepts the `Authorization` header. A `?token=` query parameter is not accepted, because it would land in URLs and logs. The subprotocol works on WebSocket routes only; HTTP routes take the `Authorization` header alone. If no credential is found, the connection is rejected with close code `1008` (policy violation).
 
 
 ## How does the user reach your code?
@@ -242,6 +243,8 @@ Use a durable, shared checkpointer such as `PgCheckpointer` in production. Tenan
 
 Subclass `BaseAuth` and implement `authenticate`. Optionally override `authorize`.
 
+Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
+
 ```python title="auth/custom_auth.py"
 from fastapi import HTTPException
 from tenxgraph_api import BaseAuth
@@ -264,6 +267,8 @@ class ApiKeyAuth(BaseAuth):
   }
 }
 ```
+
+To call other services as the user, the server also puts a `UserCredential` in `config["credential"]` (the verified bearer token by default). Override `async BaseAuth.downstream_credential(self, connection, credential, claims)` to supply a different one, such as a session cookie or API key. Clients cannot set `credential` themselves. See [Calling services as the user](/docs/guides/call-services-as-the-user).
 
 The `path` accepts `auth_app:Cls`, `auth_app.py:Cls`, `pkg.mod:Cls` and `pkg/mod.py:Cls`.
 
@@ -507,7 +512,7 @@ curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
   -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]}'
 ```
 
-Expected: HTTP 401, code `REVOKED_TOKEN`, before any graph execution.
+Expected: HTTP 401, code `INVALID_TOKEN`, before any graph execution.
 
 Then check who the server thinks you are:
 
@@ -521,7 +526,7 @@ Expected: HTTP 200 with your `user_id`, `roles`, `permissions` and `reach`. Then
 
 | Error | Likely cause | Fix |
 |---|---|---|
-| 401 `REVOKED_TOKEN` | No credential presented | Attach `Authorization: Bearer <token>` |
+| 401 `INVALID_TOKEN` (no credential) | No credential presented | Attach `Authorization: Bearer <token>` |
 | 401 `EXPIRED_TOKEN` | Token `exp` is in the past | Refresh the token; check server and issuer clock skew |
 | 401 `INVALID_TOKEN` | Bad signature or no `user_id` claim | Verify `JWT_SECRET_KEY`, `JWT_ALGORITHM`, and that the issuer emits `user_id` |
 | 401 "Invalid token, please login again" | A configured tenant claim is missing, or the roles or permissions claim is malformed | Add the claim, or fix its type (list of strings or one space-separated string) |
@@ -555,6 +560,7 @@ This is intentional: a forgotten guard becomes a deploy-time error, not a silent
 
 - [Authorization scopes](/docs/guides/authorization-scopes): Read the caller and check permissions inside tools and nodes
 - [Multi-tenant data](/docs/guides/multi-tenant-data): Tenant columns and reach in storage
+- [Calling services as the user](/docs/guides/call-services-as-the-user): Token exchange, M2M and self-issued tokens for MCP and local tools
 - [Configure the API server](/docs/server/configure): Set `auth` and other keys in `10xgraph.json`
 - [Troubleshooting auth](/docs/troubleshooting/api-server): Debug auth and CORS failures
 - [REST API: auth reference](/docs/reference/api-cli/auth): Full interface and status codes

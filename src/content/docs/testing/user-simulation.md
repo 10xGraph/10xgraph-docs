@@ -149,6 +149,17 @@ scenario = ConversationScenario(
 | `goals` | `list[str]` | What must be achieved for the simulation to count as complete |
 | `max_turns` | `int` | Hard cap on conversation turns (default: 10) |
 | `metadata` | `dict` | Arbitrary metadata passed through to results |
+| `config` | `dict` | Run config for this conversation, merged into the simulator's run config (an explicit `config=` passed to `UserSimulator.run` wins). Use it to sign in as a user |
+
+To run a scenario as a signed-in user, put the user in `config`. `10xgraph eval` applies it, so tools that read `config["user"]` work:
+
+```python
+ConversationScenario(
+    scenario_id="refund",
+    goals=["Refund is issued"],
+    config={"user": {"user_id": "u1", "org_id": "acme", "roles": ["agent"]}},
+)
+```
 
 **Writing effective goals:**
 - Be specific: `"User gets the weather temperature for London"` rather than `"User learns about weather"`

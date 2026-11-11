@@ -1,13 +1,13 @@
 ---
 title: "Invoke and stream over REST"
 description: "Call your graph over HTTP: synchronous invoke, streaming with NDJSON, thread management, stop and fix operations."
-order: 90
+order: 60
 group: "Interfaces"
 section: "API server"
 updated: "2026-10-27"
 ---
 
-The 10xGraph API server exposes your graph over HTTP, allowing you to invoke it synchronously, stream results in real time, manage thread-scoped state, and control running executions. This page covers the REST interface for graph execution.
+The 10xGraph API server puts an authenticated HTTP interface in front of your graph: synchronous invoke, streaming, per-user threads and run control. This page covers the REST routes. This page covers the REST interface for graph execution.
 
 ## Invoke and wait for results
 

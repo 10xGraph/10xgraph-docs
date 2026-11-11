@@ -26,7 +26,7 @@ config = {
 }
 ```
 
-`thread_id` is the primary key for all state, message, and metadata operations. `user_id` scopes thread ownership in a multi-tenant deployment. `PgCheckpointer` enforces it by default (`enforce_user_isolation=True`), so one user cannot read another's threads; the other checkpointers enforce owner-only access only when the API server's authorization policy asks for it. In a multi-tenant deployment you can also declare `tenant_columns` (for example `org_id`) on `PgCheckpointer`, so isolation matches on those columns as well as `user_id`; see [Multi-tenant data](/docs/guides/multi-tenant-data). Each user can have many threads; each thread persists independently until explicitly deleted. When you call the compiled graph from Python, you choose the `thread_id`. Behind the API server, the server picks the id of a new thread (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)), and clients send it back to continue.
+`thread_id` is the primary key for all state, message, and metadata operations. `user_id` scopes thread ownership in a multi-tenant deployment. `PgCheckpointer` enforces it by default (`enforce_user_isolation=True`), so one user cannot read another's threads; the other checkpointers scope by the caller's identity (`config["user"]`, which the API server sets when auth is on) and follow its reach (`own`, `tenant` or `all`). In a multi-tenant deployment you can also declare `tenant_columns` (for example `org_id`) on `PgCheckpointer`, so isolation matches on those columns as well as `user_id`; see [Multi-tenant data](/docs/guides/multi-tenant-data). Each user can have many threads; each thread persists independently until explicitly deleted. When you call the compiled graph from Python, you choose the `thread_id`. Behind the API server, the server picks the id of a new thread (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)), and clients send it back to continue.
 
 ## How checkpointing works
 
@@ -92,7 +92,7 @@ checkpointer = InMemoryCheckpointer()
 app = graph.compile(checkpointer=checkpointer)
 ```
 
-All data is lost when the process exits. Owner-only access applies only when the API server's authorization policy requests it.
+All data is lost when the process exits. Access is scoped by the caller's identity and reach only when `config["user"]` is set, as the API server does when auth is on.
 
 **Pros:** Zero setup, no external dependencies, fast for development.
 
@@ -116,7 +116,7 @@ Data survives process restarts because it is written to disk. However, SQLite se
 
 **Pros:** Durable, zero external dependencies (just a file), simple to deploy with a Python sidecar.
 
-**Cons:** Single-writer serialization, owner-only access only under an authorization policy, scales poorly across workers.
+**Cons:** Single-writer serialization, scoping by identity only when `config["user"]` is set, scales poorly across workers.
 
 **Best for:** client-side agents (desktop apps with Electron or Tauri), single-user CLI agents, edge deployments where each user has their own process and database.
 
@@ -162,6 +162,10 @@ pip install "10xgraph[pg_checkpoint]"
 `PgCheckpointer` also takes `tenant_columns` and `extra_columns`: real columns on the `threads` table that you name. Tenant columns (such as `org_id` and `project_id`) isolate data the way `user_id` does, and extra columns (such as `plan`) carry your own data and can be filtered in `alist_threads` and `GET /v1/threads`. Their values are set when the thread is created, never change, and come only from `config["user"]`, which your auth class fills. Declare the same tenant columns on `PgVectorStore` so threads and memories are isolated alike. The in-memory and SQLite checkpointers do not support them. See [Multi-tenant data](/docs/guides/multi-tenant-data).
 
 `await checkpointer.asetup()` creates the schema and is safe to repeat. The API server calls it at boot (on failure it logs and retries on first use), so a fresh Postgres needs no manual step there. See [guides/set-up-checkpointing](/docs/guides/set-up-checkpointing) for full configuration.
+
+## Tool results
+
+Every checkpointer also keeps a tool execution ledger: the result of each finished tool call. A node replayed after a crash, or resumed after a pause inside a tool node, reads the ledger and does not run those tools again. The graph clears a thread's ledger in the background once a run completes; `aclear_tool_results(config)` clears one thread yourself and `aprune_tool_results(older_than=...)` deletes old rows across threads. Recording can be turned off with `record_tool_result=False` on the checkpointer or on a `@tool`. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
 
 ## Trade-offs and decision guide
 

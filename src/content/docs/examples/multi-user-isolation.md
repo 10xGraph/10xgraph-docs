@@ -4,7 +4,7 @@ seoTitle: "Multi-user thread isolation in 10xGraph"
 description: Serve one agent to two users with JWT auth and ownership, then see what each user can and cannot reach. The statuses shown were captured from a running server.
 section: Examples
 group: Production
-order: 14
+order: 50
 label: Multi-user isolation
 updated: "2026-10-27"
 faq:

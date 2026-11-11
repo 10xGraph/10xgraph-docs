@@ -1,9 +1,9 @@
 ---
 title: Run background tasks with a worker
 description: Durable tasks on TaskIQ with the 10xgraph worker and scheduler, started from Python or over HTTP, with schedules, cancel and progress.
-section: "API server"
-group: "Operate"
-order: 165
+section: "Background jobs"
+order: 20
+label: "Worker and scheduler"
 updated: "2026-11-07"
 faq:
   - question: How is this different from BackgroundTaskManager?
@@ -92,6 +92,8 @@ Tasks are TaskIQ tasks, so everything in TaskIQ works. What 10xGraph adds:
 - Progress is TaskIQ's `ProgressTracker`.
 - `TaskCancelled` is the error a task cancelled before it started returns to the caller.
 
+An argument typed as a pydantic model is not guaranteed to arrive as one. TaskIQ parses each argument against its type hint, and when parsing fails it logs a warning and passes the raw value (a dict) to your task, which then fails later, for example with `AttributeError`. Tip: call `Model.model_validate(arg)` at the top of the task to fail fast with a clear error.
+
 The task name is the `task_name` you set, here `make_report`. Without it TaskIQ uses `<module>:<function>` (`app.tasks:make_report`).
 
 ## Run the worker and the scheduler
@@ -105,6 +107,8 @@ The task name is the `task_name` you set, here `make_report`. Without it TaskIQ 
 Both read `10xgraph.json` from the current folder (`--config` to change it), refuse to start without a `worker` key, and import the entries in `worker.tasks`. Every other flag goes to TaskIQ unchanged (`--workers`, `--ack-type`, `--log-level`). `10xgraph worker` refuses `--use-process-pool`. `10xgraph scheduler` adds `--update-interval 10` unless you pass one, which is how soon it sees changed schedules.
 
 Run exactly one scheduler. Two would send every scheduled task twice. Run as many workers as you need.
+
+`10xgraph build` generates both processes for you. With `--docker-compose` it adds a `worker` service and, if you ask for it, a `scheduler` service built from the same image as the API. With `--k8s` it adds a `<service>-worker` and a `<service>-scheduler` Deployment (the scheduler has one replica and `strategy: Recreate`, so a rollout never runs two). Use `--worker` and `--scheduler` to choose, or answer the questions when `build` asks. With the `memory` broker no worker is generated, because tasks run inside the API. See [Deploy with Docker and Kubernetes](/docs/server/deploy).
 
 ## Start a task from Python
 
@@ -132,6 +136,8 @@ A fixed schedule goes on the task and is sent by `10xgraph scheduler`:
 @broker.task(schedule=[{"cron": "0 2 * * *"}])
 async def nightly_cleanup() -> None: ...
 ```
+
+A common use is maintenance work, such as pruning old tool execution ledger rows. See the [prune job example](/docs/concepts/replay-safe-tools#prune-old-ledger-rows).
 
 For dynamic schedules use TaskIQ's `schedule_by_cron`, `schedule_by_time` or `schedule_by_interval` with the source from `tenxgraph_api.jobs.scheduler`:
 

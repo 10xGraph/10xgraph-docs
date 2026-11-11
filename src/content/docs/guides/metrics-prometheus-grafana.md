@@ -1,10 +1,10 @@
 ---
 title: Metrics with Prometheus and Grafana
 description: Export request, task and LLM metrics from the 10xGraph API server and worker to Prometheus or Grafana, by OTLP push or by scrape.
-section: "Build agents"
-group: "Observability and operations"
-order: 403
-label: Prometheus and Grafana metrics
+section: "Observability"
+group: "Metrics"
+order: 20
+label: Prometheus and Grafana
 updated: "2026-11-09"
 ---
 

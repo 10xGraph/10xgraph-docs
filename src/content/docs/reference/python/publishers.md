@@ -501,13 +501,13 @@ graph = StateGraph(publisher=publisher)
 
 ## `ObservabilityLevel`
 
-`ObservabilityLevel` is a string enum that controls how much data the tracing publishers put on spans. The default is `STANDARD`; use `FULL` only where prompts and responses may be stored.
+`ObservabilityLevel` is a string enum that controls how much data the tracing publishers put on spans. The default is `FULL`, which sends message content and graph state to the trace backend. Use `STANDARD` or `SPANS` to send less; `STANDARD` still includes graph state on node spans, which can contain the conversation.
 
 | Value | String | Captures |
 |---|---|---|
 | `SPANS` | `"spans"` | Timing and structure only, no I/O data. |
-| `STANDARD` | `"standard"` | Adds token counts, model name and request parameters when available. Default. |
-| `FULL` | `"full"` | Adds model input and output messages, tool I/O and the system prompt. May contain PII. |
+| `STANDARD` | `"standard"` | Adds token counts, model name and request parameters when available, and the graph state on node spans (`input.value` is the state going in; `output.value` is the state after, the messages produced and the next node). |
+| `FULL` | `"full"` | Default. Adds model input and output messages, tool I/O and the system prompt, on top of everything in `STANDARD`. May contain PII. |
 
 ---
 
@@ -524,14 +524,14 @@ class OtelPublisher(BasePublisher):
     def __init__(
         self,
         tracer: Tracer | None = None,
-        level: ObservabilityLevel = ObservabilityLevel.STANDARD,
+        level: ObservabilityLevel = ObservabilityLevel.FULL,
         user_id_mode: UserIdMode = "raw",
     )
 
 def setup_tracing(
     graph: StateGraph,
     tracer: Tracer | None = None,
-    level: ObservabilityLevel = ObservabilityLevel.STANDARD,
+    level: ObservabilityLevel = ObservabilityLevel.FULL,
     user_id_mode: UserIdMode = "raw",
 ) -> OtelPublisher
 ```
@@ -540,7 +540,7 @@ def setup_tracing(
 |---|---|---|---|
 | `graph` | `StateGraph` | (required) | `setup_tracing` only. Graph to instrument. |
 | `tracer` | `Tracer \| None` | `None` | Explicit tracer. Uses the global `TracerProvider` (tracer name `10xgraph`) when omitted. |
-| `level` | `ObservabilityLevel` | `STANDARD` | Span detail level. Prompts and tool I/O are recorded only at `FULL`. |
+| `level` | `ObservabilityLevel` | `FULL` | Span detail level. Prompts, completions and tool I/O are recorded at `FULL` only; graph state at `STANDARD` and `FULL`. |
 | `user_id_mode` | `"raw" \| "hash" \| "mask"` | `"raw"` | How `user_id` appears on spans. See below. |
 
 **`user_id_mode`:**
@@ -586,7 +586,7 @@ class LogfirePublisher(OtelPublisher):
         service_name: str | None = None,
         send_to_logfire: bool = True,
         console: Any = None,
-        level: ObservabilityLevel = ObservabilityLevel.STANDARD,
+        level: ObservabilityLevel = ObservabilityLevel.FULL,
         additional_span_processors: list | None = None,
         **configure_kwargs: Any,
     )
@@ -598,7 +598,7 @@ def setup_logfire(
     service_name: str | None = None,
     send_to_logfire: bool = True,
     console: Any = None,
-    level: ObservabilityLevel = ObservabilityLevel.STANDARD,
+    level: ObservabilityLevel = ObservabilityLevel.FULL,
     user_id_mode: UserIdMode = "raw",
     additional_span_processors: list | None = None,
     **configure_kwargs: Any,
@@ -612,7 +612,7 @@ def setup_logfire(
 | `service_name` | `str \| None` | `None` | Service name shown in the Logfire UI. |
 | `send_to_logfire` | `bool` | `True` | Export spans to Logfire. |
 | `console` | `Any` | `None` | `False` to suppress console output, a `logfire.ConsoleOptions`, or `None` for environment defaults. |
-| `level` | `ObservabilityLevel` | `STANDARD` | Span detail level. |
+| `level` | `ObservabilityLevel` | `FULL` | Span detail level. |
 | `user_id_mode` | `str` | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See `OtelPublisher`. |
 | `additional_span_processors` | `list \| None` | `None` | Extra `SpanProcessor` instances. |
 | `**configure_kwargs` | `Any` | | Forwarded to `logfire.configure()`. |
@@ -651,7 +651,7 @@ class LangsmithPublisher(OtelPublisher):
         api_key: str | None = None,
         project: str | None = None,
         endpoint: str = "https://api.smith.langchain.com/otel",
-        level: ObservabilityLevel = ObservabilityLevel.STANDARD,
+        level: ObservabilityLevel = ObservabilityLevel.FULL,
         tracer_provider: Any = None,
     )
 
@@ -661,7 +661,7 @@ def setup_langsmith(
     api_key: str | None = None,
     project: str | None = None,
     endpoint: str = "https://api.smith.langchain.com/otel",
-    level: ObservabilityLevel = ObservabilityLevel.STANDARD,
+    level: ObservabilityLevel = ObservabilityLevel.FULL,
     user_id_mode: UserIdMode = "raw",
     tracer_provider: Any = None,
 ) -> None
@@ -673,7 +673,7 @@ def setup_langsmith(
 | `api_key` | `str \| None` | `None` | LangSmith API key. Falls back to the `LANGSMITH_API_KEY` environment variable. |
 | `project` | `str \| None` | `None` | Project name, sent as the `Langsmith-Project` header. |
 | `endpoint` | `str` | `https://api.smith.langchain.com/otel` | OTLP base URL. `/v1/traces` is appended. Override for regional deployments. |
-| `level` | `ObservabilityLevel` | `STANDARD` | Span detail level. |
+| `level` | `ObservabilityLevel` | `FULL` | Span detail level. |
 | `user_id_mode` | `str` | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See `OtelPublisher`. |
 | `tracer_provider` | `Any` | `None` | Existing `TracerProvider` to attach to. A new global one is created when omitted. |
 
@@ -708,7 +708,7 @@ def setup_observability(graph: StateGraph | None, config: dict[str, Any]) -> Non
 | Parameter | Type | Description |
 |---|---|---|
 | `graph` | `StateGraph \| None` | Graph to instrument. `None` configures providers only. |
-| `config` | `dict[str, Any]` | Dict with `level` (`"spans"`, `"standard"` or `"full"`; unknown values fall back to `"standard"`), `user_id_mode` (`"raw"`, `"hash"` or `"mask"`; top-level key), `logfire` and `langsmith` blocks. |
+| `config` | `dict[str, Any]` | Dict with `level` (`"spans"`, `"standard"` or `"full"`; unknown values fall back to `"full"`), `user_id_mode` (`"raw"`, `"hash"` or `"mask"`; top-level key), `logfire` and `langsmith` blocks. |
 
 | Config key | Description |
 |---|---|

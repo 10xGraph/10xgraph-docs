@@ -1,9 +1,9 @@
 ---
-title: Agentflow is now 10xGraph
+title: Agentflow is now 10xGraph, infrastructure for AI applications
 seoTitle: "Agentflow is now 10xGraph: what changes"
-description: Agentflow is now 10xGraph. Why we renamed it, what the framework is, what stays the same in your code, what changes in package names, and the honest gaps.
+description: Agentflow is now 10xGraph. Why we renamed it, what it is (self-hosted infrastructure for AI applications), what stays the same in your code, and the honest gaps.
 date: 2026-10-03
-updated: 2026-10-27
+updated: 2026-11-10
 author: Shudipto Trafder
 kind: news
 tags: [announcement, rename]
@@ -13,21 +13,24 @@ Agentflow is now **10xGraph**. The framework, the MIT license and the maintainer
 
 ## What 10xGraph is
 
-Other frameworks give you the graph. 10xGraph gives you the graph and the production server around it, open source.
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
 
-You write a Python agent as a graph of nodes and tools. From the same install you get the server that runs it: REST, streaming and WebSocket endpoints, JWT or custom auth, scoped authorization on every endpoint, thread ownership, rate limiting, and Docker Compose and Kubernetes files. The tagline is "10xGraph by 10xScale: graph engineering for production AI agents."
+Your agents are the core workload, and multi-agent handoff is one feature among many. The point is the infrastructure around them: the part every team ends up building before an AI feature can ship to its own customers. The tagline is "10xGraph by 10xScale: graph engineering for production AI agents." The product promise is shorter: write your AI logic, and 10xGraph runs the infrastructure.
 
-## The five pillars
+## What it runs for you
 
-1. **The production server ships in the box.** The API server, auth, rate limits and deployment files come with the framework under the MIT license, not as a separate product. See [Serving agents](/docs/concepts/serving-agents) and [Production runtime](/docs/production).
-2. **Correct under failure.** Tool calls are replay-safe: if a process dies mid-run, a tool that already finished is not executed again, so a resumed run does not charge a card twice. Durable writes are versioned, and nodes and tools have real timeouts. Read [Replay-safe tools](/docs/concepts/replay-safe-tools) and the engineering post [Your agent charged the card twice](/blog/your-agent-charged-the-card-twice).
-3. **Built to scale.** Active thread state is cached in Redis for fast reads, while full history lives in PostgreSQL. Events can be published to Kafka, Redis Pub/Sub, RabbitMQ or OpenTelemetry. See [Checkpointing and threads](/docs/concepts/checkpointing-and-threads) and [Memory and store](/docs/concepts/memory-and-store).
-4. **One stack, from backend to frontend.** A typed TypeScript client covers invoke, stream, threads, memory and files, and tools can run in the user's browser. See [Connecting clients](/docs/client) and [Remote tools](/docs/concepts/remote-tools).
-5. **You own it.** MIT licensed, self-hosted, and not tied to one model vendor. It works with OpenAI, Google Gemini, Anthropic and any OpenAI-compatible endpoint. See [Providers](/docs/integrations/models).
+1. **Security and access on every endpoint.** JWT or custom auth, roles with a reach of `own`, `tenant` or `all`, and ownership enforced in storage: a thread outside the caller's reach answers 404. The server refuses to boot if a route has no permission guard. Auth is off until you configure it; the production template turns it on. See [Auth](/docs/server/auth) and the [platform overview](/docs/production).
+2. **Data and state.** Threads live in Postgres with Redis as a hot cache, and writes are versioned so two runs on one thread cannot overwrite each other. Memory and RAG can use pgvector in the same Postgres. Tenant isolation uses columns you declare, filled from the verified identity. See [Multi-tenant data](/docs/guides/multi-tenant-data) and [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
+3. **Background jobs.** A thin TaskIQ layer: `10xgraph worker`, `10xgraph scheduler` and `/v1/tasks` routes. Delivery is at-least-once, so write tasks that are safe to rerun. See [Background tasks](/docs/server/background-tasks).
+4. **Observability.** Tracing through OTLP, Phoenix, Logfire or LangSmith, Prometheus or OTLP metrics for the API and the worker, JSON logs, and a metadata-only audit log that you ship to your own storage. See [Observability](/docs/server/observability) and [Audit log](/docs/server/audit-log). For teams going through SOC 2 and ISO 27001 audits, the [control mapping](/docs/production/control-mapping) says which controls the platform supports and which stay with you.
+5. **Correct under failure.** Finished tool calls are recorded and not run again when a run resumes after a crash, and nodes and tools have real timeouts. The limit: a crash before a tool returns can repeat it, so send idempotency keys to anything that moves money. Read [Replay-safe tools](/docs/concepts/replay-safe-tools) and [Your agent charged the card twice](/blog/your-agent-charged-the-card-twice).
+6. **Deploy it yourself.** `10xgraph build` writes a Dockerfile, a Compose file and a Kubernetes manifest. See [Deploy](/docs/server/deploy).
+7. **One stack, backend to frontend.** A typed TypeScript client covers invoke, stream, threads, memory and files, and tools can run in the user's browser. See [Connecting clients](/docs/client) and [Remote tools](/docs/concepts/remote-tools).
+8. **You own it.** MIT licensed, self-hosted, no hosted service to depend on, and not tied to one model vendor: OpenAI, Google Gemini, Anthropic and any OpenAI-compatible endpoint. See [Providers](/docs/integrations/models).
 
-Graph orchestration, tool-calling loops, MCP and streaming are in there too, but every serious framework has those. The pillars above are why you would pick this one.
+Graph orchestration, tool-calling loops, MCP and streaming are in there too, but every serious framework has those. The list above is why you would pick this one.
 
-**Since then:** the hardening that followed the rename is written up in [What production-ready means in 10xGraph](/blog/what-production-ready-means-in-10xgraph), and the full list of defaults is in [Production readiness](/docs/production).
+**Since then:** the hardening that followed the rename is written up in [What production-ready means in 10xGraph](/blog/what-production-ready-means-in-10xgraph), and the full list of defaults is on the [platform overview](/docs/production).
 
 ## What stays the same
 
@@ -51,17 +54,18 @@ Graph orchestration, tool-calling loops, MCP and streaming are in there too, but
 The final releases under the old names are `10xscale-agentflow` 0.10.1, `10xscale-agentflow-cli` 0.6.1 and `@10xscale/agentflow-client` 0.5.0. The first releases under the new names are `10xgraph` 0.10.0 and `10xgraph-api` 0.7.0 on PyPI, and `10xgraph-client` 0.6.0 on npm. New releases and fixes go to the new package names.
 
 <Callout type="note">
-Pin your versions and read the [changelog](/changelog) before you switch package names. The project is pre-1.0, so minor versions can change behavior.
+Pin your versions and read the [changelog](/changelog) before you switch package names.
 </Callout>
 
 ## Honest weak spots
 
 You should know where we are behind before you choose us.
 
-- **Pre-1.0.** The API can still change between minor releases. Pin versions and read the changelog.
 - **A smaller community.** There are fewer integrations, tutorials and answered questions than for LangGraph or CrewAI.
 - **The rename resets recognition.** 10xGraph has no search history yet, so existing blog posts and answers still say Agentflow.
-- **Visual tooling is lighter.** LangGraph has a stronger visual studio and hosted tracing. We have a React playground and OpenTelemetry, Logfire and LangSmith publishers.
+- **Visual tooling is lighter.** LangGraph has a stronger visual studio and hosted tracing. We have a React playground and OpenTelemetry, Phoenix, Logfire and LangSmith tracing.
+- **No hosted service.** You run it, or nobody does.
+- **Auth is off until configured,** and tenant isolation needs columns you declare. Neither is automatic.
 - **Python 3.12 or newer, and code-first.** This is not a no-code builder.
 
 The [roadmap](/docs/project/roadmap) lists what is missing or partial.

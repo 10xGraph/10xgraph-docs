@@ -1,11 +1,11 @@
 ---
 title: "Authorization scopes"
 description: "Read the caller's identity and check permissions inside graph nodes and tools with get_identity, can and Identity."
-order: 380
-group: "Safety"
-section: "Build agents"
+order: 20
+group: "Identity and roles"
+section: "Security and access"
 updated: "2026-11-08"
-label: "Authorization scopes"
+label: "Permissions in tools"
 faq:
   - question: "What is the difference between identity and permissions?"
     answer: "Identity is the caller: user_id, tenant, roles and reach. Permissions are resource:action strings such as graph:invoke or store:read. The API server builds one Identity per request and puts it in config user, so your nodes and tools can read both."
@@ -272,6 +272,7 @@ The thread is outside the caller's reach: another user's thread, or another tena
 ## Related pages
 
 - [API authentication](/docs/server/auth): Configure roles, reach and custom `authorize` on the API server.
+- [Calling services as the user](/docs/guides/call-services-as-the-user): Use the caller's credential for downstream calls.
 - [Multi-tenant data](/docs/guides/multi-tenant-data): Tenant columns and how reach filters storage.
 - [Protect against prompt injection](/docs/guides/protect-against-prompt-injection): Additional safety patterns for input validation.
 - [Use dependency injection](/docs/guides/use-dependency-injection): Access config and other dependencies in nodes and tools.

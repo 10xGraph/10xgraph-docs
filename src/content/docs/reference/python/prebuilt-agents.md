@@ -49,6 +49,7 @@ def __init__(
     tools: Iterable[Callable] | None = None,
     client: Any = None,
     pass_user_info_to_mcp: bool = False,
+    mcp_auth: Any = None,
     extra_messages: list[Message] | None = None,
     trim_context: bool = False,
     tools_tags: set[str] | None = None,
@@ -77,8 +78,9 @@ def __init__(
 | `system_prompt` | `list[dict[str, Any]] \| None` | `None` | List of system message dicts. |
 | `tools` | `Iterable[Callable] \| None` | `None` | Tools available to the agent. |
 | `client` | `Any` | `None` | MCP client (fastmcp) for tool discovery. |
-| `pass_user_info_to_mcp` | `bool` | `False` | Include caller's user_id in MCP tool requests. |
-| `extra_messages` | `list[Message] \| None` | `None` | Additional messages prepended to every run. |
+| `pass_user_info_to_mcp` | `bool` | `False` | Send the caller as unsigned MCP request metadata (`meta["user"]`: the run's `Identity`, or `{"user_id": ...}`). The server cannot verify it; use it only for a trusted internal server. For per-user or per-tenant access control use `mcp_auth`. Never sent as a tool argument. |
+| `mcp_auth` | `Callable[[MCPAuthContext], Awaitable[dict[str, str]]] \| None` | `None` | Async function that returns HTTP headers for each MCP tool listing and call, such as a short-lived signed token the server verifies. Needs fastmcp 4.1.7 or later and an HTTP transport. See [Use MCP tools](/docs/guides/use-mcp#authenticate-each-call-with-mcp_auth). |
+| `extra_messages` | `list[Message] \| None` | `None` | Additional messages sent after the history on every call. Text supports `{field}` state placeholders. See [Per-request context and prompt caching](/docs/guides/configure-agent#per-request-context-and-prompt-caching). |
 | `trim_context` | `bool` | `False` | Enable automatic context message trimming. |
 | `tools_tags` | `set[str] \| None` | `None` | Filter tools by tag (only if tools come from Skills). |
 | `reasoning_config` | `dict \| bool \| None` | `True` | Extended thinking config (provider-dependent). |
@@ -325,6 +327,7 @@ def __init__(
     reflect_reasoning_config: dict[str, Any] | bool | None = None,
     client: Any = None,
     pass_user_info_to_mcp: bool = False,
+    mcp_auth: Any = None,
     extra_messages: list[Message] | None = None,
     trim_context: bool = False,
     tools_tags: set[str] | None = None,
@@ -355,8 +358,9 @@ def __init__(
 | `plan_reasoning_config` | `dict \| bool \| None` | `None` | Override reasoning config for planner. |
 | `reflect_reasoning_config` | `dict \| bool \| None` | `None` | Override reasoning config for reflector. |
 | `client` | `Any` | `None` | MCP client. |
-| `pass_user_info_to_mcp` | `bool` | `False` | Include user_id in MCP requests. |
-| `extra_messages` | `list[Message] \| None` | `None` | Prepended messages. |
+| `pass_user_info_to_mcp` | `bool` | `False` | Send the caller as unsigned MCP request metadata (`meta["user"]`: the run's `Identity`, or `{"user_id": ...}`). The server cannot verify it; use it only for a trusted internal server. For per-user or per-tenant access control use `mcp_auth`. Never sent as a tool argument. |
+| `mcp_auth` | `Callable[[MCPAuthContext], Awaitable[dict[str, str]]] \| None` | `None` | Async function that returns HTTP headers for each MCP tool listing and call, such as a short-lived signed token the server verifies. Needs fastmcp 4.1.7 or later and an HTTP transport. See [Use MCP tools](/docs/guides/use-mcp#authenticate-each-call-with-mcp_auth). |
+| `extra_messages` | `list[Message] \| None` | `None` | Messages sent after the history. Text supports `{field}` state placeholders. |
 | `trim_context` | `bool` | `False` | Enable automatic trimming. |
 | `tools_tags` | `set[str] \| None` | `None` | Filter tools by tag. |
 | `reasoning_config` | `dict \| bool \| None` | `True` | Reasoning config for all phases. |
@@ -423,6 +427,7 @@ def __init__(
     output_type: str = "text",
     client: Any = None,
     pass_user_info_to_mcp: bool = False,
+    mcp_auth: Any = None,
     extra_messages: list[Message] | None = None,
     trim_context: bool = False,
     tools_tags: set[str] | None = None,
@@ -451,8 +456,9 @@ def __init__(
 | `container` | `InjectQ \| None` | `None` | DI container. |
 | `output_type` | `str` | `"text"` | Output format. |
 | `client` | `Any` | `None` | MCP client. |
-| `pass_user_info_to_mcp` | `bool` | `False` | Include user_id in MCP requests. |
-| `extra_messages` | `list[Message] \| None` | `None` | Prepended messages. |
+| `pass_user_info_to_mcp` | `bool` | `False` | Send the caller as unsigned MCP request metadata (`meta["user"]`: the run's `Identity`, or `{"user_id": ...}`). The server cannot verify it; use it only for a trusted internal server. For per-user or per-tenant access control use `mcp_auth`. Never sent as a tool argument. |
+| `mcp_auth` | `Callable[[MCPAuthContext], Awaitable[dict[str, str]]] \| None` | `None` | Async function that returns HTTP headers for each MCP tool listing and call, such as a short-lived signed token the server verifies. Needs fastmcp 4.1.7 or later and an HTTP transport. See [Use MCP tools](/docs/guides/use-mcp#authenticate-each-call-with-mcp_auth). |
+| `extra_messages` | `list[Message] \| None` | `None` | Messages sent after the history. Text supports `{field}` state placeholders. |
 | `trim_context` | `bool` | `False` | Enable automatic trimming. |
 | `tools_tags` | `set[str] \| None` | `None` | Filter tools by tag. |
 | `reasoning_config` | `dict \| bool \| None` | `True` | Reasoning config. |
@@ -703,6 +709,7 @@ def __init__(
     tools: Iterable[Callable] | None = None,
     client: Any = None,
     pass_user_info_to_mcp: bool = False,
+    mcp_auth: Any = None,
     skills: SkillConfig | None = None,
     memory: MemoryConfig | None = None,
     realtime_client_factory: Callable[[], RealtimeClient] | None = None,
@@ -723,7 +730,8 @@ def __init__(
 | `system_prompt` | `list[dict] \| None` | `None` | System prompt. |
 | `tools` | `Iterable[Callable] \| None` | `None` | Tools available to the agent. |
 | `client` | `Any` | `None` | MCP client. |
-| `pass_user_info_to_mcp` | `bool` | `False` | Include user_id in MCP requests. |
+| `pass_user_info_to_mcp` | `bool` | `False` | Send the caller as unsigned MCP request metadata (`meta["user"]`: the run's `Identity`, or `{"user_id": ...}`). The server cannot verify it; use it only for a trusted internal server. For per-user or per-tenant access control use `mcp_auth`. Never sent as a tool argument. |
+| `mcp_auth` | `Callable[[MCPAuthContext], Awaitable[dict[str, str]]] \| None` | `None` | Async function that returns HTTP headers for each MCP tool listing and call, such as a short-lived signed token the server verifies. Needs fastmcp 4.1.7 or later and an HTTP transport. See [Use MCP tools](/docs/guides/use-mcp#authenticate-each-call-with-mcp_auth). |
 | `skills` | `SkillConfig \| None` | `None` | Skills config. |
 | `memory` | `MemoryConfig \| None` | `None` | Memory config. |
 | `realtime_client_factory` | `Callable[[], RealtimeClient] \| None` | `None` | Factory function for the realtime client. |

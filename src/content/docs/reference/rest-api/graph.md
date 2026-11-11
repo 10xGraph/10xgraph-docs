@@ -360,7 +360,7 @@ Turn-based streaming over a WebSocket. Same payloads as `POST /v1/graph/stream`,
 
 **Always mounted.** There is no setting that turns this endpoint off. Concurrent connections are capped (shared by all workers with Redis, per process without) by [`websocket.max_connections`](/docs/reference/api-cli/configuration#websocket-ag_ui-and-observability) and `max_connections_per_user`; a refused handshake closes with code `1013`.
 
-**Authentication.** Bearer token via the `Authorization` header, the `10xgraph-bearer` `Sec-WebSocket-Protocol` (preferred for browsers), or the `?token=` query fallback. Identical to the [live socket](/docs/reference/rest-api/live#authentication).
+**Authentication.** Bearer token via the `Authorization` header, the `10xgraph-bearer` `Sec-WebSocket-Protocol` (preferred for browsers). A `?token=` query parameter is not accepted. Identical to the [live socket](/docs/reference/rest-api/live#authentication).
 
 **Fresh run.** Client sends:
 

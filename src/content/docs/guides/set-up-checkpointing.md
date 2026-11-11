@@ -1,11 +1,11 @@
 ---
 title: Set up checkpointing
 description: "Choose and configure a checkpointer for state persistence: InMemoryCheckpointer for development, SqliteCheckpointer for client agents, or PgCheckpointer for production."
-section: "Build agents"
-group: "State, memory and context"
-order: 230
+section: "Data and state"
+group: "Threads and state"
+order: 10
 label: Set up checkpointing
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 A checkpointer persists your graph state after every node so that multi-turn conversations can resume across separate requests, and interrupted executions can pick up where they left off. Without a checkpointer, every `invoke()` call starts fresh with an empty state. This guide shows you how to choose the right checkpointer for your deployment and configure it completely.
@@ -111,6 +111,8 @@ Use `SqliteCheckpointer` when:
 - Each user has a **dedicated process** with their own database file.
 - You do not need to scale horizontally or share state across processes.
 
+`SqliteCheckpointer` also keeps the tool execution ledger, in the `af_tool_executions` table, and takes `record_tool_result=False` to turn it off. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
+
 Do not use it when multiple processes or users share one backend. SQLite serializes writes and is not designed for concurrent writers; use `PgCheckpointer` instead.
 
 ## PgCheckpointer: production
@@ -165,6 +167,7 @@ PgCheckpointer(
     extra_columns: Any = None,              # Your own data columns on threads, e.g. {"plan": "text"}
     row_level_security: bool = False,       # Also enforce tenant columns with Postgres RLS
     ddl_lock_timeout: float | None = 10.0,  # Seconds setup DDL waits for a table lock (None waits)
+    record_tool_result: bool = True,        # Record finished tool calls; False means a tool can run twice after a crash
 )
 ```
 
@@ -201,7 +204,9 @@ app = FastAPI(lifespan=lifespan)
 
 ### Check that the checkpointer is reachable
 
-Every checkpointer has `await checkpointer.aping()`. It returns when the backends answer and raises when they do not. For `PgCheckpointer` it runs `SELECT 1`, checks that the schema version is not older than the code expects, and pings Redis. It never creates the schema, so call `asetup()` first. The API server calls it at startup and on `/health/ready`. A custom `BaseCheckpointer` must implement it (abstract since 1.0.0rc4); see [Checkpointers](/docs/reference/python/checkpointers#aping).
+Every checkpointer has `await checkpointer.aping()`. It returns when the backends answer and raises when they do not. For `PgCheckpointer` it runs `SELECT 1`, checks that the schema version is not older than the code expects, and pings Redis. It never creates the schema, so call `asetup()` first. The API server calls it at startup and on `/health/ready`. A custom `BaseCheckpointer` must implement it; see [Checkpointers](/docs/reference/python/checkpointers#aping).
+
+Reference: [BaseCheckpointer](/docs/reference/python/checkpointers) · Source: [base_checkpointer.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/checkpointer/base_checkpointer.py)
 
 ### Multi-user isolation
 
@@ -259,6 +264,8 @@ checkpointer = PgCheckpointer(
 
 Native row-level security, the full `BaseAuth` example, isolation scopes and the filter reference are in [Multi-tenant data](/docs/guides/multi-tenant-data).
 
+Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
+
 ### State history retention
 
 The checkpointer keeps multiple versioned snapshots of each thread's state to support debugging, manual recovery, and optimistic concurrency control. By default it retains the current state plus 19 prior snapshots (`state_history_limit: 20`) and prunes older rows on each write to keep the table bounded.
@@ -272,6 +279,17 @@ checkpointer = PgCheckpointer(
 ```
 
 Higher values retain more audit trail but use more storage; `1` keeps only the current state; `0` or `None` disables pruning entirely (not recommended for long-running systems).
+
+### Tool results
+
+The checkpointer records every finished tool call in a ledger (the `tool_executions` table), so a run replayed after a crash, or resumed after a pause inside a tool node, does not run finished tools again. When a run finishes with status completed, the graph clears that thread's ledger in the background. Interrupts, stops, client-tool pauses, errors and cancels keep it, so a resume stays safe.
+
+```python
+await checkpointer.aclear_tool_results(config)                         # one thread
+await checkpointer.aprune_tool_results(older_than=timedelta(days=7))   # all threads, returns the count
+```
+
+10xGraph never calls `aprune_tool_results`. Schedule it for runs that stopped and were never resumed. With `row_level_security=True`, use a database role that bypasses RLS. To turn recording off, set `record_tool_result=False` here or on a single `@tool`; a tool can then run twice after a crash or on resume. The full example, the worker job and the rules are in [Replay-safe tools](/docs/concepts/replay-safe-tools#prune-old-ledger-rows).
 
 ### Complete production example
 

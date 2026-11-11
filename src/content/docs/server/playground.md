@@ -3,8 +3,8 @@ title: Playground
 description: Test your agent with the 10xGraph playground, a hosted UI for interactive development and debugging.
 section: "API server"
 group: "Tools"
-order: 190
-updated: "2026-10-27"
+order: 110
+updated: "2026-11-10"
 faq:
   - question: "Is the playground hosted locally or on the web?"
     answer: "The playground UI is hosted by 10xScale on the web. Your agent runs locally, and the browser communicates with your local API server via the backendUrl parameter. The playground never has access to your code or data; only network requests travel between your browser and your API."
@@ -38,11 +38,9 @@ Playground opened: https://play.10xgraph.com?backendUrl=http%3A%2F%2F127.0.0.1%3
 
 If the browser tab does not open automatically, copy the playground URL from the terminal output and paste it into your browser's address bar. You can also open [play.10xgraph.com](https://play.10xgraph.com) directly and enter your server URL on the Connect page.
 
-`10xgraph-api` 0.7.0 opens the same playground at its previous address, `playground-463bd.web.app`. Both addresses serve the same app.
+Older 0.x versions of `10xgraph-api` open the same playground at its previous address, `playground-463bd.web.app`. Both addresses serve the same app.
 
 ## Allow the playground to reach your local server
-
-Added in 1.0.0rc3.
 
 The playground is a public HTTPS page and your server runs on your own machine. Chrome's Local Network Access feature therefore asks you for permission the first time the page calls `localhost`, and the playground makes one early request to your server so the prompt appears on the Connect page. Click Allow.
 
@@ -210,7 +208,7 @@ Press `Ctrl+C` in the terminal where `10xgraph dev` is running to stop both the 
 
 ## One command: dev
 
-`10xgraph dev` is the only command that starts the server. It opens the playground by default; pass `--no-open` to skip the browser step (CI, programmatic clients). It reloads on file changes by default (`--no-reload` turns that off) and runs the Uvicorn development server, which the CLI marks as not for production. For production, build an image with `10xgraph build` (it runs Gunicorn). The commands `10xgraph play` and `10xgraph api` were removed in `10xgraph-api` 0.9.0.
+`10xgraph dev` is the only command that starts the server. It opens the playground by default; pass `--no-open` to skip the browser step (CI, programmatic clients). It reloads on file changes by default (`--no-reload` turns that off) and runs the Uvicorn development server, which the CLI marks as not for production. For production, build an image with `10xgraph build` (it runs Gunicorn). The commands `10xgraph play` and `10xgraph api` were removed before 1.0.
 
 ## Sharing your agent with others
 

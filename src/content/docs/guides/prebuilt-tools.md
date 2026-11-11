@@ -253,7 +253,7 @@ from tenxgraph.prebuilt.tools import fetch_url, safe_calculator
 from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.utils.decorators import tool
 
-@tool(name="get_weather", tags=["weather"])
+@tool(tags=["weather"])
 async def get_weather(city: str) -> str:
     """Get the current weather in a city."""
     return f"Temperature in {city} is 72F and sunny."

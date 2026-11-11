@@ -335,6 +335,21 @@ case.session_input.user_id = "premium_user"
 case.session_input.config = {"tier": "premium"}
 ```
 
+`EvalSetBuilder.add_case`, `add_multi_turn` and `add_tool_test` accept the same thing as `session_input=SessionInput(...)`. To sign in as a user that tools read from `config["user"]`:
+
+```python
+from tenxgraph.qa.evaluation import EvalSetBuilder, SessionInput
+
+EvalSetBuilder(name="orders").add_case(
+    "Show my orders",
+    "Here are your orders",
+    session_input=SessionInput(
+        user_id="u1",
+        config={"user": {"user_id": "u1", "org_id": "acme", "roles": ["agent"]}},
+    ),
+)
+```
+
 The `session_input.state` field exists on the model, but the evaluator does not currently apply it to the agent's state.
 
 ## Next steps

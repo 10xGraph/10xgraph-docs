@@ -6,7 +6,7 @@ section: "API server"
 group: "Basics"
 order: 50
 label: CLI
-updated: "2026-10-28"
+updated: "2026-11-10"
 ---
 
 The `10xgraph` command-line interface (`10xgraph-api` package) is your complete toolkit for building and operating 10xGraph agents in production. From initial scaffolding through deployment and evaluation, each command handles a specific phase of agent development.
@@ -31,7 +31,7 @@ The CLI requires Python 3.12+. It depends on the core framework (`10xgraph`), wh
 | --- | --- |
 | [`10xgraph init`](/docs/server/project-setup) | Scaffold a new agent project interactively |
 | [`10xgraph dev`](/docs/server/run-the-server) | Start the development server with reload and open the [playground](/docs/server/playground) (`--no-open` to skip) |
-| [`10xgraph build`](/docs/server/deploy) | Generate Docker files for containerization |
+| [`10xgraph build`](/docs/server/deploy) | Generate Docker files, with worker and scheduler services for background jobs |
 | [`10xgraph skills`](/docs/integrations/coding-assistants) | Install coding-agent skills (Claude, Codex, GitHub) |
 | [`10xgraph test`](/docs/testing/run-tests) | Run the project test suite (pytest wrapper) |
 | [`10xgraph eval`](/docs/testing/run-evals) | Run agent evaluations and generate reports |
@@ -47,6 +47,8 @@ Each command accepts `--help` to show its full options. Detailed flags and param
 ### Create a new project
 
 Start with `10xgraph init` to scaffold your agent project. The command asks three questions: the agent name, the template (Quick Start or Production) and the AI provider. Production writes the recommended setup without asking: JWT auth with owner-only data, a UUID ID generator, and a Redis cache store (reads `REDIS_URL`) with rate limiting and token revocation. WebSocket and AG-UI stay off.
+
+If any file init would write already exists, it asks before overwriting (default No) and writes nothing on No. Without a terminal (`--yes`, `--non-interactive`, CI) it stops before writing and lists the files; pass `--force` to overwrite them. `--dry-run` marks the files that already exist.
 
 ```bash
 10xgraph init
@@ -108,8 +110,18 @@ See [Run tests](/docs/testing/run-tests) and [Run evaluations](/docs/testing/run
 10xgraph build                         # Generate Dockerfile
 10xgraph build --docker-compose        # Also generate docker-compose.yml
 10xgraph build --k8s                   # Also generate k8s.yaml (Deployment + Service)
+10xgraph build --worker --scheduler    # Also run the background worker and scheduler
 10xgraph build --python-version 3.12   # Specify Python version (default: 3.13)
 ```
+
+`10xgraph build` also generates the background-job processes. At an interactive terminal it asks up to four questions, and skips any that a flag answers or that do not apply:
+
+1. **Where will you deploy?** Docker Compose, Kubernetes or Dockerfile only. Skipped with `--docker-compose` or `--k8s`.
+2. **Run a background worker?** Default yes. Asked only when `10xgraph.json` has a `worker` key whose broker is not `memory`, and the target is Compose or Kubernetes.
+3. **Run the scheduler?** Default no. Asked only after a yes to the worker.
+4. **Overwrite existing files?** Asked only when files exist and you did not pass `--force`. No stops without writing.
+
+`--worker/--no-worker` and `--scheduler/--no-scheduler` answer questions 2 and 3. Without a terminal the worker is included when the config has a non-`memory` `worker` key, and the scheduler only with `--scheduler`. `--worker` without a `worker` key or with the `memory` broker is an error, and so is `--scheduler` without a worker.
 
 See [Deployment guide](/docs/server/deploy) for more.
 
@@ -167,9 +179,9 @@ Output example:
 
 ```
 10xgraph-api
-  Version: 1.0.0rc4
+  Version: 1.0.0
 10xgraph (core)
-  Version: 1.0.0rc4
+  Version: 1.0.0
 ```
 
 ### Preview animations

@@ -3,8 +3,8 @@ title: Media and Files
 seoTitle: "Multimodal messages: media and files"
 description: "How 10xGraph handles media in multimodal messages: MediaRef decouples location from structure, storage backends serve files, and providers adapt automatically."
 section: Concepts
-order: 200
-group: "Serving"
+order: 210
+group: "Platform"
 label: Media and Files
 updated: "2026-10-26"
 faq:

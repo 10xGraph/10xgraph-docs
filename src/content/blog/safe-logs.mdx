@@ -2,12 +2,11 @@
 title: "Logs that are safe to ship"
 seoTitle: "Safe logs and traces for AI agents"
 description: "What 10xGraph keeps out of logs, traces and Sentry: hashed user ids, redacted Redis URLs, tool error references, escaped client values and generic errors in production."
-date: 2026-10-27
-updated: 2026-10-27
+date: 2026-11-10
+updated: 2026-11-10
 author: Shudipto Trafder
 kind: engineering
 tags: [observability, security, logging, privacy]
-draft: true
 faq:
   - q: How do I keep raw user ids out of traces?
     a: Set observability.user_id_mode in 10xgraph.json to hash or mask. Hash gives 16 hex characters of SHA-256, or HMAC-SHA256 when TENXGRAPH_TRACE_USER_ID_KEY is set. Mask keeps the ends, for example al***42. The default is raw.
@@ -18,6 +17,8 @@ faq:
 ---
 
 Logs leave your process. They go to a log aggregator, a trace backend, an error tracker, sometimes to a vendor in another country. Whatever the server writes ends up in every one of those places and stays there for the retention period. So the useful question is what the server refuses to write, not how much it can.
+
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
 
 This post lists what 10xGraph and `10xgraph-api` keep out of logs, traces and error reports by default, and the one setting you choose yourself. The setup steps are on the [observability page](/docs/server/observability).
 
@@ -63,9 +64,15 @@ Without this, a connection string inside an exception message travels to the bro
 
 If you enable Sentry, the server starts it with request bodies off (`max_request_body_size="never"`), local variables off and personal data off.
 
-Log levels follow the status code the handler returns. A 4xx (401, 403, 404, 413, 422, 429 and so on) is one WARNING line with the method, path, status and error code, with no traceback and no body. A 5xx stays an ERROR with the traceback. Only ERROR logs become Sentry events, and WARNING and INFO stay breadcrumbs. A bad token or a probing scanner no longer pages you.
+Log levels follow the status code the handler returns. A 4xx (401, 403 for a missing permission, 404, 413, 422, 429 and so on) is one WARNING line with the method, path, status and error code, with no traceback and no body. A 5xx stays an ERROR with the traceback. Only ERROR logs become Sentry events, and WARNING and INFO stay breadcrumbs. A bad token or a probing scanner no longer pages you.
 
 One thing to change when you upgrade: an alert that matched ERROR for client errors must match WARNING.
+
+## Structured logs and the audit log
+
+Set `LOG_FORMAT=json` (the default is `text`; any value other than `text` or `json` is rejected) and every application log line becomes one JSON object, which a log pipeline can parse without regular expressions. The secret sanitizer still applies.
+
+A resource that is outside the caller's reach answers 404, the same as one that does not exist, so a probing client learns nothing from the status code. The server can also record those decisions in a metadata-only audit log. With `audit` enabled and the `log` sink, each event is a JSON line on stdout from the logger `tenxgraph_api.audit`. It holds ids and outcomes, never prompts, answers or file contents. 10xGraph stores no audit data: your log pipeline keeps it, with the retention you choose. See [Audit log](/docs/server/audit-log).
 
 ## What you still own
 

@@ -2,8 +2,9 @@
 title: Use Callbacks and Hooks
 description: "Hook into graph execution to log, validate, trace, and respond to events at two levels"
 section: "Build agents"
-group: "Safety"
-order: 370
+group: "Control flow"
+order: 270
+label: "Use callbacks and hooks"
 updated: "2026-10-27"
 ---
 

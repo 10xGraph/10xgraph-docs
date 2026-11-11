@@ -8,9 +8,9 @@ outcome:
   - An approval over REST that names the exact interrupt it answers
   - A tool ledger that stops a re-run of the same step from posting or refunding twice
   - A 409 when two requests hit one thread, and for an answer that is stale or misdirected
-versions: 10xGraph 0.10.3, API and CLI 0.9.0 (steps marked "next release" need the build after that)
+versions: 10xGraph 1.0, API and CLI 1.0
 order: 30
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - q: Who can approve a refund?
     a: By default only the user who owns the thread, because the thread does not exist for anyone else (404). That fits "the customer confirms the amount". A role with reach `tenant` or `all` cannot resume other users' threads either, because runs always stay on the caller's own threads. For a back-office reviewer, build the approval step so the reviewer's decision reaches the owner's run through your own code. The guide shows the owner-only case.
@@ -77,7 +77,7 @@ def refund_order(order_id: str, config: dict | None = None) -> dict | str:
     return {"refunded": True, "refund_id": refund["refund_id"], "amount": str(amount)}
 ```
 
-The ownership helper (`_owned_order`) and the fake `payments` client are the ones from the [production ReAct agent guide](/build/production-react-agent). The order is looked up before the pause, so a user cannot even get an approval prompt for someone else's order.
+The order helper (`_owned_order`) and the fake `payments` client are the ones from the [production ReAct agent guide](/build/production-react-agent). The order is looked up before the pause, so a user cannot even get an approval prompt for someone else's order.
 
 `response_schema` does two jobs. A front end can build its form from it, and the server rejects an answer that does not match it. The built-in check understands `type`, `enum`, `properties`, `required` and `items`. Other keywords are ignored, so do not rely on `minimum` or `pattern` here.
 
@@ -170,11 +170,7 @@ HTTP 409
 
 In the test the slow run lasted 40 seconds, and the second request returned 409 about 30 seconds after it was sent. This is the guard against a double click, two tabs, or a retry that arrives while the first attempt is still working: only one run per thread at a time. Add `"on_busy": "cancel"` next to `recursion_limit` in the request to ask the running run to stop instead of waiting (documented in the API changelog; not run for this guide). With Redis configured the lock is shared across workers, and it expires by itself if a worker dies.
 
-<Callout type="note" title="Next release">
-
-Releases 0.10.3 (core) and 0.9.0 (API) have `interrupt()`, `resume`, the tool ledger and the owner check. These parts come after them: `interrupt_id` on the request and the matching 409 and 422 above, the per-thread run lock with its 409 and `on_busy`, and the owner scoping of ledger reads in `PgCheckpointer`. Without them, a resume is answered without the id check, and parallel requests on a thread are not queued. The responses above are from the repository source.
-
-</Callout>
+Written for 10xGraph 1.0.
 
 ## What this guide covers, and what you still own
 
@@ -184,7 +180,7 @@ Releases 0.10.3 (core) and 0.9.0 (API) have `interrupt()`, `resume`, the tool le
 | An answer tied to one interrupt and checked against a schema | The rules inside your tool, such as limits above which a second approver is needed |
 | A recorded tool call is not re-run after a replay | An idempotency key in the call to the payment provider |
 | One run per thread, 409 otherwise | Telling your front end to treat 409 as "someone else is already working on this" |
-| Ownership checks on every thread request | A durable checkpointer and backups for the approval state |
+| Reach-scoped access on every thread request (own by default) | A durable checkpointer and backups for the approval state |
 
 ## Where to next
 

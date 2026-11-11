@@ -1,9 +1,9 @@
 ---
 title: How to use the memory store
 description: Guide to using PgVectorStore and QdrantStore for long-term memory, factory helpers, and enabling agent-level memory with MemoryConfig.
-section: "Build agents"
-group: "State, memory and context"
-order: 250
+section: "Data and state"
+group: "Long-term memory"
+order: 30
 label: Memory store
 updated: "2026-10-27"
 ---

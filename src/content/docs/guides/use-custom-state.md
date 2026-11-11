@@ -142,7 +142,7 @@ agent = Agent(
 )
 ```
 
-Placeholders in curly braces are filled from the current state with `str.format`. If any placeholder names a field the state does not have, a warning is logged and the whole prompt is sent without interpolation. A field set to `None` renders as `None` (so `ticket_id` above reads `Ticket: None` until it is set). Escape literal braces as `{{` and `}}`.
+Placeholders in curly braces are filled from the current state with `str.format`. A field the state does not have, or a malformed placeholder, stays exactly as written while the other fields are still filled, and a warning is logged. The run never fails. The text of `extra_messages` is filled the same way. A field set to `None` renders as `None` (so `ticket_id` above reads `Ticket: None` until it is set). Escape literal braces as `{{` and `}}`.
 
 ---
 
@@ -417,7 +417,7 @@ Only keys that already exist on the state class are applied, and `context`, `con
 
 **The system prompt shows raw `{placeholders}`.**
 
-A placeholder names a field the state does not have, so interpolation was skipped for the whole prompt and a warning was logged. Add the field to your state class with a default:
+A placeholder names a field the state does not have, so it was left as written and a warning was logged (the other fields are still filled). Add the field to your state class with a default:
 
 ```python
 class MyState(AgentState):

@@ -246,6 +246,7 @@ ToolResultBlock(call_id="call_abc", output={"order_id": "A1001", "status": "ship
 |---|---|---|
 | `type` | `"tool_result"` | Discriminator. |
 | `call_id` | `str` | Matches the `ToolCallBlock.id` this is a response to. |
+| `name` | `str \| None` | Name of the tool that produced the result. `ToolNode` sets it on every result; `None` on results saved before this field existed. |
 | `output` | `Any` | The result returned by the tool (string, dict, `MediaRef` or a list of blocks). |
 | `is_error` | `bool` | `True` if the tool execution failed. Default `False`. |
 | `status` | `"completed" \| "failed" \| None` | Status of the tool call. |

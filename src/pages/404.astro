@@ -4,6 +4,7 @@ import { DOC_SECTIONS, SECTION_INFO } from '../lib/site';
 
 const links = [
   ...DOC_SECTIONS.map((s) => ({ title: s, href: `/docs/${SECTION_INFO[s].slug}`, desc: SECTION_INFO[s].blurb })),
+  { title: 'Docs map', href: '/docs/map', desc: 'Browse the docs map to find your path.' },
   { title: 'Blog', href: '/blog', desc: 'Engineering notes on production AI agents.' },
   { title: 'Changelog', href: '/changelog', desc: 'Every release of the framework, API server and client.' },
 ];

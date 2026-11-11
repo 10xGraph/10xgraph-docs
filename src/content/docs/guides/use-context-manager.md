@@ -2,8 +2,8 @@
 title: Manage conversation context
 description: "Keep message history within your LLM's context window using trimming and summarization."
 section: "Build agents"
-group: "State, memory and context"
-order: 260
+group: "Context and dependencies"
+order: 230
 updated: "2026-10-27"
 faq:
   - q: "Do I need a context manager?"

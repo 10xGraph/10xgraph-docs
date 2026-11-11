@@ -2,8 +2,8 @@
 title: How to use dependency injection
 description: Guide to using InjectQ for binding services and injecting them into node functions, tool functions, and agents via Inject[T] parameter defaults.
 section: "Build agents"
-group: "State, memory and context"
-order: 270
+group: "Context and dependencies"
+order: 240
 label: Dependency injection
 updated: "2026-10-27"
 faq:

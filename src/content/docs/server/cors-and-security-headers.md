@@ -2,11 +2,11 @@
 title: "CORS and security headers"
 description: "Configure cross-origin requests, security headers, request size limits, and trusted proxies."
 seoTitle: "CORS, Security Headers, and Request Limits"
-label: "Security headers"
-order: 80
-group: "Security"
-section: "API server"
-updated: "2026-10-27"
+label: "CORS and security headers"
+order: 50
+group: "Protect the server"
+section: "Security and access"
+updated: "2026-11-10"
 faq:
   - question: "Can I use ORIGINS='*' with credentials in production?"
     answer: "No. Wildcard origins combined with credentials is rejected at startup in production mode. Set explicit ORIGINS or disable CORS_ALLOW_CREDENTIALS."
@@ -53,8 +53,6 @@ export CORS_ALLOW_CREDENTIALS="true"
 ```
 
 ### Private-network preflight for the hosted playground
-
-Added in 1.0.0rc3.
 
 When a public page such as `https://play.10xgraph.com` calls a server on `localhost`, Chrome first sends a preflight with `Access-Control-Request-Private-Network`. The API answers it with `Access-Control-Allow-Private-Network: true`, but only for an origin listed in `ORIGINS`. For any other origin the preflight is refused as before and the header is not sent. The browser also asks the user for permission; see [Allow the playground to reach your local server](/docs/server/playground#allow-the-playground-to-reach-your-local-server).
 

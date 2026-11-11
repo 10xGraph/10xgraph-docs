@@ -5,7 +5,7 @@ description: "10xGraph vs Google ADK compared with sources: API server, auth, th
 section: Compare
 order: 60
 label: vs Google ADK
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - q: Does 10xGraph support Vertex AI as well as Google AI Studio?
     a: Yes. The 10xGraph Google provider supports both the Gemini API and Vertex AI. Switch with use_vertex_ai=True on the Agent or the GOOGLE_GENAI_USE_VERTEXAI environment variable. See the providers/google docs for the configuration.
@@ -169,7 +169,6 @@ for await (const chunk of client.stream(
 ## Weak spots of 10xGraph
 
 - Smaller community and fewer integrations.
-- Pre-1.0: pin versions and read changelogs before upgrading.
 - Renamed from Agentflow, so the 10xGraph name has little search history yet.
 - No Google-managed runtime or visual tooling. The playground is a test chat.
 - Code-first only, and Python 3.12 or newer.

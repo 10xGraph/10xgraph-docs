@@ -1,0 +1,129 @@
+---
+// /docs/map: every docs page as a node in one graph. Desktop gets the 3D map (scripts/docs-map);
+// small screens and no-JS visitors get plain lists of the guided routes. A static route, so it
+// wins over [section].astro and [...slug].astro for this one path.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { buildDocsGraph } from '../../lib/docs-graph';
+import '../../styles/docs.css';
+import '../../styles/docs-map.css';
+
+const data = await buildDocsGraph();
+const title = new Map(data.nodes.map((n) => [n.id, n]));
+const routes = data.paths.filter((p) => p.id.startsWith('route-'));
+const bySection = data.paths.filter((p) => p.section);
+const json = JSON.stringify(data).replace(/</g, '\\u003c');
+const steps = (p: (typeof data.paths)[number]) =>
+  p.steps.map((id) => title.get(id)!).map((n, i) => ({ n, i }));
+---
+<BaseLayout title="Docs map" description="Every 10xGraph docs page as one interactive graph, with guided routes for your first agent, going to production and security.">
+  <div class="docs-map">
+    <!-- Small screens and no-JS: the guided routes as plain lists of links. -->
+    <section class="dm-paths wrap" aria-labelledby="dm-paths-h">
+      <p class="eyebrow">Docs map</p>
+      <h1 id="dm-paths-h">Find your path</h1>
+      <p class="lede">Pick a route and read the pages in order. Each step is a normal docs page.</p>
+      <p class="dm-fallback-note" id="dm-fallback-note" role="alert" hidden></p>
+      {routes.map((p) => (
+        <section class="dm-route" data-dm-path={p.id}>
+          <h2>{p.name}</h2>
+          <p class="dm-route-meta">{p.blurb} <span>{p.steps.length} steps</span> <span data-dm-count>0 of {p.steps.length} read</span></p>
+          <ol>
+            {steps(p).map(({ n }) => (
+              <li data-step={n.id}><a href={n.url}>{n.title}</a></li>
+            ))}
+          </ol>
+        </section>
+      ))}
+      <h2 class="dm-by-section">By section</h2>
+      {bySection.map((p) => (
+        <details class="dm-route" data-dm-path={p.id}>
+          <summary>{p.name} <span><span data-dm-count>0 of {p.steps.length} read</span></span></summary>
+          <ol>
+            {steps(p).map(({ n }) => (
+              <li data-step={n.id}><a href={n.url}>{n.title}</a></li>
+            ))}
+          </ol>
+        </details>
+      ))}
+    </section>
+
+    <!-- Desktop (1024px and up): the 3D map. Hidden by CSS below that width and never loaded there. -->
+    <div class="dm-desktop" data-dm-desktop>
+      <h1 class="sr-only">Docs map</h1>
+      <div class="dm-stage" id="dm-stage">
+        <div id="dm-graph"></div>
+        <div id="dm-overlay" aria-hidden="true"></div>
+        <div id="dm-tip" role="presentation"></div>
+
+        <div class="dm-bar">
+          <div class="dm-search">
+            <input id="dm-q" type="search" placeholder="Search pages on the map" autocomplete="off" aria-label="Search pages on the map" />
+            <div id="dm-results" role="listbox" hidden></div>
+          </div>
+          <button class="dm-btn" id="dm-show-card" type="button">Find your path</button>
+          <span class="dm-route-chip" id="dm-route-chip" hidden></span>
+          <span class="dm-spacer"></span>
+          <span class="dm-progress">Explored <b id="dm-pcount">0 / 0</b></span>
+          <button class="dm-link" id="dm-reset" type="button">Reset</button>
+        </div>
+
+        <section class="dm-card" id="dm-card" aria-labelledby="dm-card-h" hidden>
+          <h2 id="dm-card-h">Find your path</h2>
+          <p>Choose a route through the docs. It flies to the first page and walks you along.</p>
+          <div class="dm-choices">
+            {routes.map((p) => (
+              <button type="button" class="dm-choice" data-path={p.id}>
+                <b>{p.name}</b>
+                <span>{p.blurb}</span>
+                <em><span>{p.steps.length} steps</span><span data-route-progress={p.id}></span></em>
+              </button>
+            ))}
+          </div>
+          <details class="dm-more">
+            <summary>Paths by section</summary>
+            <div>
+              {bySection.map((p) => (
+                <button type="button" data-path={p.id}><span>{p.name}</span><em data-route-progress={p.id}>{p.steps.length} pages</em></button>
+              ))}
+            </div>
+          </details>
+          <button class="dm-link" type="button" id="dm-explore">or explore the map</button>
+        </section>
+
+        <aside class="dm-panel" id="dm-panel" aria-label="Selected page" hidden>
+          <button class="dm-x" id="dm-pclose" type="button" aria-label="Close panel">&times;</button>
+          <div class="dm-scroll" id="dm-pbody"></div>
+        </aside>
+        <div class="dm-state" id="dm-loading" role="status">Loading the map</div>
+        <div class="dm-state dm-error" id="dm-err" role="alert" hidden></div>
+      </div>
+
+      <nav class="dm-legend" id="dm-legend" aria-label="Sections"></nav>
+
+      <dialog class="dm-reader" id="dm-reader" aria-labelledby="dm-rtitle">
+        <header class="dm-rhead">
+          <button class="dm-btn sm" id="dm-rback" type="button" disabled>Back</button>
+          <span class="dm-chip" id="dm-rchip"></span>
+          <span class="dm-spacer"></span>
+          <button class="dm-btn sm" id="dm-rprev" type="button" hidden>Previous step</button>
+          <button class="dm-btn sm" id="dm-rnext" type="button" hidden>Next step</button>
+          <a class="dm-link" id="dm-rfull" href="/docs">Open full page</a>
+          <button class="dm-x" id="dm-rclose" type="button" aria-label="Close reader">&times;</button>
+        </header>
+        <div class="dm-rscroll" id="dm-rscroll" tabindex="-1">
+          <p class="sr-only" id="dm-rtitle"></p>
+          <div class="reader-main dm-rbody" id="dm-rbody"></div>
+        </div>
+      </dialog>
+    </div>
+
+    <script id="docs-map-data" type="application/json" set:html={json} />
+  </div>
+</BaseLayout>
+
+<script>
+  import { markProgress } from '../../scripts/docs-map/progress';
+  import { initMap } from '../../scripts/docs-map';
+  markProgress();
+  initMap();
+</script>

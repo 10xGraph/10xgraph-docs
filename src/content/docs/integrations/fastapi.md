@@ -8,7 +8,7 @@ label: with FastAPI
 updated: "2026-10-27"
 ---
 
-`10xgraph-api` is the fastest path from a compiled graph to an HTTP endpoint (`10xgraph dev` locally, the image from `10xgraph build` in production). But many production teams already run a FastAPI service with auth, middleware, and routes they cannot rewrite. Embedding 10xGraph directly into that service lets you share business logic, authentication, and database connections without HTTP hops.
+Use `10xgraph-api` when you want the full server (`10xgraph dev` locally, the image from `10xgraph build` in production). If you already run a FastAPI service with its own auth, middleware and routes, embed the graph in it instead. Embedding 10xGraph directly into that service lets you share business logic, authentication, and database connections without HTTP hops.
 
 This guide covers both approaches, how to stream responses, manage resources with FastAPI lifespan, and test your embedded routes.
 

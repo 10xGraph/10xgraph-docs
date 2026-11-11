@@ -3,8 +3,8 @@ title: "Add human approval with interrupt()"
 seoTitle: "Pause for human approval: interrupt()"
 description: "Pause a graph mid-execution for human approval, correction, or choice from inside a node or tool. Resume when the decision is made."
 section: "Build agents"
-group: "Multi-agent and control flow"
-order: 290
+group: "Control flow"
+order: 260
 label: "Pause for human input"
 updated: "2026-10-27"
 ---
@@ -453,6 +453,17 @@ async def choose_action(data: dict) -> str:
     else:
         return visualize(data)
 ```
+
+## Who is allowed to approve
+
+Over the API, only the thread's owner can resume a paused run. A role with reach `tenant` or `all` does not change this: runs always stay on the caller's own threads. So the resume value comes from whoever owns the thread, which is usually the requester.
+
+That matters for the refund example. If the customer who asked for the refund owns the thread, the customer's own `{"approved": true}` is what `interrupt()` returns. Do not treat that value as authorization for something the requester must not approve for themselves.
+
+- **Keep the decision out of client-writable state.** Clients can set `initial_state` on a run and, with `threads:write`, `PUT` the thread state. Do not store "approved" there and trust it.
+- **For a separate approver** (support agent, manager), record the decision in your own store, from a run or endpoint that checks the approver's role and tenant. The paused run reads that record when it resumes, instead of trusting the resume value.
+
+The 10xGraph reference app uses this pattern for refunds: the approval lives in the application's own store, and the paused run reads it before paying.
 
 ## Troubleshooting
 

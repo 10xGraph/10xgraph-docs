@@ -2,12 +2,11 @@
 title: "A prompt-injected model cannot skip your approval step"
 seoTitle: "Prompt injection cannot skip your approval step"
 description: How 10xGraph keeps handoffs, tool visibility, tool results and interrupt resumes under the graph's control, so a steered model cannot walk around a human approval.
-date: 2026-10-27
-updated: 2026-10-27
+date: 2026-11-10
+updated: 2026-11-10
 author: Shudipto Trafder
 kind: engineering
 tags: [security, interrupts, human-in-the-loop, multi-agent]
-draft: true
 faq:
   - q: Does this stop prompt injection?
     a: "No. Nothing stops a model from being steered by text it reads. These controls limit what a steered model can do to the parts of the graph you did not give it: the route it takes, the tools it can call and the approval a human gives."
@@ -21,27 +20,29 @@ A human-in-the-loop design usually has the same shape: the model proposes an act
 
 That guarantee holds only if every path around the stop is closed, including the paths a model can influence by text alone. A model that has read a hostile web page or a poisoned document can be steered into producing unusual output: a tool name you did not expect, a routing hint, a message that looks like a human answer. This post lists the places where 10xGraph decides on the graph's side instead of trusting that output, and what you still have to do yourself. It describes behaviour and design, not ways to attack a particular app.
 
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
+
 The reference pages are [Interrupts](/docs/concepts/interrupts) and the [security model](/docs/production/security-model).
 
 ## Handoffs only go where a handoff tool says
 
-In a multi-agent graph, one agent can hand the conversation to another through a tool made with `create_handoff_tool`. Earlier, any tool call named `transfer_to_<X>` moved the run to node `<X>`, whether or not you had registered such a tool. A steered model could name a node that your edges never lead to, and that includes a node behind an approval step.
+Handoff is how one agent passes the conversation to another, through a tool made with `create_handoff_tool`. If any tool call named `transfer_to_<X>` moved the run to node `<X>`, a steered model could name a node that your edges never lead to, and that includes a node behind an approval step.
 
-Now a handoff is honoured only when the ToolNode holds a tool of that name created by `create_handoff_tool`. Any other `transfer_to_*` call is an ordinary tool call, and if no such tool exists it gets the usual "Tool not found" result.
+So a handoff is honoured only when the ToolNode holds a tool of that name created by `create_handoff_tool`. Any other `transfer_to_*` call is an ordinary tool call, and if no such tool exists it gets the usual "Tool not found" result.
 
-The same rule covers `Command(goto=...)` returned from your own code. A target that is neither a node in the graph nor `END` raises `GraphError` with code `GRAPH_007`, naming the node it came from and the unknown target. Before, it surfaced as a raw `KeyError`.
+The same rule covers `Command(goto=...)` returned from your own code. A target that is neither a node in the graph nor `END` raises `GraphError` with code `GRAPH_007`, naming the node it came from and the unknown target.
 
 Starting a run at a chosen node with `current_node` is a separate, intended feature (a frontend can send the agent the user picked). If a node needs an entry guard, enforce it inside the graph. The change above is about what the model can do, not what your caller can do.
 
 ## Tools hidden by `tools_tags` cannot be called
 
-An Agent can advertise only the tools that match `tools_tags`. That used to be a presentation choice: the model was shown the tagged tools, but the ToolNode would run any registered name the model happened to guess.
+An Agent can advertise only the tools that match `tools_tags`. Showing the model only the tagged tools is not enough on its own, because the ToolNode could still run any registered name the model happened to guess.
 
-Now the Agent records the names it advertised on the assistant message (`metadata["allowed_tools"]`), and the dispatch step refuses a call to anything outside that list with the same "Tool not found" error. If you use tags to keep a destructive tool away from a low-trust agent, the tag now holds at run time and not just in the prompt.
+So the Agent records the names it advertised on the assistant message (`metadata["allowed_tools"]`), and the dispatch step refuses a call to anything outside that list with the same "Tool not found" error. If you use tags to keep a destructive tool away from a low-trust agent, the tag holds at run time and not just in the prompt.
 
 ## A tool name cannot be claimed twice
 
-When a ToolNode also connects to an MCP server, a remote tool could previously take over the name of a local tool: calls meant for your function went to the server. Now a collision between an MCP tool and a local or remote tool on the same ToolNode raises `ValueError` ("Rename one of them"), and the check runs outside the code that swallows connection errors, so it cannot be hidden by a failed server ping.
+When a ToolNode also connects to an MCP server, a remote tool could otherwise take over the name of a local tool, so calls meant for your function would go to the server. A collision between an MCP tool and a local or remote tool on the same ToolNode raises `ValueError` ("Rename one of them"), and the check runs outside the code that swallows connection errors, so it cannot be hidden by a failed server ping.
 
 ## Forged tool results are refused
 
@@ -60,7 +61,7 @@ A resume carries a value, and the value can be bound to the prompt it answers:
 - The client can send `interrupt_id` with the resume on invoke, stream and WebSocket. If the thread is not paused, or is paused at another interrupt (a stale tab, a retried request after the first answer was consumed), the API answers 409 and records nothing. This is how a late "yes" fails to approve a different request.
 - The core checks the id again and, when the interrupt declared a `response_schema` (a JSON Schema), validates the value against it. A mismatch raises `InterruptMismatchError` (`INTERRUPT_001`), and a value that does not satisfy the schema raises `ResumeValidationError` (`INTERRUPT_002`). Nothing is recorded in either case.
 
-The core checks are in the repository and ship with the next core release (0.10.4 or later). The API check works with the core you have today, and it passes the id along for the core to enforce once you upgrade.
+The API checks the id first and answers 409 before a stream starts. It also passes the id to the core, which enforces it again.
 
 ```python
 from tenxgraph.utils import interrupt
@@ -87,5 +88,5 @@ Without `interrupt_id`, a resume answers whatever the thread is paused at, as be
 ## What you still own
 
 - None of this makes a model trustworthy. It removes shortcuts around your graph.
-- Authentication, per-user thread ownership and tool authorization are separate layers, covered in the [security model](/docs/production/security-model).
+- Authentication, role-based access and ownership are separate layers, covered in the [security model](/docs/production/security-model). Another user's thread answers 404. Permissions apply per route; there are no per-tool permissions, so decide inside the tool who may do what.
 - A tool that must be safe against a steered model should still validate its own arguments and use idempotency keys. See [Interrupts](/docs/concepts/interrupts) for how to place the stop before the tool, not after it.

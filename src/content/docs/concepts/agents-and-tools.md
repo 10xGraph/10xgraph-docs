@@ -89,6 +89,8 @@ agent = Agent(
 # At runtime the placeholder is replaced with state.user_name, state.occasion
 ```
 
+A missing field stays as written and the rest is still filled. `extra_messages` text is filled the same way, which is the right place for values that change mid-conversation; see [prompt caching](/docs/guides/configure-agent#per-request-context-and-prompt-caching).
+
 ### Skills
 
 A skill is a folder with a `SKILL.md` (instructions plus a short description) and optional bundled files such as scripts and reference docs. Skills follow the [Agent Skills specification](https://agentskills.io/specification). With `skills=SkillConfig(skills_dir=...)`:
@@ -241,7 +243,7 @@ def select_city(city: str) -> ToolResult:
 
 ### MCP tools
 
-10xGraph supports the Model Context Protocol (MCP), allowing you to expose both local Python functions and MCP server tools through the same `ToolNode`. Install with `pip install "10xgraph[mcp]"`, create an MCP client (using fastmcp or another MCP SDK), and pass it to `ToolNode(client=...)`. The same parallel execution, error handling, and injectable parameters apply to MCP tools. Set `pass_user_info_to_mcp=True` to forward the caller's `user_id` and other config to the MCP server so it can scope resource access. For details, see [Using MCP](/docs/guides/use-mcp).
+10xGraph supports the Model Context Protocol (MCP), allowing you to expose both local Python functions and MCP server tools through the same `ToolNode`. Install with `pip install "10xgraph[mcp]"`, create an MCP client (using fastmcp or another MCP SDK), and pass it to `ToolNode(client=...)`. The same parallel execution, error handling, and injectable parameters apply to MCP tools. To tell the server who is calling, use `mcp_auth=` (an async function returning headers, such as a short-lived signed token) when the server enforces per-user or per-tenant access, because the server can verify it. `pass_user_info_to_mcp=True` sends the caller as unsigned request metadata the server cannot verify, so use it only for a trusted internal server. For details, see [Using MCP](/docs/guides/use-mcp).
 
 ---
 
@@ -263,21 +265,20 @@ Use `@tool` to attach metadata to any function. Metadata does not change injecti
 from tenxgraph.utils import tool
 
 @tool(
-    name="web_search",
     description="Search the web for up-to-date information on any topic.",
     tags=["search", "web"],
     provider="custom",
     capabilities=["network_access"],
     metadata={"rate_limit": 100, "timeout": 30},
 )
-async def search_web(query: str, max_results: int = 5) -> list[str]:
+async def web_search(query: str, max_results: int = 5) -> list[str]:
     """Search the web."""
     ...
 ```
 
-The decorator stores metadata as private attributes (`_py_tool_name`, `_py_tool_description`, `_py_tool_tags`, …) which `ToolNode` reads when building the schema.
+The decorator stores metadata as private attributes (`_py_tool_description`, `_py_tool_tags`, …) which `ToolNode` reads when building the schema.
 
-You can also use it without arguments (function name and docstring as defaults):
+You can also use it without arguments (the docstring becomes the description):
 
 ```python
 @tool

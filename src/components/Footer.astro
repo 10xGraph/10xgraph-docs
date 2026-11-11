@@ -9,13 +9,14 @@ const docLinks: DocSection[] = ['Get started', 'Concepts', 'Build agents', 'API 
   <div class="wrap footer-grid">
     <div class="footer-brand">
       <Logo />
-      <p>Open-source Python framework for production multi-agent AI, with the production server included.</p>
+      <p>Open-source, self-hosted infrastructure for AI applications: API server, access control, state, jobs and deploy files.</p>
       <a class="footer-version" href="/changelog">v{SITE.version} <span>Changelog</span></a>
     </div>
     <nav aria-label="Docs">
       <h2>Docs</h2>
       <ul>
         {docLinks.map((s) => <li><a href={`/docs/${SECTION_INFO[s].slug}`}>{s}</a></li>)}
+        <li><a href="/docs/map">Docs map</a></li>
       </ul>
     </nav>
     <nav aria-label="Community">

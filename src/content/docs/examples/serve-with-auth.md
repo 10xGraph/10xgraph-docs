@@ -4,7 +4,7 @@ seoTitle: "Serve a 10xGraph agent with JWT auth"
 description: Scaffold the production template, run it with JWT auth, call it with curl and TenxGraphClient, then generate Docker files with 10xgraph build.
 section: Examples
 group: Production
-order: 11
+order: 20
 label: Serve with auth
 updated: "2026-11-08"
 faq:

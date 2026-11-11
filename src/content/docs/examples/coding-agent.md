@@ -3,7 +3,7 @@ title: Build a Coding AI Agent in Python
 description: "Build a plan-first coding agent with read, search, test and diff-proposing tools, so every file change is reviewed by a human before it lands."
 section: Examples
 group: "Use cases"
-order: 250
+order: 370
 label: Coding
 updated: "2026-10-08"
 faq:
@@ -76,7 +76,6 @@ def _inside_repo(path: Path) -> bool:
 
 
 @tool(
-    name="read_file",
     description="Read a text file relative to the repository root. Output is capped at 50,000 characters.",
     tags=["file", "read"],
 )
@@ -103,7 +102,6 @@ def read_file(path: str) -> str:
 
 
 @tool(
-    name="write_file",
     description=(
         "Propose a new version of a file. Returns a unified diff for human review. "
         "Nothing is written to disk by this tool."
@@ -147,7 +145,6 @@ def write_file(path: str, content: str, reason: str) -> str:
 
 
 @tool(
-    name="search_codebase",
     description="Case-insensitive search of file names and file contents. Returns paths and line previews.",
     tags=["file", "search"],
 )
@@ -194,7 +191,6 @@ def search_codebase(query: str, path: str = ".", glob: str = "**/*.py") -> str:
 
 
 @tool(
-    name="run_tests",
     description="Run the pytest suite, or one test path. Output is capped at the last 4,000 characters.",
     tags=["test", "execution"],
 )

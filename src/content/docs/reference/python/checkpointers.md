@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 210
 label: Checkpointers
-updated: "2026-10-28"
+updated: "2026-11-10"
 ---
 
 A checkpointer persists graph state, messages and thread metadata between requests, so conversations survive restarts and multi-turn runs stay coherent. 10xGraph ships four: the `BaseCheckpointer` abstract class, plus `InMemoryCheckpointer`, `SqliteCheckpointer` and `PgCheckpointer`. Pass one to `graph.compile(checkpointer=...)`.
@@ -51,14 +51,14 @@ The methods below are abstract and must be implemented by a subclass:
 | `aget_thread` | `async (config) -> ThreadInfo \| None` | Get thread metadata. |
 | `alist_threads` | `async (config, search=None, offset=None, limit=None, filters=None) -> list[ThreadInfo]` | List threads. `filters` (column conditions, see [Multi-tenant data](/docs/guides/multi-tenant-data#filters)) is supported by `PgCheckpointer`; `InMemoryCheckpointer` and `SqliteCheckpointer` raise `FilterError` for non-empty filters. |
 | `aclean_thread` | `async (config) -> Any \| None` | Delete a thread and its state and messages. |
-| `aping` | `async () -> None` | Return when the checkpointer's backends are reachable and usable, raise when they are not. Must be read-only (no writes, no table creation) and cheap, because the API server calls it on every readiness probe and at startup. An in-process checkpointer just returns. Abstract since 1.0.0rc4: a subclass without it raises `TypeError` when created. |
+| `aping` | `async () -> None` | Return when the checkpointer's backends are reachable and usable, raise when they are not. Must be read-only (no writes, no table creation) and cheap, because the API server calls it on every readiness probe and at startup. An in-process checkpointer just returns. Abstract in 1.0: a subclass without it raises `TypeError` when created. |
 | `arelease` | `async () -> Any \| None` | Release resources (close pools and connections). |
 
 `alist_messages` and `alist_threads` apply `offset` and `limit` in the backend (in SQL on SQLite and Postgres). A negative `offset` or `limit` raises `ValueError`, and a `limit` above `MAX_LIST_LIMIT` (1000, in `tenxgraph.storage.checkpointer.base_checkpointer`) is lowered to it. With no `limit` (`None` or `0`) the whole list is returned, so code that reads a full thread, such as realtime history loading, still works.
 
 ### `aping`
 
-`aping()` is the connectivity check. The API server calls it at startup and on `/health/ready`, so it must be read-only and cheap. `InMemoryCheckpointer.aping()` just returns, `SqliteCheckpointer.aping()` runs `SELECT 1`, and `PgCheckpointer.aping()` runs `SELECT 1`, compares the recorded schema version with the one the code expects (a `RuntimeError` that names both when it is older), and pings its Redis cache directly, so an outage is reported and the circuit breaker stays unchanged. It never creates the schema: the server runs `asetup()` at boot. Added in 1.0.0rc4.
+`aping()` is the connectivity check. The API server calls it at startup and on `/health/ready`, so it must be read-only and cheap. `InMemoryCheckpointer.aping()` just returns, `SqliteCheckpointer.aping()` runs `SELECT 1`, and `PgCheckpointer.aping()` runs `SELECT 1`, compares the recorded schema version with the one the code expects (a `RuntimeError` that names both when it is older), and pings its Redis cache directly, so an outage is reported and the circuit breaker stays unchanged. It never creates the schema: the server runs `asetup()` at boot.
 
 ### Sync wrappers
 
@@ -68,6 +68,17 @@ For every `async axxx()` method there is a sync `xxx()` wrapper that runs the as
 checkpointer.put_state(config, state)
 checkpointer.get_state(config)
 ```
+
+### Tool results
+
+Each checkpointer keeps a tool execution ledger: the result of every finished tool call, so a replayed or resumed node does not run finished tools again (Postgres `tool_executions`, SQLite `af_tool_executions`, process memory for `InMemoryCheckpointer`). See [Replay-safe tools](/docs/concepts/replay-safe-tools).
+
+| Method | Signature | Description |
+|---|---|---|
+| `aclear_tool_results` | `async (config, origin_message_ids=None) -> int` | Clear one thread's ledger and return the number of rows deleted. With `origin_message_ids`, only rows issued by those assistant messages go (an empty list deletes nothing); `None` clears the whole thread. Scoped to the thread's owner and tenant. The graph calls it in the background after a run completes, with that run's message ids. |
+| `aprune_tool_results` | `async (older_than: timedelta) -> int` | Delete ledger rows older than `older_than` across all threads and return the count. 10xGraph never calls it; schedule it yourself. With `row_level_security=True` on `PgCheckpointer`, run it with a role that bypasses RLS. |
+
+`PgCheckpointer` schema version 7 adds an index on `tool_executions(created_at)`. `asetup()` applies it.
 
 ### Update message metadata
 
@@ -134,6 +145,12 @@ app = graph.compile(checkpointer=checkpointer)
 - Any multi-process or multi-worker deployment.
 - Production applications where conversation history must survive crashes.
 
+### Constructor parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `record_tool_result` | `bool` | `True` | Record finished tool calls in the in-process tool execution ledger. `False` records nothing for the graph and wins over `@tool(record_tool_result=False)`. `compile()` logs one INFO line when it is off. |
+
 ### Storage behaviour
 
 | Storage | Key | Data |
@@ -142,6 +159,7 @@ app = graph.compile(checkpointer=checkpointer)
 | `_state_cache` | `thread_id` | Hot cache for the running execution. |
 | `_messages` | `thread_id` | Ordered message list. |
 | `_threads` | `thread_id` | Thread metadata (`name`, `created_at`, etc.). |
+| tool results | `thread_id` | The tool execution ledger. Lost on restart. |
 
 All access is guarded by per-bucket `asyncio.Lock` instances for safe concurrent use within a single process. The checkpointer stores and returns copies of the state, so changing a loaded state does not change the store until you save it. This costs one extra copy per state read and write.
 
@@ -195,6 +213,7 @@ The constructor takes the connection arguments below as named parameters; the re
 | `tenant_columns` (kwarg) | `list \| dict \| None` | `None` | Columns on `threads` that isolate data, such as `{"org_id": "uuid"}`. Types: `text`, `bigint`, `integer`, `uuid`. Required on thread creation by default. Values come only from `config["user"]`. Schema version 6 adds them. |
 | `extra_columns` (kwarg) | `list \| dict \| None` | `None` | Your own data columns on `threads`, any Postgres type, optional by default and filterable in `alist_threads`. |
 | `row_level_security` (kwarg) | `bool` | `False` | Also enforce tenant columns with native row-level security. Needs `tenant_columns`. |
+| `record_tool_result` (kwarg) | `bool` | `True` | Record finished tool calls in the `tool_executions` table. `False` records nothing for the graph and wins over `@tool(record_tool_result=False)`. `compile()` logs one INFO line when it is off. |
 | `ddl_lock_timeout` (kwarg) | `float \| None` | `10.0` | Seconds a setup DDL statement waits for a table lock; on timeout setup raises `tenxgraph.storage.columns.SetupLockTimeoutError`. `None` waits forever. Indexes on existing tables are built `CONCURRENTLY`. |
 
 See [Multi-tenant data](/docs/guides/multi-tenant-data) for how the columns, isolation scopes and filters work. `InMemoryCheckpointer` and `SqliteCheckpointer` raise `ValueError` if you pass these three options.
@@ -252,6 +271,7 @@ app = graph.compile(checkpointer=checkpointer)
 | Parameter | Type | Description |
 |---|---|---|
 | `db_path` | `str \| Path \| None` | Path to the SQLite database file. Defaults to `~/.10xgraph/checkpointer.db`. Parent directories are created on setup. Pass `":memory:"` for an ephemeral in-process database (useful for tests). |
+| `record_tool_result` | `bool` | Default `True`. Record finished tool calls in the `af_tool_executions` table. `False` records nothing for the graph and wins over `@tool(record_tool_result=False)`. `compile()` logs one INFO line when it is off. |
 
 **When to use:**
 - **Client-side / embedded agents.** A desktop app that ships a Python sidecar (Tauri, Electron, PyInstaller) or a local CLI agent. The checkpointer runs entirely on the user's machine, right next to the app.

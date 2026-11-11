@@ -2,13 +2,13 @@
 title: Security Model
 seoTitle: "10xGraph security model: server vs. your code"
 description: "What 10xgraph-api enforces for you (auth, ownership, input shaping, limits, error hygiene), what a client can and cannot send, and what stays yours."
-section: "Production"
-order: 10
+section: "Platform"
+order: 30
 label: Security Model
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - question: "Is a 10xGraph server secure by default?"
-    answer: "The request surface is hardened by default: every route needs a guard, threads and files belong to their owner, client input is shaped, and production hides internal errors. Authentication itself is not forced: with auth set to null in production the server starts open, so you must configure it."
+    answer: "The request surface is hardened by default: every route needs a guard, threads and files belong to their owner by default (a role can widen reads, lists, deletes and stop with reach `tenant` or `all`), client input is shaped, and production hides internal errors. Authentication itself is not forced: with auth set to null in production the server starts open, so you must configure it."
   - question: "Can a client set its own user id?"
     answer: "No. Identity comes from the authenticated token. A user_id or user key sent in the request config is dropped, and an identity that starts with the reserved __system__ prefix is refused."
   - question: "Does the server stop prompt injection?"
@@ -48,9 +48,10 @@ Identity comes only from the authenticated user in the run config. The server ne
 | Client steering server config | Server-owned config keys sent by a client are dropped, and operators can allow-list the rest | `runs.config_keys`, `runs.state_keys` | [Configure](/docs/server/configure) |
 | SSRF through media URLs and fetch tools | Every external media URL in client input is checked against the graph's `MediaFetchPolicy` before the run (400 if blocked). Downloads and the built-in `fetch_url` tool use a client that resolves the host once, requires public addresses, pins the connection, re-checks each redirect and caps the body | `media_policy` argument of `graph.compile(...)`, a `MediaFetchPolicy` (default `MediaFetchPolicy()`; import from `tenxgraph.storage.media`) | [Files and multimodal](/docs/server/files-and-multimodal) |
 | Upload abuse | The first bytes must match the declared type for formats with a signature (else 415), uploads are size-limited, and text extraction is capped | `MEDIA_MAX_SIZE_MB` | [Files and multimodal](/docs/server/files-and-multimodal) |
-| Abuse and cost | Rate limit per IP, user or global; per-user cap on runs in flight (429); WebSocket connection caps (global and per user, close code 1013 when full); run timeout (300 s by default in production); request size cap (413); cap on parallel tool calls per model turn | `rate_limit`, `runs.max_concurrent_per_user`, `websocket.max_connections`, `websocket.max_connections_per_user`, `runs.timeout`, `MAX_REQUEST_SIZE`, `runs.max_parallel_tool_calls` | [Rate limiting](/docs/server/rate-limiting) |
+| Abuse and cost | Rate limit per IP, user or global; per-user cap on runs in flight (429); WebSocket connection caps (global and per user, close code 1013 when full); run timeout (300 s by default in production); request size cap (413); cap on parallel tool calls per model turn | `cache_store.rate_limit`, `runs.max_concurrent_per_user`, `websocket.max_connections`, `websocket.max_connections_per_user`, `runs.timeout`, `MAX_REQUEST_SIZE`, `runs.max_parallel_tool_calls` | [Rate limiting](/docs/server/rate-limiting) |
+| No record of who did what | With `audit` enabled, each access decision (allowed, denied, auth failure) and each change is written as one metadata-only JSON line to the `tenxgraph_api.audit` logger, never prompts, answers or file contents. `LOG_FORMAT=json` makes every application log line JSON. 10xGraph stores nothing: your log pipeline keeps, protects and retains the lines | `audit`, `LOG_FORMAT` | [Audit log](/docs/server/audit-log) |
 | Information leaks | In production, 5xx bodies, error chunks on streams and WebSockets, and validation messages that did not come from client input carry generic text; user-controlled values are escaped before logging; `/docs` and `/redocs` are off; graph introspection needs the `graph:read` permission; Sentry is sent without request bodies or local variables; OTEL prints no spans to stdout | `MODE`, `DOCS_PATH`, `REDOCS_PATH`, `SENTRY_DSN` | [Production checklist](/docs/server/production-checklist) |
-| Browser attacks | CORS with explicit origins, Host header validation, security headers (HSTS, frame options, CSP) on by default, and `X-Forwarded-For` honoured only from trusted proxies | `ORIGINS`, `ALLOWED_HOST`, `SECURITY_HEADERS_ENABLED`, `rate_limit.trusted_proxies` | [CORS and security headers](/docs/server/cors-and-security-headers) |
+| Browser attacks | CORS with explicit origins, Host header validation, security headers (HSTS, frame options, CSP) on by default, and `X-Forwarded-For` honoured only from trusted proxies | `ORIGINS`, `ALLOWED_HOST`, `SECURITY_HEADERS_ENABLED`, `cache_store.rate_limit.trusted_proxies` | [CORS and security headers](/docs/server/cors-and-security-headers) |
 | Concurrent runs on one thread | A per-thread lock lets one run proceed; a second waits up to 30 s, then gets 409 "thread is busy". `on_busy: "cancel"` stops the running one instead | `on_busy` request option | [Invoke and stream](/docs/server/invoke-and-stream) |
 | Deployment | The generated image runs as a non-root user with a numeric id, drops the CLI code, and the compose file publishes the port on 127.0.0.1 only | `10xgraph build` | [Deploy](/docs/server/deploy) |
 
@@ -95,6 +96,8 @@ In production the docs and redoc pages default to off, debug mode is off, and `M
 > The playground's Run trace page reads `GET /v1/observability/{thread_id}`, which needs `graph:read`. With auth on, the thread is read through the caller's reach, so by default a user can read traces only for their own threads, the same rule as reading the thread. With `MODE=production` the in-memory trace store is never created, so there is nothing to read and no memory cost. Run any server that other people can reach (staging, demos) with `MODE=production`, or at least with auth on.
 
 ## What you must still do
+
+The server hardens the surface it owns. The [control mapping](/docs/production/control-mapping) shows which SOC 2 and ISO 27001 controls these protections support and which it does not provide; the auditor examines your deployment, not 10xGraph.
 
 The server hardens the surface it owns. It does not choose your auth for you: with `auth: null` and `MODE=production` the server starts and serves every route to anyone. Nothing refuses this, so configure `"auth": "jwt"` or a custom `BaseAuth` before you expose the server. Also yours: authorization checks inside your own tools, secrets, backups, the number of proxy hops in front of the server, and prompt injection through untrusted text the model reads. [What 10xGraph does not protect](/docs/production/limits) lists these in full, and the [production checklist](/docs/server/production-checklist) turns them into steps.
 
@@ -156,3 +159,5 @@ Check 3 returns 422 for the assistant role in the request body; 422 also appears
 - [Security and validators](/docs/concepts/security-and-validators)
 - [Production checklist](/docs/server/production-checklist)
 - [What 10xGraph does not protect](/docs/production/limits)
+- [Control mapping](/docs/production/control-mapping)
+- [Audit log](/docs/server/audit-log)

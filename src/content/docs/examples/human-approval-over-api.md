@@ -4,7 +4,7 @@ seoTitle: "Human approval over the 10xGraph API"
 description: Pause a refund agent with interrupt() and a response_schema, read the open request from the API, resume with resume and interrupt_id, and handle 409 and 422.
 section: Examples
 group: Production
-order: 13
+order: 40
 label: Human approval over the API
 updated: "2026-10-27"
 faq:

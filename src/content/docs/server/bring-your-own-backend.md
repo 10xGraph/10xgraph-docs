@@ -2,10 +2,10 @@
 title: Bring your own backend
 seoTitle: "Custom checkpointer, store and cache store"
 description: "The three storage classes behind a 10xGraph server, what each holds, how to plug in a custom one, the aping rules and the BaseCacheStore contract."
-section: "API server"
-group: "Operate"
-order: 175
-label: Bring your own backend
+section: "Data and state"
+group: "Your databases"
+order: 70
+label: "Bring your own database"
 updated: "2026-10-31"
 faq:
   - question: "Do I need a custom cache store to use Valkey, Dragonfly or KeyDB?"
@@ -54,6 +54,8 @@ The cache store is the one backend chosen by the `cache_store` object in `10xgra
 1. `"memory"` (the default, also when `cache_store` is absent): `InMemoryCacheStore`, correct for one process only.
 2. `"redis"`: `RedisCacheStore`. `url` is optional: empty uses the `REDIS_URL` environment variable, and a value you set (a literal or `${VAR}`) wins.
 3. `"custom"`: your own store. `path` is a `module:attr` path to a `BaseCacheStore` instance, or a zero-argument factory (a class or function) that returns one.
+
+Reference: [BaseCacheStore](/docs/reference/api-cli/cache-store) · Source: [base.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/cache_store/base.py)
 
 `REDIS_URL` alone never selects Redis.
 
@@ -231,6 +233,10 @@ await run_cache_store_contract(lambda: MyCacheStore("https://cache.internal"))
 ## Custom checkpointers and stores
 
 A custom `BaseCheckpointer` implements every abstract async method, including `aping()`, and `aget_thread_owner` when auth is on. A custom `BaseStore` implements its methods and `aping()`. Both are passed to `compile()`. The method lists are in the [checkpointer reference](/docs/reference/python/checkpointers#writing-a-custom-checkpointer) and the [store reference](/docs/reference/python/memory-stores), and [Extension points](/docs/concepts/extensibility) shows where every extension class is wired.
+
+Reference: [BaseCheckpointer](/docs/reference/python/checkpointers) · Source: [base_checkpointer.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/checkpointer/base_checkpointer.py)
+
+Reference: [BaseStore](/docs/reference/python/memory-stores) · Source: [base_store.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/store/base_store.py)
 
 ## See also
 

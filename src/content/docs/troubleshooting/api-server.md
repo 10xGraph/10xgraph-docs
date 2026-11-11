@@ -3,7 +3,7 @@ title: API Server Troubleshooting
 description: Symptoms, causes, and fixes for 10xGraph API server problems at startup, at request time, and in production deployments.
 section: Troubleshooting
 order: 40
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - q: Why does the server refuse to start with "routes are not protected"?
     a: Every route except /ping and the two eval report routes must carry a RequirePermission guard. The check runs at startup so a forgotten guard cannot ship as an open endpoint. Add the dependency to the handler.
@@ -48,8 +48,6 @@ flowchart TD
 - verify required provider keys and dependencies are installed before startup
 
 ### Issue: backend unreachable at startup
-
-Added in 1.0.0rc3.
 
 **Symptoms**
 
@@ -108,7 +106,6 @@ from tenxgraph_api.src.app.core.auth.permissions import RequirePermission
 
 router = APIRouter()
 
-
 @router.post("/v1/my-new-endpoint")
 async def my_endpoint(
     user: dict[str, Any] = Depends(RequirePermission("graph", "read")),
@@ -119,7 +116,6 @@ async def my_endpoint(
 Only `/ping` is public. Modifying the public allowlist requires editing the source code frozenset, which is intentional. Do not use it to silence this error on a route that handles user data.
 
 ### Issue: `InsecureCorsConfigError` on startup
-
 
 **Symptoms**
 
@@ -328,8 +324,6 @@ Two different limits answer 429:
 
 ### Issue: `503 RATE_LIMIT_UNAVAILABLE`
 
-Added in 1.0.0rc3.
-
 **Symptoms**
 
 - requests fail with status `503`, `error.code` `RATE_LIMIT_UNAVAILABLE`, the message `Rate limiter unavailable: its backend could not be reached.` and `Retry-After: 5`
@@ -353,7 +347,7 @@ Added in 1.0.0rc3.
 
 **Cause**
 
-With `MODE=production` the server replaces the message of every 5xx error with a generic one, because exception text can contain internals. The full error is written to the server log with the request id. Messages of 4xx `HTTPException` errors (401, 403, 404, 413, 429) are written for the client and are kept. Request validation errors (422) use the generic text "The request data is invalid. Please check your input." in production, except size-limit messages, which are kept. `execution_meta.internal_data.error` in `GET /v1/threads/{id}/state` also carries the generic text in production (this and the `WARNING` logging below are in the API changelog under Unreleased, after 0.9.0).
+With `MODE=production` the server replaces the message of every 5xx error with a generic one, because exception text can contain internals. The full error is written to the server log with the request id. Messages of 4xx `HTTPException` errors (401, 403, 404, 413, 429) are written for the client and are kept. Request validation errors (422) use the generic text "The request data is invalid. Please check your input." in production, except size-limit messages, which are kept. `execution_meta.internal_data.error` in `GET /v1/threads/{id}/state` also carries the generic text in production.
 
 **Fix**
 

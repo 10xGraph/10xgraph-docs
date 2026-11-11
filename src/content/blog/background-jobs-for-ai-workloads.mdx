@@ -1,0 +1,184 @@
+---
+title: "Background jobs for AI workloads: when a run should not hold a request open"
+seoTitle: "Background jobs for AI workloads with TaskIQ"
+description: "When an AI run belongs in a request and when it belongs in a job, and how 10xGraph runs jobs as a thin TaskIQ layer with a worker, a scheduler and the same auth."
+date: 2026-11-10
+updated: 2026-11-10
+author: Shudipto Trafder
+kind: engineering
+tags: [background-jobs, taskiq, infrastructure, reliability]
+faq:
+  - q: Does 10xGraph have its own job queue?
+    a: No. Jobs are a thin layer on TaskIQ. You write tasks with the broker from tenxgraph_api.jobs, and the broker is Redis Streams, RabbitMQ or Kafka. The 10xgraph worker and scheduler commands start TaskIQ processes that load your graph and config.
+  - q: Are tasks exactly once?
+    a: No. On Redis Streams and RabbitMQ delivery is at least once, so a task can run again if its worker dies. On Kafka it is at most once in practice. Write tasks so a rerun is safe.
+  - q: Do jobs run with the same access control as requests?
+    a: With auth on, yes. Each run rebuilds the caller's identity from stored claims and checks the tasks:trigger permission before it executes. A task that no user started runs as a named system identity you configure.
+---
+
+Some AI work does not belong in an HTTP request. Embedding ten thousand documents after an upload, summarising yesterday's support threads overnight, running an agent for twenty minutes, sending a follow-up email once a workflow finishes: none of these should keep a client connection open, and none of them should vanish when a deploy restarts the API.
+
+10xGraph treats this as part of the platform. This is how the project describes itself:
+
+> 10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
+
+This post covers the background jobs part: when to use a job, how to define and run one, how jobs stay inside your access rules, and what the delivery guarantees are.
+
+## Request or job
+
+An interactive run (invoke or stream) executes in the API worker that received the request, bounded by `runs.timeout`. That is the right place for work a user is waiting on and watching. It is the wrong place for work that outlives the request, because a long run ties up that worker's connection and a deploy waits on the graceful shutdown timeout.
+
+| Situation | Where it belongs |
+| --- | --- |
+| A user is waiting for the answer and watching tokens arrive | Request: `invoke` or `stream`, bounded by `runs.timeout` |
+| Work must finish even if the client disconnects or the API restarts | Job |
+| Work runs on a clock (nightly, hourly, once at a given time) | Job with a schedule |
+| Work is heavy enough that it should scale separately from the API | Job |
+| Work you can afford to lose on a restart, such as warming a cache | In-process task with `BackgroundTaskManager` |
+
+The last row matters. 10xGraph has two mechanisms, and they differ in what happens when the process dies. `BackgroundTaskManager` runs fire-and-forget work inside the graph process and loses it on a crash. Jobs go through a broker to a separate worker process and survive a restart. See [Run work in the background](/docs/guides/run-background-tasks) for the in-process one.
+
+## Define a task
+
+Jobs are a thin layer on [TaskIQ](https://taskiq-python.github.io/), not a queue of our own. You import the broker, decorate an async function, and everything TaskIQ offers still works. Here is a task that summarises a closed support thread, using the graph and the store the same way the API does:
+
+```python
+# app/tasks.py
+from typing import Annotated
+
+from injectq.integrations.taskiq import InjectTaskiq
+from taskiq import TaskiqDepends
+from taskiq.depends.progress_tracker import ProgressTracker, TaskState
+from tenxgraph.core.graph import CompiledGraph
+from tenxgraph_api.jobs import TaskContext, broker
+
+
+@broker.task(task_name="summarise_thread", http=True)
+async def summarise_thread(
+    thread_id: str,                                                # set by the caller
+    config: dict,                                                  # filled by the server
+    ctx: Annotated[TaskContext, TaskiqDepends()],
+    tracker: Annotated[ProgressTracker, TaskiqDepends()],
+    graph: Annotated[CompiledGraph, InjectTaskiq(CompiledGraph)],  # InjectQ value
+) -> dict:
+    await tracker.set_progress(TaskState.STARTED, {"step": 1})
+    if await ctx.cancelled():
+        return {"cancelled": True}
+    ...
+```
+
+A few details from the docs page that are easy to miss:
+
+- `http=True` lets the API start the task over HTTP. The default is `False`, and a task that is not marked answers 404 on the HTTP routes.
+- `task_name` sets the name callers use. Without it TaskIQ uses `<module>:<function>`.
+- A `config` parameter receives the run config (`user_id`, `user` and `task_id`) only if you declare it. Pass it to `graph.ainvoke(..., config=config)` to run as the caller.
+- Inject values with `InjectTaskiq`. Plain `Inject[...]` does not work in tasks: it passes the marker object instead of the value.
+
+## Run it
+
+Add a `worker` key to `10xgraph.json`. Status records, cancel flags and schedule records live in the API's cache store, so set `cache_store.type` to `redis` as well.
+
+```json
+{
+  "agent": "app.graph:app",
+  "cache_store": {"type": "redis", "url": "${REDIS_URL}"},
+  "worker": {
+    "broker": {"type": "redis_stream", "url": "${REDIS_URL}"},
+    "tasks": ["app.tasks"],
+    "result_ttl": 86400,
+    "retries": 3
+  }
+}
+```
+
+`broker.type` is `redis_stream` (the default), `rabbitmq`, `kafka` or `memory`. The memory broker is for tests and local runs, and it runs tasks inside the API. `tasks` lists the modules or file globs the worker imports. `result_ttl` is how many seconds status, progress and results are kept, and `retries` is the cap when a task opts into retries. Install the matching extra: `10xgraph-api[jobs]`, `[jobs-rabbitmq]` or `[jobs-kafka]`.
+
+Then run three kinds of process:
+
+```bash
+10xgraph dev        # the API: starts and schedules tasks, does not run them
+10xgraph worker     # runs tasks
+10xgraph scheduler  # sends scheduled tasks
+```
+
+Run exactly one scheduler, because two would send every scheduled task twice. Run as many workers as you need.
+
+Over HTTP, the API exposes the `/v1/tasks` routes, with the same auth as the graph routes:
+
+| Route | Does | Permission |
+| --- | --- | --- |
+| `POST /v1/tasks/{name}` | Run now, or schedule when the body has `schedule` | `tasks:trigger` |
+| `GET /v1/tasks/{id}` | Read status, progress, result and error | `tasks:read` |
+| `PATCH /v1/tasks/{schedule_id}` | Change a schedule's time | `tasks:trigger` |
+| `POST /v1/tasks/{id}/cancel` | Cancel a task, or delete a schedule | `tasks:cancel` |
+
+```bash
+curl -X POST http://localhost:8000/v1/tasks/summarise_thread \
+  -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
+  -d '{"kwargs": {"thread_id": "t-123"}}'
+```
+
+Callers set only the task's plain arguments. `config`, `user`, injected parameters and unknown names are refused with 422, because the server fills the run config from the caller.
+
+Schedules come in two forms. A fixed schedule goes on the task, for example `@broker.task(schedule=[{"cron": "0 2 * * *"}])`, and `10xgraph scheduler` sends it. Dynamic schedules use the same `POST` with a `schedule` body that has exactly one of `cron`, `at` (an ISO time, once) or `every` (seconds). Scheduling needs the Redis result backend, and answers 501 with the memory broker or result backend.
+
+## Jobs run as the caller
+
+A queue is a classic place for access control to leak. The request that queued the job was authenticated, but by the time a worker picks it up, the token may be long gone and the role table may have changed.
+
+With auth on, the worker checks every run again before it executes. It rebuilds the stored identity from its claims, using the current `auth.roles` the worker booted with. Then it calls `authorize(identity, "tasks:trigger", task_name)` on your `BaseAuth` class. If that refuses, the stored identity is invalid, or the check raises, the run does not execute and its status is `failure`. The check fails closed. A user whose role loses `tasks:trigger` stops running at the next run.
+
+The docs are explicit about one gap: token expiry and revocation are not checked, because a queued run has no live token. A revoked user's already queued tasks still run until their role changes, and you restart workers after you change `auth.roles`.
+
+Ownership follows the same rules as the rest of the API. Tasks and schedules belong to the user who started them. A caller's reach (`own`, `tenant` or `all`) widens `GET` and cancel only. Starting a task and `PATCH` stay on the caller's own, and anything outside the reach answers 404, the same as an unknown id.
+
+Scheduled jobs have no caller, so you name an identity for them in `auth.system_identities` and point the task at it:
+
+```json
+"system_identities": {"nightly": {"roles": ["member"], "tenant": {"org_id": "acme"}}}
+```
+
+```python
+@broker.task(schedule=[{"cron": "0 2 * * *"}], identity="nightly")
+async def nightly_cleanup(config: dict) -> None: ...
+```
+
+The run executes as a system identity with the roles and tenant of that entry. It still needs `tasks:trigger` through those roles, and a task started by a user always runs as that user. See [API authentication](/docs/server/auth) for the role setup.
+
+## At least once, so write tasks to rerun safely
+
+What happens when a worker dies in the middle of a task depends on the broker.
+
+| Broker | If a worker dies |
+| --- | --- |
+| Redis Streams | At least once. The worker acknowledges after the task ends, and another worker takes the message after `idle_timeout`. |
+| RabbitMQ | At least once. RabbitMQ requeues the message when the dead worker's connection drops. |
+| Kafka | At most once in practice. If the worker dies after its offset commit, the task is lost and its status stays `running` until `result_ttl`. |
+
+There is no exactly-once mode. Design the task so that running it twice is harmless:
+
+- Derive an idempotency key from stable inputs, such as the customer id and a document version, not from the time or a random value. Check it before doing the expensive part.
+- Prefer upserts to inserts. Re-embedding a customer's documents by writing each chunk under a key built from the document id and chunk index gives the same result on the second run.
+- Retries after an error are opt-in per task with `@broker.task(retry_on_error=True)`, up to `retries`.
+
+Cancel is also cooperative. `POST /v1/tasks/{id}/cancel` sets a flag. A queued task is then not run, but a running task is not killed: it stops when it checks `await ctx.cancelled()` and returns. Check it between steps of long work.
+
+## Scale and observe
+
+Job workers are stateless like the API workers: they load the same graph, checkpointer, store and cache store. Run `10xgraph worker` as its own deployment, and scale it on queue depth and task duration rather than request rate. Size the job tier and the API tier separately. The [scaling page](/docs/production/scaling) has the full picture.
+
+For observability, the worker logs every task and each task becomes a span. Two metrics are exported: `tenxgraph.task.runs`, a counter by task and status, and `tenxgraph.task.duration`, a histogram by task. With the `metrics` block in `10xgraph.json` enabled, the worker exports them itself, either by OTLP push or on a Prometheus scrape port (`metrics.prometheus.worker_port`). The setup is in [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana). A failed task sends no event to publishers, so alert on the `failure` status in the counter.
+
+## Limits
+
+These come straight from the docs page, and they are worth reading before you pick a broker:
+
+- Brokers are Redis Streams, RabbitMQ and Kafka. Results, progress and dynamic schedules always live in Redis. Nothing else is supported yet.
+- Delivery is not exactly once, and Kafka can lose a task if its worker dies after the offset commit.
+- There is one scheduler, and no list route: keep the ids you get back.
+- A running task cannot be killed, only asked to stop.
+- Scheduling needs the Redis result backend.
+
+## Where to go next
+
+[Background jobs](/docs/jobs) is the entry point and links the concept page. [Worker and scheduler](/docs/server/background-tasks) has every config key, the event hooks, and the Kafka details.

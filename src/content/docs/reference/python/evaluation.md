@@ -481,6 +481,7 @@ A scenario describes who the simulated user is and what they want.
 | `goals` | `list[str]` | `[]` | Goals the user wants to achieve. |
 | `max_turns` | `int` | `10` | Maximum conversation turns. |
 | `metadata` | `dict[str, Any]` | `{}` | Free-form data. |
+| `config` | `dict[str, Any]` | `{}` | Run config for this conversation, merged into the simulator's run config. An explicit `config=` passed to `UserSimulator.run` wins. Example: `{"user": {"user_id": "u1"}}`. |
 
 ### `SimulationResult`
 

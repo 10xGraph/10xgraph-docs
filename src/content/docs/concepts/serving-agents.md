@@ -3,7 +3,7 @@ title: Serving Agents
 seoTitle: "Serving agents with 10xgraph.json"
 description: How 10xgraph.json wires a compiled graph to the API server, plus authentication, authorization, and publisher setup for production.
 section: Concepts
-group: "Serving"
+group: "Platform"
 order: 160
 updated: "2026-10-27"
 ---
@@ -90,6 +90,8 @@ Import paths are **dotted module paths** (`module:attribute`), resolved with `im
 | `thread_name_generator` | name \| module:path | `random` (default), `first_message`, `none`, or your `ThreadNameGenerator` class or instance. |
 | `cache_store` | object | The cache store (`type`, `url`, `path`) plus `rate_limit` and `token_revocation` (see below). |
 
+Reference: [BaseStore](/docs/reference/python/memory-stores) · Source: [base_store.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/store/base_store.py)
+
 **Starting the server:**
 
 ```bash
@@ -117,6 +119,8 @@ When configured, rate limiting runs first as middleware. Each protected route th
 ## Authentication
 
 Authentication is pluggable via `BaseAuth`. The framework ships with JWT auth; you can subclass `BaseAuth` to add any other backend.
+
+Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
 
 **Built-in: JWT**
 
@@ -190,11 +194,13 @@ class TenantAuth(BaseAuth):
         return await super().authorize(identity, permission, resource)
 ```
 
-Role tables go in the `auth` object (`roles`, `roles_claim`, `tenant_claims`). With `"auth": "jwt"` alone, every caller gets the default permission set and reach `own`: a user reads, runs, stops and fixes only their own threads, and another user's thread answers 404. A missing permission answers 403. See [Authentication and authorization](/docs/server/auth) for roles, reach and tenants.
+Role tables go in the `auth` object (`roles`, `roles_claim`, `tenant_claims`). With `"auth": "jwt"` alone, every caller gets the default permission set and reach `own`: a user reads, runs, stops and fixes only their own threads, and another user's thread answers 404. See [Tenancy and access](/docs/concepts/tenancy-and-access) for how reach and tenant columns fit together. A missing permission answers 403. See [Authentication and authorization](/docs/server/auth) for roles, reach and tenants.
 
 ## Rate limiting
 
 Rate limiting keeps its counters in the API's cache store, the same store that holds the run locks and caps. There is no separate rate-limit backend. The `rate_limit` object sits inside `cache_store`. Set `"type": "redis"` to share the counters between workers (Redis from `cache_store.url` or `REDIS_URL`), or `"type": "custom"` with a `path` to supply your own `BaseCacheStore`.
+
+Reference: [BaseCacheStore](/docs/reference/api-cli/cache-store) · Source: [base.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/cache_store/base.py)
 
 ```json
 {
@@ -382,7 +388,7 @@ ORIGINS=https://example.com,https://app.example.com
 OTEL_ENABLED=true
 OTEL_SERVICE_NAME=my-agent
 OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4317
-OTEL_LEVEL=standard    # spans | standard | full
+OTEL_LEVEL=full        # spans | standard | full (default full: sends message content and graph state)
 ```
 
 No code changes needed. The API server automatically:

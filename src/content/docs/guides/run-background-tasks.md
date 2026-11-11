@@ -1,9 +1,9 @@
 ---
 title: Run work in the background
 description: Launch fire-and-forget async tasks from a node without blocking the response using BackgroundTaskManager.
-section: "Build agents"
-group: "Multi-agent and control flow"
-order: 300
+section: "Background jobs"
+order: 30
+label: "In-process tasks"
 updated: "2026-10-27"
 faq:
   - q: When should I use background tasks instead of just returning from my node?

@@ -4,7 +4,7 @@ seoTitle: Test AI agents without an LLM using pytest
 description: Unit test a 10xGraph Python AI agent offline with TestAgent, QuickTest, MockToolRegistry, MockMCPClient and override_node, with no API keys or network calls.
 section: Examples
 group: "Multimodal and quality"
-order: 34
+order: 320
 label: Testing agents
 updated: "2026-10-28"
 faq:
@@ -15,7 +15,7 @@ faq:
   - q: "Why does pytest warn about TestAgent being collected?"
     a: "Pytest collects classes named Test*. Import it under another name, for example 'from tenxgraph.qa.testing import TestAgent as CannedAgent', as these files do."
   - q: "Does MockMCPClient work end to end inside ToolNode?"
-    a: "ToolNode accepts it, but ToolNode drives a real fastmcp client (async context manager, ping and tool objects). MockMCPClient only provides list_tools and call_tool, so use it to test the code around your MCP client rather than ToolNode's MCP execution."
+    a: "ToolNode accepts it, but ToolNode drives a real fastmcp client (async context manager and tool objects). MockMCPClient only provides list_tools and call_tool, so use it to test the code around your MCP client rather than ToolNode's MCP execution."
 ---
 
 Agent tests that call a real model are slow, cost money and give different answers each run. 10xGraph ships test doubles in `tenxgraph.qa.testing` so you can run the real graph (routing, state, tool nodes) while the model is scripted. This example needs no API key and no network.
@@ -492,7 +492,7 @@ async def test_call_assertions(mcp: MockMCPClient):
 
 def test_tool_node_accepts_the_mock(mcp: MockMCPClient):
     # ToolNode takes the mock wherever it takes an MCP client (needs the `mcp` extra).
-    # Note: ToolNode talks to a real fastmcp client (async context manager, ping(),
+    # Note: ToolNode talks to a real fastmcp client (async context manager,
     # tool objects with .name). MockMCPClient only mirrors list_tools/call_tool, so
     # use it to test your own code around the client, not ToolNode's MCP execution.
     node = ToolNode([], client=mcp)

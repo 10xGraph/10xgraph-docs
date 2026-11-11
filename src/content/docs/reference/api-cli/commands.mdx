@@ -4,10 +4,10 @@ seoTitle: "10xGraph CLI command reference"
 description: "Every 10xGraph CLI command with its purpose, usage line, options and defaults: init, dev, build, eval, test, skills, audit, config, demo and version."
 section: Reference
 order: 410
-updated: "2026-10-27"
+updated: "2026-11-10"
 faq:
   - q: What happened to the api and play commands?
-    a: Both were removed in 10xgraph-api 0.9.0. Use dev, which starts the Uvicorn development server and opens the hosted playground by default; add --no-open to serve only. dev is not meant for production, so use build and Gunicorn there.
+    a: Both were removed before 1.0. Use dev, which starts the Uvicorn development server and opens the hosted playground by default; add --no-open to serve only. dev is not meant for production, so use build and Gunicorn there.
 group: "CLI and configuration"
 ---
 
@@ -15,7 +15,7 @@ The `10xgraph` command ships with the `10xgraph-api` package. It has ten subcomm
 
 <Callout type="note" title="Coming from agentflow">
 
-The `agentflow` command still works as a deprecated alias of `10xgraph` and prints a notice when it runs. It is removed in 2.0, so switch scripts and CI to `10xgraph`. The package was `10xscale-agentflow-cli` before 0.7.0.
+The `agentflow` command still works as a deprecated alias of `10xgraph` and prints a notice when it runs. It is removed in 2.0, so switch scripts and CI to `10xgraph`. The package was `10xscale-agentflow-cli` before the rename to 10xGraph.
 
 </Callout>
 
@@ -108,7 +108,7 @@ Start the local development server (Uvicorn) and open the hosted playground when
 
 With `MODE=production` set, `dev` prints a warning if you also use `--reload`, or bind to a host other than loopback (`127.0.0.1`, `localhost`, `::1`): the dev server has no TLS and is not meant for a real deployment.
 
-`dev` is the only server command. `10xgraph api` and `10xgraph play` were removed in `10xgraph-api` 0.9.0. For production, run Gunicorn in the image that `10xgraph build` generates.
+`dev` is the only server command. `10xgraph api` and `10xgraph play` were removed before 1.0. For production, run Gunicorn in the image that `10xgraph build` generates.
 
 ## build
 
@@ -127,9 +127,13 @@ Generate deployment files. See [Deploy with Docker and Kubernetes](/docs/server/
 | `--docker-compose / --no-docker-compose` | off | Also write `docker-compose.yml`, omit `CMD` from the Dockerfile |
 | `--k8s / --no-k8s` | off | Also write `k8s.yaml` |
 | `--service-name` | `10xgraph-api` | Service name in generated files |
+| `--worker / --no-worker` | asked | Include a background worker. Needs a non-`memory` `worker` key in `10xgraph.json` |
+| `--scheduler / --no-scheduler` | off | Include the scheduler. Needs the worker |
 | `--verbose`, `-v` / `--quiet`, `-q` | off | Logging level |
 
 `--docker-compose` and `--k8s` cannot be combined: the compose image has no start command, so the pod would crash-loop. The command refuses and exits with an error. Run `build` once with `--k8s`, or once with `--docker-compose`.
+
+At an interactive terminal, `build` asks where you will deploy, whether to run a worker and the scheduler, and whether to overwrite existing files. See [Questions and background jobs](/docs/server/deploy#questions-and-background-jobs).
 
 ## eval
 
@@ -188,11 +192,11 @@ Install the bundled coding-agent skill, or validate skills.
 | `--validate` | unset | Validate a skill directory or folder of them against the Agent Skills spec. Repeatable |
 | `--verbose`, `-v` / `--quiet`, `-q` | off | Logging level |
 
-Install locations: `.agents/skills/10xgraph` (Codex), `.claude/skills/10xgraph` (Claude), and `.github/skills/10xgraph` plus `.github/instructions/10xgraph.instructions.md` (GitHub).
+Install locations: `.agents/skills/10xgraph` plus a 10xGraph section in `AGENTS.md` (Codex), `.claude/skills/10xgraph` plus a section in `CLAUDE.md` (Claude), and `.github/skills/10xgraph` plus `.github/instructions/10xgraph.instructions.md` (GitHub).
 
 ## audit
 
-Read-only environment check: Python version, installed packages, core evaluation API, `10xgraph.json` validity, a security check and whether the default port is free. The security check reads only the JSON file and reports production-readiness gaps (auth, rate limiting, token revocation) as warnings; they never fail the command. Exits 1 if any check fails, so it works as a CI gate.
+Read-only environment check: Python version, installed packages, core evaluation API, `10xgraph.json` validity, a security check, an audit log check and whether the default port is free. The security check reads only the JSON file and reports production-readiness gaps (auth, rate limiting, token revocation) as warnings; they never fail the command. With `MODE=production`, the audit log check warns when `audit.enabled` is not `true` (see [Audit log](/docs/server/audit-log)). Exits 1 if any check fails, so it works as a CI gate.
 
 ```bash
 10xgraph audit [--config FILE]

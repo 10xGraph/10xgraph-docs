@@ -4,7 +4,7 @@ seoTitle: "Security regression evals for AI agents"
 description: Catch a prompt-injected agent in CI. An eval set that expects zero tool calls, plus a pytest check that no tool outside the allow-list was requested.
 section: Examples
 group: Production
-order: 16
+order: 70
 label: Security regression evals
 updated: "2026-10-27"
 faq:

@@ -2,11 +2,10 @@
 title: Production Deployment Checklist
 seoTitle: "Production hardening checklist for 10xGraph"
 description: "Security, persistence, scaling, and monitoring checklist before shipping your 10xGraph API to production."
-section: "API server"
-group: "Operate"
-order: 170
-label: Production Checklist
-updated: "2026-10-27"
+section: "Platform"
+order: 70
+label: Production checklist
+updated: "2026-11-10"
 faq:
   - question: "What is the minimum checklist for production?"
     answer: "Set MODE=production, use explicit ORIGINS, configure Postgres+Redis for persistence, enable rate limiting, and run at least two API instances."
@@ -30,7 +29,7 @@ With `MODE=production`, the server does these for you. You do not configure them
 - Scopes graph introspection (`GET /v1/graph`, `/v1/graph/tools`, `/v1/graph:StateSchema`) to callers with the `graph:read` permission.
 - Gives every authenticated user reach `own` unless a role says otherwise, so each user reaches only their own threads.
 - Turns debug mode off.
-- Pings every configured backend at boot and refuses to start while one is unreachable (see [Startup check](#startup-check)). Added in 1.0.0rc3.
+- Pings every configured backend at boot and refuses to start while one is unreachable (see [Startup check](#startup-check)).
 - Ships a hardened image when you use `10xgraph build`: non-root user, Gunicorn with `TenxGraphUvicornWorker` and long graceful timeouts, health check on `/ping`. On SIGTERM `/health/ready` answers 503 while open runs finish.
 
 For why these matter, see the [security model](/docs/production/security-model) and [scaling and reliability](/docs/production/scaling).
@@ -188,8 +187,6 @@ A leftover `REDIS_URL` never blocks boot: it only matters to a `cache_store` of 
 
 `STARTUP_CHECKS=false` skips the check. It runs the same probes as `/health/ready`, with a different outcome: at startup an unreachable checkpointer or store stops the server, while at runtime `/health/ready` answers 503 so the load balancer stops sending traffic until the backend returns. See [Ping and health](/docs/reference/rest-api/ping#get-healthready).
 
-Added in 1.0.0rc3.
-
 ### Redis caching
 
 Redis acts as a hot cache in front of Postgres. `PgCheckpointer` requires a Redis connection, but the durable data lives in Postgres. After a Redis connection failure, `PgCheckpointer` skips Redis for a short cool-down (`redis_breaker_cooldown`, 5 seconds by default, `0` disables it) and uses Postgres at once, so a Redis outage does not slow every run step.
@@ -328,7 +325,7 @@ done
 # After threshold, requests should return 429 Too Many Requests
 ```
 
-With `fail_open` set to `false` and the cache store unreachable, the API answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead of 429. See [Rate limiting](/docs/server/rate-limiting). Added in 1.0.0rc3.
+With `fail_open` set to `false` and the cache store unreachable, the API answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead of 429. See [Rate limiting](/docs/server/rate-limiting).
 
 ## 8. Proxy buffering and request handling
 
@@ -394,7 +391,7 @@ See [Backup and restore](/docs/server/backup-and-restore) for table-scoped dumps
 
 ### Logging
 
-Set `LOG_LEVEL=INFO` in production. The server generates a request ID per request and returns it in the `X-Request-ID` response header; log it on the client side to correlate with server logs.
+Set `LOG_LEVEL=INFO` and `LOG_FORMAT=json` in production, turn on the `audit` key (see [Audit log](/docs/server/audit-log)), and ship stdout to retained storage you control; 10xGraph does not keep logs. The [control mapping](/docs/production/control-mapping) shows which audit controls this covers. The server generates a request ID per request and returns it in the `X-Request-ID` response header; log it on the client side to correlate with server logs.
 
 ### Sentry error tracking
 
@@ -421,11 +418,11 @@ OTEL_SERVICE_NAME=10xgraph-api
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
-Set the endpoint. With `MODE=production` and no endpoint, the server does not print spans to the console (they could carry request URLs and, at `OTEL_LEVEL=full`, message content); it exports nothing and logs a warning at startup.
+Set the endpoint. With `MODE=production` and no endpoint, the server does not print spans to the console (they could carry request URLs and, at `OTEL_LEVEL=full`, the default, message content); it exports nothing and logs a warning at startup.
 
 ### Traces and event publishers
 
-Traces at the `full` level and the Redis, RabbitMQ and Kafka publishers carry message and tool content, and spans carry the user id. 10xGraph never forces TLS on these connections; it is your call:
+Traces at the `full` level (the default; use `standard` or `spans` to send less) and the Redis, RabbitMQ and Kafka publishers carry message and tool content, and spans carry the user id. 10xGraph never forces TLS on these connections; it is your call:
 
 - We recommend TLS in production whenever you can (`rediss://`, `amqps://`, Kafka `security_protocol="SSL"` or `"SASL_SSL"`, an `https://` OTLP endpoint), and always on a network you do not control.
 - A broker or collector reachable only inside a network you secure yourself (a private subnet or VPC, or a service mesh that already encrypts traffic) can run without it.
@@ -511,6 +508,8 @@ curl http://127.0.0.1:8000/ping
 - [Checkpointing and threads](/docs/concepts/checkpointing-and-threads)
 - [Set up checkpointing](/docs/guides/set-up-checkpointing)
 - [Observability](/docs/server/observability)
+- [Audit log](/docs/server/audit-log)
+- [Control mapping](/docs/production/control-mapping)
 - [Deploy](/docs/server/deploy)
 - [Production readiness](/docs/production)
 - [Security model](/docs/production/security-model)

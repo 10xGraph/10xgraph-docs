@@ -3,7 +3,7 @@ title: "Hot and cold agent memory: why 10xGraph puts Redis in front of Postgres"
 seoTitle: "Hot and cold agent memory: Redis and Postgres"
 description: How PgCheckpointer splits agent state between a Redis hot cache and versioned Postgres history, keeps them consistent, and behaves when either one fails.
 date: 2026-09-24
-updated: 2026-10-27
+updated: 2026-11-10
 author: Shudipto Trafder
 kind: engineering
 tags: [memory, redis, postgres]
@@ -20,7 +20,7 @@ faq:
     a: Yes. SqliteCheckpointer keeps durable state and its cache in one local SQLite file, and InMemoryCheckpointer keeps everything in process. Both suit development and tests.
 ---
 
-Every agent framework has to decide where conversation state lives between steps. The decision looks like plumbing, but it sets your per-step latency, what a crash loses, how many workers can serve one thread, and what happens on the day Redis restarts.
+10xGraph is open-source, self-hosted infrastructure for AI applications, and the first thing any such backend has to decide is where conversation state lives between steps. The decision looks like plumbing, but it sets your per-step latency, what a crash loses, how many workers can serve one thread, and what happens on the day Redis restarts.
 
 10xGraph's production checkpointer, `PgCheckpointer`, uses two stores with separate jobs. **Redis is the hot layer**: the latest state of each active thread, read first and refreshed on every step, with a TTL. **Postgres is the cold layer**: versioned state snapshots, the full message history, thread metadata and the tool-call ledger. It is the source of truth.
 
@@ -282,18 +282,18 @@ Either guard covers most cases on its own. Together they make sure a stale entry
 With authentication enabled, a thread belongs to a user, and knowing a thread ID must not be enough to read it. `PgCheckpointer` treats `user_id` as an ownership boundary by default (`enforce_user_isolation=True`):
 
 - The cache key includes both IDs, `state_cache:<thread_id>:<user_id>`, so one user's cache lookups can never return another user's entry.
-- Durable reads, writes and deletes are scoped to the owning user. On write, the thread row is locked and its owner checked, and a write to another user's thread raises a `STORAGE_FORBIDDEN_001` error.
+- Durable reads, writes and deletes are scoped to the caller. On write, the thread row is locked and its owner checked; a thread that belongs to another user or tenant raises `ThreadNotFoundError`, so it looks the same as a thread that does not exist.
 
 For single-tenant deployments, or setups with no real user identity, set `enforce_user_isolation=False` and the thread ID alone is the key. Runs without a `user_id` share one `"anonymous"` identity, which matches what the API server uses when auth is off.
 
 ## Since this post
 
-Changes in core after this post was first written:
+Changes in core since this post was first written, all in 1.0:
 
-- **Write-through on `aput_state` (0.10.1).** A state written between runs now refreshes the cache too. Before, `PgCheckpointer` left the old version in Redis, and the next run's first write raised `StaleStateError`. The refresh is version-guarded and best-effort, so a Redis outage still never fails the write.
-- **Message ids are unique per thread.** The Postgres key is `(thread_id, message_id)`, so one user claiming an id cannot make another thread's checkpoint fail. This is in the core changelog under the next release after 0.10.3.
-- **Paging is capped.** `alist_messages` and `alist_threads` lower an explicit `limit` to 1000 and reject negative values. `limit=None` or `0` still returns everything. Same release.
-- **Ledger reads are owner-scoped.** `aget_tool_result` applies the same owner filter as message reads. Same release.
+- **Write-through on `aput_state`.** A state written between runs now refreshes the cache too. Before, `PgCheckpointer` left the old version in Redis, and the next run's first write raised `StaleStateError`. The refresh is version-guarded and best-effort, so a Redis outage still never fails the write.
+- **Message ids are unique per thread.** The Postgres key is `(thread_id, message_id)`, so one user claiming an id cannot make another thread's checkpoint fail.
+- **Paging is capped.** `alist_messages` and `alist_threads` lower an explicit `limit` to 1000 and reject negative values. `limit=None` or `0` still returns everything.
+- **Ledger reads are owner-scoped.** `aget_tool_result` applies the same owner filter as message reads.
 - **Isolation stays on by default.** `enforce_user_isolation` is still `True` unless you pass `False`.
 
 ## Failure matrix
@@ -327,7 +327,9 @@ checkpointer = PgCheckpointer(
 app = graph.compile(checkpointer=checkpointer)
 ```
 
-Point the `checkpointer` key in `10xgraph.json` at this object, for example `"checkpointer": "graph.agent:checkpointer"`, and the API server builds and uses it.
+Pass the checkpointer in code, as above. The API server takes it from the compiled graph that the `agent` key in `10xgraph.json` points to; it does not read a `checkpointer` key from the config file.
+
+For multi-tenant apps, `PgCheckpointer` can also keep your own tenant columns on the thread row and filter every query by them. See [Multi-tenant data](/docs/guides/multi-tenant-data).
 
 **`cache_ttl`** should cover the typical gap between turns in an active conversation. For live chat, an hour or a few hours keeps working sets small. For agents users come back to over days, keep the 24-hour default or raise it. A short TTL never loses data. It only means more reads go to Postgres.
 
@@ -343,13 +345,13 @@ You do not need Redis and Postgres running to build an agent. `SqliteCheckpointe
 
 One difference matters before production: `SqliteCheckpointer` does not implement the tool ledger, so replay safety requires `PgCheckpointer`.
 
-## The same pattern in the API server
+## The same rule in the API server
 
-The API server uses the same idea for a different question: who owns this thread? Every authenticated request on a thread needs that answer, and asking Postgres every time would put a query in front of every call.
+The API server asks storage the same question on every thread request: is this thread within the caller's reach? It does not keep a separate ownership cache. Each thread route makes one scoped read through the checkpointer before it takes the run lock or sends a response header, and a thread outside the caller's reach answers 404 before the graph runs.
 
-The ownership resolver uses two tiers. L1 is a bounded in-process LRU per worker (10,000 entries, 30-second TTL by default). L2 is an optional shared Redis cache (one-hour TTL by default) so workers do not each query the database. Only positive answers are cached. Caching "this thread has no owner yet" would let a later caller be treated as the creator of a thread someone else had just created. Deleting a thread evicts it from the local L1 and from L2, and the short L1 TTL limits how long another worker can serve a stale answer.
+Reach comes from the caller's role: `own` by default, or `tenant` or `all` for roles you configure in the `auth` object. A wider reach applies to reads, lists, deletes and stop. Runs and state or message writes always stay within the caller's own threads, so the scoped read for a run uses reach `own`. See [Tenancy and access](/docs/concepts/tenancy-and-access).
 
-The structure is the same as for state: a fast cache in front, the database as the authority, and TTLs that bound how long a stale answer can live.
+The structure matches the state cache: the database is the authority, and every answer is filtered by the verified identity, never by what the client sends.
 
 ## Current limits
 

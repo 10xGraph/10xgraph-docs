@@ -5,7 +5,7 @@ section: Reference
 group: "REST API"
 order: 300
 label: Conventions and permissions
-updated: "2026-10-27"
+updated: "2026-11-10"
 ---
 
 Every route in the 10xGraph REST API lives under `/v1/` (except `/ping`), returns the same JSON envelope, authenticates with a Bearer token, and is guarded by a resource and action permission pair. This page lists those shared rules, the full permission table, the WebSocket close codes and the HTTP status codes.
@@ -69,12 +69,7 @@ Authorization: Bearer <token>
 new WebSocket("ws://host/v1/graph/ws", ["10xgraph-bearer", token]);
 ```
 
-```text
-# Last-resort fallback (WebSocket only): the token lands in URLs and access logs
-/v1/graph/ws?token=<token>
-```
-
-The server echoes the `10xgraph-bearer` sentinel back on accept, which browsers require to complete the handshake. The older `agentflow-bearer` sentinel is accepted until 2.0. The `?token=` query parameter is read only on WebSocket connections.
+The server echoes the `10xgraph-bearer` sentinel back on accept, which browsers require to complete the handshake. The older `agentflow-bearer` sentinel is accepted until 2.0. A `?token=` query parameter is not accepted: a token in the URL would land in access logs. The subprotocol is read only on WebSocket connections.
 
 If auth is not configured (`"auth": null`), credentials are not required. Missing, invalid or expired credentials return HTTP `401`. A permission failure returns `403`. On WebSocket routes both become close code `1008`. See [authentication](/docs/server/auth) for setup.
 
@@ -160,4 +155,4 @@ These are the status codes the server returns. Routes document their own specifi
 | `429` | Rate limit exceeded. Body has `error.code` `RATE_LIMIT_EXCEEDED`; the `Retry-After` and `X-RateLimit-*` headers say when to retry. The same status is returned when a user has more than `runs.max_concurrent_per_user` runs in flight (default 10); that body has code `HTTPException` and `Retry-After: 5`. The model provider rate limiting the server also returns `429`, with code `PROVIDER_RATE_LIMITED` and a `Retry-After` taken from the provider (5 seconds if it sends none) |
 | `499` | The client closed the request while it waited for a busy thread. The response is never read |
 | `500` | Unexpected server error. Body has code `INTERNAL_SERVER_ERROR`; in production the message is generic |
-| `503` | Checkpointer or storage temporarily unavailable (code `SERVICE_UNAVAILABLE` for a database or cache driver error), with `Retry-After`. Readiness answers 503 while the server is shutting down. A rate limiter whose backend is unreachable with `fail_open: false` also answers 503, with code `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` (added in 1.0.0rc3) |
+| `503` | Checkpointer or storage temporarily unavailable (code `SERVICE_UNAVAILABLE` for a database or cache driver error), with `Retry-After`. Readiness answers 503 while the server is shutting down. A rate limiter whose backend is unreachable with `fail_open: false` also answers 503, with code `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` |
