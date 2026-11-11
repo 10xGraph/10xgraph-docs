@@ -69,6 +69,17 @@ checkpointer.put_state(config, state)
 checkpointer.get_state(config)
 ```
 
+### Tool results
+
+Each checkpointer keeps a tool execution ledger: the result of every finished tool call, so a replayed or resumed node does not run finished tools again (Postgres `tool_executions`, SQLite `af_tool_executions`, process memory for `InMemoryCheckpointer`). See [Replay-safe tools](/docs/concepts/replay-safe-tools).
+
+| Method | Signature | Description |
+|---|---|---|
+| `aclear_tool_results` | `async (config) -> None` | Clear one thread's ledger. Scoped to the thread's owner and tenant. The graph calls it in the background after a run completes. |
+| `aprune_tool_results` | `async (older_than: timedelta) -> int` | Delete ledger rows older than `older_than` across all threads and return the count. 10xGraph never calls it; schedule it yourself. With `row_level_security=True` on `PgCheckpointer`, run it with a role that bypasses RLS. |
+
+`PgCheckpointer` schema version 7 adds an index on `tool_executions(created_at)`. `asetup()` applies it.
+
 ### Update message metadata
 
 `aupdate_message_metadata` is not abstract. A backend overrides it to support feedback and other metadata updates.
@@ -134,6 +145,12 @@ app = graph.compile(checkpointer=checkpointer)
 - Any multi-process or multi-worker deployment.
 - Production applications where conversation history must survive crashes.
 
+### Constructor parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `record_tool_result` | `bool` | `True` | Record finished tool calls in the in-process tool execution ledger. `False` records nothing for the graph and wins over `@tool(record_tool_result=False)`. `compile()` logs one INFO line when it is off. |
+
 ### Storage behaviour
 
 | Storage | Key | Data |
@@ -142,6 +159,7 @@ app = graph.compile(checkpointer=checkpointer)
 | `_state_cache` | `thread_id` | Hot cache for the running execution. |
 | `_messages` | `thread_id` | Ordered message list. |
 | `_threads` | `thread_id` | Thread metadata (`name`, `created_at`, etc.). |
+| tool results | `thread_id` | The tool execution ledger. Lost on restart. |
 
 All access is guarded by per-bucket `asyncio.Lock` instances for safe concurrent use within a single process. The checkpointer stores and returns copies of the state, so changing a loaded state does not change the store until you save it. This costs one extra copy per state read and write.
 
@@ -195,6 +213,7 @@ The constructor takes the connection arguments below as named parameters; the re
 | `tenant_columns` (kwarg) | `list \| dict \| None` | `None` | Columns on `threads` that isolate data, such as `{"org_id": "uuid"}`. Types: `text`, `bigint`, `integer`, `uuid`. Required on thread creation by default. Values come only from `config["user"]`. Schema version 6 adds them. |
 | `extra_columns` (kwarg) | `list \| dict \| None` | `None` | Your own data columns on `threads`, any Postgres type, optional by default and filterable in `alist_threads`. |
 | `row_level_security` (kwarg) | `bool` | `False` | Also enforce tenant columns with native row-level security. Needs `tenant_columns`. |
+| `record_tool_result` (kwarg) | `bool` | `True` | Record finished tool calls in the `tool_executions` table. `False` records nothing for the graph and wins over `@tool(record_tool_result=False)`. `compile()` logs one INFO line when it is off. |
 | `ddl_lock_timeout` (kwarg) | `float \| None` | `10.0` | Seconds a setup DDL statement waits for a table lock; on timeout setup raises `tenxgraph.storage.columns.SetupLockTimeoutError`. `None` waits forever. Indexes on existing tables are built `CONCURRENTLY`. |
 
 See [Multi-tenant data](/docs/guides/multi-tenant-data) for how the columns, isolation scopes and filters work. `InMemoryCheckpointer` and `SqliteCheckpointer` raise `ValueError` if you pass these three options.
@@ -252,6 +271,7 @@ app = graph.compile(checkpointer=checkpointer)
 | Parameter | Type | Description |
 |---|---|---|
 | `db_path` | `str \| Path \| None` | Path to the SQLite database file. Defaults to `~/.10xgraph/checkpointer.db`. Parent directories are created on setup. Pass `":memory:"` for an ephemeral in-process database (useful for tests). |
+| `record_tool_result` | `bool` | Default `True`. Record finished tool calls in the `af_tool_executions` table. `False` records nothing for the graph and wins over `@tool(record_tool_result=False)`. `compile()` logs one INFO line when it is off. |
 
 **When to use:**
 - **Client-side / embedded agents.** A desktop app that ships a Python sidecar (Tauri, Electron, PyInstaller) or a local CLI agent. The checkpointer runs entirely on the user's machine, right next to the app.

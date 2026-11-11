@@ -163,6 +163,10 @@ pip install "10xgraph[pg_checkpoint]"
 
 `await checkpointer.asetup()` creates the schema and is safe to repeat. The API server calls it at boot (on failure it logs and retries on first use), so a fresh Postgres needs no manual step there. See [guides/set-up-checkpointing](/docs/guides/set-up-checkpointing) for full configuration.
 
+## Tool results
+
+Every checkpointer also keeps a tool execution ledger: the result of each finished tool call. A node replayed after a crash, or resumed after a pause inside a tool node, reads the ledger and does not run those tools again. The graph clears a thread's ledger in the background once a run completes; `aclear_tool_results(config)` clears one thread yourself and `aprune_tool_results(older_than=...)` deletes old rows across threads. Recording can be turned off with `record_tool_result=False` on the checkpointer or on a `@tool`. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
+
 ## Trade-offs and decision guide
 
 Choosing the right checkpointer is a scaling decision:

@@ -111,6 +111,8 @@ Use `SqliteCheckpointer` when:
 - Each user has a **dedicated process** with their own database file.
 - You do not need to scale horizontally or share state across processes.
 
+`SqliteCheckpointer` also keeps the tool execution ledger, in the `af_tool_executions` table, and takes `record_tool_result=False` to turn it off. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
+
 Do not use it when multiple processes or users share one backend. SQLite serializes writes and is not designed for concurrent writers; use `PgCheckpointer` instead.
 
 ## PgCheckpointer: production
@@ -165,6 +167,7 @@ PgCheckpointer(
     extra_columns: Any = None,              # Your own data columns on threads, e.g. {"plan": "text"}
     row_level_security: bool = False,       # Also enforce tenant columns with Postgres RLS
     ddl_lock_timeout: float | None = 10.0,  # Seconds setup DDL waits for a table lock (None waits)
+    record_tool_result: bool = True,        # Record finished tool calls; False means a tool can run twice after a crash
 )
 ```
 
@@ -276,6 +279,17 @@ checkpointer = PgCheckpointer(
 ```
 
 Higher values retain more audit trail but use more storage; `1` keeps only the current state; `0` or `None` disables pruning entirely (not recommended for long-running systems).
+
+### Tool results
+
+The checkpointer records every finished tool call in a ledger (the `tool_executions` table), so a run replayed after a crash, or resumed after a pause inside a tool node, does not run finished tools again. When a run finishes with status completed, the graph clears that thread's ledger in the background. Interrupts, stops, client-tool pauses, errors and cancels keep it, so a resume stays safe.
+
+```python
+await checkpointer.aclear_tool_results(config)                         # one thread
+await checkpointer.aprune_tool_results(older_than=timedelta(days=7))   # all threads, returns the count
+```
+
+10xGraph never calls `aprune_tool_results`. Schedule it for runs that stopped and were never resumed. With `row_level_security=True`, use a database role that bypasses RLS. To turn recording off, set `record_tool_result=False` here or on a single `@tool`; a tool can then run twice after a crash or on resume. The full example, the worker job and the rules are in [Replay-safe tools](/docs/concepts/replay-safe-tools#prune-old-ledger-rows).
 
 ### Complete production example
 

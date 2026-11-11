@@ -137,6 +137,8 @@ A fixed schedule goes on the task and is sent by `10xgraph scheduler`:
 async def nightly_cleanup() -> None: ...
 ```
 
+A common use is maintenance work, such as pruning old tool execution ledger rows. See the [prune job example](/docs/concepts/replay-safe-tools#prune-old-ledger-rows).
+
 For dynamic schedules use TaskIQ's `schedule_by_cron`, `schedule_by_time` or `schedule_by_interval` with the source from `tenxgraph_api.jobs.scheduler`:
 
 ```python

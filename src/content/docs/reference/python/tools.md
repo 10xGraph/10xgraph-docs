@@ -176,6 +176,7 @@ Mark a function as a tool with metadata for schema generation and filtering.
     capabilities: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
     parameters: dict[str, Any] | None = None,
+    record_tool_result: bool = True,
 )
 ```
 
@@ -188,6 +189,7 @@ Mark a function as a tool with metadata for schema generation and filtering.
 | `capabilities` | `list[str] \| None` | `None` | Capabilities or permissions required by the tool. Examples: `["read_files", "network_access"]`. |
 | `metadata` | `dict[str, Any] \| None` | `None` | Additional arbitrary metadata for the tool. |
 | `parameters` | `dict[str, Any] \| None` | `None` | Explicit JSON Schema dict for parameters. Bypasses automatic schema generation. |
+| `record_tool_result` | `bool` | `True` | Record this tool's results in the checkpointer's tool execution ledger so a replay or resume does not run it again. Set `False` for read-only tools (search, weather, lookups); they may then run twice after a crash or on resume. `record_tool_result=False` on the checkpointer turns recording off for every tool and wins over this flag. See [Replay-safe tools](/docs/concepts/replay-safe-tools). |
 
 **Returns:** The decorated function with metadata attached as private attributes (`_py_tool_*`). The function behaves identically to the original.
 

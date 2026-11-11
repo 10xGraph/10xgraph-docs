@@ -318,6 +318,15 @@ async def process_payment(amount: float, currency: str) -> dict:
     return {"status": "ok", "transaction_id": "txn_123"}
 ```
 
+Set `record_tool_result=False` on a read-only tool (search, weather, lookups) to keep it out of the checkpointer's tool execution ledger. The default is `True`, which stops a finished call from running again after a crash or a resume. With `False`, the tool can run twice in those cases. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
+
+```python
+@tool(record_tool_result=False)
+def get_weather(city: str) -> str:
+    """Look up the weather."""
+    return "sunny"
+```
+
 Retrieve metadata programmatically:
 
 ```python
