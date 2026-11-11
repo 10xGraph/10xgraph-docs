@@ -108,6 +108,8 @@ Both read `10xgraph.json` from the current folder (`--config` to change it), ref
 
 Run exactly one scheduler. Two would send every scheduled task twice. Run as many workers as you need.
 
+`10xgraph build` generates both processes for you. With `--docker-compose` it adds a `worker` service and, if you ask for it, a `scheduler` service built from the same image as the API. With `--k8s` it adds a `<service>-worker` and a `<service>-scheduler` Deployment (the scheduler has one replica and `strategy: Recreate`, so a rollout never runs two). Use `--worker` and `--scheduler` to choose, or answer the questions when `build` asks. With the `memory` broker no worker is generated, because tasks run inside the API. See [Deploy with Docker and Kubernetes](/docs/server/deploy).
+
 ## Start a task from Python
 
 Use TaskIQ's own call:

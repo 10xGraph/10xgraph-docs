@@ -31,7 +31,7 @@ The CLI requires Python 3.12+. It depends on the core framework (`10xgraph`), wh
 | --- | --- |
 | [`10xgraph init`](/docs/server/project-setup) | Scaffold a new agent project interactively |
 | [`10xgraph dev`](/docs/server/run-the-server) | Start the development server with reload and open the [playground](/docs/server/playground) (`--no-open` to skip) |
-| [`10xgraph build`](/docs/server/deploy) | Generate Docker files for containerization |
+| [`10xgraph build`](/docs/server/deploy) | Generate Docker files, with worker and scheduler services for background jobs |
 | [`10xgraph skills`](/docs/integrations/coding-assistants) | Install coding-agent skills (Claude, Codex, GitHub) |
 | [`10xgraph test`](/docs/testing/run-tests) | Run the project test suite (pytest wrapper) |
 | [`10xgraph eval`](/docs/testing/run-evals) | Run agent evaluations and generate reports |
@@ -108,8 +108,18 @@ See [Run tests](/docs/testing/run-tests) and [Run evaluations](/docs/testing/run
 10xgraph build                         # Generate Dockerfile
 10xgraph build --docker-compose        # Also generate docker-compose.yml
 10xgraph build --k8s                   # Also generate k8s.yaml (Deployment + Service)
+10xgraph build --worker --scheduler    # Also run the background worker and scheduler
 10xgraph build --python-version 3.12   # Specify Python version (default: 3.13)
 ```
+
+`10xgraph build` also generates the background-job processes. At an interactive terminal it asks up to four questions, and skips any that a flag answers or that do not apply:
+
+1. **Where will you deploy?** Docker Compose, Kubernetes or Dockerfile only. Skipped with `--docker-compose` or `--k8s`.
+2. **Run a background worker?** Default yes. Asked only when `10xgraph.json` has a `worker` key whose broker is not `memory`, and the target is Compose or Kubernetes.
+3. **Run the scheduler?** Default no. Asked only after a yes to the worker.
+4. **Overwrite existing files?** Asked only when files exist and you did not pass `--force`. No stops without writing.
+
+`--worker/--no-worker` and `--scheduler/--no-scheduler` answer questions 2 and 3. Without a terminal the worker is included when the config has a non-`memory` `worker` key, and the scheduler only with `--scheduler`. `--worker` without a `worker` key or with the `memory` broker is an error, and so is `--scheduler` without a worker.
 
 See [Deployment guide](/docs/server/deploy) for more.
 

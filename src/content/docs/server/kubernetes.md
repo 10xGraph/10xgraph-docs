@@ -42,6 +42,10 @@ This produces three files:
 
 The `--force` flag overwrites existing files. Do not add `--docker-compose` for an image you will run on Kubernetes: with that flag the `Dockerfile` omits its `CMD` and relies on the compose file's `command`. Generate the compose file in a separate run if you need it.
 
+### Worker and scheduler
+
+If your `10xgraph.json` has a `worker` key with a broker other than `memory`, `build --k8s` can also write a `<service>-worker` Deployment and, with `--scheduler`, a `<service>-scheduler` Deployment. They run `10xgraph worker` and `10xgraph scheduler` in the same image, have no Service and no HTTP probes, and use the same security context and Secret as the API. The scheduler has one replica and `strategy: Recreate`, so a rollout never runs two. See [Background tasks](/docs/server/background-tasks).
+
 ### What the generated manifest includes
 
 The manifest is a working skeleton. It sets these values, which are easy to get wrong:

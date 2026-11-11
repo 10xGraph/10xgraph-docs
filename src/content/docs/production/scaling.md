@@ -41,7 +41,7 @@ Each in-flight run holds a connection open and waits on model calls, so size and
 
 ## Job workers
 
-If you use [background jobs](/docs/server/background-tasks), run `10xgraph worker` as its own deployment next to the API workers, and one `10xgraph scheduler` process if you use schedules. Job workers are stateless like the API workers: they load the same graph, checkpointer, store and cache store, and take tasks from the TaskIQ broker (Redis Streams, RabbitMQ or Kafka). Scale them on queue depth and task duration, not on request rate, and size their count and the API's count separately. Delivery is at least once, so a task whose worker dies can run again on another worker; write tasks so a rerun is safe. The `worker` key in `10xgraph.json` sets the broker and options.
+If you use [background jobs](/docs/server/background-tasks), run `10xgraph worker` as its own deployment next to the API workers, and one `10xgraph scheduler` process if you use schedules. Job workers are stateless like the API workers: they load the same graph, checkpointer, store and cache store, and take tasks from the TaskIQ broker (Redis Streams, RabbitMQ or Kafka). Scale them on queue depth and task duration, not on request rate, and size their count and the API's count separately. Delivery is at least once, so a task whose worker dies can run again on another worker; write tasks so a rerun is safe. The `worker` key in `10xgraph.json` sets the broker and options. `10xgraph build` can generate the worker and scheduler as their own Compose services or Kubernetes Deployments (`--worker`, `--scheduler`).
 
 ## Snowflake IDs
 

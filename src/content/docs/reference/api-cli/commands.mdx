@@ -127,9 +127,13 @@ Generate deployment files. See [Deploy with Docker and Kubernetes](/docs/server/
 | `--docker-compose / --no-docker-compose` | off | Also write `docker-compose.yml`, omit `CMD` from the Dockerfile |
 | `--k8s / --no-k8s` | off | Also write `k8s.yaml` |
 | `--service-name` | `10xgraph-api` | Service name in generated files |
+| `--worker / --no-worker` | asked | Include a background worker. Needs a non-`memory` `worker` key in `10xgraph.json` |
+| `--scheduler / --no-scheduler` | off | Include the scheduler. Needs the worker |
 | `--verbose`, `-v` / `--quiet`, `-q` | off | Logging level |
 
 `--docker-compose` and `--k8s` cannot be combined: the compose image has no start command, so the pod would crash-loop. The command refuses and exits with an error. Run `build` once with `--k8s`, or once with `--docker-compose`.
+
+At an interactive terminal, `build` asks where you will deploy, whether to run a worker and the scheduler, and whether to overwrite existing files. See [Questions and background jobs](/docs/server/deploy#questions-and-background-jobs).
 
 ## eval
 
