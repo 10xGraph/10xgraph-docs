@@ -48,6 +48,8 @@ Each command accepts `--help` to show its full options. Detailed flags and param
 
 Start with `10xgraph init` to scaffold your agent project. The command asks three questions: the agent name, the template (Quick Start or Production) and the AI provider. Production writes the recommended setup without asking: JWT auth with owner-only data, a UUID ID generator, and a Redis cache store (reads `REDIS_URL`) with rate limiting and token revocation. WebSocket and AG-UI stay off.
 
+If any file init would write already exists, it asks before overwriting (default No) and writes nothing on No. Without a terminal (`--yes`, `--non-interactive`, CI) it stops before writing and lists the files; pass `--force` to overwrite them. `--dry-run` marks the files that already exist.
+
 ```bash
 10xgraph init
 ```
