@@ -47,7 +47,8 @@ export async function getReleases(): Promise<Release[]> {
   const order = { core: 0, api: 1, client: 2 } as const;
   const all = await getCollection('releases');
   return all.sort(
-    (a: Release, b: Release) => b.data.date.getTime() - a.data.date.getTime() || order[a.data.package] - order[b.data.package],
+    (a: Release, b: Release) => b.data.date.getTime() - a.data.date.getTime() || order[a.data.package] - order[b.data.package] ||
+      b.data.version.localeCompare(a.data.version, undefined, { numeric: true }),
   );
 }
 export const releaseAnchor = (r: Release) => `${r.data.package}-${r.data.version.replace(/\./g, '-')}`;

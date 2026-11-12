@@ -12,13 +12,13 @@ The fourth 1.0 release candidate. It is the `1.0.0rc3` code plus the changes bel
 pip install -U --pre "10xgraph-api==1.0.0rc4"
 ```
 
-It requires `10xgraph` 1.0.0rc4 (checkpointers have `aping()`). `10xgraph-client` stays at 1.0.0-rc.2. Read **Breaking** and the [upgrade guide](/docs/project/upgrade-to-1.0#from-100rc3-to-100rc4) before upgrading.
+It requires `10xgraph` 1.0.0rc4 (checkpointers have `aping()`). `10xgraph-client` stays at 1.0.0-rc.2. Read **Breaking** and the [upgrade guide](/docs/project/upgrade-to-1.0) before upgrading.
 
 ### Breaking
 
 - **`BaseCacheStore` replaces three extension points.** Removed with no aliases: `ConcurrencyLimiter`; `TokenRevocationBackend` (and its in-memory and Redis variants, and `build_token_revocation`); `BaseRateLimitBackend`, `MemoryRateLimitBackend` and `RedisRateLimitBackend`. **Migration:** implement `BaseCacheStore` if you wrote your own, and select it with `"cache_store": {"type": "custom", "path": "module:attr"}`.
 - **`cache_store` is one object.** It holds the store and what it backs: `{"type": "memory" | "redis" | "custom", "url": "${REDIS_URL}", "path": "module:attr", "rate_limit": {...}, "token_revocation": true}`. `url` goes with type `redis` (optional: empty reads the `REDIS_URL` environment variable; `$VAR` and `${VAR}` are expanded) and `path` with type `custom`. No `cache_store`, or no `type`, is the in-memory store. Unknown keys are config errors that list the valid ones.
-- **Top-level `redis`, `rate_limit` and `token_revocation` keys are config errors.** The error says where each setting goes: inside `cache_store`. `rate_limit` inside `cache_store` has no `backend` or `redis` key, and `token_revocation` is `true`, `false`, `null` or `{"enabled", "token_lifetime", "user_ttl"}`; the strings `"redis"`, `"memory"` and `"module:attr"` are config errors. **Migration:** see the mapping table in the [upgrade guide](/docs/project/upgrade-to-1.0#from-100rc3-to-100rc4).
+- **Top-level `redis`, `rate_limit` and `token_revocation` keys are config errors.** The error says where each setting goes: inside `cache_store`. `rate_limit` inside `cache_store` has no `backend` or `redis` key, and `token_revocation` is `true`, `false`, `null` or `{"enabled", "token_lifetime", "user_ttl"}`; the strings `"redis"`, `"memory"` and `"module:attr"` are config errors. **Migration:** see the mapping table in the [upgrade guide](/docs/project/upgrade-to-1.0).
 - **`REDIS_URL` no longer selects the cache store.** Write `"cache_store": {"type": "redis"}`; with no `url` it reads `REDIS_URL`. Type `redis` without the `redis` package refuses to boot with `pip install "10xgraph-api[redis]"`.
 - **`/health/ready` reports `cache`, not `redis`.** The keys are `checkpointer`, `store` and `cache`. **Migration:** update monitors that read `checks.redis`.
 - **Rate-limit counters reset once.** The Redis keys moved to the `10xgraph:ratelimit2` namespace. Other Redis key layouts are unchanged, so old and new pods share locks during a rolling deploy.
