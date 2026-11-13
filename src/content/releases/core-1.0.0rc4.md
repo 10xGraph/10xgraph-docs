@@ -12,7 +12,7 @@ The fourth 1.0 release candidate. It is the `1.0.0rc3` code plus a required conn
 pip install -U --pre "10xgraph==1.0.0rc4"
 ```
 
-`10xgraph-api` 1.0.0rc4 ships alongside and requires it. `10xgraph-client` stays at 1.0.0-rc.2. Read **Breaking** and the [upgrade guide](/docs/project/upgrade-to-1.0#from-100rc3-to-100rc4) before upgrading.
+`10xgraph-api` 1.0.0rc4 ships alongside and requires it. `10xgraph-client` stays at 1.0.0-rc.2. Read **Breaking** and the [upgrade guide](/docs/project/upgrade-to-1.0) before upgrading.
 
 ### Breaking
 
