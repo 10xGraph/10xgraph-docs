@@ -5,7 +5,7 @@ description: How to report a vulnerability in 10xGraph, what response to expect,
 section: Project
 order: 40
 label: Security
-updated: "2026-10-27"
+updated: "2026-11-16"
 ---
 
 ## Reporting a vulnerability
@@ -36,8 +36,9 @@ Include as much of the following as you can:
 
 ## Supported versions
 
-Security fixes are applied to the latest published release line. Pin a known-good
-version in production and upgrade promptly when a security release is announced.
+Security fixes are released as a patch on the latest 1.x minor release. Release candidates
+and 0.x releases no longer receive fixes. Pin a known-good version in production and upgrade
+promptly when a security release is announced.
 
 ## Scope
 

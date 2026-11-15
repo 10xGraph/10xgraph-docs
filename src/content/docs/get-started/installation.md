@@ -190,10 +190,10 @@ Never commit `.env` or API keys to version control. Use `.gitignore` to exclude 
 If you are building a JavaScript or TypeScript application that calls the 10xGraph API server, install the client SDK:
 
 ```bash
-npm install 10xgraph-client@next
+npm install 10xgraph-client
 ```
 
-The main class is `TenxGraphClient`, and the package requires Node.js 18 or newer. See the [client documentation](/docs/client) for usage.
+The main class is `TenxGraphClient`, and the package requires Node.js 20 or newer. See the [client documentation](/docs/client) for usage.
 
 The client talks to a running 10xGraph API server (`10xgraph dev` locally) over HTTP, and you pass a thread ID to keep conversation history across runs. Use `10xgraph-api` 1.0 with client 1.0: the client authenticates WebSockets with the `10xgraph-bearer` subprotocol, which older servers do not accept. HTTP calls work with either. See the [Quickstart](/docs/get-started/first-agent) for a complete example.
 

@@ -6,10 +6,10 @@ description: Migration guide from 10xgraph 0.10, 10xgraph-api 0.9 and 10xgraph-c
 section: Project
 order: 20
 label: Upgrade to 1.0
-updated: "2026-11-10"
+updated: "2026-11-16"
 ---
 
-1.0 is the release where the public API is stable under a deprecation policy. The core
+1.0 is the release where the public API becomes stable: it does not break before 2.0 (see [Stability](/docs/project/stability)). The core
 (`10xgraph`) and the API server (`10xgraph-api`) contain breaking changes, most of them
 secure-by-default behaviour that now refuses what used to be allowed. The TypeScript client
 (`10xgraph-client`) has one breaking change (Node.js 20 or later) and a few behaviour changes. Work through the sections for the packages you run before
@@ -94,7 +94,7 @@ Read them if you use stores, `PgCheckpointer` or `RAGAgent`. The isolation scope
 - **`PgVectorStore.adrop_legacy_key_index()` and the legacy key index handling** are
   transitional and deprecated. Setup keeps the pre-tenant `<table>_key_uq` index next to the new
   `<table>_kuq_<hash>` index when you add tenant columns, and a keyed write that hits it raises
-  `ValueError`. Both will be removed in the next breaking release (1.5 or 2.0); after that, setup
+  `ValueError`. Both will be removed in 2.0; after that, setup
   replaces the old index directly. Until then, run the rollout in
   [Multi-tenant data](/docs/guides/multi-tenant-data#add-tenant-columns-to-a-pgvectorstore-table-that-has-data).
 - The `agentflow` import alias, `agentflow` CLI command and `AgentFlow*` client aliases are

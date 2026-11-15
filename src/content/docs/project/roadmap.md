@@ -4,7 +4,7 @@ description: What 10xGraph does not do yet, which surfaces are incomplete, and w
 section: Project
 order: 30
 label: Roadmap
-updated: "2026-11-10"
+updated: "2026-11-16"
 ---
 
 This page is the honest inventory: things that are announced, half-built, or
@@ -102,6 +102,7 @@ These are not gaps. They are decisions, and they are unlikely to change.
 
 ## Stability commitments
 
-From 1.0 on, the public API is covered by a deprecation policy: nothing public is
-removed without at least one minor release of warning, and moved modules keep a
-shim.
+From 1.0 on, the public API does not break before 2.0. Anything that has to go is
+deprecated first, keeps working while deprecated, and is removed only in 2.0. Moved
+modules keep working at their old import path. See
+[Stability and deprecation policy](/docs/project/stability).
