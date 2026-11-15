@@ -1,26 +1,28 @@
 ---
 title: Quickstart
-seoTitle: "10xGraph quickstart: agent, API and TS client"
-description: Install 10xGraph, build a support agent in Python, serve it with the API server, then call it with curl and the TypeScript client.
+seoTitle: "10xGraph quickstart: scaffold, serve, secure"
+description: Scaffold a support agent with 10xgraph init, chat with it in the playground, call the API with curl and TypeScript, turn on JWT auth and generate the Docker files.
 section: "Get started"
 order: 40
-updated: "2026-10-27"
+updated: "2026-11-15"
 faq:
   - q: Do I need ReactAgent, or should I write a StateGraph myself?
-    a: Start with ReactAgent. It builds the standard reason-and-act graph for you (one agent node, one tool node, a conditional edge between them) and returns a normal compiled graph. Move to StateGraph when you need custom routing or several agents.
+    a: Start with ReactAgent. The project that 10xgraph init writes uses it. It builds the standard reason-and-act graph for you (one agent node, one tool node, a conditional edge between them) and returns a normal compiled graph. Move to StateGraph when you need custom routing or several agents.
   - q: Can I use OpenAI or Anthropic instead of Google?
-    a: Yes. Change the model string and the provider argument, and install the matching extra. The graph, the tools and the API server stay the same.
+    a: Yes. Pick the provider at the init question (or pass --provider), install the matching extra and put the provider key in .env. Init writes the matching model and provider lines into graph/agent.py. The tools, the graph and the API server stay the same.
+  - q: What does 10xgraph init create in Quick setup?
+    a: Six files. 10xgraph.json tells the server where your graph is, graph/agent.py holds the agent, .env.example lists the provider key to set, requirements.txt lists the packages the Docker image installs, graph/__init__.py makes graph a package, and .gitignore keeps .env out of git.
   - q: Which Node.js version does the TypeScript client need?
-    a: Node.js 18 or newer. Install the client with npm and point TenxGraphClient at the baseUrl of your running 10xgraph dev server.
+    a: Node.js 20 or newer. Install the client with npm and point TenxGraphClient at the baseUrl of your running 10xgraph dev server.
   - q: How do I authenticate the TypeScript client?
-    a: Pass an auth option to the TenxGraphClient constructor, for example bearerAuth("your-token"). The client also exports basicAuth(username, password) and headerAuth(name, value).
+    a: Pass an auth option to the TenxGraphClient constructor, for example bearerAuth(token), and read the token from an environment variable. The client also exports basicAuth(username, password) and headerAuth(name, value).
   - q: Why does the second curl call remember the first one?
     a: Both calls send the same thread_id, and the compiled graph has a checkpointer. The checkpointer stores the conversation per thread, so the next call on that thread continues it.
 ---
 
-To build your first 10xGraph agent, install the packages, define a ReactAgent with two tools, run it from Python, serve it with `10xgraph dev`, and call it with curl and the TypeScript client. This page takes you through all of it with one support agent.
+To build your first 10xGraph agent, scaffold a project with `10xgraph init`, give the agent two tools, and start it with `10xgraph dev`. You chat with it in the playground, call the API with curl, continue a thread, turn on JWT auth and watch a second user get `404` on the first user's thread, call it from TypeScript, and write the Dockerfile.
 
-You need Python 3.12 or newer and an API key for your chosen model provider (Google, OpenAI, or Anthropic).
+You need Python 3.12 or newer and an API key for your chosen model provider (Google, OpenAI, or Anthropic). The TypeScript step also needs Node.js 20 or newer.
 
 ## Install the packages
 
@@ -31,8 +33,7 @@ Choose your model provider and install the matching extra:
 <TabItem label="Google Gemini">
 
 ```bash
-pip install "10xgraph[google-genai]" 10xgraph-api
-export GOOGLE_API_KEY="your-gemini-api-key"
+pip install "10xgraph[google-genai]" "10xgraph-api[jwt]"
 ```
 
 </TabItem>
@@ -40,8 +41,7 @@ export GOOGLE_API_KEY="your-gemini-api-key"
 <TabItem label="OpenAI">
 
 ```bash
-pip install "10xgraph[openai]" 10xgraph-api
-export OPENAI_API_KEY="your-openai-api-key"
+pip install "10xgraph[openai]" "10xgraph-api[jwt]"
 ```
 
 </TabItem>
@@ -49,352 +49,370 @@ export OPENAI_API_KEY="your-openai-api-key"
 <TabItem label="Anthropic">
 
 ```bash
-pip install "10xgraph[anthropic]" 10xgraph-api
-export ANTHROPIC_API_KEY="your-anthropic-api-key"
+pip install "10xgraph[anthropic]" "10xgraph-api[jwt]"
 ```
 
 </TabItem>
 
 </Tabs>
 
-The `10xgraph` package is the framework. The `10xgraph-api` package adds the server and the `10xgraph` CLI. The provider extra (google-genai, openai, or anthropic) lets 10xGraph call your chosen model. For details on API keys and other providers, see [Installation](/docs/get-started/installation).
+The `10xgraph` package is the framework. The `10xgraph-api` package adds the server and the `10xgraph` CLI, and its `jwt` extra installs PyJWT for the auth step below. The provider extra (google-genai, openai, or anthropic) lets 10xGraph call your chosen model. For details on API keys and other providers, see [Installation](/docs/get-started/installation).
 
-## Build and run the agent locally
+## Scaffold with `10xgraph init`
 
-You will create two Python files: one that defines the agent, and one that runs it.
-
-<Steps>
-
-1. **Define tools and create the agent**
-
-   Create a file named `agent.py`. Tools are plain Python functions. Their docstrings and type hints become the schema that the model sees, so write them clearly.
-
-   <Tabs syncKey="provider">
-
-   <TabItem label="Google Gemini">
-
-   ```python title="agent.py"
-   from tenxgraph.prebuilt.agent import ReactAgent
-   from tenxgraph.storage.checkpointer import InMemoryCheckpointer
-
-
-   def lookup_order(order_id: str) -> dict:
-       """Look up an order by id and return its status and total."""
-       return {"order_id": order_id, "status": "delivered", "total": 59.0}
-
-
-   def refund_order(order_id: str, amount: float) -> str:
-       """Refund an order. This moves money, so it must run once per request."""
-       return f"Refunded {amount:.2f} for order {order_id}"
-
-
-   agent = ReactAgent(
-       model="google/gemini-2.5-flash",
-       provider="google",
-       system_prompt=[
-           {
-               "role": "system",
-               "content": "You are a concise support agent for an online shop.",
-           }
-       ],
-       tools=[lookup_order, refund_order],
-   )
-
-   app = agent.compile(checkpointer=InMemoryCheckpointer())
-   ```
-
-   </TabItem>
-
-   <TabItem label="OpenAI">
-
-   ```python title="agent.py"
-   from tenxgraph.prebuilt.agent import ReactAgent
-   from tenxgraph.storage.checkpointer import InMemoryCheckpointer
-
-
-   def lookup_order(order_id: str) -> dict:
-       """Look up an order by id and return its status and total."""
-       return {"order_id": order_id, "status": "delivered", "total": 59.0}
-
-
-   def refund_order(order_id: str, amount: float) -> str:
-       """Refund an order. This moves money, so it must run once per request."""
-       return f"Refunded {amount:.2f} for order {order_id}"
-
-
-   agent = ReactAgent(
-       model="gpt-4o",
-       provider="openai",
-       system_prompt=[
-           {
-               "role": "system",
-               "content": "You are a concise support agent for an online shop.",
-           }
-       ],
-       tools=[lookup_order, refund_order],
-   )
-
-   app = agent.compile(checkpointer=InMemoryCheckpointer())
-   ```
-
-   </TabItem>
-
-   <TabItem label="Anthropic">
-
-   ```python title="agent.py"
-   from tenxgraph.prebuilt.agent import ReactAgent
-   from tenxgraph.storage.checkpointer import InMemoryCheckpointer
-
-
-   def lookup_order(order_id: str) -> dict:
-       """Look up an order by id and return its status and total."""
-       return {"order_id": order_id, "status": "delivered", "total": 59.0}
-
-
-   def refund_order(order_id: str, amount: float) -> str:
-       """Refund an order. This moves money, so it must run once per request."""
-       return f"Refunded {amount:.2f} for order {order_id}"
-
-
-   agent = ReactAgent(
-       model="claude-haiku-4-5",
-       provider="anthropic",
-       system_prompt=[
-           {
-               "role": "system",
-               "content": "You are a concise support agent for an online shop.",
-           }
-       ],
-       tools=[lookup_order, refund_order],
-   )
-
-   app = agent.compile(checkpointer=InMemoryCheckpointer())
-   ```
-
-   </TabItem>
-
-   </Tabs>
-
-   `ReactAgent` builds a standard reason-and-act graph for you: it has an agent node that calls the model, a tool node that runs tools, and conditional routing between them. `compile()` returns a `CompiledGraph`, the object you run and the server loads.
-
-2. **Test the agent locally**
-
-   Create `run.py` next to `agent.py`. It sends two requests on the same thread:
-
-   ```python title="run.py"
-   from tenxgraph.core.state import Message
-
-   from agent import app
-
-   config = {"thread_id": "quickstart-1"}
-
-   # First turn: the agent calls lookup_order
-   result = app.invoke(
-       {"messages": [Message.text_message("Where is order 1042?")]},
-       config=config,
-   )
-   print(result["messages"][-1].text())
-
-   # Second turn on the same thread: the agent calls refund_order
-   result = app.invoke(
-       {"messages": [Message.text_message("Refund order 1042 for 59.00")]},
-       config=config,
-   )
-   print(result["messages"][-1].text())
-   ```
-
-   Run it:
-
-   ```bash
-   python run.py
-   ```
-
-   The exact wording varies by model. The first reply gives the order status and total, and the second confirms the refund. Both turns use thread `quickstart-1`, so the checkpointer keeps the first conversation available to the second.
-
-3. **Create the server config file**
-
-   The API server finds your graph by reading `10xgraph.json`. Create this file in the same directory as `agent.py`:
-
-   ```json title="10xgraph.json"
-   {
-     "agent": "agent:app",
-     "env": ".env",
-     "auth": null
-   }
-   ```
-
-   The `agent` field points to the `app` variable in the `agent` module. The server loads and compiles it once at startup.
-
-4. **Start the API server**
-
-   ```bash
-   10xgraph dev --no-open
-   ```
-
-   Expected output:
-
-   ```text
-   INFO: Uvicorn running on http://127.0.0.1:8000
-   ```
-
-   The server listens on `127.0.0.1:8000` by default. Plain `10xgraph dev` also opens the playground in your browser, so you can chat with the agent, browse its threads and inspect runs without writing any frontend. This step uses `--no-open` to start the server only, and you call it with curl next. Either way, the server reloads when your files change. Use `--host 0.0.0.0` to accept connections from other machines and `--port` to use a different port. The server needs the same provider API key in its environment, so run it from the shell where you exported the key.
-
-5. **Call the agent over HTTP**
-
-   In a second terminal, invoke the agent with curl. Notice the message format: content is a list of typed blocks.
-
-   ```bash
-   curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
-     -H "Content-Type: application/json" \
-     -d '{
-       "messages": [
-         {
-           "role": "user",
-           "content": [{"type": "text", "text": "Where is order 1042?"}]
-         }
-       ]
-     }'
-   ```
-
-   The response is a JSON object with `data` (the result) and `metadata` (request id and timestamp):
-
-   ```json
-   {
-     "data": {
-       "messages": [
-         {"role": "user", "content": [{"type": "text", "text": "Where is order 1042?"}]},
-         {"role": "assistant", "content": [{"type": "text", "text": "Order 1042 is delivered. The total is $59.00."}]}
-       ],
-       "state": null,
-       "context": null,
-       "summary": null,
-       "meta": {"thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f", "is_new_thread": true}
-     },
-     "metadata": {
-       "request_id": "550e8400-e29b-41d4-a716-446655440000",
-       "timestamp": "2026-10-08T12:30:45.123Z",
-       "message": "OK"
-     }
-   }
-   ```
-
-   The assistant message is the last item in `data.messages`.
-
-</Steps>
-
-## Call the agent from TypeScript
-
-The 10xGraph client for TypeScript wraps the HTTP API with types and helper methods. It handles graph execution, thread management, long-term memory, and file uploads. It requires Node.js 18 or newer.
-
-Install the client:
+Create an empty folder and run `10xgraph init` in it. Init writes into the current directory.
 
 ```bash
-npm install 10xgraph-client
+mkdir support-agent && cd support-agent
+10xgraph init
 ```
 
-Create a file named `client.ts`:
-
-```typescript title="client.ts"
-import { TenxGraphClient, Message } from "10xgraph-client";
-
-const client = new TenxGraphClient({
-  baseUrl: "http://127.0.0.1:8000",
-});
-
-async function main() {
-  // Send one user message. With no thread_id, the server starts a new thread.
-  const result = await client.invoke(
-    [Message.text_message("Where is order 1042?")],
-    { recursion_limit: 10 }
-  );
-
-  console.log(result.messages.at(-1)?.text());
-  console.log("Thread:", result.meta.thread_id); // keep it to continue the conversation
-}
-
-main();
-```
-
-Run it with a TypeScript runner such as `tsx`:
+In Quick setup, init asks three questions: "Which setup?" (choose Quick), "What is your agent name?" and "Which AI provider?". To skip the prompts, pass the answers as flags:
 
 ```bash
-npx tsx client.ts
+10xgraph init --mode quick --name support-agent --provider google
 ```
 
-The client wraps the HTTP request, parses the response, and returns a typed object.
+Init writes six files:
 
-### Stream the agent response
+```text
+support-agent/
+├── .env.example
+├── .gitignore
+├── 10xgraph.json
+├── requirements.txt
+└── graph/
+    ├── __init__.py
+    └── agent.py
+```
 
-To see the agent reasoning in real time, use `stream()` instead of `invoke()`. It returns an async iterable of stream events:
+`10xgraph.json` is the server config. Init writes this:
 
-```typescript title="stream.ts"
-import { TenxGraphClient, Message, StreamEventType } from "10xgraph-client";
-
-const client = new TenxGraphClient({ baseUrl: "http://127.0.0.1:8000" });
-
-async function main() {
-  const stream = client.stream(
-    [Message.text_message("Refund order 1042 for 59.00")]
-  );
-
-  // Print each message chunk as it arrives
-  for await (const chunk of stream) {
-    if (chunk.event === StreamEventType.MESSAGE && chunk.message) {
-      process.stdout.write(chunk.message.text());
-    }
+```json title="10xgraph.json"
+{
+  "agent": "graph.agent:app",
+  "env": ".env",
+  "auth": null,
+  "thread_name_generator": null,
+  "ag_ui": {
+    "enabled": false
+  },
+  "websocket": {
+    "enabled": false
   }
 }
-
-main();
 ```
 
-### Authentication
+The `agent` value `graph.agent:app` means the `app` variable in `graph/agent.py`. The server loads and compiles it once at startup. `env` names the file the server reads for environment variables, and `"auth": null` leaves the server open for now. `graph/agent.py` is a working `ReactAgent` with a sample weather tool, compiled with an `InMemoryCheckpointer`. Quick setup is the fastest path to a running agent. Full setup also adds storage, API security, evals and tests (see [Project structure](/docs/get-started/project-structure)).
 
-If your API server has authentication enabled, pass `auth` to the client constructor:
+Init does not read your key. Copy `.env.example` to `.env` and fill in the key for your provider. The file lists one variable: `GOOGLE_API_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
 
-```typescript
-import { TenxGraphClient, bearerAuth } from "10xgraph-client";
-
-const client = new TenxGraphClient({
-  baseUrl: "http://127.0.0.1:8000",
-  auth: bearerAuth("your-api-token"),
-});
+```bash
+cp .env.example .env
 ```
 
-The client also exports `basicAuth(username, password)` and `headerAuth(name, value)` for other auth schemes.
+Set the key before you start the server, because the agent module creates the provider client when it loads. `.gitignore` already excludes `.env` and keeps `.env.example`.
 
-## Understanding the request and response
+## Make it a support agent
 
-When you call `/v1/graph/invoke`, you send a `GraphInputSchema` and get back a `GraphInvokeOutputSchema`.
+Replace the contents of `graph/agent.py` with the two order tools. Tools are plain Python functions. Their docstrings and type hints become the schema that the model sees, so write them clearly.
 
-**Request fields** (POST body):
+```python title="graph/agent.py"
+from dotenv import load_dotenv
+from tenxgraph.prebuilt.agent import ReactAgent
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
 
-| Field | Type | Default | Meaning |
-|---|---|---|---|
-| `messages` | Message[] | `[]` | List of messages. Required unless `resume` is set. |
-| `config` | object | null | Run settings. `thread_id` continues an existing thread. Omit it to start a new one. |
-| `initial_state` | object | null | Initial values for custom state fields. Each key must be listed in `runs.state_keys` in `10xgraph.json`, or the server answers `422`. |
-| `recursion_limit` | number | 25 | Maximum steps the graph can take. Allowed: 1 to 100. |
-| `response_granularity` | string | `low` | Response detail level: `low` (messages only), `partial` (messages, context and summary), or `full` (messages and full state). |
-| `resume` | any | null | Answer for a paused thread. Send it (even as `null`) only to resume an interrupted run. |
+load_dotenv()
 
-**Response fields** (in `data`):
 
-| Field | Type | Meaning |
-|---|---|---|
-| `messages` | Message[] | Final message list after the run. |
-| `state` | object | Full state (only when `response_granularity` is `full`). |
-| `context` | Message[] | Context window (only when `response_granularity` is `partial`). |
-| `summary` | string | Conversation summary (only when `response_granularity` is `partial`). |
-| `meta` | object | Run metadata: `thread_id` (the thread the run used) and `is_new_thread`. |
+def lookup_order(order_id: str) -> dict:
+    """Look up an order by id and return its status and total."""
+    return {"order_id": order_id, "status": "delivered", "total": 59.0}
 
-**Message format**: A message is an object with `role` (user, assistant, or tool) and `content` (a list of typed blocks). A text block is `{"type": "text", "text": "..."}`. Images, audio, and documents use other types (see [Send media](/docs/guides/send-media)).
+
+def refund_order(order_id: str, amount: float) -> str:
+    """Refund an order. This moves money, so it must run once per request."""
+    return f"Refunded {amount:.2f} for order {order_id}"
+
+
+react_agent = ReactAgent(
+    model="gemini-2.5-flash",
+    provider="google",
+    system_prompt=[
+        {
+            "role": "system",
+            "content": "You are a concise support agent for an online shop.",
+        }
+    ],
+    tools=[lookup_order, refund_order],
+)
+
+app = react_agent.compile(checkpointer=InMemoryCheckpointer())
+```
+
+Keep the `model` and `provider` lines that init wrote for your provider. Init writes `model="gpt-4o-mini"` with `provider="openai"`, and `model="claude-sonnet-5-5"` with `provider="anthropic"`.
+
+`ReactAgent` builds a standard reason-and-act graph for you: an agent node that calls the model, a tool node that runs tools, and conditional routing between them. `compile()` returns a `CompiledGraph`, the object the server loads.
+
+## Run it with `10xgraph dev`
+
+```bash
+10xgraph dev
+```
+
+The terminal shows the server address and then opens the playground:
+
+```text
+✓ Ready to serve: 10xGraph runtime configured successfully
+  API  http://127.0.0.1:8000
+  Docs  http://127.0.0.1:8000/docs
+  Reload  enabled
+```
+
+The server listens on `127.0.0.1:8000` and reloads when your files change. Plain `10xgraph dev` also opens the hosted playground in your browser, at a URL like `https://play.10xgraph.com?backendUrl=http%3A%2F%2F127.0.0.1%3A8000`. On the Connect page the backend URL is filled in and the auth mode is **None**, which matches `"auth": null`. Chrome asks once for permission to reach your local server; click Allow. Then open **Chat** and send "Where is order 1042?". The reply streams in and the tool calls appear inline. **Thread Inspector** lists the saved threads and their messages. See [Playground](/docs/server/playground) for every page.
+
+The rest of this page uses curl, so you can start the server without the browser:
+
+```bash
+10xgraph dev --no-open
+```
+
+Use `--host 0.0.0.0` to accept connections from other machines and `--port` to use a different port.
+
+## Call the API
+
+In a second terminal, invoke the agent with curl. A message's `content` is a list of typed blocks, not a string.
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {
+        "role": "user",
+        "content": [{"type": "text", "text": "Where is order 1042?"}]
+      }
+    ]
+  }'
+```
+
+The response holds `data` (the result) and `metadata` (request id and timestamp). `data.messages` lists the user message, the tool call, the tool result and the final reply, in order (fields such as `message_id`, `timestamp` and `usages` are left out here):
+
+```json
+{
+  "data": {
+    "messages": [
+      {"role": "user", "content": [{"type": "text", "text": "Where is order 1042?"}]},
+      {"role": "assistant", "content": [{"type": "tool_call", "id": "call_1", "name": "lookup_order", "args": {"order_id": "1042"}}]},
+      {"role": "tool", "content": [{"type": "tool_result", "call_id": "call_1", "name": "lookup_order", "output": [{"order_id": "1042", "status": "delivered", "total": 59.0}], "is_error": false}]},
+      {"role": "assistant", "content": [{"type": "text", "text": "Order 1042 is delivered. The total is $59.00."}]}
+    ],
+    "state": null,
+    "context": null,
+    "summary": null,
+    "meta": {"is_new_thread": true, "thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f"}
+  },
+  "metadata": {
+    "request_id": "550e8400-e29b-41d4-a716-446655440000",
+    "timestamp": "2026-11-15T12:30:45.123456",
+    "message": "OK"
+  }
+}
+```
+
+The reply is the last item in `data.messages`, and its wording varies by model. To watch the run as it happens, call `/v1/graph/stream`. Use `-N` so curl prints each line as it arrives:
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/v1/graph/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {
+        "role": "user",
+        "content": [{"type": "text", "text": "Where is order 1042?"}]
+      }
+    ]
+  }'
+```
+
+The body is newline-delimited JSON, one chunk per line, not SSE. These are a few of the lines, trimmed to the main fields:
+
+```json
+{"event": "message", "message": {"role": "user", "content": [{"type": "text", "text": "Where is order 1042?"}]}, "thread_id": "7f3c2a10-...", "run_id": "...", "metadata": {"status": "invoking_graph", "is_new_thread": true}}
+{"event": "message", "message": {"role": "assistant", "content": [{"type": "tool_call", "name": "lookup_order", "args": {"order_id": "1042"}}]}, "thread_id": "7f3c2a10-...", "run_id": "..."}
+{"event": "message", "message": {"role": "assistant", "delta": true, "content": [{"type": "text", "text": "Order 1042 is delivered."}]}, "thread_id": "7f3c2a10-...", "run_id": "..."}
+{"event": "updates", "data": {"status": "done"}, "thread_id": "7f3c2a10-...", "run_id": "..."}
+```
+
+Tool activity arrives as ordinary `message` chunks, and a stream that finishes without an error ends with an `updates` chunk whose `data` is `{"status": "done"}`. See [Invoke and stream](/docs/server/invoke-and-stream) for every event type.
+
+## Continue the thread and read it back
+
+Copy `data.meta.thread_id` from the invoke response and send it as `config.thread_id` on the next request. The agent still has the order it looked up, so it can refund it:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {
+        "role": "user",
+        "content": [{"type": "text", "text": "Refund order 1042 for 59.00"}]
+      }
+    ],
+    "config": {"thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f"}
+  }'
+```
+
+The agent calls `refund_order`, and the last message confirms it. List the threads the server has saved, then read one back:
+
+```bash
+curl http://127.0.0.1:8000/v1/threads
+curl http://127.0.0.1:8000/v1/threads/7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f/messages
+```
+
+Each entry in `data.threads` is a thread record:
+
+```json
+{"thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f", "thread_name": null, "user_id": "anonymous", "metadata": null, "updated_at": "2026-11-15T12:31:02.512345", "run_id": null}
+```
+
+`data.messages` on the second call holds the messages from both turns, with `has_more`, `offset` and `limit` beside it. The `user_id` is `anonymous` because the server is open. The next step changes that.
 
 <Callout type="tip" title="Let the server pick the thread id">
 
 Omit `thread_id` from `config` to start a new thread. The server picks the id and returns it in `data.meta.thread_id`, and on every chunk of a stream. Send that id on later requests to continue, resume or stop the conversation. By default the server refuses an id it did not create (`404`), so do not make one up. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 
 </Callout>
+
+## Turn on auth and see isolation
+
+The server so far is open: anyone who can reach it can read any thread. Turn on JWT in `10xgraph.json` by changing one line:
+
+```json title="10xgraph.json"
+"auth": "jwt"
+```
+
+Set a signing secret in the shell that starts the server. `JWT_ALGORITHM` defaults to `HS256`, and for HS algorithms the secret must be at least 32 bytes. Then stop the server with Ctrl+C and start it again:
+
+```bash
+export JWT_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+10xgraph dev --no-open
+```
+
+The server logs `Authentication is DISABLED` while `auth` is `null`, and refuses to load without `JWT_SECRET_KEY` once it is `"jwt"`. Because `InMemoryCheckpointer` lives in the server process, the restart also clears the threads from the earlier steps.
+
+In a second terminal, in the same project folder and with `JWT_SECRET_KEY` exported there too, sign a token for each of two users. In a real system your login service does this.
+
+```python title="make_tokens.py"
+import os
+import time
+
+import jwt  # PyJWT
+
+secret = os.environ["JWT_SECRET_KEY"]
+algorithm = os.environ.get("JWT_ALGORITHM", "HS256")
+
+for user_id in ("alice", "bob"):
+    token = jwt.encode(
+        {"user_id": user_id, "exp": int(time.time()) + 3600},
+        secret,
+        algorithm=algorithm,
+    )
+    print(f"export {user_id.upper()}_TOKEN={token}")
+```
+
+```bash
+eval "$(python make_tokens.py)"
+```
+
+Call the agent without a token, and the server answers `401`:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/v1/threads
+```
+
+Call it as Alice. This returns `200`, and Alice now owns the new thread:
+
+```bash
+THREAD_ID=$(curl -s -X POST http://127.0.0.1:8000/v1/graph/invoke \
+  -H "Authorization: Bearer $ALICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":[{"type":"text","text":"Where is order 1042?"}]}]}' \
+  | python -c "import json,sys; print(json.load(sys.stdin)['data']['meta']['thread_id'])")
+```
+
+Read Alice's thread as Bob, and the server answers `404`, as it does for a thread id that does not exist. Bob's own thread list is empty:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "Authorization: Bearer $BOB_TOKEN" \
+  http://127.0.0.1:8000/v1/threads/$THREAD_ID/messages
+```
+
+The same request with `$ALICE_TOKEN` answers `200` with her messages. See [Security in five minutes](/docs/get-started/security-in-five-minutes) for what this one setting turned on and what it leaves to you.
+
+## Call it from TypeScript
+
+The 10xGraph client for TypeScript wraps the HTTP API with types and helper methods. It requires Node.js 20 or newer. Install it:
+
+```bash
+npm install 10xgraph-client
+```
+
+Create `client.ts`. It reads Alice's token from the environment and prints the reply as it streams in:
+
+```typescript title="client.ts"
+import { TenxGraphClient, Message, StreamEventType, bearerAuth } from "10xgraph-client";
+
+const client = new TenxGraphClient({
+  baseUrl: "http://127.0.0.1:8000",
+  auth: bearerAuth(process.env.ALICE_TOKEN ?? ""),
+});
+
+async function main() {
+  const stream = client.stream([Message.text_message("Where is order 1042?")]);
+
+  for await (const chunk of stream) {
+    if (chunk.event === StreamEventType.MESSAGE && chunk.message?.role === "assistant") {
+      process.stdout.write(chunk.message.text());
+    }
+    if (chunk.event === StreamEventType.ERROR) console.error(chunk.data);
+  }
+  console.log();
+}
+
+main();
+```
+
+Run it in the shell where `ALICE_TOKEN` is exported, with a TypeScript runner such as `tsx`:
+
+```bash
+npx tsx client.ts
+```
+
+Use `client.invoke(messages, options)` to get the whole result at once; `result.meta.thread_id` holds the thread id, and `result.messages.at(-1)?.text()` is the final reply. The client also exports `basicAuth(username, password)` and `headerAuth(name, value)` for other auth schemes. See [Create a client](/docs/client/create-client).
+
+## Write the deploy files
+
+The image installs what `requirements.txt` lists, and init already wrote that file with your provider extra and `10xgraph-api`. It does not include the `jwt` extra, which the server needs once `"auth": "jwt"` is set, so add it. For the Google provider the file then reads:
+
+```text title="requirements.txt"
+10xgraph[google-genai]>=1.0,<2.0
+10xgraph-api[jwt]>=1.0,<2.0
+```
+
+Then generate the files:
+
+```bash
+10xgraph build --yes
+```
+
+It writes a `Dockerfile` and a `.dockerignore`. Add `--docker-compose` or `--k8s` for a `docker-compose.yml` or a `k8s.yaml`. The image runs Gunicorn in `MODE=production`, and `.dockerignore` leaves `.env` out, so pass the provider key and `JWT_SECRET_KEY` as environment variables when you run the container. The command also prints warnings that rate limiting and token revocation are off. See [Deploy with Docker and Kubernetes](/docs/server/deploy) for building, running and the release checklist.
+
+## Understanding the request and response
+
+The fields you can send to `/v1/graph/invoke` and `/v1/graph/stream`, the fields in `data`, and the message format are listed in the [graph endpoints reference](/docs/reference/rest-api/graph). `data.meta` carries `thread_id` and `is_new_thread`.
 
 <Callout type="note" title="InMemoryCheckpointer restarts with the server">
 
@@ -408,29 +426,18 @@ The `refund_order` tool moves money. If a run is interrupted and later resumed, 
 
 </Callout>
 
-Your first agent is running. If 10xGraph saved you time, a [star on GitHub](https://github.com/10xGraph/10xGraph) helps other developers find it.
+Your first agent is running, secured and ready to ship. If 10xGraph saved you time, a [star on GitHub](https://github.com/10xGraph/10xGraph) helps other developers find it.
 
-## Make it production ready
-
-The server you just ran is open: no auth, in-memory state. Close the gap before anyone else can reach it.
+## Next
 
 <CardGrid>
 
-<LinkCard title="Security in five minutes" href="/docs/get-started/security-in-five-minutes" description="Turn on JWT, then watch the server refuse a missing token and a second user reading the first user's thread." eyebrow="Next" />
+<LinkCard title="Security in five minutes" href="/docs/get-started/security-in-five-minutes" description="What the JWT setting turned on, and what it does not do." eyebrow="Next" />
 <LinkCard title="Production readiness" href="/docs/production" description="What you get when you serve with 10xgraph-api, and what is still yours to configure." eyebrow="Production" />
-
-</CardGrid>
-
-## More to read
-
-You now have a working agent, API server, and TypeScript client. Here is what to read next:
-
-<CardGrid>
-
+<LinkCard title="Production checklist" href="/docs/server/production-checklist" description="The settings to confirm before you deploy." eyebrow="Production" />
 <LinkCard title="Understand the mental model" href="/docs/get-started/tutorial/mental-model" description="Messages, state, nodes, edges, graphs, and threads: the core concepts." eyebrow="Tutorial" />
 <LinkCard title="Build a graph by hand" href="/docs/get-started/tutorial/build-a-graph" description="Create nodes and edges yourself to understand how ReactAgent works." eyebrow="Tutorial" />
-<LinkCard title="Create a client" href="/docs/client/create-client" description="Client configuration, authentication, and options." eyebrow="How-to" />
-<LinkCard title="Project structure" href="/docs/get-started/project-structure" description="What 10xgraph init generates for a production project." eyebrow="Get started" />
+<LinkCard title="Project structure" href="/docs/get-started/project-structure" description="What 10xgraph init generates for Full setup." eyebrow="Get started" />
 <LinkCard title="Long-term memory" href="/docs/concepts/memory-and-store" description="Remember facts across conversations with the memory store." eyebrow="Concept" />
 <LinkCard title="Authentication reference" href="/docs/server/auth" description="JWT options, custom auth and scopes." eyebrow="How-to" />
 

@@ -35,7 +35,7 @@ You pick the store with `cache_store.type`:
 
 Reference: [BaseCacheStore](/docs/reference/api-cli/cache-store) · Source: [base.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/cache_store/base.py)
 
-With `memory`, a lock taken in one process is invisible to another, a rate limit of 100 requests becomes 100 per process, and a revocation applies only where it was made. The Redis URL comes from `cache_store.url` or the `REDIS_URL` environment variable. `REDIS_URL` alone does not select Redis; set the type. The Full setup writes a Redis store with rate limiting and token revocation.
+With `memory`, a lock taken in one process is invisible to another, a rate limit of 100 requests becomes 100 per process, and a revocation applies only where it was made. The Redis URL comes from `cache_store.url` or the `REDIS_URL` environment variable. `REDIS_URL` alone does not select Redis; set the type. The Full setup writes rate limiting and token revocation with a memory store by default; it writes a Redis store with `--storage postgres`, `--storage postgres-memory` or `--worker`.
 
 ## When the store fails
 

@@ -1,6 +1,6 @@
 ---
 title: Data and state
-description: "Where your agent state lives: threads, memory and shared server state, on Postgres and Redis by default."
+description: "Where your agent state lives: threads, memory and shared server state, on Postgres and Redis in production."
 section: "Data and state"
 order: 0
 updated: "2026-11-10"

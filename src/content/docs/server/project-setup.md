@@ -8,7 +8,7 @@ label: Initialize a Project
 updated: "2026-10-27"
 faq:
   - q: "What is the difference between the Quick and Full setups?"
-    a: "Quick generates a minimal graph with 10xgraph.json and environment template. Full adds tests, evaluations, auth stubs, and a full project structure, and writes the recommended config: JWT auth with owner-only data, a UUID ID generator, a Redis cache store with rate limiting and token revocation."
+    a: "Quick generates a minimal graph with 10xgraph.json and environment template. Full adds tests, evaluations, auth stubs, and a full project structure, and writes the recommended config: JWT auth with owner-only data, a UUID ID generator, and a cache store with rate limiting and token revocation. The cache store is memory with the default memory storage and Redis with Postgres storage or a worker."
   - q: "Can I change the setup or auth choice after scaffolding?"
     a: "Yes, re-run 10xgraph init with --force to regenerate, or edit 10xgraph.json directly. See server/configure for full config reference."
   - q: "When should I choose a memory cache store instead of Redis?"
@@ -46,7 +46,7 @@ To scaffold in a specific directory without entering it:
 For CI pipelines or scripted setup, provide all arguments upfront:
 
 ```bash
-10xgraph init --yes --name MyWeatherBot --mode full --provider openai --cache-store redis
+10xgraph init --yes --name MyWeatherBot --mode full --provider openai --storage postgres
 ```
 
 Passing `--yes` or `--non-interactive` skips all prompts. Any value you omit takes its default (the Quick setup, and for Full the recommended setup). The auth, cache store, rate limit and token revocation flags are only valid with `--mode full`.
@@ -60,7 +60,8 @@ Passing `--yes` or `--non-interactive` skips all prompts. Any value you omit tak
 | `--mode` | | `quick` \| `full` | Prompted, or `quick` with `--yes` / `--non-interactive` | Dev (`quick`) or team/deployment mode. `--template quick-start\|production` is an alias |
 | `--provider` | | `google` \| `openai` \| `anthropic` | Prompted | AI provider for the starter agent |
 | `--auth` | | `none` \| `jwt` \| `custom` | `jwt` | Requires `--mode full` |
-| `--cache-store` | | `memory` \| `redis` | `redis` | Requires `--mode full` |
+| `--storage` | | `memory` \| `sqlite` \| `postgres` \| `postgres-memory` | `memory` | Requires `--mode full`. Picks the checkpointer (and the store for `postgres-memory`) |
+| `--cache-store` | | `memory` \| `redis` | Follows `--storage`: `memory` for `memory` and `sqlite`, `redis` for `postgres` and `postgres-memory`. `redis` when `--worker` is set | Requires `--mode full`. `memory` with a worker is refused |
 | `--rate-limit` / `--no-rate-limit` | | Flag | On | Adds or leaves out `cache_store.rate_limit` |
 | `--token-revocation` / `--no-token-revocation` | | Flag | On with auth | Adds or leaves out `cache_store.token_revocation`. Ignored with `--auth none` |
 | `--websocket` / `--no-websocket` | | Flag | Off | Writes `websocket.enabled` |
@@ -86,6 +87,7 @@ Minimal setup for rapid prototyping:
 ```
 10xgraph.json
 .env.example
+requirements.txt
 graph/
   __init__.py
   agent.py
@@ -94,10 +96,12 @@ graph/
 - **10xgraph.json**: Server config with just the agent path and env file.
 - **graph/agent.py**: A starter ReAct agent built with `ReactAgent`, with a sample weather tool and an `app` variable for the server.
 - **.env.example**: API key placeholders. Copy to `.env`, fill in your credentials.
+- **requirements.txt**: `10xgraph[<provider extra>]` and `10xgraph-api`, the packages the agent needs. `10xgraph build` installs from it, and add extras such as `jwt` here when you turn a feature on.
 
 Run with:
 
 ```bash
+pip install -r requirements.txt
 cp .env.example .env
 # Add your provider API key to .env
 10xgraph dev
@@ -172,7 +176,7 @@ Init builds your config from your answers, not a static template. Examples:
 }
 ```
 
-**Full (the default for `--mode full`):**
+**Full (the default for `--mode full`, which means `--storage memory`, so the cache store is `memory`; `--storage postgres`, `--storage postgres-memory` or `--worker` write `redis`):**
 
 ```json
 {
@@ -186,7 +190,7 @@ Init builds your config from your answers, not a static template. Examples:
   "injectq": "graph.agent:container",
   "id_generator": "uuid",
   "cache_store": {
-    "type": "redis",
+    "type": "memory",
     "rate_limit": {
       "enabled": true,
       "requests": 100,
@@ -211,7 +215,7 @@ Init builds your config from your answers, not a static template. Examples:
 }
 ```
 
-The cache store has no `url`, so Redis comes from the `REDIS_URL` environment variable. A `worker` block is added when you choose a background worker, and `"store": "graph.agent:store"` when you choose Postgres memory storage. The `test` and `evaluation` blocks are left out when tests or evals are turned off.
+With `"type": "redis"` the cache store has no `url`, so Redis comes from the `REDIS_URL` environment variable. A `worker` block is added when you choose a background worker, and `"store": "graph.agent:store"` when you choose Postgres memory storage. The `test` and `evaluation` blocks are left out when tests or evals are turned off.
 
 **Full with `--auth none`:** the same file with `"auth": null` and no token revocation. Rate limiting is then counted `by` `ip`.
 

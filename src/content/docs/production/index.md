@@ -8,7 +8,7 @@ label: Platform overview
 updated: "2026-11-10"
 faq:
   - q: "Is 10xGraph production ready?"
-    a: "The server enforces reach-scoped thread access (own thread by default), permission checks, input limits, run limits and production-mode checks by default, and stores state durably with Postgres. You still own auth configuration, secrets, TLS, backups and your tools' own authorization. The limits page lists what it does not protect."
+    a: "The server enforces reach-scoped thread access (own thread by default), permission checks, input limits, run limits and production-mode checks by default, and stores state durably when you use `PgCheckpointer` (Postgres). You still own auth configuration, secrets, TLS, backups and your tools' own authorization. The limits page lists what it does not protect."
   - q: "Do I have to write the API server myself?"
     a: "No. You write the graph and point 10xgraph.json at it. 10xgraph-api generates the REST and WebSocket server, and 10xgraph build generates the Dockerfile, compose file and Kubernetes manifest."
   - q: "What happens if I run in production without auth?"
