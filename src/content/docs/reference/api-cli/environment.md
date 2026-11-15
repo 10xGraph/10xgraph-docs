@@ -257,7 +257,7 @@ See [Files and multimodal](/docs/server/files-and-multimodal) for how these fit 
 | `MAX_NESTING_DEPTH` | `64` | Deepest nesting of objects and lists accepted in client messages (`metadata`, `raw`, content blocks), `initial_state`, `config`, `resume` and `filters`. Deeper input is refused with 422 before the graph runs. Allowed range 1 to 900 |
 | `IDEMPOTENCY_TTL_SECONDS` | `86400` | How long a finished run is remembered under its `Idempotency-Key`. The header is opt-in. See [idempotency keys](/docs/reference/rest-api/conventions#idempotency-keys). |
 
-Client dicts and lists (`config`, `initial_state`, `resume`, `metadata`, `filters`) also have fixed structure caps that have no setting: 64 levels of nesting, 1000 keys per object, 10000 items per list and 200000 values in all. A larger body gets 422 `VALIDATION_ERROR`.
+Client dicts and lists (`config`, `initial_state`, `resume`, `metadata`, `filters`) also have fixed structure caps (the nesting depth is `MAX_NESTING_DEPTH` above) that have no setting: 1000 keys per object, 10000 items per list and 200000 values in all. A larger body gets 422 `VALIDATION_ERROR`.
 
 `MAX_REQUEST_SIZE` is enforced by HTTP middleware and applies to requests that declare a `Content-Length`. It does not cover WebSocket frames (bounded separately at 1 MiB per frame on `/v1/graph/live`) or chunked uploads (bounded by `MEDIA_MAX_SIZE_MB` as the body is read).
 

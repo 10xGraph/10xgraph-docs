@@ -114,7 +114,7 @@ The server loads your container at startup and makes it the global instance. You
 
 ## Generate readable thread names
 
-`thread_name_generator` takes `random` (the default, also when the key is unset), `first_message` (the user's first message, whitespace collapsed, cut to at most 60 characters on a word boundary), `none` (threads stay unnamed but are saved) or a `module:attr` path to your own generator. The server saves every generated name after the run. To write your own, subclass `ThreadNameGenerator`. It gets the user's messages first, then the replies:
+`thread_name_generator` takes `none` (the default, also when the key is unset or `null`; threads stay unnamed but are saved), `random` (a random name), `first_message` (the user's first message, whitespace collapsed, cut to at most 60 characters on a word boundary) or a `module:attr` path to your own generator. The server saves every generated name after the run. To write your own, subclass `ThreadNameGenerator`. It gets the user's messages first, then the replies:
 
 ```python
 # graph/thread_name_generator.py
@@ -210,7 +210,7 @@ This table shows what each setting does when its key is absent from `10xgraph.js
 | Rate limiting | Off | off | on: 100 requests per 60 seconds, by user, `fail_open` false |
 | Token revocation | Off | off | on |
 | ID generator | The graph's own generator | not written | `uuid` |
-| Thread naming | `random`: new threads get a random name, saved | `null` (random) | a generator class file in `graph/` that you edit |
+| Thread naming | `none`: threads are saved without a name | not written (none) | `first_message` |
 | WebSocket | Routes `/v1/graph/ws` and `/v1/graph/live` mounted; a warning if no WebSocket library is installed | `enabled: false` | `enabled: false` unless you pass `--websocket` |
 | AG-UI | Off | `enabled: false` | `enabled: false` |
 | Startup checks | On: checkpointer and store are fatal if unreachable; the cache store is fatal only with token revocation on (and auth set) or a rate limit with `fail_open` false, otherwise one warning | same | same |

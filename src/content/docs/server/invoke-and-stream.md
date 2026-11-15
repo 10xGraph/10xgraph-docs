@@ -81,7 +81,7 @@ The server refuses some input with `422`, on invoke, stream and the WebSocket:
 - An unknown `current_node`.
 - A state value that does not match its field type. The error names the field.
 
-Requests are also limited in size: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. `initial_state`, `config` and `resume` may be nested no deeper than 64 levels; deeper gets `422` with code `VALIDATION_ERROR`. A request over a limit gets `422` with a message that names the limit, in development and production alike. The limits are fixed.
+Requests are also limited in size: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. `initial_state`, `config` and `resume` may be nested no deeper than 64 levels by default (`MAX_NESTING_DEPTH`); deeper gets `422` with code `VALIDATION_ERROR`. A request over a limit gets `422` with a message that names the limit, in development and production alike. The count and text limits are fixed; the nesting depth is the `MAX_NESTING_DEPTH` setting.
 
 A frontend can pass a selected ID straight into state, once you list its key in `runs.state_keys` in `10xgraph.json` (for example `"runs": {"state_keys": ["selected_job_id"]}`). Without it, clients can set no state key. The server ignores any `message_id` you send and generates its own.
 
@@ -346,6 +346,8 @@ If an error occurs during execution, the response will include an error chunk:
 ```
 
 In production (`MODE=production`), the text in an `error` chunk is replaced by a generic message, the same as invoke returns, so a failing node cannot leak a connection string or a path. Development shows the details. The same applies on the WebSocket and AG-UI.
+
+An `error` chunk can also carry a `code` in `data`. `INVALID_REQUEST_DATA` means the database refused data in the request (a NUL character, a lone surrogate or a number out of range); the message is the same as the HTTP 422 answer. Other codes are `VALIDATION_ERROR`, the not-found code for a missing thread and `SERVICE_UNAVAILABLE` while the server shuts down.
 
 Failures during a stream arrive as an `error` chunk, because the HTTP status is already 200 once streaming starts. Authentication, authorization and validation errors are returned before the stream begins. For synchronous invoke, the call fails with an HTTP error status:
 

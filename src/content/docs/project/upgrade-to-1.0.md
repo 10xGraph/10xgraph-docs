@@ -157,8 +157,8 @@ Other changes:
   `--cache-store`, `--rate-limit`, `--token-revocation` and `--websocket` override parts of it.
 - **New keys.** `id_generator` (`uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake`
   or `module:attr`) and `thread_name_generator` (`random`, `first_message`, `none` or
-  `module:attr`). With `thread_name_generator` unset, new threads are now named (randomly) and
-  the name is saved. See the [configuration reference](/docs/reference/api-cli/configuration).
+  `module:attr`). With `thread_name_generator` unset, new threads are saved without a name; set
+  `random` or `first_message` to name them. See the [configuration reference](/docs/reference/api-cli/configuration).
 
 Migration steps:
 
@@ -454,6 +454,8 @@ Authorization backends are replaced; see [Auth, roles and reach](#auth-roles-and
   or any other value stops startup. Startup also stops if PyJWT is missing with `"auth": "jwt"`,
   and the `auth` value must be exactly `"jwt"`.
 - **With `cache_store.token_revocation` on, every token needs a `jti` claim.** A token without a usable `jti` (a non-empty string or an integer) answers 401 `INVALID_TOKEN` ("Invalid token, jti missing"), also from a custom `BaseAuth` class. Issue tokens with a `jti`, or turn revocation off.
+- **`BaseAuth.authenticate` is `async def`.** A custom auth class must define it as `async def authenticate`; the server awaits it.
+- **A revoked token answers 401 with code `REVOKED_TOKEN`.**
 - **A token that carries an `aud` claim is refused while `JWT_AUDIENCE` is unset** (401 `INVALID_TOKEN`). Set `JWT_AUDIENCE` to the value your tokens carry. A missing tenant claim or a `__system__` user id also answers `INVALID_TOKEN`.
 - **`graph:setup` is gone from the permission list.** The setup endpoint no longer exists.
 - **Graph validation errors use the code `VALIDATION_ERROR`.** The duplicate `AGENTFLOW_VALIDATION_ERROR` is gone; match on `VALIDATION_ERROR`.
@@ -463,7 +465,10 @@ Authorization backends are replaced; see [Auth, roles and reach](#auth-roles-and
 - **Uploads are checked against default limits:** images over 50,000,000 pixels and PDFs over 10 MB or 500 pages answer 413 (`MEDIA_MAX_IMAGE_PIXELS`, `MEDIA_MAX_PDF_MB`, `MEDIA_MAX_PDF_PAGES`). Per-user quotas (`MEDIA_MAX_FILES_PER_USER`, `MEDIA_MAX_USER_STORAGE_MB`) are off by default.
 - **The generated Gunicorn command uses `TenxGraphUvicornWorker`** (`tenxgraph_api.src.app.uvicorn_worker.TenxGraphUvicornWorker`). Regenerate Docker and Kubernetes files with `10xgraph build`, or point your own command at it. Keep the Gunicorn `--graceful-timeout` above the sum of the three `SHUTDOWN_*_SECONDS` settings (50 s by default) and the pod grace period above that.
 - **Nested `initial_state`, `config` and `resume` deeper than 64 levels get 422**
-  (`VALIDATION_ERROR`).
+  (`VALIDATION_ERROR`). The limit is the `MAX_NESTING_DEPTH` setting (64 by default, 1 to 900).
+- **Keys in the request state (`initial_state`) get 422 unless the server lists them in `runs.state_keys`.** The same holds for `PUT /v1/threads/{id}/state` and AG-UI `state`. See [Configuration](/docs/reference/api-cli/configuration).
+- **The built-in thread name generator class is now `RandomThreadNameGenerator`,** replacing `AIThreadNameGenerator` and `DefaultThreadNameGenerator`. With `thread_name_generator` unset, threads stay unnamed; any value other than `none`, `random`, `first_message` or `module:attr` is a config error.
+- **Data the database cannot store answers 422 `INVALID_REQUEST_DATA`,** not a 5xx error. This covers a NUL character, a lone surrogate and a number out of range.
 - **`/health/ready` answers 503 while the server shuts down** (`status: draining`), and while the database schema version is below what the code expects.
 - **Thread, message and memory ids must match `^[A-Za-z0-9._:@-]{1,128}$`,** in the path and in the body (`thread_id`, `config.thread_id`). Anything else gets 422 `VALIDATION_ERROR`. This breaks clients that make their own thread ids with spaces, slashes or more than 128 characters.
 - **Shutdown is configured with `SHUTDOWN_GRACE_SECONDS` (10), `SHUTDOWN_STOP_SECONDS` (10) and `SHUTDOWN_TIMEOUT_SECONDS` (30).** The lifespan calls `graph.aclose()` once with them; the old separate 30 second background drain is gone. A run started during shutdown gets 503 `SERVICE_UNAVAILABLE` with `Retry-After: 5`.

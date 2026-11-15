@@ -187,6 +187,8 @@ Document extraction requires the `media` extra:
 pip install "10xgraph-api[media]"
 ```
 
+With `DOCUMENT_HANDLING=extract_text` (the default) and no `media` extra, an upload answers 422 with a message that names the extra. Install it, or set `DOCUMENT_HANDLING` to `pass_raw` or `skip`.
+
 ### Document handling modes
 
 Three modes control what happens to document blocks when referenced:

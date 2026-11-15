@@ -117,7 +117,6 @@ graph/
   __init__.py
   agent.py
   state.py
-  thread_name_generator.py
   tools/
     __init__.py
     weather_tool.py (example tool)
@@ -129,13 +128,16 @@ graph/
 auth/                       # only if --auth custom
   __init__.py
   agent_auth.py
-tests/
+worker/                     # only if --worker is not none
+  __init__.py
+  tasks.py
+tests/                      # unless tests are turned off
   __init__.py
   conftest.py
   test_graph_nodes.py
   test_catalog_tools.py
   test_agent_eval.py
-evals/
+evals/                      # unless evals are turned off
   __init__.py
   weather_agents_eval.py
   user_simulator_eval.py
@@ -145,10 +147,10 @@ evals/
 
 - **pyproject.toml**: Declares your project as a package. Enables `pip install -e .` (editable), integrates `ruff`/`mypy`/`pytest` config, and ensures repeatable environments.
 - **graph/state.py**: Custom state schema (inherits from `AgentState`). Extend it as your agent's state grows.
-- **graph/thread_name_generator.py**: A thread name generator that `thread_name_generator` in `10xgraph.json` points at. Edit it, or switch the key to `random` or `first_message`.
 - **graph/tools/**: Custom agent tools as decorated functions.
 - **graph/validators/**: Lifecycle validators (before invoke, after step, on error) and validation manager.
 - **auth/agent_auth.py**: Custom authentication logic (only scaffolded when `--auth custom`). Implement `BaseAuth` subclass.
+- **worker/tasks.py**: Example background tasks. Only scaffolded when a worker is chosen.
 - **tests/**: Unit tests (mock the model, test state transitions, tool logic).
 - **.env.example**: Conditional blocks for JWT and Redis; only kept in `.env` if you selected those options.
 - **.pre-commit-config.yaml**: Git hooks for `ruff check/format`, `bandit`, `mypy`.
@@ -165,20 +167,8 @@ Init builds your config from your answers, not a static template. Examples:
   "env": ".env",
   "auth": null,
   "thread_name_generator": null,
-  "ag_ui": {"enabled": false}
-}
-```
-
-**Production with no auth:**
-
-```json
-{
-  "agent": "graph.agent:app",
-  "env": ".env",
-  "auth": null,
-  "thread_name_generator": "graph.thread_name_generator:MyNameGenerator",
-  "injectq": "graph.agent:container",
-  "ag_ui": {"enabled": false}
+  "ag_ui": {"enabled": false},
+  "websocket": {"enabled": false}
 }
 ```
 
@@ -188,8 +178,11 @@ Init builds your config from your answers, not a static template. Examples:
 {
   "agent": "graph.agent:app",
   "env": ".env",
-  "auth": "jwt",
-  "thread_name_generator": "graph.thread_name_generator:MyNameGenerator",
+  "auth": {"method": "jwt"},
+  "thread_name_generator": "first_message",
+  "ag_ui": {"enabled": false, "allow_client_tools": false},
+  "websocket": {"enabled": false},
+  "remote_tools": [],
   "injectq": "graph.agent:container",
   "id_generator": "uuid",
   "cache_store": {
@@ -205,14 +198,24 @@ Init builds your config from your answers, not a static template. Examples:
     },
     "token_revocation": true
   },
-  "ag_ui": {"enabled": false},
-  "websocket": {"enabled": false}
+  "audit": {"enabled": true, "sinks": ["log"], "include_reads": true},
+  "test": {"path": "tests", "coverage": true, "coverage_threshold": 70},
+  "evaluation": {
+    "directory": "evals",
+    "output_dir": "eval_reports",
+    "threshold": 0.75,
+    "parallel": false,
+    "max_concurrency": 4,
+    "timestamp_files": true
+  }
 }
 ```
 
-The cache store has no `url`, so Redis comes from the `REDIS_URL` environment variable. The block also holds the `test` and `evaluation` defaults.
+The cache store has no `url`, so Redis comes from the `REDIS_URL` environment variable. A `worker` block is added when you choose a background worker, and `"store": "graph.agent:store"` when you choose Postgres memory storage. The `test` and `evaluation` blocks are left out when tests or evals are turned off.
 
-**Production with `--auth none`:** the same file with `"auth": null`, and no token revocation.
+**Production with `--auth none`:** the same file with `"auth": null` and no token revocation. Rate limiting is then counted `by` `ip`.
+
+**Thread names.** Production writes `"thread_name_generator": "first_message"`. Quick Start leaves it `null`, which means none: threads are saved without a name. The other choices are `random`, or a `module:attr` path to your own `ThreadNameGenerator` subclass. See [Generate readable thread names](/docs/server/configure#generate-readable-thread-names).
 
 For full details on every config key, see `/docs/server/configure`. To see what each key does when it is absent, see [What is on by default](/docs/server/configure#what-is-on-by-default).
 

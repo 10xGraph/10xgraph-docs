@@ -131,7 +131,7 @@ Validators run synchronously from the graph's perspective; make them fast and de
 
 This validator detects prompt injection and jailbreak attempts using pattern matching, keyword analysis, and heuristics. It checks for:
 
-- NUL characters (`\x00`), refused with violation type `invalid_character`. They are also refused when a run loads its state, even with no validator registered
+- NUL characters (`\x00`), refused with violation type `invalid_character`. They are also refused when a run loads its state, even with no validator registered. Text from the model or a tool is cleaned instead of refused; see [Errors and limits](/docs/concepts/errors-and-limits)
 - Excessive length (configurable, default 10000 characters)
 - Regex patterns for common instruction-override tricks (e.g., `"ignore all previous instructions"`)
 - Role manipulation attempts (e.g., `"you are now a ..."`, `"pretend as a ..."`)

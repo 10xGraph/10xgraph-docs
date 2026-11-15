@@ -217,6 +217,7 @@ Uploads fail with `400`, `413` or `415`; reads fail with `404`. A missing permis
 | --- | --- |
 | `400` | Missing filename or empty file. |
 | `422` | The multipart body has no `file` part, or more than one. Auth is checked before the body is parsed, so an unauthenticated request never gets this far. |
+| `422` | With `DOCUMENT_HANDLING=extract_text` (the default), the server lacks the `media` extra. The message names it (`pip install "10xgraph-api[media]"`) and says to set `DOCUMENT_HANDLING` to `pass_raw` or `skip` instead. |
 | `413` | File exceeds `MEDIA_MAX_SIZE_MB` (or the media service rejects its size). The limit is checked as data arrives in 1 MiB chunks, so uploads are rejected before the whole file is buffered. The same status answers an image over `MEDIA_MAX_IMAGE_PIXELS`, a PDF over `MEDIA_MAX_PDF_MB` or `MEDIA_MAX_PDF_PAGES`, and an upload past the per-user quota (`MEDIA_MAX_FILES_PER_USER`, `MEDIA_MAX_USER_STORAGE_MB`). |
 | `415` | Content type not allowed by `MEDIA_ALLOWED_CONTENT_TYPES`. |
 | `404` | `file_id` not found or owned by another user. |
