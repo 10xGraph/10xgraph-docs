@@ -5,7 +5,7 @@ description: "10xGraph vs LlamaIndex Agents compared with sources: server, auth,
 section: Compare
 order: 50
 label: vs LlamaIndex Agents
-updated: "2026-11-10"
+updated: "2026-11-15"
 faq:
   - q: Can I use my LlamaIndex indexes inside a 10xGraph agent?
     a: Yes. Wrap your query engine in a Python function, hand it to a ToolNode, and the agent calls it like any other tool. Your indexing and retrieval stack stays the same.
@@ -48,7 +48,7 @@ The first rows are where the two differ most. Orchestration and retrieval basics
 | License | MIT, including API/CLI and client | `llama-index-core` is MIT ([PyPI](https://pypi.org/project/llama-index-core/)). LlamaParse is credit-priced with Free, Starter, Pro and Enterprise tiers ([pricing](https://www.llamaindex.ai/pricing)) |
 | TypeScript | Typed `10xgraph-client` for the 10xGraph API | LlamaIndex.TS, a separate MIT-licensed TypeScript framework ([repository](https://github.com/run-llama/LlamaIndexTS)), and React UI hooks in LlamaAgents ([overview](https://developers.llamaindex.ai/python/llamaagents/overview/)) |
 | Retrieval and indexing | Bring your own, exposed as a tool | The core of the framework: indexes, query engines, parsing ([PyPI](https://pypi.org/project/llama-index-core/)) |
-| Orchestration | Typed `StateGraph` with conditional edges and sub-graphs | `FunctionAgent`, `AgentWorkflow`, and event-driven Workflows ([agents docs](https://developers.llamaindex.ai/python/framework/understanding/agent/)) |
+| Orchestration | Typed `StateGraph` with conditional edges | `FunctionAgent`, `AgentWorkflow`, and event-driven Workflows ([agents docs](https://developers.llamaindex.ai/python/framework/understanding/agent/)) |
 | State persistence | `InMemoryCheckpointer`, `PgCheckpointer` (Postgres plus Redis), SQLite, keyed by `thread_id` | A serializable `Context` that you save and restore, for example with `to_dict` and `from_dict` ([state docs](https://developers.llamaindex.ai/python/framework/understanding/agent/state/)) |
 | Python version | 3.12 or newer | 3.10 or newer ([PyPI](https://pypi.org/project/llama-index-core/)) |
 

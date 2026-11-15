@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 130
 label: Control flow
-updated: "2026-10-08"
+updated: "2026-11-15"
 ---
 
 These APIs control graph execution from inside nodes and tools. Use `Command` to update state and choose the next node in one return value, `interrupt()` to pause for human input and resume later, and handoff tools to let a model transfer control to another agent.
@@ -59,14 +59,14 @@ Command(
 |---|---|---|---|
 | `update` | `StateT \| Message \| str \| BaseConverter \| None` | `None` | Applied before navigating. An `AgentState` replaces the current state (its new messages are recorded); a `Message`, `str`, converter or list of these is added as new message(s). |
 | `goto` | `str \| None` | `None` | Name of the next node to execute, or `END` to terminate. |
-| `graph` | `str \| None` | `None` | Target graph (`None` for the current one). Stored on the command; the current runtime does not use it for routing. |
+| `graph` | `str \| None` | `None` | Reserved. Stored on the command; the runtime does not use it for routing. Nested graphs are not supported. |
 | `state` | `StateT \| None` | `None` | Optional state to attach. When streaming, its new context messages are emitted. |
 
 ### Constants
 
 | Constant | Value | Description |
 |---|---|---|
-| `Command.PARENT` | `"PARENT"` | Value meant for `graph=` to name the parent graph. Not acted on by the current runtime. |
+| `Command.PARENT` | `"PARENT"` | Reserved. Not acted on by the runtime, because nested graphs are not supported. |
 
 ### Example
 

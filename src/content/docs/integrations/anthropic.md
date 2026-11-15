@@ -168,6 +168,8 @@ agent = Agent(
 )
 ```
 
+Multi-agent graphs need nothing extra. Each `Agent` node replays only the thinking blocks of its own replies (matched by `metadata["node_name"]`). Replies from other agent nodes keep their text and tool calls, so a second Claude agent with a different system prompt or tools reads the shared history without this error.
+
 Pass the context manager to `StateGraph(context_manager=...)` as usual. Caveats:
 
 - The header and the field go together. The field without the header is its own 400 (`block_binding: Extra inputs are not permitted`).

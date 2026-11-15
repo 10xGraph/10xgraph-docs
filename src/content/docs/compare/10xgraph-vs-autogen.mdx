@@ -5,7 +5,7 @@ description: 10xGraph vs Microsoft AutoGen compared with sources. AutoGen is in 
 section: Compare
 order: 40
 label: vs Microsoft AutoGen
-updated: "2026-11-10"
+updated: "2026-11-15"
 faq:
   - q: Is AutoGen still actively developed?
     a: According to the AutoGen repository, AutoGen is in maintenance mode. It receives no new features and is community managed, and Microsoft recommends Microsoft Agent Framework for new projects.
@@ -50,7 +50,7 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 | License | MIT, including API/CLI and client | MIT and CC-BY-4.0 dual license per the repository ([repository](https://github.com/microsoft/autogen)). `autogen-agentchat` on PyPI lists MIT ([PyPI](https://pypi.org/project/autogen-agentchat/)) |
 | TypeScript client | Typed `10xgraph-client` | Not documented |
 | Project status | 1.0, actively developed | Maintenance mode, community managed ([repository](https://github.com/microsoft/autogen)) |
-| Orchestration | Typed `StateGraph` with conditional edges and sub-graphs | Group chat teams, including `SelectorGroupChat` where a model picks the next speaker, and `GraphFlow` for structured workflows ([teams docs](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/teams.html)) |
+| Orchestration | Typed `StateGraph` with conditional edges | Group chat teams, including `SelectorGroupChat` where a model picks the next speaker, and `GraphFlow` for structured workflows ([teams docs](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/teams.html)) |
 | State persistence | `InMemoryCheckpointer`, `PgCheckpointer` (Postgres plus Redis), SQLite, keyed by `thread_id` | `save_state()` and `load_state()` on agents and teams, with no built-in database persistence ([state docs](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/state.html)) |
 | Python version | 3.12 or newer | 3.10 or newer ([PyPI](https://pypi.org/project/autogen-agentchat/)) |
 

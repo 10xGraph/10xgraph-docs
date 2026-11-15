@@ -5,12 +5,14 @@ description: How StateGraph models an agent as nodes, edges and shared state, co
 section: Concepts
 order: 20
 group: "Foundations"
-updated: "2026-10-08"
+updated: "2026-11-15"
 faq:
   - q: What is the difference between StateGraph and ReactAgent?
     a: ReactAgent is a prebuilt that creates a StateGraph for you, with one agent node, one tool node and a conditional edge between them. Build a StateGraph yourself when you need your own nodes, routing or several agents.
   - q: What happens if a graph loops forever?
     a: Each run has a recursion limit (25 steps by default). When exceeded, execution stops with a GraphRecursionError. Increase recursion_limit in the run config or fix the routing logic that causes loops.
+  - q: Can I use a compiled graph as a node of another graph?
+    a: No. 10xGraph does not support nested graphs. add_node accepts a function, a ToolNode or an Agent, and passing a compiled graph raises ValueError "Invalid arguments for add_node". Build one graph with several Agent nodes and route between them with edges, conditional edges, Command(goto=...) or handoff tools.
   - q: Do I need a checkpointer to use a StateGraph?
     a: No, a graph runs without one. But without a checkpointer, nothing is saved between calls. Every invoke starts fresh from the initial state, and you cannot resume interrupted runs. Pass a checkpointer to compile().
 
@@ -39,6 +41,41 @@ flowchart LR
 | State | An `AgentState` (or subclass) shared by all nodes | `StateGraph(MyState())` |
 
 `START` and `END` live in `tenxgraph.utils.constants`. Nodes you register may return a `Message`, a list of messages, a plain string (stored as an assistant message), an `AgentState`, a dict or a `Command`.
+
+### Nested graphs are not supported
+
+A compiled graph cannot be a node of another `StateGraph`. `add_node` accepts only a function (sync or async), a `ToolNode` or an `Agent`. Passing a compiled graph raises `ValueError: Invalid arguments for add_node`.
+
+Calling another compiled graph from inside a custom node (`await other_app.ainvoke(...)`) is not a supported pattern either. Its streaming, tool calls, client tools and interrupts do not reach the outer graph.
+
+Build one graph with several `Agent` nodes instead, and connect them with edges, conditional edges, `Command(goto=...)` or handoff tools. See [Route between agents with handoff](/docs/guides/handoff-between-agents).
+
+```python
+from tenxgraph.core import Agent, StateGraph, ToolNode
+from tenxgraph.prebuilt.tools import create_handoff_tool
+from tenxgraph.utils import END
+
+triage = Agent(model="gemini-2.5-flash", provider="google", tool_node="triage_tools",
+               system_prompt=[{"role": "system", "content": "Route the request."}])
+writer = Agent(model="gemini-2.5-flash", provider="google",
+               system_prompt=[{"role": "system", "content": "Draft the answer."}])
+
+graph = StateGraph()
+graph.add_node("triage", triage)
+graph.add_node("triage_tools", ToolNode([create_handoff_tool("writer", "Hand off to writer.")]))
+graph.add_node("writer", writer)
+graph.set_entry_point("triage")
+graph.add_edge("triage_tools", "triage")
+graph.add_conditional_edges(
+    "triage",
+    lambda state: "triage_tools" if state.context and state.context[-1].tools_calls else END,
+    {"triage_tools": "triage_tools", END: END},
+)
+graph.add_edge("writer", END)
+app = graph.compile()
+```
+
+This may be revisited in a later major version.
 
 ## How do I build a graph?
 
@@ -191,7 +228,7 @@ If a run reaches the limit while the graph is still processing (the current node
 **When to raise the limit:**
 
 - Your graph has legitimate multi-step workflows that need more than 25 steps (e.g., a research agent that iterates over multiple search queries and summaries).
-- You have nested graphs or multi-agent orchestration where one agent calls another, multiplying the step count.
+- You have a multi-agent graph where agents hand off to each other, multiplying the step count.
 
 **When the limit is a signal of a bug:**
 

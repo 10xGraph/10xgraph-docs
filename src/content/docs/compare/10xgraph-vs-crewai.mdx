@@ -5,7 +5,7 @@ description: 10xGraph vs CrewAI compared with sources. Production server, auth, 
 section: Compare
 order: 30
 label: vs CrewAI
-updated: "2026-11-10"
+updated: "2026-11-15"
 faq:
   - q: Can I run CrewAI tools inside a 10xGraph graph?
     a: Any Python callable can be wrapped as a tool in a ToolNode. You typically rewrite the tool definition rather than re-using CrewAI's tool classes directly.
@@ -47,7 +47,7 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 | Docker Compose and Kubernetes manifests | `10xgraph build --docker-compose --k8s` writes `Dockerfile`, `docker-compose.yml`, `k8s.yaml` | Not documented for the open-source package. AMP lists cloud, dedicated VPC and self-hosted options ([pricing](https://www.crewai.com/pricing)) |
 | License | MIT, including API/CLI and client | MIT ([PyPI](https://pypi.org/project/crewai/)). AMP plans are commercial ([pricing](https://www.crewai.com/pricing)) |
 | TypeScript client | Typed `10xgraph-client` | Not documented |
-| Orchestration model | Typed `StateGraph` with nodes, conditional edges, sub-graphs | Crews run tasks under a sequential or hierarchical process. In hierarchical mode a manager agent delegates ([processes docs](https://docs.crewai.com/en/concepts/processes)) |
+| Orchestration model | Typed `StateGraph` with nodes, conditional edges | Crews run tasks under a sequential or hierarchical process. In hierarchical mode a manager agent delegates ([processes docs](https://docs.crewai.com/en/concepts/processes)) |
 | State persistence | `InMemoryCheckpointer`, `PgCheckpointer` (Postgres plus Redis), SQLite, keyed by `thread_id` | Flows `@persist` with SQLite as the default backend and custom backends supported ([Flows docs](https://docs.crewai.com/en/concepts/flows)) |
 | Python version | 3.12 or newer | 3.10 to 3.13 ([PyPI](https://pypi.org/project/crewai/)) |
 
