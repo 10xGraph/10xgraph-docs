@@ -286,6 +286,8 @@ Do not use evaluations to test wiring bugs: a failing case does not tell you whe
 - `TestResult` assertions are chainable, and `TestContext` isolates each test.
 - An `EvalSet` of `EvalCase` objects plus an `EvalConfig` describes an evaluation, and `10xgraph eval` runs it against your real graph and writes reports.
 
+You have a tested, evaluated agent. If 10xGraph saved you time, a [star on GitHub](https://github.com/10xGraph/10xGraph) helps other developers find it.
+
 ## Next steps
 
 You have finished the tutorial track. Continue with:
