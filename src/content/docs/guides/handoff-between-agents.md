@@ -4,12 +4,14 @@ description: "Transfer control between agents in a multi-agent graph using hando
 section: "Build agents"
 group: "Control flow"
 order: 250
-updated: "2026-10-27"
+updated: "2026-11-15"
 faq:
   - q: "When should I use this instead of SwarmAgent?"
     a: "Use manual handoff when you need full control over graph topology or custom routing logic. Use SwarmAgent when all agents are peers and you want automatic handoff tool injection."
   - q: "Can handoff tools route to agents that do not exist?"
     a: "The handoff is detected and routed before tool execution, so the target node must exist in the graph. A target that is not a node raises a GraphError with code GRAPH_007."
+  - q: "Can I put a compiled graph inside another graph as a node?"
+    a: "No. 10xGraph does not support nested graphs. add_node raises ValueError: Invalid arguments for add_node when given a compiled graph. Use one graph with several Agent nodes and route between them with handoff tools or Command."
   - q: "How do I prevent routing loops?"
     a: "Ensure at least one agent has a conditional edge that routes to END when no handoff is called, breaking the cycle."
 ---
@@ -190,21 +192,42 @@ graph.set_entry_point("router")
 `Command` lets you:
 - **goto**: Route to any node name or `END`
 - **update**: Apply state changes before navigating (e.g., add a message)
-- **graph**: Return to a parent graph with `Command.PARENT`
 - **state**: Attach a full state object
 
 Command routing is useful when decisions come from parsing outputs, applying business logic, or orchestrating multi-turn flows where the LLM should not see routing logic.
 
-## Return to a parent graph
+## Nested graphs are not supported
 
-In a nested graph scenario, signal that you're done with the subgraph:
+A compiled graph cannot be a node of another `StateGraph`. `add_node` accepts only a function, a `ToolNode` or an `Agent`, and a compiled graph raises `ValueError: Invalid arguments for add_node`. Running another compiled graph from inside a custom node (`await other_app.ainvoke(...)`) is not supported either: its streaming, tool calls, client tools and interrupts do not pass through to the outer graph.
+
+Build a multi-agent system as one graph instead: several `Agent` nodes and `ToolNode`s, connected by edges, conditional edges, `Command(goto=...)` and handoff tools, as in the example above. A minimal sketch:
 
 ```python
-# In a subgraph node
-return Command(goto=END, graph=Command.PARENT)
+from tenxgraph.core import Agent, StateGraph, ToolNode
+from tenxgraph.prebuilt.tools import create_handoff_tool
+from tenxgraph.utils import END
+
+triage = Agent(model="gemini-2.5-flash", provider="google", tool_node="triage_tools",
+               system_prompt=[{"role": "system", "content": "Route the request."}])
+writer = Agent(model="gemini-2.5-flash", provider="google",
+               system_prompt=[{"role": "system", "content": "Draft the answer."}])
+
+graph = StateGraph()
+graph.add_node("triage", triage)
+graph.add_node("triage_tools", ToolNode([create_handoff_tool("writer", "Hand off to writer.")]))
+graph.add_node("writer", writer)
+graph.set_entry_point("triage")
+graph.add_edge("triage_tools", "triage")
+graph.add_conditional_edges(
+    "triage",
+    lambda state: "triage_tools" if state.context and state.context[-1].tools_calls else END,
+    {"triage_tools": "triage_tools", END: END},
+)
+graph.add_edge("writer", END)
+app = graph.compile()
 ```
 
-This hands control back to the parent graph's routing, not to `END` in the subgraph.
+This may be revisited in a later major version.
 
 ## Routing topologies
 

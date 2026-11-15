@@ -5,7 +5,7 @@ description: "10xGraph vs Google ADK compared with sources: API server, auth, th
 section: Compare
 order: 60
 label: vs Google ADK
-updated: "2026-11-10"
+updated: "2026-11-15"
 faq:
   - q: Does 10xGraph support Vertex AI as well as Google AI Studio?
     a: Yes. The 10xGraph Google provider supports both the Gemini API and Vertex AI. Switch with use_vertex_ai=True on the Agent or the GOOGLE_GENAI_USE_VERTEXAI environment variable. See the providers/google docs for the configuration.
@@ -48,7 +48,7 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 | License | MIT, including API/CLI and client | Apache-2.0 ([PyPI](https://pypi.org/project/google-adk/)) |
 | TypeScript | Typed `10xgraph-client` for the 10xGraph API | ADK for TypeScript, an agent framework for Node.js and browsers, Apache-2.0 ([adk-js](https://github.com/google/adk-js)). It is a framework, not a client for a Python server |
 | Model providers | OpenAI, Anthropic (direct, Vertex AI, Bedrock), Google (Gemini, Vertex AI), OpenAI-compatible endpoints | Gemini first-party, plus OpenAI, Anthropic and others through LiteLLM ([LiteLLM docs](https://adk.dev/agents/models/litellm/)) |
-| Orchestration | Typed `StateGraph` with conditional edges and sub-graphs | `SequentialAgent`, `ParallelAgent` and `LoopAgent` workflow agents ([workflow agents docs](https://adk.dev/agents/workflow-agents/)) |
+| Orchestration | Typed `StateGraph` with conditional edges | `SequentialAgent`, `ParallelAgent` and `LoopAgent` workflow agents ([workflow agents docs](https://adk.dev/agents/workflow-agents/)) |
 | Sessions and persistence | `InMemoryCheckpointer`, `PgCheckpointer` (Postgres plus Redis), SQLite, keyed by `thread_id` | `InMemorySessionService`, `VertexAiSessionService`, `DatabaseSessionService` for PostgreSQL, MySQL and SQLite ([sessions docs](https://adk.dev/sessions/session/)) |
 | Python version | 3.12 or newer | 3.10 or newer ([PyPI](https://pypi.org/project/google-adk/)) |
 

@@ -6,7 +6,7 @@ section: Integrations
 group: "Frameworks"
 order: 70
 label: with CopilotKit (AG-UI)
-updated: "2026-10-08"
+updated: "2026-11-15"
 faq:
   - q: "Why CopilotKit instead of the TypeScript client?"
     a: "CopilotKit is a complete chat UI and runtime. Use it if you want a hosted chat widget. The 10xGraph TypeScript client gives you more control over the UI and how to render the stream."
@@ -33,16 +33,30 @@ Messages flow end to end: the user types in CopilotKit, the route handler forwar
 You need:
 
 - A 10xGraph API server running with the `ag-ui` extra installed and `/v1/ag-ui` enabled in `10xgraph.json` (follow [Serve your agent over AG-UI](/docs/server/ag-ui) first).
+- `"runs": {"thread_ids": "client"}` in `10xgraph.json`. CopilotKit makes its own thread ids, and the default `server` mode answers `404` for an id it never issued, so without this every chat fails.
 - A Next.js project.
 - Basic familiarity with React hooks and async code.
+
+A minimal `10xgraph.json` for this guide:
+
+```json
+{
+  "agent": "graph.main:app",
+  "auth": "jwt",
+  "runs": {"thread_ids": "client"},
+  "ag_ui": {"enabled": true, "allow_client_tools": true}
+}
+```
 
 ## Set up the Next.js route handler
 
 Install the required packages in your Next.js project:
 
 ```bash
-npm install @copilotkit/react-core @copilotkit/runtime @ag-ui/client zod
+npm install @copilotkit/react-core@1.88.0 @copilotkit/runtime@1.88.0 @ag-ui/client@1.0.2 zod
 ```
+
+Install the `@ag-ui/client` version that CopilotKit pins (1.0.2 for CopilotKit 1.88.0). A newer `@ag-ui/client` (1.0.4, for example) installs a second copy, and `next build` fails with `Type 'HttpAgent' is not assignable to type 'AbstractAgent'` and a `_debug` private property error. Run `npm ls @ag-ui/client` and check that it shows a single version.
 
 Create a route handler that bridges CopilotKit and your 10xGraph server. The handler keeps your API token on the server, never exposing it to the browser:
 
@@ -188,6 +202,8 @@ import { useInterrupt } from "@copilotkit/react-core/v2";
 useInterrupt({
   render: ({ interrupt, resolve, cancel }) => {
     if (!interrupt) return null;
+    // The payload given to interrupt() is in metadata.value. message is optional.
+    const value = (interrupt.metadata as { value?: unknown } | undefined)?.value;
     return (
       <div style={{
         position: "fixed",
@@ -200,7 +216,8 @@ useInterrupt({
         boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
         maxWidth: 300,
       }}>
-        <p>{interrupt.message}</p>
+        {interrupt.message && <strong>{interrupt.message}</strong>}
+        <pre>{JSON.stringify(value, null, 2)}</pre>
         <input
           type="text"
           placeholder="Optional comment"
