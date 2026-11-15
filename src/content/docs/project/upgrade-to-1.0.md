@@ -188,6 +188,11 @@ Migration steps:
   request to OpenAI `"minimal"`, Anthropic `"low"` and Google `"low"` (`thinking_budget=512`); the
   values are in `DEFAULT_REASONING_EFFORT_BY_PROVIDER`. Pass `{"effort": "medium"}` to keep the
   old depth. `None` or `False` still turns reasoning off.
+- **Claude reasoning is readable by default.** With `reasoning_config` unset or `True`, Anthropic
+  requests send `thinking={"type": "adaptive", "display": "summarized"}`, because current Claude
+  models otherwise return thinking blocks with an empty summary. An explicit `reasoning_config`
+  dict sends `display` only when it has a `display` key, and a `thinking` passed to the Agent is
+  used as given.
 - **OpenAI Responses asks for a reasoning summary and retries models without reasoning.** With
   reasoning on and no `summary` set, the request sends `summary: "auto"`. If the reasoning came
   from the default and the model answers 400 naming the reasoning parameter (for example
@@ -213,6 +218,13 @@ Migration steps:
 - **A missing or empty `user_id` now raises `ValueError`** on store operations. Pass a concrete
   `user_id`, or `system_user_id(name)` for shared data. Re-index records written with an empty
   owner.
+- **Memory types are strict.** An unknown `memory_type` is an error instead of silently
+  `episodic`: the model-facing memory tools return an error before any write or search, and
+  `UserMemoryConfig` / `AgentMemoryConfig` raise a `ValidationError`.
+- **Memory search no longer filters by the scope's `memory_type` and `category`** unless the
+  model passes them, so memories saved under another type or category are found. Preload mode
+  follows the same rule, and with user memory on it gives the model `remember` and `forget`, so
+  such an Agent needs a `ToolNode`.
 - **`RAGAgent` searches as `system_user_id("knowledge_base")`** unless `store_config` sets
   `user_id`. `store_config_builder` output must include `user_id`.
 - **Agent memory is owned by `system_user_id(agent_id)` (or `app_id`), not the current user.**
@@ -255,6 +267,8 @@ Migration steps:
 - **`PromptInjectionValidator` is less noisy and leaks less:** persona patterns are upper-case only, emoji and CJK no longer trip the special-character rule, hex digests are not flagged, and keywords match whole words. Error details carry `pattern_index` instead of the regex or a sample of the input. The Full setup validator no longer blocks `bypass`, `override`, `disable`, `token` or `free`, and its max length is 10000.
 - **Client-visible error text shows only the exception type** for exceptions that are not 10xGraph's own (stream `ERROR` chunk `reason` and `state.error`). Logs keep the full text. `err.context` keeps the real values.
 - **`@tool` has no `name` argument.** A tool's name is its function name, which is what `ToolNode` routes on. `@tool(name=...)` and `@tool("name")` fail, so rename the function instead. `get_tool_metadata()` has no `name` key. `@tool` works on bound methods.
+- **The `mcp` extra needs fastmcp 4.1.7 and mcp 2.3 or later** (was fastmcp 2.11.3 and mcp
+  1.30). `ToolNode` itself still runs on fastmcp 3.x; only `mcp_auth=` refuses it.
 
 - **A `ToolNode` lists its MCP server's tools once.** The list is cached for the life of the node (`mcp_cache_tools=True`), which saves a connect and list call per model call. Tools you add to the server later, and tools you remove, are not seen until you call `await tool_node.refresh_mcp_tools()`. If your server changes its tools while the process runs, build the node with `mcp_cache_tools=False` to list on every model call. A failed listing is never cached.
 - **More `ToolNode` options for MCP, all optional:** `mcp_prefix`, `mcp_max_result_chars`, `mcp_max_description_chars`, `mcp_cache_tools` and `mcp_connect_timeout`. The connect timeout defaults to 30 seconds, so an MCP server that takes longer than that to accept a connection fails the call. Pass `mcp_connect_timeout=None` to wait without a limit. See [Tools](/docs/reference/python/tools).
@@ -285,6 +299,15 @@ Migration steps:
 
 ### Publishers and multi-agent
 
+- **Tracing sends message content and state by default.** The OTEL, Phoenix, Logfire and
+  LangSmith publishers default to `ObservabilityLevel.FULL` (was `STANDARD`). Set
+  `level=ObservabilityLevel.STANDARD` (or `"level": "standard"`) or `SPANS` to keep content out
+  of the trace backend.
+- **Span names follow the OTEL GenAI conventions, one trace per run.** The run is
+  `invoke_agent 10xgraph` (was `tenxgraph.graph`), an LLM call `chat {model}` (was
+  `tenxgraph.llm`), a tool call `execute_tool {tool}` (was `tenxgraph.tool`), and a node span
+  carries the node's name (was `tenxgraph.node`). Update dashboards and filters that match the old
+  names.
 - **Background work is best-effort.** Sync `invoke()` and `stream()` wait up to `shutdown_timeout` (30 s) for pending events, memory writes and thread naming. `ainvoke()` and `astream()` do not wait: call `await graph.aclose()` before exit. At most 1000 background tasks can be pending; beyond that new ones are dropped (WARNING at most every 5 s, counter `background_task_manager.tasks_dropped`). Delivery is at-most-once with no retry.
 - **Sync calls inside a running event loop raise `RuntimeError`.** `invoke()`, `stream()`, `stop()` and sync checkpointer methods such as `get_state()` name the async method to use. Async id factories (`AsyncIDGenerator`) now work.
 - **A run refused while the graph is closing** sends a terminal error chunk with `data.code = "SERVICE_UNAVAILABLE"` and `retry_after_seconds`, and no `done` chunk. A WebSocket then closes with 1012.

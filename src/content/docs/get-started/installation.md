@@ -4,7 +4,7 @@ seoTitle: Install 10xGraph (Python and TypeScript)
 description: Install 10xGraph and the API server with pip on Python 3.12 or newer, add provider extras and a checkpointer, verify the CLI, and install the TypeScript client.
 section: "Get started"
 order: 30
-updated: "2026-11-10"
+updated: "2026-11-16"
 faq:
   - q: "Which Python version does 10xGraph need?"
     a: "Python 3.12 or newer. Both the core package and the API package declare requires-python >=3.12, so pip refuses to install them on an older interpreter."

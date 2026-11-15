@@ -43,6 +43,13 @@ function contentLastmod() {
       map.set(`${SITE_URL}${prefix}${slug ? `/${slug}` : ''}`, new Date(date[1]).toISOString());
     }
   }
+  // The changelog page changes with every release: use the newest release date.
+  let newest = '';
+  for (const file of walk('src/content/releases')) {
+    const m = readFileSync(file, 'utf8').match(/^date:\s*['"]?([0-9-]{10})/m);
+    if (m && m[1] > newest) newest = m[1];
+  }
+  if (newest) map.set(`${SITE_URL}/changelog`, new Date(newest).toISOString());
   return map;
 }
 const lastmod = contentLastmod();
