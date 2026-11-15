@@ -65,7 +65,7 @@ html:has(.home) { scroll-behavior: smooth; }
 }
 .home .hero .sub{margin:26px 0 0;max-width:33em;color:var(--sub);font-size:clamp(1rem,1.25vw,1.1rem);line-height:1.68}
 .home .hero .cta-row{margin-top:32px}
-.home .hero .star{margin-top:10px}
+.home .hero .star{margin-top:10px;gap:8px}
 .home .provider{position:relative;margin-top:clamp(36px,5vw,64px);padding-top:18px;border-top:1px solid var(--line);font-size:.92rem;color:var(--faint);display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline}
 @media (max-width:1020px){
 .home .hero-grid{grid-template-columns:minmax(0,1fr)}

@@ -25,7 +25,6 @@ export const NAV = [
   { label: 'Docs', href: '/docs' },
   { label: 'Docs map', href: '/docs/map', wideOnly: true },
   { label: 'Blog', href: '/blog' },
-  { label: 'GitHub', href: SITE.github },
 ] as const;
 
 // Blog categories. Every post has exactly one `kind`; each kind with posts gets /blog/kind/<kind>.

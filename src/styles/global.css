@@ -104,6 +104,11 @@ code, pre { font-family: var(--f-mono); }
 .version-pill { display: inline-flex; align-items: center; min-height: 26px; padding: 0 9px; border: 1px solid var(--line-2); border-radius: 999px; font: 400 0.72rem var(--f-mono); color: var(--muted); text-decoration: none; }
 .version-pill:hover { color: var(--text); border-color: var(--accent-line); }
 @media (max-width: 640px) { .version-pill { display: none; } }
+.star-btn { position: relative; flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 999px; font: 400 0.72rem var(--f-mono); color: var(--muted); text-decoration: none; transition: color .18s, border-color .18s; }
+.star-btn::after { content: ''; position: absolute; inset: -7px -4px; }
+.star-btn:hover { color: var(--text); border-color: var(--accent-line); }
+.star-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; color: var(--text); }
+@media (max-width: 480px) { .star-btn { width: 28px; padding: 0; justify-content: center; } .star-btn span { display: none; } .star-btn::after { inset: -7px; } }
 .wordmark { font: 700 1.3rem var(--f-display); letter-spacing: -0.04em; color: var(--text); text-decoration: none; display: inline-flex; align-items: center; gap: 0.32em; }
 .wordmark-mark { flex: none; width: 1.05em; height: 1.05em; }
 .site-header nav { margin-left: auto; }
@@ -119,10 +124,10 @@ code, pre { font-family: var(--f-mono); }
   .site-header nav a { padding: 0 8px; font-size: 0.88rem; }
   .search-trigger, .theme-toggle { flex: none; }
 }
-/* Phones: GitHub stays in the footer, so the header keeps room for search and the theme toggle. */
 @media (max-width: 1023.98px) { .site-header nav li.nav-wide { display: none; } }
-@media (max-width: 480px) { .site-header nav li:last-child { display: none; } }
-@media (max-width: 360px) { .site-header nav a { padding: 0 6px; } .wordmark span { display: none; } }
+/* Phones: Blog stays in the footer, so the header keeps room for Star, search and the theme toggle. */
+@media (max-width: 480px) { .site-header nav li:last-child { display: none; } .header-row { gap: 4px; } .site-header nav a { padding: 0 6px; font-size: 0.84rem; } }
+@media (max-width: 360px) { .site-header nav a { padding: 0 5px; } .wordmark span { display: none; } }
 
 /* buttons */
 .btn { display: inline-flex; align-items: center; min-height: 48px; padding: 0 22px; border-radius: 8px; font: 600 1rem var(--f-body); text-decoration: none; }
