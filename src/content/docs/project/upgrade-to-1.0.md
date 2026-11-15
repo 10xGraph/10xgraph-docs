@@ -453,6 +453,8 @@ Authorization backends are replaced; see [Auth, roles and reach](#auth-roles-and
   `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512`, `EdDSA`). `none`, an empty value
   or any other value stops startup. Startup also stops if PyJWT is missing with `"auth": "jwt"`,
   and the `auth` value must be exactly `"jwt"`.
+- **With `cache_store.token_revocation` on, every token needs a `jti` claim.** A token without a usable `jti` (a non-empty string or an integer) answers 401 `INVALID_TOKEN` ("Invalid token, jti missing"), also from a custom `BaseAuth` class. Issue tokens with a `jti`, or turn revocation off.
+- **A token that carries an `aud` claim is refused while `JWT_AUDIENCE` is unset** (401 `INVALID_TOKEN`). Set `JWT_AUDIENCE` to the value your tokens carry. A missing tenant claim or a `__system__` user id also answers `INVALID_TOKEN`.
 - **`graph:setup` is gone from the permission list.** The setup endpoint no longer exists.
 - **Graph validation errors use the code `VALIDATION_ERROR`.** The duplicate `AGENTFLOW_VALIDATION_ERROR` is gone; match on `VALIDATION_ERROR`.
 - **A run that hits its recursion limit answers 422 (`GRAPH_RECURSION_LIMIT`),** not 500.

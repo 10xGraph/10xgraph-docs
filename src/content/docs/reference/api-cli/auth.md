@@ -70,7 +70,7 @@ The built-in backend requires:
 | `exp` | Expiry time, required. No token is treated as permanently valid; a missing `exp` is rejected with 401. |
 | `user_id` | Identity key. The `sub` claim is not accepted; you must use `user_id`. It must be a non-empty string or a whole number (not a boolean). A number is stored as a string. Anything else, such as an empty or whitespace-only string, a boolean, a float, a list or an object, is rejected with 401. |
 
-If `JWT_ISSUER` or `JWT_AUDIENCE` is set, the matching `iss` or `aud` claim is also required.
+`JWT_ISSUER` and `JWT_AUDIENCE` are both off when unset or empty. With `JWT_ISSUER` unset, the issuer is not checked: a token with any `iss`, or none, is accepted. With it set, the token must carry `iss` and it must match exactly. With `JWT_AUDIENCE` unset, a token without `aud` is accepted, but a token that carries an `aud` claim is refused. With it set, the token must carry `aud` and it must match. A failure of either check answers 401 `INVALID_TOKEN`. Set both in production when the same signing key or identity provider also issues tokens for other services.
 
 Other claims (`roles`, `scopes`, `email`, custom fields) are kept in `identity.claims`. The claims named in `auth.roles_claim`, `auth.permissions_claim` and `auth.tenant_claims` also drive permissions, reach and tenant values.
 
@@ -101,10 +101,14 @@ Set `JWT_MAX_TOKEN_AGE_SECONDS` to refuse tokens older than that many seconds, c
 | 401 | `INVALID_TOKEN` | No credential was presented (missing Authorization header, missing WebSocket auth, missing query param) |
 | 401 | `EXPIRED_TOKEN` | Token `exp` is in the past, or the token is older than `JWT_MAX_TOKEN_AGE_SECONDS` by its `iat` |
 | 401 | `INVALID_TOKEN` | Signature or structure is invalid, `user_id` is missing or malformed, or a `scope` or `scopes` claim has the wrong type |
-| 401 | (message "Invalid token, please login again") | A configured `tenant_claims` claim is missing, or the roles or permissions claim is malformed |
+| 401 | `INVALID_TOKEN` (message "Invalid token, please login again") | A configured `tenant_claims` claim is missing, or the roles or permissions claim is malformed |
+| 401 | `INVALID_TOKEN` | The `user_id` starts with the reserved prefix `__system__`, or `cache_store.token_revocation` is on and the token has no usable `jti` (message "Invalid token, jti missing") |
+| 401 | `REVOKED_TOKEN` | The token, or all of the user's tokens, were revoked |
 | 500 | `JWT_SETTINGS_NOT_CONFIGURED` | `JWT_SECRET_KEY` or `JWT_ALGORITHM` is unset at request time |
 
 On WebSocket routes, errors become a clean close with code 1008 instead of an HTTP response.
+
+Client action: refresh the token on `EXPIRED_TOKEN`; sign in again on `INVALID_TOKEN` or `REVOKED_TOKEN`.
 
 ### Generating test tokens
 
@@ -166,7 +170,7 @@ Provide your own `BaseAuth` subclass when you need integration with an internal 
 
 The `path` accepts four forms: `auth_app:Cls` (a top-level module in the project folder), `auth_app.py:Cls`, `pkg.mod:Cls` (a dotted package path) and `pkg/mod.py:Cls` (a file path). A path that does not exist raises an error naming it.
 
-Subclass `BaseAuth` and implement `authenticate`. The method is **synchronous** and receives the request, response, and credential:
+Subclass `BaseAuth` and implement `authenticate`. The method is `async def` (the server awaits it) and receives the request, response, and credential:
 
 ```python
 from typing import Any
@@ -175,7 +179,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from tenxgraph_api import BaseAuth
 
 class MyAuthBackend(BaseAuth):
-    def authenticate(
+    async def authenticate(
         self,
         request: Request,  # Request or WebSocket (HTTPConnection)
         response: Response,
@@ -199,9 +203,9 @@ class MyAuthBackend(BaseAuth):
         }
 ```
 
-<aside class="callout callout-warning" role="note"><p class="callout-title">`authenticate` must be synchronous</p>
+<aside class="callout callout-warning" role="note"><p class="callout-title">`authenticate` must be `async def`</p>
 
-The server calls `authenticate(...)` without `await`. If you declare it `async def`, you return an un-awaited coroutine and auth fails silently. Keep it a plain `def`. For non-Bearer schemes (API keys, cookies), ignore `credential` and read `request.headers` directly.
+The server awaits `authenticate(...)`. A plain `def` is not supported, so a custom class written that way must change to `async def`. A slow lookup no longer blocks the event loop. For non-Bearer schemes (API keys, cookies), ignore `credential` and read `request.headers` directly.
 
 </aside>
 
@@ -323,6 +327,8 @@ Revoke a token (by `jti`) or all of a user's tokens with `10xgraph revoke`. The 
 }
 ```
 
+With `token_revocation` on, every token must carry a `jti` claim (a non-empty string or an integer). A token without it answers 401 `INVALID_TOKEN` ("Invalid token, jti missing"), because one token is revoked by its `jti`. A custom `BaseAuth` class must return `jti` in its claims too. With revocation off, `jti` stays optional. A revoked token answers 401 `REVOKED_TOKEN`, or a 1008 close on a WebSocket.
+
 `cache_store.token_revocation` is `true`, `false`, or an object: `{"enabled": true, "token_lifetime": <seconds>, "user_ttl": <seconds>}`. `user_ttl` is how long a per-user cutoff is kept and defaults to 30 days; `null` keeps entries forever. A string value is a config error.
 
 Revocation fails closed: if the cache store raises an error, requests that need the check answer `503`. With an in-memory cache store in production, or `WEB_CONCURRENCY` above 1, the server warns that revocations only reach this process; set `cache_store.type` to `redis` (or a shared custom store).
@@ -333,7 +339,7 @@ Revocation fails closed: if the cache store raises an error, requests that need 
 from tenxgraph_api import BaseAuth
 
 class MyAuth(BaseAuth):
-    def authenticate(self, request, response, credential): ...
+    async def authenticate(self, request, response, credential): ...
 
     async def authorize(self, identity, permission, resource=None) -> bool:
         """True to allow, False for 403."""

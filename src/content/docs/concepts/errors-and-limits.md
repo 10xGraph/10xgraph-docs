@@ -192,6 +192,10 @@ The API has no route to import thread history, so there is no permission for it.
 
 The API server limits each request: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. A request over a limit gets 422. `initial_state`, `config` and `resume` may be nested no deeper than 64 levels; deeper also gets 422 (`VALIDATION_ERROR`). On AG-UI the limits apply to the trailing turn, and the full history gets a cap of 10,000 messages. The limits are fixed. See [Graph endpoints](/docs/reference/rest-api/graph).
 
+The server also caps the shape of client dicts: `config`, `initial_state` and `resume` may hold at most 1,000 keys per object, 10,000 items per list and 200,000 values in all. The nesting depth limit is the `MAX_NESTING_DEPTH` setting (64 unless changed); it also covers message `metadata`, `raw` and content blocks. The key, item and value counts are not applied to message `metadata`. Text the database cannot store, a NUL character or a lone surrogate, is refused with 422 before the run starts when it is in a message or in caller state. Anywhere else (for example a `search` value or message feedback) Postgres refuses it and the server answers 422 `INVALID_REQUEST_DATA`.
+
+The server does not limit the length of a single string inside `config`, inside message `metadata` or inside a non-text block. Only the whole-body cap `MAX_REQUEST_SIZE` (10 MB unless changed) bounds those. If your application needs tighter rules, such as a maximum length for a value your frontend sends in `config`, lower `MAX_REQUEST_SIZE`, restrict what clients may send with `runs.config_keys` and `runs.state_keys`, and write your own input validator. See [Writing a validator](/docs/concepts/security-and-validators#writing-a-validator).
+
 ### State and message size
 
 There is no enforced maximum state size, but each state snapshot is persisted to the checkpointer. Storing very large state (gigabytes of uncompressed text) will stress your database. Trim context regularly with `MessageContextManager` or `SummaryContextManager` to keep state size reasonable. See [Context management](/docs/concepts/context-management).

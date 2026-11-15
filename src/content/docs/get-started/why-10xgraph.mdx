@@ -151,7 +151,7 @@ from tenxgraph_api import BaseAuth
 
 
 class MyAuth(BaseAuth):
-    def authenticate(
+    async def authenticate(
         self,
         request: Request,
         response: Response,
@@ -195,7 +195,7 @@ from tenxgraph_api import BaseAuth
 
 
 class TeamAccess(BaseAuth):
-    def authenticate(self, request, response, credential):
+    async def authenticate(self, request, response, credential):
         ...  # verify the credential and return claims with user_id
 
     async def authorize(self, identity, permission, resource=None) -> bool:

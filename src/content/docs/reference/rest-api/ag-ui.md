@@ -171,6 +171,8 @@ A browser tool cannot replace a server tool: if the `ToolNode` already has a too
 | Description | 4096 characters |
 | Parameters schema | 16 KB as JSON |
 
+With `ag_ui.allow_client_tools` true, a client tool named like a server tool (a local or MCP tool of the graph) is refused with 422 before the run starts (`tools[1]: 'get_weather' is the name of a server tool`). A client tool that repeats a name declared under `remote_tools` is accepted.
+
 With `ag_ui.allow_client_tools` set to `false`, tools sent by the client are ignored and only [`remote_tools`](/docs/reference/api-cli/configuration#remote_tools) from `10xgraph.json` are offered.
 
 ---

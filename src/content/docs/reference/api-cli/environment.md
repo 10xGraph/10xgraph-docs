@@ -125,8 +125,8 @@ In development the same combination only logs a warning, which tells you the dep
 | --- | --- | --- |
 | `JWT_SECRET_KEY` | Secret key for JWT signing and verification. No default. | `auth: "jwt"` |
 | `JWT_ALGORITHM` | JWT algorithm. Default `HS256`. Allowed values: `HS256`, `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512` and `EdDSA`, spelled exactly. `none`, an empty value or any other value stops startup. | `auth: "jwt"` |
-| `JWT_ISSUER` | Required `iss` claim. Unset means not checked. | Optional |
-| `JWT_AUDIENCE` | Required `aud` claim. Unset means not checked. | Optional |
+| `JWT_ISSUER` | Required `iss` claim. Unset or empty: the issuer is not checked and a token with any `iss`, or none, is accepted. Set: the token must carry `iss` and it must match exactly, else 401 `INVALID_TOKEN`. | Optional |
+| `JWT_AUDIENCE` | Required `aud` claim. Unset or empty: a token without `aud` is accepted, but a token that carries `aud` is refused (401 `INVALID_TOKEN`). Set: the token must carry `aud` and it must match, else 401 `INVALID_TOKEN`. | Optional |
 | `JWT_SECRET_KEYS` | Extra verification keys for rotation, as a JSON list of `{"kid": "...", "key": "..."}` objects or plain strings. Tried beside `JWT_SECRET_KEY`, which keeps working unchanged. Unset by default. See [rotate the signing key](/docs/reference/api-cli/auth#rotating-the-signing-key). | Optional |
 | `JWT_MAX_TOKEN_AGE_SECONDS` | Refuse a token older than this many seconds by its `iat` claim, and refuse a token with no `iat`. Unset (off) by default. | Optional |
 

@@ -153,7 +153,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from tenxgraph_api import BaseAuth
 
 class FirebaseAuth(BaseAuth):  # assumes firebase_admin is installed and initialized
-    def authenticate(
+    async def authenticate(
         self, request: Request, response: Response,
         credential: HTTPAuthorizationCredentials | None,
     ) -> dict[str, Any] | None:
@@ -166,7 +166,7 @@ class FirebaseAuth(BaseAuth):  # assumes firebase_admin is installed and initial
             return None  # treated as an anonymous user
 ```
 
-Important: `authenticate` is **synchronous**. Declaring it `async def` returns an un-awaited coroutine and breaks auth.
+Important: `authenticate` is **async**. Declare it `async def`; the server awaits it, so a slow lookup does not block the event loop.
 
 ```json
 {
@@ -185,7 +185,7 @@ Authorization is separate from authentication. After the user is identified, the
 from tenxgraph_api import BaseAuth
 
 class TenantAuth(BaseAuth):
-    def authenticate(self, request, response, credential):
+    async def authenticate(self, request, response, credential):
         ...  # verify the credential and return claims that include user_id
 
     async def authorize(self, identity, permission, resource=None) -> bool:
