@@ -17,6 +17,7 @@ One event per decision or change, with ids and outcomes only:
 
 - Every permission check and thread, file or task access check: allowed, denied or not found.
 - Authentication failures: a missing, invalid or expired token, rejected claims, a reserved identity, a revoked token.
+- Refusals before a handler runs: an input validator rejection, a request body over the size limit, a rate-limit refusal, and a rate limiter whose backend is unreachable.
 - Successful changes: writing or clearing thread state, message feedback, deleting a thread or message, writing or deleting a memory, uploading or deleting a file, stopping or fixing a run, starting, cancelling or rescheduling a task, and revoking a token or user (through the API and `10xgraph revoke`).
 
 ## What it never records
@@ -37,7 +38,7 @@ Prompts, answers, message text, file contents, tokens, and claims other than ids
 |---|---|
 | `v` | Event schema version. |
 | `ts` | UTC timestamp. |
-| `event` | `access`, `auth` or `change`. |
+| `event` | `access`, `auth`, `change`, `input` or `rate_limit`. |
 | `request_id` | The request id, also returned on the response. |
 | `transport` | `http` or `ws` (WebSocket). |
 | `user_id` | The verified caller. `null` when the caller is unknown, for example a failed authentication, or when auth is off. |
@@ -46,7 +47,7 @@ Prompts, answers, message text, file contents, tokens, and claims other than ids
 | `action` | The permission checked, as `resource:action`. |
 | `resource` | The resource named by the request, such as `thread/<id>`. |
 | `result` | See the event types below. |
-| `reason` | Why an authentication failed. `null` otherwise. |
+| `reason` | Why an authentication failed, an input was refused or a request was rate limited. `null` otherwise. |
 | `client_ip` | The client address the [rate limiter](/docs/server/rate-limiting) uses, with its trusted-proxy settings. Without a rate limit, the socket peer address. |
 | `count` | On `change` events, how many items the service reports it changed, when it returns a count. |
 
@@ -57,6 +58,8 @@ Prompts, answers, message text, file contents, tokens, and claims other than ids
 | `access` | Every permission check and every check of a thread named in a request, frame or body. | `allowed`, `denied` or `not_found` |
 | `auth` | A token is missing, invalid or expired, claims are rejected, the identity is reserved, or the token is revoked. | `failed`, with `reason` |
 | `change` | After a successful delete or write, file upload, task change, or revocation. | `success` |
+| `input` | A validator rejects the request (`reason` `validation`), or the body is over the size limit (`reason` `request_too_large`). | `denied`, with `reason` |
+| `rate_limit` | A request is refused with 429 (`reason` `limit_exceeded`, `denied`), or the limiter's backend is down and `fail_open` is off, answered 503 (`reason` `unavailable`, `failed`). | `denied` or `failed`, with `reason` |
 
 ## Configure
 

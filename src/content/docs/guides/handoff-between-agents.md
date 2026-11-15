@@ -292,7 +292,7 @@ The logs show which nodes execute in order, making it easy to confirm the routin
 
 ## Run it in production
 
-Handoffs are decided inside the graph, and only a handoff tool registered on the `ToolNode` can move a run to another node, so a prompt-injected `transfer_to_*` call is an ordinary failed tool call. The caller can still start a run at a chosen node with `current_node`; restrict that with `runs.state_keys` if your graph needs an entry guard. See the [Security model](/docs/production/security-model).
+Handoffs are decided inside the graph, and only a handoff tool registered on the `ToolNode` can move a run to another node, so a prompt-injected `transfer_to_*` call is an ordinary failed tool call. A caller can start a run at a chosen node with `current_node` only if you list it in `runs.state_keys`, which is empty by default; leave it off if your graph needs an entry guard. See the [Security model](/docs/production/security-model).
 
 ## Related pages
 

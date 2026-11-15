@@ -174,19 +174,26 @@ Only keys that already exist as fields on your state class are applied; `context
 
 ## What clients can write through the API
 
-When you serve the graph with `10xgraph dev`, a client can set custom state fields on invoke, stream and WebSocket `initial_state`, and with `PUT /v1/threads/{thread_id}/state`. This is by design: a frontend can send a selected ID straight into state without spending a model turn on it.
+When you serve the graph with `10xgraph dev`, a client can set custom state fields on invoke, stream and WebSocket `initial_state`, with `PUT /v1/threads/{thread_id}/state` and in the AG-UI `state` field, but only the keys you list in `runs.state_keys` in `10xgraph.json`. The list is empty by default, so a client can set none until you allow some. A frontend can then send a selected ID straight into state without spending a model turn on it.
 
 The server limits what a client can write:
 
 | Client input | Result |
 |---|---|
-| Custom fields you defined on your state class | Accepted, if the value matches the field type. A wrong type returns 422 and names the field. |
+| Custom fields you defined on your state class | Accepted only if listed in `runs.state_keys`, and if the value matches the field type. An unlisted key returns 422. A wrong type returns 422 and names the field. |
 | `context_summary` or `execution_meta` | Always 422. These built-in fields are never client-writable. |
-| `current_node` | Accepted if it names a node in the graph. An unknown node returns 422. |
+| `current_node` | Accepted if it is listed in `runs.state_keys` and names a node in the graph. An unknown node returns 422. |
 | Messages in `context` | User messages only. Roles `assistant` and `system` return 422. A `tool` message is accepted only as `tool_result` blocks that answer a pending client tool call. |
 | `message_id` on a message | Ignored. The server generates the id. |
 
-To restrict which custom keys clients may set, list them in `runs.state_keys` in `10xgraph.json`. When it is set, any other key is refused.
+To let clients set custom keys, list them in `runs.state_keys` in `10xgraph.json`. Any other key is refused with 422. `context` in `PUT` state is always allowed.
+
+```json
+{
+  "agent": "graph.react:app",
+  "runs": { "state_keys": ["selected_job_id"] }
+}
+```
 
 <aside class="callout callout-warning" role="warning"><p class="callout-title">Never read identity from state</p>
 <p>Because clients can write custom state fields, a field such as <code>user_id</code>, <code>tenant_id</code>, <code>role</code> or <code>account</code> in state is not proof of who is calling. Do not use it for access checks, database filters or billing in tools or nodes. Take the user from the authenticated config with <code>get_identity(config)</code> from <code>tenxgraph.core.authz</code>, which clients cannot set. See <a href="/docs/guides/authorization-scopes">Authorization scopes</a>. The <code>user_id</code> field in the examples on this page is a display value only.</p></aside>
@@ -484,7 +491,7 @@ This ensures each graph instance gets its own dict/list, not a shared one (a com
 
 ## Run it in production
 
-Over the API, callers can set custom state fields on purpose (a frontend picker can send its selection straight into state). To limit which keys clients may write, list them in `runs.state_keys` in `10xgraph.json`. Built-in fields such as `context_summary` and `execution_meta` are never writable through the API, and identity must come from the authenticated user, never from state. See [Configure the server](/docs/server/configure) and [Invoke and stream](/docs/server/invoke-and-stream).
+Over the API, callers can set the custom state fields you list in `runs.state_keys` in `10xgraph.json` (a frontend picker can send its selection straight into state). Clients can set no key until you list it. Built-in fields such as `context_summary` and `execution_meta` are never writable through the API, and identity must come from the authenticated user, never from state. See [Configure the server](/docs/server/configure) and [Invoke and stream](/docs/server/invoke-and-stream).
 
 ## Next steps
 

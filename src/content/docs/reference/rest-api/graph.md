@@ -57,7 +57,7 @@ Run the graph and return the complete result when all nodes finish.
 | `resume` | any | no | Answer for a thread paused by [`interrupt()`](/docs/guides/add-human-approval). The paused node runs again and `interrupt()` returns this value; `null` means cancelled. Send it only to resume a paused thread. Nested no deeper than 64 levels. |
 | `interrupt_id` | string | no | The `id` of the interrupt `resume` answers. Take it from `execution_meta.interrupt_data.interrupt.id` in the thread state. If the thread is not paused, or is paused at a different interrupt, the request gets `409` before anything runs. Ignored without `resume`. |
 | `on_busy` | string | no | `wait` (default) or `cancel`. What to do when another run is active on the thread (see [One run per thread](#one-run-per-thread)). |
-| `initial_state` | object | no | Initial state for the run. Custom fields and `current_node` are allowed; built-in fields are not (see input rules below). Nested no deeper than 64 levels. |
+| `initial_state` | object | no | Initial state for the run. Only keys listed in `runs.state_keys` are accepted, none by default; built-in fields never are (see input rules below). Nested no deeper than 64 levels. |
 | `config` | object | no | Run configuration. Nested no deeper than 64 levels. |
 | `config.thread_id` | string | no | Id of an existing thread to continue. Must match `^[A-Za-z0-9._:@-]{1,128}$`, else `422`. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.meta.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `404`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
 | `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `collection` and `_`-prefixed keys. A client cannot choose a memory collection; it is ignored, not refused. See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). |
@@ -68,12 +68,13 @@ Run the graph and return the complete result when all nodes finish.
 
 - A message with role `assistant` or `system`. Clients send user messages only.
 - A `tool` message that is not made of `tool_result` blocks, or that does not answer a remote tool call waiting for a result.
+- A key in `initial_state` that is not listed in `runs.state_keys` (an empty list by default). `current_node` needs listing too.
 - `context_summary` or `execution_meta` in `initial_state`. Clients can never write these built-in fields.
 - A `current_node` in `initial_state` that is not a node in the graph.
 - A state value whose type does not match the state field. The error names the field.
 - An `initial_state`, `config` or `resume` value nested deeper than 64 levels. The answer is `422` with code `VALIDATION_ERROR`.
 
-Custom state fields are allowed. If the operator set `runs.state_keys` in `10xgraph.json`, only the listed keys are accepted. The server replaces any `message_id` you send with its own. The same rules apply to `POST /v1/graph/stream` and the WebSocket.
+Custom state fields are denied unless the operator lists them in `runs.state_keys` in `10xgraph.json`; only listed keys are accepted. The server replaces any `message_id` you send with its own. The same rules apply to `POST /v1/graph/stream` and the WebSocket.
 
 **Size limits.** At most 500 messages per request, 100 content blocks per message, and 1,000,000 characters of text in total across text blocks. A request over a limit gets `422` with a message that names the limit, in development and production alike. The limits are fixed and apply to invoke, stream and the WebSocket (`messages` and `tool_result`), and to `PUT /v1/threads/{id}/state` `context` and `POST /v1/threads/{id}/messages`. [AG-UI](/docs/reference/rest-api/ag-ui#request-size-limits) applies them to the trailing turn.
 

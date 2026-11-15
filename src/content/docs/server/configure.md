@@ -307,7 +307,7 @@ The old `graph_introspection` key is removed and refuses to boot. See [Migrating
 
 ## Keys the server owns in request config
 
-A client can send a `config` object with a run, and your nodes and tools can read its keys. The server drops these keys from client config before the graph sees them (no error is returned): `user`, `user_id`, `remote_tools`, `ag_ui`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection`, and any key that starts with `_`. Identity comes from the verified token, never from config. To narrow the rest, list allowed keys in `runs.config_keys` and `runs.state_keys`. See [Invoke and stream](/docs/server/invoke-and-stream).
+A client can send a `config` object with a run, and your nodes and tools can read its keys. The server drops these keys from client config before the graph sees them (no error is returned): `user`, `user_id`, `remote_tools`, `ag_ui`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection`, and any key that starts with `_`. Identity comes from the verified token, never from config. To narrow the rest, list allowed keys in `runs.config_keys`. Client state is separate and closed by default: list the keys a client may set in `runs.state_keys`, or it can set none. See [Invoke and stream](/docs/server/invoke-and-stream).
 
 ## Environment variable expansion in the cache store URL
 

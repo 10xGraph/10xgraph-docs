@@ -239,7 +239,7 @@ console.log(await chat('What did I just say?')); // sees the previous turn
 
 ### Seed the graph with initial state
 
-`initial_state` sets state keys before the run. Use keys that exist in your graph's state schema. The server answers 422 for `context_summary`, `execution_meta`, an unknown `current_node`, or a value of the wrong type. Do not put identity such as a user ID in state and trust it on the server, because any client can set it.
+`initial_state` sets state keys before the run. Use keys that exist in your graph's state schema, and list each one in `runs.state_keys` in the server's `10xgraph.json` (for the example below, `"runs": {"state_keys": ["user_preferences"]}`). A key that is not listed gets 422. The server also answers 422 for `context_summary`, `execution_meta`, an unknown `current_node`, or a value of the wrong type. Do not put identity such as a user ID in state and trust it on the server, because any client can set it.
 
 ```ts
 const result = await client.invoke([Message.text_message('Continue where we left off')], {

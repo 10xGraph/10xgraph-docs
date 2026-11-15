@@ -43,7 +43,7 @@ Same as [`invoke()`](/docs/reference/client/invoke#parameters). An array of `Mes
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `initial_state` | `Record<string, any>` | `undefined` | Initial state values to seed the graph. |
+| `initial_state` | `Record<string, any>` | `undefined` | Initial state values to seed the graph. Each key must be listed in the server's `runs.state_keys`, or it answers 422. |
 | `config` | `Record<string, any>` | `undefined` | Run config. Set `thread_id` at the top level of this object to continue an existing thread. Omit it to start a new one; the server picks the id and sends it on each chunk as `thread_id`. |
 | `recursion_limit` | `number` | `25` | Maximum recursion depth for the graph. |
 | `on_busy` | `'wait' \| 'cancel'` | server default (`'wait'`) | What the server does when another run is active on the same thread. `'wait'` queues behind it for up to 30 seconds, then fails with `ConflictError`. `'cancel'` stops the running run and starts this one. |

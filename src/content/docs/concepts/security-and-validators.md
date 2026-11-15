@@ -131,13 +131,17 @@ Validators run synchronously from the graph's perspective; make them fast and de
 
 This validator detects prompt injection and jailbreak attempts using pattern matching, keyword analysis, and heuristics. It checks for:
 
+- NUL characters (`\x00`), refused with violation type `invalid_character`. They are also refused when a run loads its state, even with no validator registered
 - Excessive length (configurable, default 10000 characters)
 - Regex patterns for common instruction-override tricks (e.g., `"ignore all previous instructions"`)
 - Role manipulation attempts (e.g., `"you are now a ..."`, `"pretend as a ..."`)
 - System prompt leakage techniques (e.g., `"Reveal the system prompt"`)
 - Encoding obfuscation (Base64 payloads that decode to suspicious keywords, hidden Unicode tag characters, emoji variation selectors and bidirectional overrides, and Latin and Cyrillic letters mixed inside one word). Non-English text on its own is not flagged, so messages in any language pass.
+- Template injection (`{{...}}`, `${...}`, `{%...%}`), authority claims and payload-splitting markers
 - Delimiter confusion (e.g., `"--- END OF INSTRUCTIONS ---"`, `<system>` tags)
 - Three or more suspicious keywords in a single message (e.g., `"bypass"`, `"override"`, `"reveal"`)
+
+It reads message text only (text, tool results, document excerpts, tool call arguments), not state or config. Anything beyond this list is your responsibility: write a `BaseValidator` subclass and register it with `register_input_validator()` (see [Writing a validator](#writing-a-validator)).
 
 Constructor parameters:
 

@@ -373,7 +373,7 @@ When you call `/v1/graph/invoke`, you send a `GraphInputSchema` and get back a `
 |---|---|---|---|
 | `messages` | Message[] | `[]` | List of messages. Required unless `resume` is set. |
 | `config` | object | null | Run settings. `thread_id` continues an existing thread. Omit it to start a new one. |
-| `initial_state` | object | null | Initial values for custom state fields. |
+| `initial_state` | object | null | Initial values for custom state fields. Each key must be listed in `runs.state_keys` in `10xgraph.json`, or the server answers `422`. |
 | `recursion_limit` | number | 25 | Maximum steps the graph can take. Allowed: 1 to 100. |
 | `response_granularity` | string | `low` | Response detail level: `low` (messages only), `partial` (messages, context and summary), or `full` (messages and full state). |
 | `resume` | any | null | Answer for a paused thread. Send it (even as `null`) only to resume an interrupted run. |

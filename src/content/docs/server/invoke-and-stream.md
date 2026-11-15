@@ -63,7 +63,7 @@ The request body is a JSON object with these fields:
 |-------|------|---------|-------------|
 | `messages` | array | `[]` | List of user messages to send to the graph. At least one message is required unless `resume` is provided. Roles `assistant` and `system` return 422. |
 | `config` | object | `{}` | Optional configuration for the run, such as `thread_id` for continuing an existing conversation. Omit it to start a new thread. |
-| `initial_state` | object | `null` | Optional initial state for the graph execution. Custom fields and `current_node` are allowed. `context_summary` and `execution_meta` return 422. |
+| `initial_state` | object | `null` | Optional initial state for the graph execution. Only keys listed in `runs.state_keys` are accepted (none by default; any other key returns 422), and `current_node` must be listed too. `context_summary` and `execution_meta` always return 422. |
 | `response_granularity` | string | `low` | How much to return: `low`, `partial` or `full`. `state` in the response is filled only at `full`. |
 | `recursion_limit` | integer | 25 | Maximum depth of graph execution (1-100). Raise this if your graph has deep loops. |
 | `resume` | any | `null` | Set this to resume a paused thread (see human-in-the-loop section below). |
@@ -76,13 +76,14 @@ The server refuses some input with `422`, on invoke, stream and the WebSocket:
 
 - Messages with role `assistant` or `system`. Clients send user messages only.
 - A `tool` message that is not `tool_result` blocks answering a pending remote tool call.
+- A key in `initial_state` that is not listed in `runs.state_keys`. The list is empty by default. The message names the key.
 - `context_summary` or `execution_meta` in `initial_state`. These built-in fields are never client-writable.
 - An unknown `current_node`.
 - A state value that does not match its field type. The error names the field.
 
 Requests are also limited in size: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total. `initial_state`, `config` and `resume` may be nested no deeper than 64 levels; deeper gets `422` with code `VALIDATION_ERROR`. A request over a limit gets `422` with a message that names the limit, in development and production alike. The limits are fixed.
 
-Custom state fields are allowed, so a frontend can pass a selected ID straight into state. To limit which keys clients may set, list them in `runs.state_keys` in `10xgraph.json`. The server ignores any `message_id` you send and generates its own.
+A frontend can pass a selected ID straight into state, once you list its key in `runs.state_keys` in `10xgraph.json` (for example `"runs": {"state_keys": ["selected_job_id"]}`). Without it, clients can set no state key. The server ignores any `message_id` you send and generates its own.
 
 ### Response fields
 

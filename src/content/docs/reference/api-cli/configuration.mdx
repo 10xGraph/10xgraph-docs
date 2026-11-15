@@ -115,7 +115,7 @@ A top-level `authorization` key is refused at startup. Move its rules into `auth
 |---|---|---|---|
 | `runs.thread_ids` | `"server"` or `"client"` | `"server"` | Who may name a new thread. See below |
 | `runs.config_keys` | array of strings or null | `null` (any key) | Allow-list for the keys of a request's `config` |
-| `runs.state_keys` | array of strings or null | `null` (any key) | Allow-list for the keys of a request's `initial_state` |
+| `runs.state_keys` | array of strings or null | `[]` (no key) | State keys a client may set in `initial_state`, `PUT` state and AG-UI `state`. Empty or unset: none |
 | `runs.max_concurrent_per_user` | integer or null | `10` | HTTP graph runs one verified user may have in flight at once |
 | `runs.timeout` | number or null | `300` in production, no limit in development | Longest a single graph run may take, in seconds |
 | `runs.max_parallel_tool_calls` | integer or null | `null` (core decides) | Tool calls one model turn may run at once |
@@ -149,9 +149,22 @@ With `"client"`, any request may start a thread under an id it picks. With owner
 
 ### config_keys and state_keys
 
-When set, a request whose `config` (or `initial_state`) carries any key not on the list is rejected with `422`. `thread_id` and `run_id` are always allowed in `config`. When the key is `null` or absent, any key passes except the ones the server owns, which it drops. Keys the server sets itself, such as `ag_ui` on the AG-UI endpoint and `remote_tools`, are added after this check, so you never list them, and a client cannot send them.
+The two lists behave differently.
 
-Set these when a tool or node trusts a value such as `role` or `plan` from state or config. Without an allow-list, a client can send that value.
+`config_keys` is open by default. When set, a request whose `config` carries any key not on the list is rejected with `422`. `thread_id` and `run_id` are always allowed. When the key is `null` or absent, any key passes except the ones the server owns, which it drops. Keys the server sets itself, such as `ag_ui` on the AG-UI endpoint and `remote_tools`, are added after this check, so you never list them, and a client cannot send them.
+
+`state_keys` is closed by default, like `remote_tools`: only the keys you list may be set by a client, in `initial_state`, in `PUT /v1/threads/{id}/state` and in the AG-UI `state` field. When the key is `null`, `[]` or absent, a client can set none, and any other key answers `422` with a message that names the key and points here. `context` in `PUT` state is always allowed, because it has its own rules for messages. A client that sends no state needs no setting.
+
+```json
+{
+  "agent": "graph.react:app",
+  "runs": { "state_keys": ["preferences", "selected_job_id"] }
+}
+```
+
+List only keys a client may be trusted with. A tool or node that trusts a value such as `role` or `plan` from state must not have that key on the list. `current_node` is a state key too: list it only if clients may start a run at a chosen node.
+
+Upgrading from a version where an unset `state_keys` accepted any key: list every key your clients send, or their requests now get `422`.
 
 ### max_concurrent_per_user
 
