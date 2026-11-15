@@ -55,7 +55,7 @@ The first rows are where the two differ most. Orchestration and retrieval basics
 ## Why teams pair LlamaIndex with 10xGraph, or switch
 
 1. **Retrieval is one tool, not the whole app.** Agent products also call APIs, issue refunds and route between specialists. 10xGraph models the whole flow as a graph, and retrieval is one tool.
-2. **Auth and isolation are generated.** The workflow server docs describe an API token for LlamaCloud deployments and an unprotected local server. 10xGraph's production template adds JWT auth, owner-only threads and a Redis rate limit.
+2. **Auth and isolation are generated.** The workflow server docs describe an API token for LlamaCloud deployments and an unprotected local server. 10xGraph's Full setup adds JWT auth, owner-only threads and a Redis rate limit.
 3. **Side effects survive crashes.** 10xGraph's tool ledger skips tools that already ran when a run resumes. See [replay-safe tools](/docs/concepts/replay-safe-tools).
 4. **Threads persist without extra code.** The checkpointer stores state per `thread_id`, so you do not serialize a context yourself.
 
@@ -134,7 +134,7 @@ app.invoke(
 
 ```bash
 pip install "10xgraph[google-genai,pg_checkpoint]" 10xgraph-api llama-index
-10xgraph init --yes --template production --auth jwt
+10xgraph init --yes --mode full --auth jwt
 10xgraph dev --host 0.0.0.0 --port 8000 --no-open
 10xgraph build --docker-compose --k8s
 ```

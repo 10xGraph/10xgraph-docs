@@ -138,7 +138,9 @@ By default, AG-UI clients can send tools with each request. The model is offered
 }
 ```
 
-With `allow_client_tools: false`, only tools declared in `remote_tools` are offered.
+With `allow_client_tools: false`, only tools declared in `remote_tools` are offered, and tools the client sends are ignored.
+
+With `allow_client_tools` true, a client tool whose name equals a server tool (a local tool or an MCP tool of the graph) is refused with 422 before the run starts, for example `tools[1]: 'get_weather' is the name of a server tool`. A client tool that repeats a name declared under `remote_tools` is accepted.
 
 ### Rate limiting
 

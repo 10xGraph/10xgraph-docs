@@ -81,7 +81,7 @@ curl -X POST http://127.0.0.1:8000/v1/files/upload \
 | `file_id` | Opaque storage key. Reference this from message content blocks. |
 | `mime_type` | The content type the server recorded. |
 | `size_bytes` | Stored size in bytes. |
-| `filename` | Original filename from the upload. |
+| `filename` | The uploaded filename, cleaned: base name only, no control or bidi characters, at most 255 characters. |
 | `extracted_text` | Extracted document text, when `DOCUMENT_HANDLING=extract_text` and the type is extractable. `null` otherwise, and also `null` for HTML, XML, CSV, Markdown, JSON and plain-text files over 5 MiB, which are stored without extraction. |
 | `url` | API-relative retrieval path. |
 | `direct_url` | Signed direct URL, when the storage backend can produce one. |
@@ -102,7 +102,7 @@ Lists the files the caller uploaded, newest first. Files with no recorded owner 
 
 The response `data` has `files` (each with `file_id`, `filename`, `mime_type`, `size_bytes`, `url`, `created_at`), `has_more`, `offset` and `limit`.
 
-It works on every store, cloud (S3, GCS) included. A cloud store keeps a per-owner index, so files stored before `10xgraph` 1.0, or stored with no owner, are not listed. Listing with auth off on a cloud store, and any custom store that cannot enumerate its keys, answers `501`. The same index serves the per-user quotas and the release of a thread's files when the thread is deleted.
+It works on every store, cloud (S3, GCS) included. A cloud store keeps a per-owner index, so files stored before `10xgraph` 1.0, or stored with no owner, are not listed. Listing with auth off, listing with reach `tenant` or `all` on a cloud store (the cloud storage library cannot list a bucket), and any custom store that cannot enumerate its keys, answers `501`. The same index serves the per-user quotas and the release of a thread's files when the thread is deleted.
 
 ---
 
@@ -216,7 +216,8 @@ Uploads fail with `400`, `413` or `415`; reads fail with `404`. A missing permis
 | Status | Description |
 | --- | --- |
 | `400` | Missing filename or empty file. |
-| `422` | The multipart body has no `file` part. Auth is checked before the body is parsed, so an unauthenticated request never gets this far. |
+| `422` | The multipart body has no `file` part, or more than one. Auth is checked before the body is parsed, so an unauthenticated request never gets this far. |
+| `422` | With `DOCUMENT_HANDLING=extract_text` (the default), the server lacks the `media` extra. The message names it (`pip install "10xgraph-api[media]"`) and says to set `DOCUMENT_HANDLING` to `pass_raw` or `skip` instead. |
 | `413` | File exceeds `MEDIA_MAX_SIZE_MB` (or the media service rejects its size). The limit is checked as data arrives in 1 MiB chunks, so uploads are rejected before the whole file is buffered. The same status answers an image over `MEDIA_MAX_IMAGE_PIXELS`, a PDF over `MEDIA_MAX_PDF_MB` or `MEDIA_MAX_PDF_PAGES`, and an upload past the per-user quota (`MEDIA_MAX_FILES_PER_USER`, `MEDIA_MAX_USER_STORAGE_MB`). |
 | `415` | Content type not allowed by `MEDIA_ALLOWED_CONTENT_TYPES`. |
 | `404` | `file_id` not found or owned by another user. |

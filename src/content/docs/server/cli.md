@@ -46,7 +46,7 @@ Each command accepts `--help` to show its full options. Detailed flags and param
 
 ### Create a new project
 
-Start with `10xgraph init` to scaffold your agent project. The command asks three questions: the agent name, the template (Quick Start or Production) and the AI provider. Production writes the recommended setup without asking: JWT auth with owner-only data, a UUID ID generator, and a Redis cache store (reads `REDIS_URL`) with rate limiting and token revocation. WebSocket and AG-UI stay off.
+Start with `10xgraph init` to scaffold your agent project. The command asks three questions: the agent name, the setup (Quick or Full) and the AI provider. Full writes the recommended setup without asking: JWT auth with owner-only data, a UUID ID generator, and a Redis cache store (reads `REDIS_URL`) with rate limiting and token revocation. WebSocket and AG-UI stay off.
 
 If any file init would write already exists, it asks before overwriting (default No) and writes nothing on No. Without a terminal (`--yes`, `--non-interactive`, CI) it stops before writing and lists the files; pass `--force` to overwrite them. `--dry-run` marks the files that already exist.
 
@@ -54,11 +54,13 @@ If any file init would write already exists, it asks before overwriting (default
 10xgraph init
 ```
 
-The scaffold generates a `10xgraph.json` configuration file, graph code, and optional evals and tests. Every question has a matching flag, and flags such as `--auth`, `--cache-store`, `--rate-limit` and `--token-revocation` override parts of the Production setup, so the same scaffold can be reproduced in CI or by coding agents without interaction:
+The scaffold generates a `10xgraph.json` configuration file, graph code, and optional evals and tests. Every question has a matching flag, and flags such as `--auth`, `--cache-store`, `--rate-limit` and `--token-revocation` override parts of the Full setup, so the same scaffold can be reproduced in CI or by coding agents without interaction:
 
 ```bash
-10xgraph init --name MyAgent --template production --auth jwt --yes --non-interactive
+10xgraph init --name MyAgent --mode full --auth jwt --yes --non-interactive
 ```
+
+`--mode quick|full` picks the setup. `--template quick-start|production` still works as an alias of `--mode`.
 
 See [Initialize a project](/docs/server/project-setup) for the full guide.
 

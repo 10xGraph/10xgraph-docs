@@ -4,7 +4,7 @@ seoTitle: Secure a 10xGraph agent with JWT in five minutes
 description: Turn on JWT auth for the quickstart agent, create tokens for two users, and watch the server reject a missing token and a second user reading the first user's thread.
 section: "Get started"
 order: 45
-updated: "2026-10-27"
+updated: "2026-11-15"
 faq:
   - q: Which claims does a token need?
     a: "`exp` and `user_id`. JwtAuth requires `exp` on every token, and rejects a token without `user_id` (or with one that is not a non-empty string or a whole number) with a 401. If you set `JWT_ISSUER` or `JWT_AUDIENCE`, `iss` and `aud` are required too."
@@ -14,36 +14,35 @@ faq:
     a: No. It proves the isolation mechanism. Production also needs a strong secret from a secret store, a durable checkpointer, rate limits and the other items on the production checklist.
 ---
 
-The quickstart server is open: anyone who can reach port 8000 can call the agent and read any thread. This page closes that in five steps and shows the server enforcing it. You only change one config key and set two environment variables. The agent code stays as it is.
+A server without auth is open: anyone who can reach port 8000 can call the agent and read any thread. This page turns on JWT, shows the server refusing a missing token and a second user reading the first user's thread, and explains what that one setting turned on. You change one config key and set one environment variable. The agent code stays as it is.
 
-You need the `agent.py` and `10xgraph.json` from the [quickstart](/docs/get-started/first-agent).
+The [quickstart](/docs/get-started/first-agent) already runs these steps in compact form. This page is the same walk-through with each step explained, so you can read it after the quickstart or on its own. On its own, you need a project from `10xgraph init` (Quick setup) with `graph/agent.py` and `10xgraph.json`, and your provider key in `.env`.
 
 ## 1. Turn on JWT auth
 
-Install the JWT extra, which adds PyJWT:
+Install the JWT extra, which adds PyJWT. If you installed `10xgraph-api[jwt]` in the quickstart, you already have it:
 
 ```bash
 pip install "10xgraph-api[jwt]"
 ```
 
-Change `10xgraph.json` so `auth` is `"jwt"`:
+Change `10xgraph.json` so `auth` is `"jwt"`. Init writes `"agent": "graph.agent:app"`, and every other key stays as it is:
 
 ```json title="10xgraph.json"
 {
-  "agent": "agent:app",
+  "agent": "graph.agent:app",
   "env": ".env",
   "auth": "jwt"
 }
 ```
 
-Set the signing secret and algorithm in the environment of the shell that starts the server. `JWT_ALGORITHM` defaults to `HS256`; the secret has no default, and the server refuses to load without it. For HS algorithms the secret must be at least 32 bytes. A shorter one logs a warning in development and stops the server at startup when `MODE=production`.
+Set the signing secret in the environment of the shell that starts the server. `JWT_ALGORITHM` defaults to `HS256`, so you only set it to use another algorithm; the secret has no default, and the server refuses to load without it. For HS algorithms the secret must be at least 32 bytes. A shorter one logs a warning in development and stops the server at startup when `MODE=production`.
 
 ```bash
 export JWT_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
-export JWT_ALGORITHM="HS256"
 ```
 
-Your provider key must be exported in that same shell, as in the quickstart. Then start the server:
+Your provider key must be available to the server, from `.env` as in the quickstart or exported in that same shell. Stop any running server with Ctrl+C, then start it again:
 
 ```bash
 10xgraph dev --no-open
@@ -51,7 +50,7 @@ Your provider key must be exported in that same shell, as in the quickstart. The
 
 ## 2. Make a token for each user
 
-In a real system your login service signs tokens. For this test, sign two with PyJWT. Run this in the shell where `JWT_SECRET_KEY` is exported:
+In a real system your login service signs tokens. For this test, sign two with PyJWT. Run this in a second terminal where `JWT_SECRET_KEY` is exported to the same value the server uses:
 
 ```python title="make_tokens.py"
 import os
@@ -60,7 +59,7 @@ import time
 import jwt  # PyJWT
 
 secret = os.environ["JWT_SECRET_KEY"]
-algorithm = os.environ["JWT_ALGORITHM"]
+algorithm = os.environ.get("JWT_ALGORITHM", "HS256")
 
 for user_id in ("alice", "bob"):
     token = jwt.encode(
@@ -68,14 +67,14 @@ for user_id in ("alice", "bob"):
         secret,
         algorithm=algorithm,
     )
-    print(f"{user_id.upper()}_TOKEN={token}")
+    print(f"export {user_id.upper()}_TOKEN={token}")
 ```
 
 ```bash
-python make_tokens.py
+eval "$(python make_tokens.py)"
 ```
 
-Copy the two lines into your shell as `export` commands. `JwtAuth` requires two claims: `exp` (a token without it is rejected) and `user_id` (a non-empty string or a whole number). The `user_id` is the identity the server uses for ownership, so it must come from your login service and never from anything the client sends in the request body.
+This sets `ALICE_TOKEN` and `BOB_TOKEN` in your shell. `JwtAuth` requires two claims: `exp` (a token without it is rejected) and `user_id` (a non-empty string or a whole number). The `user_id` is the identity the server uses for ownership, so it must come from your login service and never from anything the client sends in the request body.
 
 ## 3. Call without a token
 
@@ -121,7 +120,7 @@ Setting `auth` to `"jwt"` did more than check a signature:
 
 ## What this does not do
 
-The quickstart still uses `InMemoryCheckpointer`, so threads vanish on restart, and the dev server is a single process. A strong secret from a secret store, a durable checkpointer, rate limits, CORS and the rest are covered next.
+The quickstart agent still uses `InMemoryCheckpointer`, so threads vanish on restart, and the dev server is a single process. A strong secret from a secret store, a durable checkpointer, rate limits, CORS and the rest are covered next.
 
 ## Next
 

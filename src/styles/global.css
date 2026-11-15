@@ -112,7 +112,7 @@ code, pre { font-family: var(--f-mono); }
 .wordmark { font: 700 1.3rem var(--f-display); letter-spacing: -0.04em; color: var(--text); text-decoration: none; display: inline-flex; align-items: center; gap: 0.32em; }
 .wordmark-mark { flex: none; width: 1.05em; height: 1.05em; }
 .site-header nav { margin-left: auto; }
-.site-header ul { display: flex; gap: 2px; list-style: none; margin: 0; padding: 0; }
+.site-header nav ul { display: flex; gap: 2px; list-style: none; margin: 0; padding: 0; }
 .site-header nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; color: var(--muted); text-decoration: none; font-size: 0.94rem; border-radius: 6px; }
 .site-header nav a:hover, .site-header nav a[aria-current='page'] { color: var(--text); }
 .theme-toggle { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface); color: var(--muted); cursor: pointer; }

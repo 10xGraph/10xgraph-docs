@@ -40,10 +40,10 @@ flowchart LR
 mkdir support && cd support
 python -m venv .venv && source .venv/bin/activate
 pip install "10xgraph[google-genai,pg_checkpoint,qdrant]" "10xgraph-api[jwt,redis]"
-10xgraph init --yes --template production 
+10xgraph init --yes --mode full 
 ```
 
-The production template writes `10xgraph.json` with JWT auth, a Redis cache store that reads `REDIS_URL`, a rate limit and token revocation. Two changes matter for this guide. Point the agent at an async factory (step 2), add a store (step 3), and rate-limit by user instead of by address, so one noisy customer cannot spend another customer's quota:
+The Full setup writes `10xgraph.json` with JWT auth, a Redis cache store that reads `REDIS_URL`, a rate limit and token revocation. Two changes matter for this guide. Point the agent at an async factory (step 2), add a store (step 3), and rate-limit by user instead of by address, so one noisy customer cannot spend another customer's quota:
 
 ```json title="10xgraph.json"
 {

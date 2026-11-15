@@ -354,7 +354,7 @@ from fastapi import HTTPException, Request, Response
 from tenxgraph_api import BaseAuth
 
 class TestAuth(BaseAuth):
-    def authenticate(self, request: Request, response: Response, credential):
+    async def authenticate(self, request: Request, response: Response, credential):
         # Extract user from a test header
         user_id = request.headers.get("X-Test-User")
         if not user_id:

@@ -1,6 +1,6 @@
 ---
 title: Security and Validators
-description: "How input validators and PromptInjectionValidator work, the authorization model, and what the production template enables against injection and misuse."
+description: "How input validators and PromptInjectionValidator work, the authorization model, and what the Full setup enables against injection and misuse."
 section: Concepts
 order: 170
 group: "Platform"
@@ -131,13 +131,17 @@ Validators run synchronously from the graph's perspective; make them fast and de
 
 This validator detects prompt injection and jailbreak attempts using pattern matching, keyword analysis, and heuristics. It checks for:
 
+- NUL characters (`\x00`), refused with violation type `invalid_character`. They are also refused when a run loads its state, even with no validator registered. Text from the model or a tool is cleaned instead of refused; see [Errors and limits](/docs/concepts/errors-and-limits)
 - Excessive length (configurable, default 10000 characters)
 - Regex patterns for common instruction-override tricks (e.g., `"ignore all previous instructions"`)
 - Role manipulation attempts (e.g., `"you are now a ..."`, `"pretend as a ..."`)
 - System prompt leakage techniques (e.g., `"Reveal the system prompt"`)
 - Encoding obfuscation (Base64 payloads that decode to suspicious keywords, hidden Unicode tag characters, emoji variation selectors and bidirectional overrides, and Latin and Cyrillic letters mixed inside one word). Non-English text on its own is not flagged, so messages in any language pass.
+- Template injection (`{{...}}`, `${...}`, `{%...%}`), authority claims and payload-splitting markers
 - Delimiter confusion (e.g., `"--- END OF INSTRUCTIONS ---"`, `<system>` tags)
 - Three or more suspicious keywords in a single message (e.g., `"bypass"`, `"override"`, `"reveal"`)
+
+It reads message text only (text, tool results, document excerpts, tool call arguments), not state or config. Anything beyond this list is your responsibility: write a `BaseValidator` subclass and register it with `register_input_validator()` (see [Writing a validator](#writing-a-validator)).
 
 Constructor parameters:
 
@@ -186,9 +190,9 @@ Media that a client sends is untrusted input. Three defaults protect the server:
 - **Uploads.** The API compares the first bytes of an upload with its declared type (`415` on a mismatch), caps text extraction, lets only the owner delete a file (`files:delete`) and deletes files when the messages and threads that use them are deleted. See [Files and multimodal on the server](/docs/server/files-and-multimodal).
 - **File tools.** `file_read`, `file_write` and `file_search` hide `.env`, key files and `.ssh`, `.aws`, `.gnupg` and `.git` folders by default, and `create_file_tools(root)` fixes the root in code. See [File tools](/docs/guides/prebuilt/file-tools).
 
-## What the production template generates
+## What the Full setup generates
 
-When you run `10xgraph init --template production`, the generated project includes a security setup:
+When you run `10xgraph init --mode full`, the generated project includes a security setup:
 
 - `graph/validators/validators.py` defines a `PromptInjectionValidator(strict_mode=True, max_length=10000)` with `max_length=10000` and a short list of suspicious keywords (`"ignore previous"`, `"forget previous"`, `"disregard previous"`, `"circumvent"`, `"remove restrictions"`, `"coupon"`). It no longer blocks everyday words such as `bypass`, `override`, `disable`, `token` or `free`. **Tune this list to your product.** Keywords match whole words.
 

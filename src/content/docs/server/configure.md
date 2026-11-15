@@ -114,7 +114,7 @@ The server loads your container at startup and makes it the global instance. You
 
 ## Generate readable thread names
 
-`thread_name_generator` takes `random` (the default, also when the key is unset), `first_message` (the user's first message, whitespace collapsed, cut to at most 60 characters on a word boundary), `none` (threads stay unnamed but are saved) or a `module:attr` path to your own generator. The server saves every generated name after the run. To write your own, subclass `ThreadNameGenerator`. It gets the user's messages first, then the replies:
+`thread_name_generator` takes `none` (the default, also when the key is unset or `null`; threads stay unnamed but are saved), `random` (a random name), `first_message` (the user's first message, whitespace collapsed, cut to at most 60 characters on a word boundary) or a `module:attr` path to your own generator. The server saves every generated name after the run. To write your own, subclass `ThreadNameGenerator`. It gets the user's messages first, then the replies:
 
 ```python
 # graph/thread_name_generator.py
@@ -200,9 +200,9 @@ The server logs one INFO line at boot that names the store and the config key it
 
 ## What is on by default
 
-This table shows what each setting does when its key is absent from `10xgraph.json`, and what `10xgraph init` writes for each template.
+This table shows what each setting does when its key is absent from `10xgraph.json`, and what `10xgraph init` writes for each setup.
 
-| Setting | Key absent | Quick Start template | Production template |
+| Setting | Key absent | Quick setup | Full setup |
 |---|---|---|---|
 | Auth | Off: every request is accepted | `null` (off) | `jwt` |
 | Roles and reach | Default permission set (all but `admin:*`), reach `own`, when auth is on. Nothing when auth is off | not written | not written (default set, reach `own`) |
@@ -210,7 +210,7 @@ This table shows what each setting does when its key is absent from `10xgraph.js
 | Rate limiting | Off | off | on: 100 requests per 60 seconds, by user, `fail_open` false |
 | Token revocation | Off | off | on |
 | ID generator | The graph's own generator | not written | `uuid` |
-| Thread naming | `random`: new threads get a random name, saved | `null` (random) | a generator class file in `graph/` that you edit |
+| Thread naming | `none`: threads are saved without a name | not written (none) | `first_message` |
 | WebSocket | Routes `/v1/graph/ws` and `/v1/graph/live` mounted; a warning if no WebSocket library is installed | `enabled: false` | `enabled: false` unless you pass `--websocket` |
 | AG-UI | Off | `enabled: false` | `enabled: false` |
 | Startup checks | On: checkpointer and store are fatal if unreachable; the cache store is fatal only with token revocation on (and auth set) or a rate limit with `fail_open` false, otherwise one warning | same | same |
@@ -307,7 +307,7 @@ The old `graph_introspection` key is removed and refuses to boot. See [Migrating
 
 ## Keys the server owns in request config
 
-A client can send a `config` object with a run, and your nodes and tools can read its keys. The server drops these keys from client config before the graph sees them (no error is returned): `user`, `user_id`, `remote_tools`, `ag_ui`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection`, and any key that starts with `_`. Identity comes from the verified token, never from config. To narrow the rest, list allowed keys in `runs.config_keys` and `runs.state_keys`. See [Invoke and stream](/docs/server/invoke-and-stream).
+A client can send a `config` object with a run, and your nodes and tools can read its keys. The server drops these keys from client config before the graph sees them (no error is returned): `user`, `user_id`, `remote_tools`, `ag_ui`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection`, and any key that starts with `_`. Identity comes from the verified token, never from config. To narrow the rest, list allowed keys in `runs.config_keys`. Client state is separate and closed by default: list the keys a client may set in `runs.state_keys`, or it can set none. See [Invoke and stream](/docs/server/invoke-and-stream).
 
 ## Environment variable expansion in the cache store URL
 

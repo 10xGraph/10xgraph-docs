@@ -132,7 +132,7 @@ This is the only wiring the server needs:
 }
 ```
 
-`agent` is `module:attribute`. `env` names the dotenv file loaded before the graph is imported. `auth: null` leaves the API open for local work. For anything reachable from a network, set `"auth": "jwt"` and `JWT_SECRET_KEY`. `10xgraph init` scaffolds a project with the same layout, including a production template with auth, rate limiting and tests.
+`agent` is `module:attribute`. `env` names the dotenv file loaded before the graph is imported. `auth: null` leaves the API open for local work. For anything reachable from a network, set `"auth": "jwt"` and `JWT_SECRET_KEY`. `10xgraph init` scaffolds a project with the same layout, including a Full setup with auth, rate limiting and tests.
 
 The server wraps results in an envelope. An invoke response looks like `{"data": {"messages": [...]}, "metadata": {...}}`. The stream endpoint sends one JSON object per line, each with an `event` (`message`, `state`, `updates` or `error`), and the message chunks carry the assistant text.
 

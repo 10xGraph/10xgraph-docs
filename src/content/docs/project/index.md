@@ -5,7 +5,7 @@ description: "How 10xGraph is run: MIT license, maintained by 10xScale, with a c
 section: Project
 order: 10
 label: Overview
-updated: "2026-11-10"
+updated: "2026-11-16"
 ---
 
 This section covers 10xGraph as a project: who maintains it, how releases are announced, how to report a security problem, where to get help and how to contribute. It is MIT licensed, maintained by 10xScale, at version 1.0, after its October 2026 rename from Agentflow.
@@ -18,7 +18,8 @@ If you plan to upgrade across a breaking change, [Upgrade to 1.0](/docs/project/
 
 | Page | Answers |
 | --- | --- |
-| [Changelog](/changelog) | What shipped, and what "stable" commits us to |
+| [Changelog](/changelog) | What shipped, and which versions are current |
+| [Stability](/docs/project/stability) | What 1.0 commits to, and how a deprecation works |
 | [Upgrade to 1.0](/docs/project/upgrade-to-1.0) | What breaks from 0.10, 0.9 and 0.6, and how to migrate |
 | [Upgrade to 0.9](/docs/project/upgrade-to-0.9) | What broke from 0.8 to 0.9, and how to migrate |
 | [Roadmap](/docs/project/roadmap) | What is missing, partial, or deliberately out of scope |
@@ -33,6 +34,6 @@ If you plan to upgrade across a breaking change, [Upgrade to 1.0](/docs/project/
   no hosted-service requirement.
 - **Maintainer:** [10xScale](https://10xscale.ai), which runs 10xGraph in
   production across its own products.
-- **Stability:** from 1.0 the public API is covered by a deprecation policy. Nothing
-  public is removed without a release of warning.
-- **Requires:** Python 3.12 or newer; Node 18 or newer for the TypeScript client.
+- **Stability:** from 1.0 the public API does not break before 2.0. Anything removed is
+  deprecated first and removed only in 2.0. See [Stability](/docs/project/stability).
+- **Requires:** Python 3.12 or newer; Node 20 or newer for the TypeScript client.

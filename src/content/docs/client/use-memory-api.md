@@ -111,7 +111,8 @@ async function respondWithMemory(userQuestion: string) {
     '</user_memories>',
   ].join('\n');
 
-  // 3. Invoke the agent; the memories travel as a custom state field
+  // 3. Invoke the agent; the memories travel as a custom state field.
+  // The server must list it: "runs": { "state_keys": ["memory_context"] } in 10xgraph.json
   const response = await client.invoke([Message.text_message(userQuestion)], {
     config: threadId ? { thread_id: threadId } : undefined,
     initial_state: { memory_context: marked },

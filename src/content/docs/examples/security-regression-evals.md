@@ -16,7 +16,7 @@ faq:
 
 Prompt injection is a regression risk like any other: a prompt change, a model upgrade or a new tool can quietly make the agent follow text it should ignore. This example adds two checks to a support agent that run in CI. One is an eval set for `10xgraph eval`, where the correct behaviour is "call no tool". The other is a pytest test that fails if the model asks for any tool outside an allow-list.
 
-**Needs:** a project made with `10xgraph init` (the production template already has `evals/` and `tests/`), `pip install "10xgraph[openai]" "10xgraph-api"` and `OPENAI_API_KEY` (or the Google or Anthropic equivalents). These checks call the model for real, so they cost tokens and are not fully deterministic: run each case a few times before you trust a pass.
+**Needs:** a project made with `10xgraph init` (the Full setup already has `evals/` and `tests/`), `pip install "10xgraph[openai]" "10xgraph-api"` and `OPENAI_API_KEY` (or the Google or Anthropic equivalents). These checks call the model for real, so they cost tokens and are not fully deterministic: run each case a few times before you trust a pass.
 
 ## The agent under test
 

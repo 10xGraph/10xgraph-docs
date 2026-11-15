@@ -206,7 +206,7 @@ redis-cli -u redis://redis.internal:6379/0 ping
 
 ### One run per thread
 
-The server runs one graph run at a time on a thread. With a shared cache store configured (Redis), the lock is shared across all instances, so two replicas cannot run the same thread at once. Without one, the lock is per process and does not stop two replicas from running one thread together. A second run waits up to 30 seconds, then gets `409` (`thread is busy`). The lock expires on its own if a worker dies. If the cache store is unreachable, runs proceed without the lock and the error is logged. See [Invoke and stream](/docs/server/invoke-and-stream#one-run-per-thread).
+The server runs one graph run at a time on a thread. With a shared cache store configured (Redis), the lock is shared across all instances, so two replicas cannot run the same thread at once. Without one, the lock is per process and does not stop two replicas from running one thread together. A second run waits up to 30 seconds, then gets `409` (`thread is busy`). The lock expires on its own if a worker dies. If the cache store is unreachable, the lock falls back to a per-process lock, so each worker still runs one run at a time on a thread. See [Invoke and stream](/docs/server/invoke-and-stream#one-run-per-thread).
 
 ### Warnings you may see
 
@@ -282,7 +282,7 @@ SNOWFLAKE_WORKER_ID=2
 
 ### Error text and request limits
 
-With `MODE=production`, error chunks on stream, WebSocket and AG-UI carry a generic message instead of the raw exception text, the same as invoke. Requests are also limited to 500 messages, 100 content blocks per message and 1,000,000 characters of text; over a limit gets `422` naming the limit. `initial_state`, `config` and `resume` may be nested no deeper than 64 levels. Neither needs configuration.
+With `MODE=production`, error chunks on stream, WebSocket and AG-UI carry a generic message instead of the raw exception text, the same as invoke. Requests are also limited to 500 messages, 100 content blocks per message and 1,000,000 characters of text; over a limit gets `422` naming the limit. `initial_state`, `config` and `resume` may be nested no deeper than 64 levels by default (`MAX_NESTING_DEPTH`). Neither needs configuration.
 
 ## 7. Rate limiting
 

@@ -48,15 +48,15 @@ Wherever a command takes `--config` with the default `10xgraph.json`, it uses `a
 
 ## init
 
-Scaffold a new agent project. Interactive `init` asks three questions: the agent name, the template (Quick Start or Production) and the AI provider. Everything else comes from the template.
+Scaffold a new agent project. Interactive `init` asks three questions: the agent name, the setup (Quick or Full) and the AI provider. Everything else comes from the setup.
 
 ```bash
-10xgraph init [--path DIR] [--template quick-start|production] [options]
+10xgraph init [--path DIR] [--mode quick|full] [options]
 ```
 
-**Quick Start** writes a minimal config with auth off and no `cache_store`.
+**Quick** writes a minimal config with auth off and no `cache_store`.
 
-**Production** writes the recommended setup without asking:
+**Full** writes the recommended setup without asking:
 
 - `"auth": "jwt"`
 - `"id_generator": "uuid"`
@@ -72,21 +72,21 @@ The flags are overrides for scripts:
 | `--path`, `-p` | `.` | Directory to initialize |
 | `--force`, `-f` | off | Overwrite existing files |
 | `--name` | inferred | Agent name, required only when it cannot be inferred |
-| `--template` | prompt | `quick-start` or `production` |
+| `--mode` | prompt | `quick` or `full`. `--template quick-start\|production` is an alias |
 | `--provider` | prompt | `google`, `openai` or `anthropic` |
-| `--auth` | `jwt` | Production only: `none`, `jwt` or `custom` |
-| `--cache-store` | `redis` | Production only: `memory` or `redis` |
-| `--rate-limit` / `--no-rate-limit` | on | Production only: add or leave out `cache_store.rate_limit` |
-| `--token-revocation` / `--no-token-revocation` | on with auth | Production only: add or leave out `cache_store.token_revocation`. Ignored with `--auth none` |
+| `--auth` | `jwt` | Full only: `none`, `jwt` or `custom` |
+| `--cache-store` | `redis` | Full only: `memory` or `redis` |
+| `--rate-limit` / `--no-rate-limit` | on | Full only: add or leave out `cache_store.rate_limit` |
+| `--token-revocation` / `--no-token-revocation` | on with auth | Full only: add or leave out `cache_store.token_revocation`. Ignored with `--auth none` |
 | `--websocket` / `--no-websocket` | off | Write `websocket.enabled` |
 | `--yes`, `-y` | off | Accept the defaults without prompting |
 | `--non-interactive` | off | Fail instead of prompting |
 | `--dry-run` | off | Preview without writing files |
 
-Quick Start ignores `--auth`, `--cache-store`, `--rate-limit` and `--token-revocation`. Example for a script:
+Quick ignores `--auth`, `--cache-store`, `--rate-limit` and `--token-revocation`. Example for a script:
 
 ```bash
-10xgraph init --yes --template production --name shop-support --provider openai --cache-store redis
+10xgraph init --yes --mode full --name shop-support --provider openai --cache-store redis
 ```
 
 ## dev

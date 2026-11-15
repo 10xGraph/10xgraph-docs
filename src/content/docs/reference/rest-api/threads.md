@@ -170,7 +170,7 @@ The merge rules are fixed. `context` is appended to the existing list, not repla
 - Any `message_id` you send in `context` is ignored. The server generates the ids.
 - A value that does not match the type of its state field returns `422` and names the field. This includes `context`, which must be a list of messages.
 
-Custom state fields are allowed. If the operator set `runs.state_keys` in `10xgraph.json`, only the listed keys are accepted.
+Custom state fields are denied unless the operator lists them in `runs.state_keys` in `10xgraph.json`; only listed keys are accepted. `context` is always allowed.
 
 ```bash
 # Add a custom field to the state before the first invoke

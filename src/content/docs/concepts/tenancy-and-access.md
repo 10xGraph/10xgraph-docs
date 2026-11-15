@@ -19,7 +19,7 @@ Access in 10xGraph has two questions. **What may this role do** is answered by p
 
 ## Identity comes from your auth class
 
-When `auth` is configured, the server calls your auth class on every request. `method` is `jwt` or `custom` (a `BaseAuth` subclass); the claims it returns must include `user_id`. The server turns those claims into an `Identity` and puts it in `config["user"]`. Clients cannot set that key, so nothing in a request body can claim to be another user. Auth is off unless you configure it; the production template turns it on.
+When `auth` is configured, the server calls your auth class on every request. `method` is `jwt` or `custom` (a `BaseAuth` subclass); the claims it returns must include `user_id`. The server turns those claims into an `Identity` and puts it in `config["user"]`. Clients cannot set that key, so nothing in a request body can claim to be another user. Auth is off unless you configure it; the Full setup turns it on.
 
 ## Roles, permissions and reach
 
@@ -59,4 +59,4 @@ The storage filter is always on. For defense in depth you can set `row_level_sec
 - [Authentication and authorization](/docs/server/auth): configure `auth`, roles and `tenant_claims`.
 - [Multi-tenant data](/docs/guides/multi-tenant-data): declare tenant columns and turn on row-level security.
 - [Authorization scopes](/docs/guides/authorization-scopes): permissions per role, step by step.
-- [Security and validators](/docs/concepts/security-and-validators): input validation and the production template.
+- [Security and validators](/docs/concepts/security-and-validators): input validation and the Full setup.

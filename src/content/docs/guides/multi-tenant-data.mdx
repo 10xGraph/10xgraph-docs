@@ -68,7 +68,7 @@ from tenxgraph_api import BaseAuth
 
 
 class TenantAuth(BaseAuth):
-    def authenticate(
+    async def authenticate(
         self,
         request: Request,
         response: Response,

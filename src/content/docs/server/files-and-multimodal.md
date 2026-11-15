@@ -64,6 +64,10 @@ The server responds with metadata and a unique `file_id`:
 }
 ```
 
+### Filenames
+
+The server cleans the filename once, at upload. It keeps only the base name (a path in either style is dropped), removes control characters and Unicode bidi controls, caps the length at 255 characters, and falls back to `file` if nothing is left. Ordinary names such as accents, CJK and spaces are unchanged. A client UI should still escape the filename when it renders it. A request with more than one `file` part is refused with `422`.
+
 ### Permissions and ownership
 
 The uploading user is automatically recorded as the file's owner. Every read operation (for files that have an owner, which is every file uploaded in production), including retrieval, metadata queries, and message rewriting, checks ownership and rejects requests from other users (`404` on the file routes, a "File not found" error on message references). This owner recording is immutable and survives as long as the file does.
@@ -182,6 +186,8 @@ Document extraction requires the `media` extra:
 ```bash
 pip install "10xgraph-api[media]"
 ```
+
+With `DOCUMENT_HANDLING=extract_text` (the default) and no `media` extra, an upload answers 422 with a message that names the extra. Install it, or set `DOCUMENT_HANDLING` to `pass_raw` or `skip`.
 
 ### Document handling modes
 
@@ -339,6 +345,12 @@ Or set `GOOGLE_APPLICATION_CREDENTIALS` and omit `MEDIA_CLOUD_CREDENTIALS_JSON`.
 
 On S3 and GCS the cloud store keeps a per-owner index object (`{prefix}/owners/<hash>.index.json`), updated on every store and delete. `GET /v1/files`, the per-user quotas and the release of a thread's files on thread delete use it. Files stored before `10xgraph` 1.0, or stored without an owner, are not in the index, so they are not listed, counted or released. The orphan sweeper (`MEDIA_SWEEP_INTERVAL_SECONDS`) does not run on the cloud store, because the library cannot list blobs.
 
+Listing with reach `tenant` or `all` needs every key in the bucket, and the cloud storage library cannot list a bucket. On the cloud store those callers get `501` from `GET /v1/files`, and the server logs one warning line. Reach `own` keeps working through the owner index. The index object is deleted when its owner's last file is deleted.
+
+### Keep the bucket private
+
+Object keys are random 128-bit ids. They are not namespaced by tenant: the owner and tenant are recorded in each file's metadata, and the API enforces access from that. Never make the bucket public, and do not share it with other writers or other applications.
+
 Thread links on a file are updated atomically on the local and memory stores. On the cloud store each update re-reads the metadata just before it writes and retries up to 5 times, which leaves a small window where two writers racing at that instant can lose an update. Several workers sharing one local media folder serialize through a `.meta.lock` file in that folder (POSIX only).
 
 ## Signed URLs and direct access
@@ -362,7 +374,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 }
 ```
 
-Signed URLs are useful for large files or direct browser downloads. Ownership is checked before issuing a URL, but the signed URL itself is a bearer link: anyone who holds it can download the file until it expires.
+Signed URLs are useful for large files or direct browser downloads. Ownership is checked before issuing a URL, but the signed URL itself is a bearer link: anyone who holds it can download the file until it expires. Keep the expiry short.
 
 ### Signed URL configuration
 

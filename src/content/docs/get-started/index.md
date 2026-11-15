@@ -22,14 +22,14 @@ Later, `10xgraph build` writes the Docker and Kubernetes files for deployment. D
 
 ## Secure by the third step
 
-The quickstart server starts open so you can try it. Step 3 turns on JWT, and you watch the server return 401 without a token and 404 when a second user reads the first user's thread. With auth configured, the server also turns on owner-only thread access, so you do not write that code. [Security in five minutes](/docs/get-started/security-in-five-minutes) is the page; it needs one config key and two environment variables.
+The quickstart server starts open so you can try it, then turns on JWT near the end, and you watch the server return 401 without a token and 404 when a second user reads the first user's thread. With auth configured, the server also turns on owner-only thread access, so you do not write that code. [Security in five minutes](/docs/get-started/security-in-five-minutes) explains that step; it needs one config key and one environment variable.
 
 ## The three-step path
 
 | Step | Time | What you get |
 |---|---|---|
 | 1. [Install](/docs/get-started/installation) | 5 min | The library, the API server and CLI, and the TypeScript client, with a provider key set |
-| 2. [Quickstart: first agent](/docs/get-started/first-agent) | 10 min | A support agent with two tools, served at `/v1/graph/invoke`, called from curl and TypeScript |
+| 2. [Quickstart: first agent](/docs/get-started/first-agent) | 10 min | A support agent scaffolded with `10xgraph init`, tried in the playground, called from curl and TypeScript, with JWT on and Docker files written |
 | 3. [Security in five minutes](/docs/get-started/security-in-five-minutes) | 5 min | JWT auth on, two users, a 401 for no token and a 404 for someone else's thread |
 
 After that, read [Production readiness](/docs/production) for what the server gives you and what stays your job, then the [production checklist](/docs/server/production-checklist) before you deploy.
@@ -51,7 +51,7 @@ The tutorial builds one agent across several pages, so follow it in order. Skip 
 | [Tutorial: Threads and memory](/docs/get-started/tutorial/threads-and-memory) | 10 min | Persistent memory across invocations with checkpointers |
 | [Tutorial: Serve and inspect](/docs/get-started/tutorial/serve-and-inspect) | 10 min | The Swagger UI, the playground and reading thread state |
 | [Tutorial: Call from your app](/docs/get-started/tutorial/call-from-your-app) | 10 min | A front end with the TypeScript client, streaming and sessions |
-| [Project structure](/docs/get-started/project-structure) | 5 min | What the production template generates |
+| [Project structure](/docs/get-started/project-structure) | 5 min | What the Full setup generates |
 
 ## Prerequisites
 

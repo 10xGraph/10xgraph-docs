@@ -1,39 +1,40 @@
 ---
 title: Project structure
 seoTitle: 10xGraph production project structure
-description: The files that 10xgraph init --template production generates, what each one does, and which 10xgraph.json keys init writes for you.
+description: The files that 10xgraph init --mode full generates, what each one does, and which 10xgraph.json keys init writes for you.
 group: "Next steps"
 section: "Get started"
 order: 120
 updated: "2026-10-27"
 faq:
-  - q: Which template should I start from?
-    a: "Use quick-start to try an idea, since it writes a graph, an env example and 10xgraph.json. Use production when the agent will be deployed, because it adds a state class, a tool, a prompt-injection validator, lifecycle hooks, evals, tests, ruff and pre-commit setup, and the recommended config: JWT auth with owner-only data, a UUID ID generator and a Redis cache store with rate limiting and token revocation."
+  - q: Which setup should I start from?
+    a: "Use Quick to try an idea, since it writes a graph, an env example and 10xgraph.json. Use Full when the agent will be deployed, because it adds a state class, a tool, a prompt-injection validator, lifecycle hooks, evals, tests, ruff and pre-commit setup, and the recommended config: JWT auth with owner-only data, a UUID ID generator and a cache store with rate limiting and token revocation. The cache store is memory with the default memory storage and Redis with Postgres storage or a worker."
   - q: Does init overwrite my existing files?
     a: No. If a file already exists, init stops with an error unless you pass --force. A 10xgraph.json that was already in the directory is protected by the same rule.
   - q: Can I add rate limiting without auth?
-    a: Yes. Pass --auth none --rate-limit with --template production, or add a rate_limit block inside cache_store in 10xgraph.json by hand or in 10xgraph config. Token revocation needs auth and is skipped with --auth none.
+    a: Yes. Pass --auth none --rate-limit with --mode full, or add a rate_limit block inside cache_store in 10xgraph.json by hand or in 10xgraph config. Token revocation needs auth and is skipped with --auth none.
 ---
 
-`10xgraph init --template production` scaffolds a deployable agent project: a `graph/` package with a state class, a weather tool, a prompt-injection validator and lifecycle hooks, plus `tests/`, `evals/`, ruff and pre-commit setup, an env template and a generated `10xgraph.json`. This page walks through every file and the config keys init writes.
+`10xgraph init --mode full` scaffolds a deployable agent project: a `graph/` package with a state class, a weather tool, a prompt-injection validator and lifecycle hooks, plus `tests/`, `evals/`, ruff and pre-commit setup, an env template and a generated `10xgraph.json`. This page walks through every file and the config keys init writes.
 
 ## Generate the project
 
-Run init with the production template. The interactive command asks only the agent name, template and AI provider, then writes the recommended setup. The command below writes a JWT-protected project with a Redis cache store, rate limiting and token revocation, and skips all prompts.
+Run init with the Full setup. The interactive command asks only the agent name, setup and AI provider, then writes the recommended setup. The command below writes a JWT-protected project with in-memory storage and a memory cache store, rate limiting and token revocation, and skips all prompts. Add `--storage postgres` for a Redis cache store.
 
 ```bash
 # Scaffold a production project in the current directory without prompts
-10xgraph init --template production --name MyAgent --yes
+10xgraph init --mode full --name MyAgent --yes
 ```
 
-Without `--yes` or `--non-interactive`, init asks the three questions interactively. The template choice defaults to quick-start, and `--yes` without `--template` also gives you quick-start.
+Without `--yes` or `--non-interactive`, init asks the three questions interactively. The setup choice defaults to Quick, and `--yes` without `--mode` also gives you Quick.
 
 | Option | Values | Default | Purpose |
 |---|---|---|---|
-| `--template` | `quick-start`, `production` | `quick-start` | Which project to scaffold. Quick-start is a minimal graph with no auth. |
-| `--auth` | `none`, `jwt`, `custom` | `jwt` | Authentication scheme. Needs `--template production`. |
-| `--cache-store` | `memory`, `redis` | `redis` | Cache store type. Needs `--template production`. |
-| `--rate-limit` / `--no-rate-limit` | flag | on | Adds or leaves out `cache_store.rate_limit`. Needs `--template production`. |
+| `--mode` | `quick`, `full` | `quick` | Which project to scaffold. Quick is a minimal graph with no auth. `--template quick-start\|production` is an alias. |
+| `--auth` | `none`, `jwt`, `custom` | `jwt` | Authentication scheme. Needs `--mode full`. |
+| `--storage` | `memory`, `sqlite`, `postgres`, `postgres-memory` | `memory` | Checkpointer and store preset. Needs `--mode full`. |
+| `--cache-store` | `memory`, `redis` | Follows `--storage`: `memory` for `memory` and `sqlite`, `redis` for `postgres` and `postgres-memory`; `redis` with a worker | Cache store type. Needs `--mode full`. |
+| `--rate-limit` / `--no-rate-limit` | flag | on | Adds or leaves out `cache_store.rate_limit`. Needs `--mode full`. |
 | `--token-revocation` / `--no-token-revocation` | flag | on with auth | Adds or leaves out `cache_store.token_revocation`. Ignored with `--auth none`. |
 | `--websocket` / `--no-websocket` | flag | off | Writes `websocket.enabled`. |
 | `--name` | text | Directory name, or `MyAgent` when the path is `.` | Agent name, used for the package name in `pyproject.toml` and `APP_NAME` in `.env.example`. |
@@ -59,7 +60,6 @@ Init writes the tree below. The `auth/` folder exists only with `--auth custom`;
 - graph/ Your agent package
   - agent.py Builds the ReactAgent and exports the compiled graph as `app`
   - state.py Custom AgentState subclass
-  - thread_name_generator.py ThreadNameGenerator subclass for naming threads
   - tools/ Tool functions
     - weather_tool.py Example tool with retries and progress events
   - validators/ Input validation and lifecycle hooks
@@ -68,10 +68,12 @@ Init writes the tree below. The `auth/` folder exists only with `--auth custom`;
     - lifecyle.py Lifecycle hooks (the filename spelling is the template's)
 - auth/ Only with `--auth custom`
   - agent_auth.py BaseAuth subclass with an unimplemented authenticate method
-- evals/ Evaluation files
+- worker/ Only with a background worker (`--worker`)
+  - tasks.py Example TaskIQ background tasks
+- evals/ Evaluation files, unless turned off
   - weather_agents_eval.py Eval set built with EvalSetBuilder
   - user_simulator_eval.py Simulated-user scenarios
-- tests/ Pytest suite
+- tests/ Pytest suite, unless turned off
   - conftest.py Sets a dummy GEMINI_API_KEY for tests
   - test_graph_nodes.py Checks on the agent configuration and routing
   - test_catalog_tools.py Tests for get_weather
@@ -79,7 +81,7 @@ Init writes the tree below. The `auth/` folder exists only with `--auth custom`;
 
 </FileTree>
 
-The quick-start template is smaller: `graph/agent.py` (a single-file agent with its tool), `.env.example` and `10xgraph.json`.
+The Quick setup is smaller: `graph/__init__.py` and `graph/agent.py` (a single-file agent with its tool), `.env.example`, `.gitignore`, `requirements.txt` and `10xgraph.json`. `requirements.txt` lists `10xgraph[<provider extra>]` and `10xgraph-api`, and `10xgraph build` installs from it.
 
 ## How the pieces connect
 
@@ -107,6 +109,7 @@ from tenxgraph.core.state import MessageContextManager
 from tenxgraph.prebuilt.agent import ReactAgent
 from tenxgraph.storage.checkpointer import InMemoryCheckpointer
 from dotenv import load_dotenv
+from injectq import InjectQ
 
 from graph.state import WeatherState
 from graph.tools.weather_tool import get_weather
@@ -116,6 +119,9 @@ from graph.validators.manager import callback_manager
 load_dotenv()
 
 checkpointer = InMemoryCheckpointer()
+
+# Dependency injection container; 10xgraph.json points at it ("injectq": "graph.agent:container").
+container = InjectQ.get_instance()
 
 context_manager = MessageContextManager(
     max_messages=20,  # last 20 user messages will be kept in context
@@ -145,6 +151,7 @@ react_agent = ReactAgent(
     trim_context=True,
     tools=[get_weather],
     context_manager=context_manager,
+    container=container,
 )
 
 app = react_agent.compile(
@@ -275,21 +282,11 @@ callback_manager.register_lifecycle_hook(AgentLifecycleHook())
 
 Override only the hooks you need. The full contract is in [Use callbacks](/docs/guides/use-callbacks).
 
-### graph/thread_name_generator.py: thread names
+### Thread names
 
-The generator names a thread from the user's messages. The template returns a fixed placeholder string.
+Init no longer generates a thread name file. Full writes `"thread_name_generator": "first_message"` in `10xgraph.json`, which names a thread from the user's first message. Quick-start leaves the key unset, which means none: threads are saved without a name.
 
-```python title="graph/thread_name_generator.py"
-from tenxgraph_api import ThreadNameGenerator
-
-
-class MyNameGenerator(ThreadNameGenerator):
-    async def generate_name(self, messages: list[str]) -> str:
-        # TODO: Implement logic to generate thread name based on messages
-        return "MyCustomThreadName"
-```
-
-Replace the return value with logic that derives a name from `messages`, for example a short summary of the first message.
+The other choices are `random` for a random two-word name, or a `module:attr` path to your own `ThreadNameGenerator` subclass. See [Generate readable thread names](/docs/server/configure#generate-readable-thread-names) for a custom class.
 
 ### auth/agent_auth.py: custom authentication
 
@@ -316,7 +313,7 @@ class AgentAuth(BaseAuth):
             "Implement it in auth/agent_auth.py."
         )
 
-    def authenticate(
+    async def authenticate(
         self,
         request: Request,
         response: Response,
@@ -370,7 +367,7 @@ SNOWFLAKE_WORKER_ID=2
 
 SENTRY_DSN=""
 
-# Only with --cache-store redis
+# Only with a Redis cache store
 REDIS_URL=""
 
 # Only with --auth jwt
@@ -402,14 +399,19 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
     "method": "custom",
     "path": "auth.agent_auth:AgentAuth"
   },
-  "thread_name_generator": "graph.thread_name_generator:MyNameGenerator",
+  "thread_name_generator": "first_message",
   "ag_ui": {
+    "enabled": false,
+    "allow_client_tools": false
+  },
+  "websocket": {
     "enabled": false
   },
+  "remote_tools": [],
   "injectq": "graph.agent:container",
   "id_generator": "uuid",
   "cache_store": {
-    "type": "redis",
+    "type": "memory",
     "rate_limit": {
       "enabled": true,
       "requests": 100,
@@ -421,8 +423,23 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
     },
     "token_revocation": true
   },
-  "websocket": {
-    "enabled": false
+  "audit": {
+    "enabled": true,
+    "sinks": ["log"],
+    "include_reads": true
+  },
+  "test": {
+    "path": "tests",
+    "coverage": true,
+    "coverage_threshold": 70
+  },
+  "evaluation": {
+    "directory": "evals",
+    "output_dir": "eval_reports",
+    "threshold": 0.75,
+    "parallel": false,
+    "max_concurrency": 4,
+    "timestamp_files": true
   }
 }
 ```
@@ -431,33 +448,23 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
 |---|---|---|
 | `agent` | Always | `graph.agent:app` |
 | `env` | Always | `.env` |
-| `auth` | Always | `null` for none, `"jwt"` for JWT (needs `JWT_SECRET_KEY` and `JWT_ALGORITHM`), or `{"method": "custom", "path": "auth.agent_auth:AgentAuth"}` |
-| `ag_ui` | Always | `{"enabled": false}`, the AG-UI endpoint is off |
-| `thread_name_generator` | Always | `null` for quick-start, `graph.thread_name_generator:MyNameGenerator` for production |
-| `injectq` | Production | `graph.agent:container` (see the warning below) |
-| `id_generator` | Production | `"uuid"` |
-| `cache_store` | Production | `{"type": "redis", ...}` with no `url`, so Redis comes from `REDIS_URL`. It holds `rate_limit` (100 requests per 60 seconds, by `user`, `fail_open` false) and `token_revocation` (`true` with auth). `--cache-store memory` writes `"type": "memory"`; `--no-rate-limit` and `--no-token-revocation` leave those two out |
+| `auth` | Always | `null` for none, `{"method": "jwt"}` for JWT (needs `JWT_SECRET_KEY` and `JWT_ALGORITHM`), or `{"method": "custom", "path": "auth.agent_auth:AgentAuth"}` |
+| `ag_ui` | Always | `{"enabled": false}`, the AG-UI endpoint is off. Full adds `"allow_client_tools": false` |
+| `thread_name_generator` | Always | unset for Quick, `first_message` for Full; `module:attr` for your own class |
+| `injectq` | Full | `graph.agent:container`, defined in `graph/agent.py` |
+| `id_generator` | Full | `"uuid"` |
+| `cache_store` | Full | `{"type": "memory", ...}` with the default memory storage and with `sqlite`; `{"type": "redis", ...}` with `postgres`, `postgres-memory` or a worker, and then there is no `url`, so Redis comes from `REDIS_URL`. It holds `rate_limit` (100 requests per 60 seconds, by `user`, `fail_open` false) and `token_revocation` (`true` with auth). `--cache-store` overrides the choice (a worker refuses `memory`); `--no-rate-limit` and `--no-token-revocation` leave those two out |
 | `websocket` | Always | `{"enabled": false}`, or `true` with `--websocket` |
+| `remote_tools` | Full | `[]`, where frontend tools are declared |
+| `audit` | Full | `{"enabled": true, "sinks": ["log"], "include_reads": true}`, JSON lines on stdout |
+| `store` | Full with Postgres memory storage | `graph.agent:store` |
+| `worker` | Full with a background worker | The broker type and url, and `"tasks": ["worker.tasks"]` |
+| `test` | Full, unless tests are turned off | Path `tests`, coverage on, threshold 70 |
+| `evaluation` | Full, unless evals are turned off | Directory `evals`, output `eval_reports`, threshold 0.75 |
 
-Keys such as `test`, `evaluation`, `remote_tools` and `store` are not written for production, though you can add them yourself. There is no `checkpointer` key to set: the server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The quick-start template adds no `cache_store` or `id_generator`. Run `10xgraph config` to change any of these. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), for what is on by default see [Configure 10xgraph.json](/docs/server/configure#what-is-on-by-default), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
+There is no `checkpointer` key to set: the server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The Quick setup adds no `cache_store` or `id_generator`. Run `10xgraph config` to change any of these. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), for what is on by default see [Configure 10xgraph.json](/docs/server/configure#what-is-on-by-default), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
 
 ## Fix these before you deploy
-
-<Callout type="warning" title="The injectq key points at a variable that does not exist">
-
-Production init writes `"injectq": "graph.agent:container"`, but `graph/agent.py` defines no `container`. The server fails at startup with `Failed to load InjectQ from graph.agent:container: module 'graph.agent' has no attribute 'container'`.
-
-Either delete the `injectq` key from `10xgraph.json`, or add a container to `graph/agent.py`:
-
-```python title="graph/agent.py"
-from injectq import InjectQ
-
-container = InjectQ.get_instance()
-```
-
-When you start using dependency injection, bind your services on this container. See [Use dependency injection](/docs/guides/use-dependency-injection).
-
-</Callout>
 
 <Callout type="tip" title="Switch to a durable checkpointer">
 

@@ -15,19 +15,30 @@ In this step, you will start the API server from the agent and memory you built 
 
 ## Prerequisites
 
-Install the server and a provider extra, and set your provider API key in `.env`:
+Install the server and a provider extra:
 
 ```bash
 pip install 10xgraph-api "10xgraph[google-genai]"
 ```
 
-You need the step 3 graph with memory. If you skipped that step, create `graph/react.py`:
+The server loads a project folder, so scaffold one with `10xgraph init` (the [Quickstart](/docs/get-started/first-agent) explains each file). Copy `.env.example` to `.env` and set your provider API key:
 
-```python
+```bash
+mkdir tutorial-server && cd tutorial-server
+10xgraph init --mode quick --name tutorial-server --provider google
+cp .env.example .env
+```
+
+The server needs a graph compiled with a checkpointer and exposed as `app`. Replace the contents of `graph/agent.py` with the graph from step 3 in that form:
+
+```python title="graph/agent.py"
+from dotenv import load_dotenv
 from tenxgraph.core.graph import Agent, StateGraph, ToolNode
 from tenxgraph.core.state import AgentState
 from tenxgraph.storage.checkpointer import InMemoryCheckpointer
 from tenxgraph.utils import END
+
+load_dotenv()
 
 def get_weather(location: str) -> str:
     """Get the current weather for a specific location."""
@@ -68,7 +79,7 @@ graph.set_entry_point("MAIN")
 app = graph.compile(checkpointer=checkpointer)
 ```
 
-Your `10xgraph.json` already points to this graph at `graph.react:app`.
+The `10xgraph.json` that init wrote already points to this graph at `graph.agent:app`: the `app` variable in `graph/agent.py`.
 
 ## Start the API server
 

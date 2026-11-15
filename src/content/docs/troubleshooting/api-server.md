@@ -300,6 +300,32 @@ A `404` on `POST /v1/ag-ui` means `ag_ui.enabled` is not `true` in `10xgraph.jso
 
 A `1008` accompanied by an `error` event with `code: "not_live"` or `"THREAD_NOT_FOUND"` tells you which of the two `1008` causes applies.
 
+### Issue: `422` with `initial_state keys not allowed by this server`
+
+**Symptoms**
+
+- invoke, stream, the WebSocket or AG-UI answers `422` with `initial_state keys not allowed by this server: <key>. List them in runs.state_keys in 10xgraph.json to allow them`
+- `PUT /v1/threads/{id}/state` answers the same with `state keys not allowed ...`
+
+**Cause**
+
+`runs.state_keys` denies by default. A client may set only the state keys it lists, and an unset or empty list allows none. AG-UI `state` follows the same rule.
+
+**Fix**
+
+- list the keys your client sends in `10xgraph.json`:
+
+```json
+{
+  "agent": "graph.react:app",
+  "runs": { "state_keys": ["preferences"] }
+}
+```
+
+- do not list a key that a tool or node trusts for access decisions, such as `role`
+- `context` in `PUT` state is always allowed and needs no entry
+- the setting can also be edited in `10xgraph config`, under **Client state keys**
+
 ### Issue: `429 Too Many Requests`
 
 **Symptoms**
@@ -367,7 +393,7 @@ With `MODE=production` the server replaces the message of every 5xx error with a
 - checkpointer backend unavailable (Postgres, Redis, or SQLite)
 - inconsistent `thread_id` usage
 - a `thread_id` that does not exist, which answers `404` by default (`runs.thread_ids` is `server`)
-- a state update whose `context` is not a list of messages, or that sets built-in fields or keys outside `runs.state_keys`, which answers `422`
+- a state update whose `context` is not a list of messages, or that sets built-in fields or keys not listed in `runs.state_keys` (an empty list by default), which answers `422`
 - a message id that is not in the thread, which answers `404` (`Message not found`)
 
 **Fix**

@@ -133,7 +133,7 @@ client.updateThreadState(
 | `config` | `Record<string, any>` | Config sent in the request body. Pass `{}` if you have nothing to add. |
 | `state` | `any` | Partial state to merge in. |
 
-The server merges `state` into the stored snapshot instead of replacing it. Dictionaries are deep-merged, other values overwrite, `null` values do not erase existing ones, and `context` messages are appended. The server answers 422 for `context_summary` or `execution_meta` in `state`, for `context` messages that are not user messages (a `tool` message is accepted only as `tool_result` blocks answering a pending client tool call), for `context` messages that carry tool calls, and for a value that does not match its state field type. Custom fields are allowed unless the operator set `runs.state_keys`. Any `message_id` you send is replaced by the server. Returns the merged state at `response.data.state`.
+The server merges `state` into the stored snapshot instead of replacing it. Dictionaries are deep-merged, other values overwrite, `null` values do not erase existing ones, and `context` messages are appended. The server answers 422 for `context_summary` or `execution_meta` in `state`, for `context` messages that are not user messages (a `tool` message is accepted only as `tool_result` blocks answering a pending client tool call), for `context` messages that carry tool calls, and for a value that does not match its state field type. Custom fields need the operator to list them in `runs.state_keys` (none by default; an unlisted key answers 422), except `context`, which is always allowed. Any `message_id` you send is replaced by the server. Returns the merged state at `response.data.state`.
 
 ```ts
 // Merge one key into the stored state

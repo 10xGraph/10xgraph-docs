@@ -100,9 +100,22 @@ The server reads a standard bearer credential from the `Authorization` header:
 | Valid signature but no `user_id` claim | 401 | `INVALID_TOKEN` |
 | `user_id` that is not a non-empty string or whole number (empty, boolean, float, list, object) | 401 | `INVALID_TOKEN` |
 | `scope` or `scopes` claim of the wrong type | 401 | `INVALID_TOKEN` |
+| Tenant claim missing, or `user_id` with the reserved `__system__` prefix | 401 | `INVALID_TOKEN` |
+| Token revoked | 401 | `REVOKED_TOKEN` |
+| Token revocation on and no usable `jti` claim | 401 | `INVALID_TOKEN` |
 | All auth/authorization checks pass | 200 | (success) |
 
-To pin tokens to your service and prevent replay across services, set `JWT_ISSUER` and `JWT_AUDIENCE` in your environment. When either is set, tokens must carry the matching claim, so a token minted for another service is rejected even if it shares your key.
+To pin tokens to your service and prevent replay across services, set `JWT_ISSUER` and `JWT_AUDIENCE` in your environment. Set both in production when the same signing key or identity provider also issues tokens for other services, so a token minted for another service is rejected here.
+
+`JWT_ISSUER` and `JWT_AUDIENCE` are both off when unset or empty. With `JWT_ISSUER` unset, the issuer is not checked: a token with any `iss`, or none, is accepted. With it set, the token must carry `iss` and it must match exactly. With `JWT_AUDIENCE` unset, a token without `aud` is accepted, but a token that carries an `aud` claim is refused. With it set, the token must carry `aud` and it must match. A failure of either check answers 401 `INVALID_TOKEN`.
+
+The codes tell a client what to do:
+
+- `INVALID_TOKEN`: the token cannot be used as it is. Sign in again.
+- `EXPIRED_TOKEN`: the token is past its `exp`. Refresh it.
+- `REVOKED_TOKEN`: the token was revoked. Sign in again.
+
+A correctly signed token that lacks a configured tenant claim (`auth.tenant_claims`), and a token whose `user_id` starts with the reserved prefix `__system__`, both answer 401 `INVALID_TOKEN`.
 
 ### WebSocket connections
 
@@ -250,7 +263,7 @@ from fastapi import HTTPException
 from tenxgraph_api import BaseAuth
 
 class ApiKeyAuth(BaseAuth):
-    def authenticate(self, request, response, credential):
+    async def authenticate(self, request, response, credential):
         api_key = request.headers.get("X-API-Key")
         if not api_key or not verify_key(api_key):
             raise HTTPException(status_code=401, detail="Invalid API key")
@@ -274,7 +287,7 @@ The `path` accepts `auth_app:Cls`, `auth_app.py:Cls`, `pkg.mod:Cls` and `pkg/mod
 
 ### `authenticate(request, response, credential)`
 
-- Required, and **synchronous**: the server calls it without `await`. Keep it a plain `def`.
+- Required, and **async**: declare it `async def`. The server awaits it, so a slow lookup does not block the event loop.
 - Returns the verified claims as a dict. It must include `user_id`. Every other key lands in `identity.claims`.
 - Raise `HTTPException` (your status) or `UserAccountError` (401) to refuse. On a WebSocket both become a clean 1008 close.
 - Derive `user_id` and tenant values only from the verified credential, never from a client-set header or query parameter.
@@ -290,7 +303,7 @@ The `path` accepts `auth_app:Cls`, `auth_app.py:Cls`, `pkg.mod:Cls` and `pkg/mod
 
 ```python
 class MyAuth(BaseAuth):
-    def authenticate(self, request, response, credential): ...
+    async def authenticate(self, request, response, credential): ...
 
     async def authorize(self, identity, permission, resource=None):
         if not await super().authorize(identity, permission, resource):
@@ -310,6 +323,8 @@ With auth on, set `cache_store.token_revocation` to `true` and the server refuse
   "cache_store": {"type": "redis", "token_revocation": true}
 }
 ```
+
+With revocation on, every token must carry a `jti` claim (a non-empty string or an integer). A token without it is refused with 401 `INVALID_TOKEN` and the message "Invalid token, jti missing". One token is revoked by its `jti`, so without it the token could never be revoked on its own. This also applies to a custom `BaseAuth` class: the claims it returns must include `jti`. With revocation off, `jti` stays optional. A revoked token answers 401 `REVOKED_TOKEN`; on a WebSocket the socket is closed with code 1008.
 
 If the cache store is unreachable, the server refuses to boot and requests that need the check answer 503. See [Token revocation](/docs/reference/api-cli/auth#token-revocation) for the object form.
 
@@ -407,7 +422,7 @@ from tenxgraph_api import BaseAuth
 class DbAuth(BaseAuth):
     pool: asyncpg.Pool  # create once, for example at app startup
 
-    def authenticate(self, request, response, credential):
+    async def authenticate(self, request, response, credential):
         ...  # verify the credential, return {"user_id": ..., "org_id": ...}
 
     async def authorize(self, identity, permission, resource=None):
@@ -454,7 +469,7 @@ class CasbinAuth(BaseAuth):
     def __init__(self):
         self.enforcer = casbin.Enforcer("auth/model.conf", "auth/policy.csv")
 
-    def authenticate(self, request, response, credential):
+    async def authenticate(self, request, response, credential):
         ...  # verify the credential, return {"user_id": ...}
 
     async def authorize(self, identity, permission, resource=None):
@@ -475,7 +490,7 @@ from tenxgraph_api import BaseAuth
 CERBOS_URL = "http://localhost:3592/api/check/resources"
 
 class CerbosAuth(BaseAuth):
-    def authenticate(self, request, response, credential):
+    async def authenticate(self, request, response, credential):
         ...  # verify the credential, return {"user_id": ..., "roles": [...]}
 
     async def authorize(self, identity, permission, resource=None):
@@ -529,7 +544,9 @@ Expected: HTTP 200 with your `user_id`, `roles`, `permissions` and `reach`. Then
 | 401 `INVALID_TOKEN` (no credential) | No credential presented | Attach `Authorization: Bearer <token>` |
 | 401 `EXPIRED_TOKEN` | Token `exp` is in the past | Refresh the token; check server and issuer clock skew |
 | 401 `INVALID_TOKEN` | Bad signature or no `user_id` claim | Verify `JWT_SECRET_KEY`, `JWT_ALGORITHM`, and that the issuer emits `user_id` |
-| 401 "Invalid token, please login again" | A configured tenant claim is missing, or the roles or permissions claim is malformed | Add the claim, or fix its type (list of strings or one space-separated string) |
+| 401 `INVALID_TOKEN` ("Invalid token, please login again") | A configured tenant claim is missing, or the roles or permissions claim is malformed | Add the claim, or fix its type (list of strings or one space-separated string) |
+| 401 `INVALID_TOKEN` ("Invalid token, jti missing") | `cache_store.token_revocation` is on and the token has no `jti` | Issue tokens with a `jti` claim, or turn revocation off |
+| 401 `REVOKED_TOKEN` | The token or all of the user's tokens were revoked | Sign in again for a new token |
 | 403 `Missing required permission: <resource>:<action>` | The caller's roles do not grant it | Add the permission to a role, or give the user the role |
 | 404 on a thread you expect to exist | It belongs to another user or tenant, or does not exist | Check `GET /v1/me` for reach and the token's tenant claim |
 | Startup `ValueError`: "JWT_SECRET_KEY and JWT_ALGORITHM must be set" | One of the two env vars is missing with JWT | Set both |

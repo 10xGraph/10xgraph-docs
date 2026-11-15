@@ -125,8 +125,8 @@ In development the same combination only logs a warning, which tells you the dep
 | --- | --- | --- |
 | `JWT_SECRET_KEY` | Secret key for JWT signing and verification. No default. | `auth: "jwt"` |
 | `JWT_ALGORITHM` | JWT algorithm. Default `HS256`. Allowed values: `HS256`, `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512` and `EdDSA`, spelled exactly. `none`, an empty value or any other value stops startup. | `auth: "jwt"` |
-| `JWT_ISSUER` | Required `iss` claim. Unset means not checked. | Optional |
-| `JWT_AUDIENCE` | Required `aud` claim. Unset means not checked. | Optional |
+| `JWT_ISSUER` | Required `iss` claim. Unset or empty: the issuer is not checked and a token with any `iss`, or none, is accepted. Set: the token must carry `iss` and it must match exactly, else 401 `INVALID_TOKEN`. | Optional |
+| `JWT_AUDIENCE` | Required `aud` claim. Unset or empty: a token without `aud` is accepted, but a token that carries `aud` is refused (401 `INVALID_TOKEN`). Set: the token must carry `aud` and it must match, else 401 `INVALID_TOKEN`. | Optional |
 | `JWT_SECRET_KEYS` | Extra verification keys for rotation, as a JSON list of `{"kid": "...", "key": "..."}` objects or plain strings. Tried beside `JWT_SECRET_KEY`, which keeps working unchanged. Unset by default. See [rotate the signing key](/docs/reference/api-cli/auth#rotating-the-signing-key). | Optional |
 | `JWT_MAX_TOKEN_AGE_SECONDS` | Refuse a token older than this many seconds by its `iat` claim, and refuse a token with no `iat`. Unset (off) by default. | Optional |
 
@@ -254,9 +254,10 @@ See [Files and multimodal](/docs/server/files-and-multimodal) for how these fit 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `MAX_REQUEST_SIZE` | `10485760` (10MB) | Maximum request body size in bytes |
+| `MAX_NESTING_DEPTH` | `64` | Deepest nesting of objects and lists accepted in client messages (`metadata`, `raw`, content blocks), `initial_state`, `config`, `resume` and `filters`. Deeper input is refused with 422 before the graph runs. Allowed range 1 to 900 |
 | `IDEMPOTENCY_TTL_SECONDS` | `86400` | How long a finished run is remembered under its `Idempotency-Key`. The header is opt-in. See [idempotency keys](/docs/reference/rest-api/conventions#idempotency-keys). |
 
-Client dicts and lists (`config`, `initial_state`, `resume`, `metadata`, `filters`) also have fixed structure caps that have no setting: 64 levels of nesting, 1000 keys per object, 10000 items per list and 200000 values in all. A larger body gets 422 `VALIDATION_ERROR`.
+Client dicts and lists (`config`, `initial_state`, `resume`, `metadata`, `filters`) also have fixed structure caps (the nesting depth is `MAX_NESTING_DEPTH` above) that have no setting: 1000 keys per object, 10000 items per list and 200000 values in all. A larger body gets 422 `VALIDATION_ERROR`.
 
 `MAX_REQUEST_SIZE` is enforced by HTTP middleware and applies to requests that declare a `Content-Length`. It does not cover WebSocket frames (bounded separately at 1 MiB per frame on `/v1/graph/live`) or chunked uploads (bounded by `MEDIA_MAX_SIZE_MB` as the body is read).
 

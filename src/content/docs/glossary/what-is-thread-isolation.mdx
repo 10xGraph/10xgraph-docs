@@ -14,7 +14,7 @@ faq:
   - q: Is thread isolation on by default in 10xGraph?
     a: When auth is configured or MODE is production, every thread query is scoped to the caller's reach. With the default reach `own`, only the owner can read or run a thread; reach `tenant` or `all` widens reads, lists and deletes but never runs. With auth off in development there is no identity, so nothing is isolated.
   - q: Does isolation stop a user from changing their own thread?
-    a: No. A user may write to their own thread. Restrict that with permissions such as threads:write, and with runs.state_keys for the state fields a caller may set.
+    a: No. A user may write to their own thread. Restrict that with permissions such as threads:write, and with runs.state_keys, which lists the only state fields a caller may set (none by default).
 ---
 
 **Thread isolation means each user can read and run only the conversation threads they own.** An agent server stores history per thread. If any signed-in user can name any thread id, then anyone who learns or guesses an id can read another person's messages or continue their conversation. Isolation closes that gap.

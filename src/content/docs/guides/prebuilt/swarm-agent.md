@@ -578,4 +578,4 @@ For the complete parameter list and advanced options, see the [reference page](/
 
 ## Run it in production
 
-Handoffs are limited to the agents each one is allowed to hand off to; a call to any other target returns tool-not-found. A caller can still start at a chosen node with `current_node`, so restrict it with `runs.state_keys` if needed. See the [Security model](/docs/production/security-model).
+Handoffs are limited to the agents each one is allowed to hand off to; a call to any other target returns tool-not-found. A caller can start at a chosen node with `current_node` only if you list `current_node` in `runs.state_keys`, which is empty by default. See the [Security model](/docs/production/security-model).

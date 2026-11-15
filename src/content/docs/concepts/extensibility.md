@@ -317,7 +317,7 @@ Server-layer ABCs are wired via `10xgraph.json` (), with no code changes to the 
 
 ### BaseAuth
 
-Extend `BaseAuth` when you need custom authentication beyond JWT: API key lookup, LDAP integration, OAuth2 with your identity provider, or a legacy auth system. The `authenticate` method is synchronous and receives the request, response, and credential. Return a dict with at least `user_id`, or raise an exception to reject the request.
+Extend `BaseAuth` when you need custom authentication beyond JWT: API key lookup, LDAP integration, OAuth2 with your identity provider, or a legacy auth system. The `authenticate` method is `async def` (the server awaits it) and receives the request, response, and credential. Return a dict with at least `user_id`, or raise an exception to reject the request.
 
 Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
 
@@ -325,7 +325,7 @@ Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](ht
 from tenxgraph_api import BaseAuth
 
 class ApiKeyAuth(BaseAuth):
-    def authenticate(self, request, response, credential) -> dict | None:
+    async def authenticate(self, request, response, credential) -> dict | None:
         key = request.headers.get("X-API-Key")
         return lookup_api_key(key)   # dict with user_id; raise an exception to reject
 ```
@@ -338,7 +338,7 @@ Override `BaseAuth.authorize` when the built-in role-based permissions do not fi
 from tenxgraph_api import BaseAuth
 
 class PolicyAuth(BaseAuth):
-    def authenticate(self, request, response, credential) -> dict | None:
+    async def authenticate(self, request, response, credential) -> dict | None:
         ...  # verify the credential, return claims with user_id
 
     async def authorize(self, identity, permission, resource=None) -> bool:

@@ -256,6 +256,8 @@ if (missing.length > 0) {
 await client.invoke([Message.text_message('Hello')], { initial_state: initialState });
 ```
 
+The server accepts only keys listed in `runs.state_keys` in `10xgraph.json`, here `"runs": { "state_keys": ["user_id"] }`. Any other key gets `422`.
+
 ---
 
 ## observability()

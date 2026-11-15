@@ -132,7 +132,7 @@ To stop the running run and take its place, add `"on_busy": "cancel"` to the fra
 
 ### Request limits and error text
 
-A frame is limited to 500 messages (in `messages` or `tool_result`), 100 content blocks per message and 1,000,000 characters of text in total. An oversized frame gets 422 from the schema check, as does an `initial_state`, `config` or `resume` nested deeper than 64 levels. In production (`MODE=production`), `error` chunks from a failing node or tool carry a generic message instead of the raw exception text. Development shows the details.
+A frame is limited to 500 messages (in `messages` or `tool_result`), 100 content blocks per message and 1,000,000 characters of text in total. An oversized frame gets 422 from the schema check, as does an `initial_state`, `config` or `resume` nested deeper than 64 levels by default (`MAX_NESTING_DEPTH`). In production (`MODE=production`), `error` chunks from a failing node or tool carry a generic message instead of the raw exception text. Development shows the details.
 
 ### Rate limiting and concurrency
 

@@ -48,9 +48,9 @@ The short version: you write the agents, tools and tasks, and the server owns th
 
 **Default:** client messages must have the `user` role. An `assistant` or `system` message is refused with 422, so a forged "I approved it" cannot enter the thread. A `tool` message is accepted only as the answer to a pending remote tool call. `context_summary` and `execution_meta` are never client-writable, the server replaces client message ids, and reserved config keys such as `user`, `user_id`, `tool_timeout` and `max_parallel_tool_calls` are rejected.
 
-**Config:** `runs.config_keys` and `runs.state_keys` are allow-lists for request config and state (422 on other keys).
+**Config:** `runs.config_keys` is an allow-list for request config, and `runs.state_keys` lists the only state keys a client may set (422 on other keys; none are allowed until you list them).
 
-**By design:** a client may set custom state fields and `current_node`. That lets a frontend picker write a selected id straight into state, and lets a dropdown of agents start at the chosen node. If your graph needs an entry guard, enforce it inside the graph or restrict `runs.state_keys`.
+**By design:** a client may set the state fields you list in `runs.state_keys`, including `current_node` if you list it. That lets a frontend picker write a selected id straight into state, and lets a dropdown of agents start at the chosen node. If your graph needs an entry guard, enforce it inside the graph or restrict `runs.state_keys`.
 
 **You still must:** treat anything the client may put into state as untrusted input in your own nodes.
 

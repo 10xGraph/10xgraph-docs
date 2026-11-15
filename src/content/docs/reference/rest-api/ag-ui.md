@@ -52,7 +52,7 @@ If `ag_ui.enabled` is `true` but the extra is missing, the server refuses to sta
 | `threadId` | yes | The 10xGraph thread, matching `^[A-Za-z0-9._:@-]{1,128}$` (else `422`). Runs on the same `threadId` share the checkpoint. Send a blank or `"new"` to have the server create the thread; the id comes back in `RUN_STARTED`. An id the server never issued gets `404` unless `runs.thread_ids` is `client` |
 | `runId` | yes | Client-chosen id, echoed on `RUN_STARTED` and `RUN_FINISHED` |
 | `messages` | yes | The conversation as the client sees it. Only the new trailing user turn, or tool results for a pending browser tool call, reach the graph |
-| `state` | no | Initial application state for the run. The keys `context`, `context_summary` and `execution_meta` are dropped |
+| `state` | no | Initial application state for the run. The keys `context`, `context_summary` and `execution_meta` are dropped. Every other key must be listed in `runs.state_keys` in `10xgraph.json`, or the request answers `422` |
 | `tools` | no | Browser tools offered to the model for this run only. See [Client tools](#client-tools) |
 | `context` | no | Accepted and validated, not passed to the graph |
 | `forwardedProps` | no | Accepted and validated, not passed to the graph |
@@ -170,6 +170,8 @@ A browser tool cannot replace a server tool: if the `ToolNode` already has a too
 | Name | 1 to 64 letters, digits, `_` or `-`, unique within the run |
 | Description | 4096 characters |
 | Parameters schema | 16 KB as JSON |
+
+With `ag_ui.allow_client_tools` true, a client tool named like a server tool (a local or MCP tool of the graph) is refused with 422 before the run starts (`tools[1]: 'get_weather' is the name of a server tool`). A client tool that repeats a name declared under `remote_tools` is accepted.
 
 With `ag_ui.allow_client_tools` set to `false`, tools sent by the client are ignored and only [`remote_tools`](/docs/reference/api-cli/configuration#remote_tools) from `10xgraph.json` are offered.
 

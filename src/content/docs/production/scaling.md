@@ -16,7 +16,7 @@ faq:
     a: "An interactive run (invoke or stream) executes in the API worker that received the request, bounded by runs.timeout. For work that should outlive a request, enqueue a background job: the API sends it to a TaskIQ broker and a separate 10xgraph worker process runs it. Scale the job workers independently of the API."
 ---
 
-You scale a served 10xGraph agent by running more stateless API workers behind a load balancer, with Postgres for durable state and a shared cache store (Redis by default) for the things workers must share: locks, caps, rate limits and caches. Work that should not hold a request open goes to a separately scaled job worker tier. Without a shared cache store, the locks and caps still work but count per process. This page lists exactly what the cache store shares, how reliability works under failure, and where the limits are. For the request path and state layers, read [Architecture](/docs/production/architecture) first.
+You scale a served 10xGraph agent by running more stateless API workers behind a load balancer, with Postgres for durable state and a shared cache store (Redis, or a custom shared store) for the things workers must share: locks, caps, rate limits and caches. Work that should not hold a request open goes to a separately scaled job worker tier. Without a shared cache store, the locks and caps still work but count per process. This page lists exactly what the cache store shares, how reliability works under failure, and where the limits are. For the request path and state layers, read [Architecture](/docs/production/architecture) first.
 
 ## What the cache store shares across workers
 
