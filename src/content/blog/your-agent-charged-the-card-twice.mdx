@@ -7,7 +7,7 @@ updated: 2026-11-10
 author: Shudipto Trafder
 kind: engineering
 tags: [reliability, tools, checkpointing]
-featured: true
+featured: false
 faq:
   - q: Does 10xGraph guarantee a tool runs exactly once?
     a: No. The ledger records a call after it returns, so a crash in the short window between the side effect and the record can still re-run it. Pass an idempotency key to the downstream API to cover that window.

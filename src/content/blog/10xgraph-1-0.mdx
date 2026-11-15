@@ -1,0 +1,150 @@
+---
+title: "10xGraph 1.0: the backend your AI agent needs before it ships to customers"
+seoTitle: "10xGraph 1.0: a backend for AI agents"
+description: "10xGraph 1.0 is out: open-source, self-hosted infrastructure for AI apps with auth, roles, tenant isolation, durable state, jobs and tracing, from one CLI."
+date: 2026-11-16
+author: Shudipto Trafder
+kind: release
+tags: [release, announcement, production]
+featured: true
+faq:
+  - q: How do I start a 10xGraph 1.0 project?
+    a: Install 10xgraph-api, run 10xgraph init --mode full in an empty folder, install the project with pip install -e ., set the provider key and JWT_SECRET_KEY in .env, and start it with 10xgraph dev. The Full setup turns on JWT auth, rate limits, token revocation, a prompt-injection validator, an audit log, tests and evals.
+  - q: Will 1.x releases break my code?
+    a: No. Nothing public is removed or renamed in a 1.x release. Anything that has to go is deprecated first, with a warning that names the replacement, and keeps working until 2.0. See the stability and deprecation policy.
+  - q: Which versions work together?
+    a: The three packages share major.minor. 10xgraph 1.0.x works with 10xgraph-api 1.0.x and 10xgraph-client 1.0.x; patch versions move independently.
+---
+Getting an AI agent to work is the easy part now. A model, a few tools and a loop, and you have a demo in an afternoon.
+
+Then someone asks you to put it in front of customers, and the questions change:
+
+- Can customer A ever read customer B's conversation?
+- Who is allowed to delete a thread, and who can only read their own?
+- What happens when the pod restarts halfway through a refund?
+- Where do the traces go, and do they contain user data?
+- How do we deploy this, and who reviews it for security?
+
+None of these are about the agent. They are about the backend around it, and most teams end up building that backend by hand before the feature can ship.
+
+That backend is what [10xGraph](https://github.com/10xGraph/10xGraph) is, and today it reaches 1.0.
+
+## What 10xGraph is
+
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks. 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and it generates the Docker and Kubernetes files to deploy it. It is MIT licensed and made by 10xScale. (It used to be called Agentflow.)
+
+It ships as three packages, released together:
+
+- `10xgraph`: the Python framework (graphs, agents, tools, memory, storage)
+- `10xgraph-api`: the API server and the `10xgraph` CLI
+- `10xgraph-client`: a typed TypeScript client
+
+The quickest way to show what that means is to start one.
+
+## A production-shaped agent from the CLI
+
+You need Python 3.12 or newer and a key for Google, OpenAI or Anthropic. No code to write.
+
+```bash
+pip install 10xgraph-api
+
+mkdir support-agent && cd support-agent
+10xgraph init --mode full --name support-agent --provider google --yes
+pip install -e .
+cp .env.example .env   # set GOOGLE_API_KEY and JWT_SECRET_KEY
+10xgraph dev
+```
+
+That's it. Your agent is ready, and it is not a toy. The Full setup turns on what a real deployment needs:
+
+- **JWT auth**, with every thread, message and file owned by the user who created it
+- **A rate limit** of 100 requests per minute per user, and **token revocation**
+- **A prompt-injection validator** on incoming messages
+- **An audit log**, as JSON lines you can ship to your own storage
+- **Thread names** taken from the first message
+- **Tests and evals** for the agent, plus ruff and pre-commit
+- A working example agent with a tool, ready to replace with your own
+
+The server listens on port 8000 with invoke, streaming, threads and message history. `10xgraph dev` also opens a playground in the browser where you can chat with the agent and inspect its threads.
+
+Auth is already on, so a request without a token is refused:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/v1/threads
+# 401
+```
+
+With a valid token, a user sees only their own data. Another user's thread answers 404, the same as a thread that does not exist, so nobody can even learn that it is there. You wrote no access-control code for this.
+
+Need durable storage? Add `--storage postgres` to `init` and you get Postgres for threads with Redis as the cache store. Set `DATABASE_URL` and `REDIS_URL` in `.env`.
+
+### Test, evaluate, deploy
+
+The same CLI takes the project the rest of the way:
+
+```bash
+10xgraph test                          # run the generated test suite
+10xgraph eval                          # run the agent evals and open the report
+10xgraph config                        # review auth, rate limits, CORS and the rest
+10xgraph build --docker-compose --k8s  # write the deploy files
+```
+
+`build` writes a `Dockerfile` (multi-stage, non-root), a `docker-compose.yml` and a `k8s.yaml` with liveness and readiness probes. Frontends talk to the server through the typed TypeScript client, `npm install 10xgraph-client`.
+
+## What is under the hood
+
+Here is what the Full setup is standing on.
+
+**Access control on every endpoint.** One `auth` object configures JWT or your own auth class, plus roles. Each role has permissions (`graph:invoke`, `threads:delete`, ...) and a reach: `own`, `tenant` or `all`. The server refuses to boot if any non-public route is missing a permission guard.
+
+**Tenant isolation in storage, not just in the API.** `PgCheckpointer` (threads) and `PgVectorStore` (long-term memory) filter every query by tenant columns you declare, filled from the verified identity, never from client input. Postgres row-level security is available as an extra layer.
+
+**One database.** Conversation state lives in Postgres with Redis as a hot cache. Long-term memory and RAG use pgvector in the same Postgres, with similarity, full-text or hybrid search. One database to back up and secure.
+
+**Correct when things fail.** Finished tool calls are recorded, so when a run resumes after a crash, a tool that already ran is not called again. On SIGTERM the server stops taking traffic, finishes or saves active runs, and shuts down cleanly. A cancelled or crashed run leaves a usable thread. (The honest limit: a crash before a tool returns can repeat it, so anything that moves money should get an idempotency key.)
+
+**Calling services as the user.** `UserCredential` lets a tool or an MCP server call downstream APIs with the end user's credential, and that credential never reaches traces or logs.
+
+**Background jobs, metrics and an audit log.** A thin TaskIQ layer (`10xgraph worker`, `10xgraph scheduler`) that runs jobs under the same auth. Prometheus or OTLP metrics for the API and the worker. A metadata-only audit log you ship to your own storage.
+
+**Tracing.** Spans follow the OpenTelemetry GenAI conventions and go to any OTLP backend, Phoenix, Logfire or LangSmith.
+
+**Any model.** OpenAI, Google Gemini (including Vertex AI), Anthropic (direct, Vertex AI or Bedrock) and OpenAI-compatible endpoints like vLLM or Ollama. Changing the model string does not change your graph or tools. MCP tools work out of the box.
+
+Graph orchestration, a tool-calling loop, streaming and MCP are in there too, but every serious framework has those. The list above is the reason to pick this one.
+
+## What 1.0 promises
+
+The breaking changes are done. From 1.0 on:
+
+- Nothing public is removed or renamed in a 1.x release.
+- Anything that has to go is deprecated first, with a warning that names the replacement, and keeps working until 2.0.
+- Minor releases only add things. Patch releases only fix bugs and security issues.
+- The three packages share `major.minor`, so `10xgraph` 1.1.x works with `10xgraph-api` 1.1.x and `10xgraph-client` 1.1.x.
+
+What counts as "public" in each package is written down in the [stability and deprecation policy](/docs/project/stability). Coming from 0.x, read the [upgrade guide](/docs/project/upgrade-to-1.0) first. The old `agentflow` names keep working with a deprecation warning until 2.0.
+
+## What it does not do (yet)
+
+Better you hear it here than find out later:
+
+- **Auth is off until you configure it.** The `--mode full` template turns it on, but the Quick setup and a bare server start open.
+- **Tenant isolation needs columns you declare.** It is not magic multi-tenancy; you say which claims define a tenant.
+- **No hosted service.** You run it, on your own infrastructure. That is the point, but it is also work.
+- **Permissions are per route, not per tool.** "User A may call `refund`, user B may not" is not built in yet.
+- **Smaller ecosystem.** LangGraph and CrewAI have bigger communities, more integrations and stronger visual tooling.
+- **Not a compliance certificate.** 10xGraph is built for teams going through SOC 2 and ISO 27001 audits and maps which controls it supports, but the audit is of your organization and your environment.
+
+## Try it
+
+```bash
+pip install -U 10xgraph 10xgraph-api
+npm install 10xgraph-client
+```
+
+- Docs: [Quickstart](/docs/get-started/first-agent)
+- Code: [github.com/10xGraph/10xGraph](https://github.com/10xGraph/10xGraph)
+- Full release notes: [changelog](/changelog)
+- Questions: [GitHub Discussions](https://github.com/10xGraph/10xGraph/discussions/372)
+
+If you are shipping AI to your own customers and the backend questions at the top of this post sound familiar, give it a try and tell us where it falls short. And if it saves you some work, a star on the repo helps other people find it.
