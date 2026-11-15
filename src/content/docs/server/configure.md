@@ -200,9 +200,9 @@ The server logs one INFO line at boot that names the store and the config key it
 
 ## What is on by default
 
-This table shows what each setting does when its key is absent from `10xgraph.json`, and what `10xgraph init` writes for each template.
+This table shows what each setting does when its key is absent from `10xgraph.json`, and what `10xgraph init` writes for each setup.
 
-| Setting | Key absent | Quick Start template | Production template |
+| Setting | Key absent | Quick setup | Full setup |
 |---|---|---|---|
 | Auth | Off: every request is accepted | `null` (off) | `jwt` |
 | Roles and reach | Default permission set (all but `admin:*`), reach `own`, when auth is on. Nothing when auth is off | not written | not written (default set, reach `own`) |

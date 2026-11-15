@@ -94,12 +94,12 @@ Then scaffold, serve and package it:
 
 ```bash
 pip install "10xgraph[google-genai,pg_checkpoint]" 10xgraph-api
-10xgraph init --yes --template production --auth jwt
+10xgraph init --yes --mode full --auth jwt
 10xgraph dev --host 0.0.0.0 --port 8000 --no-open
 10xgraph build --docker-compose --k8s
 ```
 
-The `production` template writes an `10xgraph.json` with `"auth": "jwt"` and a Redis rate limit. If the process is killed after `refund_order` returns but before the run is saved, the resumed run reads the tool ledger and does not refund twice. See [replay-safe tools](/docs/concepts/replay-safe-tools).
+The Full setup writes an `10xgraph.json` with `"auth": "jwt"` and a Redis rate limit. If the process is killed after `refund_order` returns but before the run is saved, the resumed run reads the tool ledger and does not refund twice. See [replay-safe tools](/docs/concepts/replay-safe-tools).
 
 For the equivalent LangGraph quickstart, see [LangGraph's docs](https://docs.langchain.com/oss/python/langgraph/overview).
 

@@ -150,7 +150,7 @@ Other changes:
   `WEB_CONCURRENCY` above 1, the server warns that revocations only reach this process.
 - **`10xgraph revoke` builds the configured cache store** the same way as the server (the
   `--redis-url` override stays) and refuses with a clear error when it is `InMemoryCacheStore`.
-- **`10xgraph init` asks only the agent name, template and AI provider.** Production writes
+- **`10xgraph init` asks only the agent name, setup and AI provider.** Full writes
   `"auth": "jwt"`, `"id_generator": "uuid"` and
   `"cache_store": {"type": "redis", "rate_limit": {...}, "token_revocation": true}` (no `url`:
   Redis reads `REDIS_URL`). Quick Start writes no `cache_store`. The flags `--auth`,
@@ -252,7 +252,7 @@ Migration steps:
 - **New `ToolNode` options, off by default:** `max_result_chars`, `mcp_include` and `mcp_exclude`. `ToolNode` warns when a different callable replaces a tool of the same name, and accepts a generator of tools.
 - **Factory tools bind their targets at creation:** `create_vertex_ai_search(datastore, model)`, `create_google_web_search(model)` and `create_fetch_url(allowed_hosts)`. The allow-list is checked on every redirect hop. The module-level `file_read`, `file_write` and `file_search` still work but warn; they are removed in 2.0, so use `create_file_tools`.
 - **File tools:** overwrite is atomic and create is exclusive. The deny list adds `.git-credentials`, `*.tfstate`, `*.tfstate.*` and `*.tfvars`. Error text no longer leaks paths.
-- **`PromptInjectionValidator` is less noisy and leaks less:** persona patterns are upper-case only, emoji and CJK no longer trip the special-character rule, hex digests are not flagged, and keywords match whole words. Error details carry `pattern_index` instead of the regex or a sample of the input. The production template validator no longer blocks `bypass`, `override`, `disable`, `token` or `free`, and its max length is 10000.
+- **`PromptInjectionValidator` is less noisy and leaks less:** persona patterns are upper-case only, emoji and CJK no longer trip the special-character rule, hex digests are not flagged, and keywords match whole words. Error details carry `pattern_index` instead of the regex or a sample of the input. The Full setup validator no longer blocks `bypass`, `override`, `disable`, `token` or `free`, and its max length is 10000.
 - **Client-visible error text shows only the exception type** for exceptions that are not 10xGraph's own (stream `ERROR` chunk `reason` and `state.error`). Logs keep the full text. `err.context` keeps the real values.
 - **`@tool` has no `name` argument.** A tool's name is its function name, which is what `ToolNode` routes on. `@tool(name=...)` and `@tool("name")` fail, so rename the function instead. `get_tool_metadata()` has no `name` key. `@tool` works on bound methods.
 

@@ -17,12 +17,12 @@ faq:
   - q: Can I use OpenAI or Claude instead of Gemini?
     a: Yes. Change the model and provider arguments of ReactAgent, for example provider="openai" or provider="anthropic", and install the matching extra (openai or anthropic) instead of google-genai. The tools, graph and server stay the same.
   - q: Do I need Redis running for local development?
-    a: REDIS_URL must be set, because graph/agent.py reads it. The production template also turns on token_revocation, which keeps its entries in the Redis cache store, so with an unreachable Redis the server refuses to boot (set STARTUP_CHECKS=false to skip the check, or remove token_revocation while you develop). Without a reachable Redis and without that setting the server logs one warning and starts. Without DATABASE_URL the in-memory checkpointer is used.
+    a: REDIS_URL must be set, because graph/agent.py reads it. The Full setup also turns on token_revocation, which keeps its entries in the Redis cache store, so with an unreachable Redis the server refuses to boot (set STARTUP_CHECKS=false to skip the check, or remove token_revocation while you develop). Without a reachable Redis and without that setting the server logs one warning and starts. Without DATABASE_URL the in-memory checkpointer is used.
   - q: Why do the tools raise exceptions instead of returning an error message?
     a: A raised exception stops the tool and marks the result as failed. The model gets a generic failure with a reference id, and the full message goes to the server log, so internal details never reach the model or the customer. A returned dictionary treats the keys error, status, is_error and success as result metadata and removes them, so an error returned that way never reaches the model either. To give the model a message it can pass on, return it as a plain string.
 ---
 
-A production ReAct agent is more than a model calling tools in a loop. It has to know who is asking, refuse other customers' data, never repeat a side effect like a refund, keep conversations across restarts, and sit behind auth and rate limits. This guide builds all of that for a store support agent, starting from the 10xGraph production template.
+A production ReAct agent is more than a model calling tools in a loop. It has to know who is asking, refuse other customers' data, never repeat a side effect like a refund, keep conversations across restarts, and sit behind auth and rate limits. This guide builds all of that for a store support agent, starting from the 10xGraph Full setup.
 
 You need Python 3.12 or later, a Gemini API key, and Docker if you want local Postgres and Redis.
 
@@ -44,7 +44,7 @@ Create a folder, install the framework and the API server, and generate the proj
 mkdir support-agent && cd support-agent
 python -m venv .venv && source .venv/bin/activate
 pip install "10xgraph[google-genai,pg_checkpoint]" "10xgraph-api[jwt,redis]"
-10xgraph init --yes --template production 
+10xgraph init --yes --mode full 
 ```
 
 The template writes a working agent with JWT auth (every user reaches only their own threads) and a Redis cache store (`"cache_store": {"type": "redis"}`, read from `REDIS_URL`) with a rate limit and token revocation already set in `10xgraph.json`:

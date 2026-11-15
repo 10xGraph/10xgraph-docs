@@ -1,21 +1,21 @@
 ---
 title: Initialize a Project
-description: "Scaffold a 10xGraph project with interactive prompts or CLI flags, and understand what each template generates."
+description: "Scaffold a 10xGraph project with interactive prompts or CLI flags, and understand what each setup generates."
 section: "API server"
 group: "Basics"
 order: 40
 label: Initialize a Project
 updated: "2026-10-27"
 faq:
-  - q: "What is the difference between Quick Start and Production templates?"
-    a: "Quick Start generates a minimal graph with 10xgraph.json and environment template. Production adds tests, evaluations, auth stubs, and a full project structure, and writes the recommended config: JWT auth with owner-only data, a UUID ID generator, a Redis cache store with rate limiting and token revocation."
-  - q: "Can I change the template or auth choice after scaffolding?"
+  - q: "What is the difference between the Quick and Full setups?"
+    a: "Quick generates a minimal graph with 10xgraph.json and environment template. Full adds tests, evaluations, auth stubs, and a full project structure, and writes the recommended config: JWT auth with owner-only data, a UUID ID generator, a Redis cache store with rate limiting and token revocation."
+  - q: "Can I change the setup or auth choice after scaffolding?"
     a: "Yes, re-run 10xgraph init with --force to regenerate, or edit 10xgraph.json directly. See server/configure for full config reference."
   - q: "When should I choose a memory cache store instead of Redis?"
     a: "A memory cache store works for single instances only. Use Redis when running multiple server replicas or containers that need shared counters, locks and token revocation."
 ---
 
-`10xgraph init` scaffolds a new agent project from an interactive questionnaire or command-line flags. It creates a working graph, configuration file, and optional test/evaluation stubs tailored to your deployment model (Quick Start for development, Production for teams and deployment).
+`10xgraph init` scaffolds a new agent project from an interactive questionnaire or command-line flags. It creates a working graph, configuration file, and optional test/evaluation stubs tailored to your deployment model (Quick for development, Full for teams and deployment).
 
 ## Prerequisites
 
@@ -33,7 +33,7 @@ Navigate to an empty directory and run:
 10xgraph init
 ```
 
-The command asks three questions: the agent name, the template and the AI provider. It then prints a summary of what it wrote and creates the files. The Production template does not ask about auth or rate limiting; it writes the recommended setup (see [How 10xgraph.json is generated](#how-10xgraphjson-is-generated)). The next steps point to `10xgraph config` for full control.
+The command asks three questions: the agent name, the setup and the AI provider. It then prints a summary of what it wrote and creates the files. The Full setup does not ask about auth or rate limiting; it writes the recommended setup (see [How 10xgraph.json is generated](#how-10xgraphjson-is-generated)). The next steps point to `10xgraph config` for full control.
 
 To scaffold in a specific directory without entering it:
 
@@ -46,10 +46,10 @@ To scaffold in a specific directory without entering it:
 For CI pipelines or scripted setup, provide all arguments upfront:
 
 ```bash
-10xgraph init --yes --name MyWeatherBot --template production --provider openai --cache-store redis
+10xgraph init --yes --name MyWeatherBot --mode full --provider openai --cache-store redis
 ```
 
-Passing `--yes` or `--non-interactive` skips all prompts. Any value you omit takes its default (`quick-start` template, and for Production the recommended setup). The auth, cache store, rate limit and token revocation flags are only valid with `--template production`.
+Passing `--yes` or `--non-interactive` skips all prompts. Any value you omit takes its default (the Quick setup, and for Full the recommended setup). The auth, cache store, rate limit and token revocation flags are only valid with `--mode full`.
 
 ### Flags reference
 
@@ -57,10 +57,10 @@ Passing `--yes` or `--non-interactive` skips all prompts. Any value you omit tak
 |---|---|---|---|---|
 | `--path` | `-p` | Directory path | `.` | Project root |
 | `--name` | | String | Directory name of `--path`, or `MyAgent` for `.` | Agent name and display label |
-| `--template` | | `quick-start` \| `production` | Prompted, or `quick-start` with `--yes` / `--non-interactive` | Dev (`quick-start`) or team/deployment mode |
+| `--mode` | | `quick` \| `full` | Prompted, or `quick` with `--yes` / `--non-interactive` | Dev (`quick`) or team/deployment mode. `--template quick-start\|production` is an alias |
 | `--provider` | | `google` \| `openai` \| `anthropic` | Prompted | AI provider for the starter agent |
-| `--auth` | | `none` \| `jwt` \| `custom` | `jwt` | Requires `--template production` |
-| `--cache-store` | | `memory` \| `redis` | `redis` | Requires `--template production` |
+| `--auth` | | `none` \| `jwt` \| `custom` | `jwt` | Requires `--mode full` |
+| `--cache-store` | | `memory` \| `redis` | `redis` | Requires `--mode full` |
 | `--rate-limit` / `--no-rate-limit` | | Flag | On | Adds or leaves out `cache_store.rate_limit` |
 | `--token-revocation` / `--no-token-revocation` | | Flag | On with auth | Adds or leaves out `cache_store.token_revocation`. Ignored with `--auth none` |
 | `--websocket` / `--no-websocket` | | Flag | Off | Writes `websocket.enabled` |
@@ -72,14 +72,14 @@ Passing `--yes` or `--non-interactive` skips all prompts. Any value you omit tak
 Example with `--dry-run`:
 
 ```bash
-10xgraph init --name MyBot --template production --dry-run
+10xgraph init --name MyBot --mode full --dry-run
 ```
 
 This lists files that would be created without touching your filesystem.
 
 ## What init generates
 
-### Quick Start template
+### Quick setup
 
 Minimal setup for rapid prototyping:
 
@@ -103,7 +103,7 @@ cp .env.example .env
 10xgraph dev
 ```
 
-### Production template
+### Full setup
 
 Complete project structure with auth, a cache store, tests, and evaluations:
 
@@ -159,7 +159,7 @@ evals/                      # unless evals are turned off
 
 Init builds your config from your answers, not a static template. Examples:
 
-**Quick Start (minimal):**
+**Quick (minimal):**
 
 ```json
 {
@@ -172,7 +172,7 @@ Init builds your config from your answers, not a static template. Examples:
 }
 ```
 
-**Production (the default for `--template production`):**
+**Full (the default for `--mode full`):**
 
 ```json
 {
@@ -213,9 +213,9 @@ Init builds your config from your answers, not a static template. Examples:
 
 The cache store has no `url`, so Redis comes from the `REDIS_URL` environment variable. A `worker` block is added when you choose a background worker, and `"store": "graph.agent:store"` when you choose Postgres memory storage. The `test` and `evaluation` blocks are left out when tests or evals are turned off.
 
-**Production with `--auth none`:** the same file with `"auth": null` and no token revocation. Rate limiting is then counted `by` `ip`.
+**Full with `--auth none`:** the same file with `"auth": null` and no token revocation. Rate limiting is then counted `by` `ip`.
 
-**Thread names.** Production writes `"thread_name_generator": "first_message"`. Quick Start leaves it `null`, which means none: threads are saved without a name. The other choices are `random`, or a `module:attr` path to your own `ThreadNameGenerator` subclass. See [Generate readable thread names](/docs/server/configure#generate-readable-thread-names).
+**Thread names.** Full writes `"thread_name_generator": "first_message"`. Quick leaves it `null`, which means none: threads are saved without a name. The other choices are `random`, or a `module:attr` path to your own `ThreadNameGenerator` subclass. See [Generate readable thread names](/docs/server/configure#generate-readable-thread-names).
 
 For full details on every config key, see `/docs/server/configure`. To see what each key does when it is absent, see [What is on by default](/docs/server/configure#what-is-on-by-default).
 
@@ -232,7 +232,7 @@ This re-runs init in your current directory and overwrites all template files (g
 **To preview without writing:**
 
 ```bash
-10xgraph init --name MyBot --template production --dry-run
+10xgraph init --name MyBot --mode full --dry-run
 ```
 
 Lists files that would be created and exits without modifying the filesystem.
@@ -247,10 +247,10 @@ Lists files that would be created and exits without modifying the filesystem.
 
 Asks three questions:
 1. **Agent name?** (default: `MyAgent`)
-2. **Quick Start or Production?** (default: Quick Start)
+2. **Quick or Full?** (default: Quick)
 3. **AI provider?** (Google, OpenAI or Anthropic)
 
-Nothing else is asked. Production writes the recommended config and lists it in the summary. Run `10xgraph config` afterwards to change WebSocket, AG-UI, the ID generator, thread naming and every other setting.
+Nothing else is asked. Full writes the recommended config and lists it in the summary. Run `10xgraph config` afterwards to change WebSocket, AG-UI, the ID generator, thread naming and every other setting.
 
 ### Non-interactive with defaults
 
@@ -258,12 +258,12 @@ Nothing else is asked. Production writes the recommended config and lists it in 
 10xgraph init --yes
 ```
 
-Uses all defaults: agent name inferred from directory, Quick Start template, no auth, no cache store.
+Uses all defaults: agent name inferred from directory, Quick setup, no auth, no cache store.
 
 ### Non-interactive with explicit arguments
 
 ```bash
-10xgraph init --yes --name WeatherBot --template production --auth jwt --cache-store memory
+10xgraph init --yes --name WeatherBot --mode full --auth jwt --cache-store memory
 ```
 
 Does not prompt; an invalid value fails with an error.
@@ -287,7 +287,7 @@ cp .env.example .env
 
 Installs the bundled 10xGraph skills for Codex, Claude Code or GitHub Copilot (pick one with `--agent` or use `--all`), so your coding assistant knows the framework.
 
-### 3. (Production only) Set up Git hooks
+### 3. (Full only) Set up Git hooks
 
 ```bash
 pre-commit install
@@ -338,15 +338,15 @@ The graph module didn't load when the server started. Check:
 - Are all imports in `graph/agent.py` installed? (e.g., `pip install "10xgraph[google-genai]"`)
 - Run `python -c "from graph.agent import app; print(app)"` to get a detailed error.
 
-**"Invalid template" or "Invalid auth mode"**
+**"Invalid mode" or "Invalid auth mode"**
 
-You passed an unrecognized value to `--template`, `--auth`, or `--cache-store`. Valid values:
+You passed an unrecognized value to `--mode`, `--auth`, or `--cache-store`. Valid values:
 
-- `--template`: `quick-start`, `production`
+- `--mode`: `quick`, `full` (the alias `--template` takes `quick-start`, `production`)
 - `--auth`: `none`, `jwt`, `custom`
 - `--cache-store`: `memory`, `redis`
 
-Auth, cache store, rate-limit and token-revocation flags only work with `--template production`.
+Auth, cache store, rate-limit and token-revocation flags only work with `--mode full`.
 
 **Agent name contains special characters**
 

@@ -51,7 +51,7 @@ The tutorial builds one agent across several pages, so follow it in order. Skip 
 | [Tutorial: Threads and memory](/docs/get-started/tutorial/threads-and-memory) | 10 min | Persistent memory across invocations with checkpointers |
 | [Tutorial: Serve and inspect](/docs/get-started/tutorial/serve-and-inspect) | 10 min | The Swagger UI, the playground and reading thread state |
 | [Tutorial: Call from your app](/docs/get-started/tutorial/call-from-your-app) | 10 min | A front end with the TypeScript client, streaming and sessions |
-| [Project structure](/docs/get-started/project-structure) | 5 min | What the production template generates |
+| [Project structure](/docs/get-started/project-structure) | 5 min | What the Full setup generates |
 
 ## Prerequisites
 

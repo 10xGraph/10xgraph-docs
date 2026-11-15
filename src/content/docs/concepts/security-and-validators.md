@@ -1,6 +1,6 @@
 ---
 title: Security and Validators
-description: "How input validators and PromptInjectionValidator work, the authorization model, and what the production template enables against injection and misuse."
+description: "How input validators and PromptInjectionValidator work, the authorization model, and what the Full setup enables against injection and misuse."
 section: Concepts
 order: 170
 group: "Platform"
@@ -190,9 +190,9 @@ Media that a client sends is untrusted input. Three defaults protect the server:
 - **Uploads.** The API compares the first bytes of an upload with its declared type (`415` on a mismatch), caps text extraction, lets only the owner delete a file (`files:delete`) and deletes files when the messages and threads that use them are deleted. See [Files and multimodal on the server](/docs/server/files-and-multimodal).
 - **File tools.** `file_read`, `file_write` and `file_search` hide `.env`, key files and `.ssh`, `.aws`, `.gnupg` and `.git` folders by default, and `create_file_tools(root)` fixes the root in code. See [File tools](/docs/guides/prebuilt/file-tools).
 
-## What the production template generates
+## What the Full setup generates
 
-When you run `10xgraph init --template production`, the generated project includes a security setup:
+When you run `10xgraph init --mode full`, the generated project includes a security setup:
 
 - `graph/validators/validators.py` defines a `PromptInjectionValidator(strict_mode=True, max_length=10000)` with `max_length=10000` and a short list of suspicious keywords (`"ignore previous"`, `"forget previous"`, `"disregard previous"`, `"circumvent"`, `"remove restrictions"`, `"coupon"`). It no longer blocks everyday words such as `bypass`, `override`, `disable`, `token` or `free`. **Tune this list to your product.** Keywords match whole words.
 

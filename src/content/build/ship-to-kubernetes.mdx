@@ -35,13 +35,13 @@ flowchart LR
     P2 --> D
 ```
 
-## 1. Start from the production template
+## 1. Start from the Full setup
 
 ```bash
 mkdir shop-support && cd shop-support
 python -m venv .venv && source .venv/bin/activate
 pip install "10xgraph[google-genai,pg_checkpoint]" "10xgraph-api[jwt,redis]"
-10xgraph init --yes --template production --name shop-support
+10xgraph init --yes --mode full --name shop-support
 ```
 
 That writes `10xgraph.json` (JWT auth, a Redis cache store that reads `REDIS_URL` holding token revocation and a rate limit at 100 requests per 60 seconds per user, with the counters shared through that Redis), a `graph/` package with a sample weather agent, tests and evals. Build the Docker image only after two edits.
@@ -176,7 +176,7 @@ healthy
 
 The image builds, runs as uid 10001 on a read-only root, and starts with all capabilities dropped. `/ping` stays 200 while `/health/ready` is 503 because Redis cannot be reached. That split is what the manifest relies on. Readiness fails, so the pod is taken out of the Service and receives no new requests. Liveness still passes, so Kubernetes does not restart a pod that is merely waiting for a dependency. The unauthenticated request got 401, because every route except `/ping` and `/health/ready` needs a token. Stop and remove the container with `docker rm -f shop`.
 
-The production template turns token revocation on, so the server also refuses to boot when the cache store is unreachable. `STARTUP_CHECKS=false` skips that boot check if you want to see the probes alone.
+The Full setup turns token revocation on, so the server also refuses to boot when the cache store is unreachable. `STARTUP_CHECKS=false` skips that boot check if you want to see the probes alone.
 
 The full Compose file with Postgres and Redis passed `docker compose config`. I did not start it, and I did not run the app against a real Postgres.
 

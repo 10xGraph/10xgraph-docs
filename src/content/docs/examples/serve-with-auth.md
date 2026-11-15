@@ -1,14 +1,14 @@
 ---
 title: Serve an agent with auth, from init to Docker
 seoTitle: "Serve a 10xGraph agent with JWT auth"
-description: Scaffold the production template, run it with JWT auth, call it with curl and TenxGraphClient, then generate Docker files with 10xgraph build.
+description: Scaffold the Full setup, run it with JWT auth, call it with curl and TenxGraphClient, then generate Docker files with 10xgraph build.
 section: Examples
 group: Production
 order: 20
 label: Serve with auth
 updated: "2026-11-08"
 faq:
-  - q: Does the production template run with no auth?
+  - q: Does the Full setup run with no auth?
     a: "No. With --auth jwt the generated 10xgraph.json sets \"auth\": \"jwt\" and the server needs JWT_SECRET_KEY. If you set \"auth\": null and MODE=production, the server starts open and nothing refuses it, so configure auth yourself."
   - q: Why replace InMemoryCheckpointer before deploying?
     a: The generated image starts Gunicorn with WEB_CONCURRENCY=2, and an in-memory checkpointer lives inside one process. Use PgCheckpointer so threads, ownership and the tool ledger survive a restart and are shared between workers.
@@ -18,13 +18,13 @@ You write the agent. `10xgraph-api` turns it into an HTTP service with JWT auth,
 
 **Needs:** Python 3.12+, `pip install "10xgraph[openai]" "10xgraph-api[jwt,redis]"` (the template's own `pyproject.toml` lists these), `OPENAI_API_KEY` for the model, and a Redis if you keep the Redis rate limiter. Use `--provider google` or `--provider anthropic` to switch the provider extra and the key name.
 
-## 1. Scaffold the production template
+## 1. Scaffold the Full setup
 
 ```bash
-10xgraph init --template production --auth jwt --provider openai --yes
+10xgraph init --mode full --auth jwt --provider openai --yes
 ```
 
-The production template turns on a Redis cache store (read from `REDIS_URL`), rate limiting and token revocation. The counters are shared between workers. For a first run without Redis, pass `--cache-store memory`; the counters then live in each process.
+The Full setup turns on a Redis cache store (read from `REDIS_URL`), rate limiting and token revocation. The counters are shared between workers. For a first run without Redis, pass `--cache-store memory`; the counters then live in each process.
 
 The command writes the project into the current folder. The files you will touch:
 

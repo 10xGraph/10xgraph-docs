@@ -81,7 +81,7 @@ The response is a plain JSON object, not the standard `data` and `metadata` enve
 Three pieces of middleware also skip `/ping` and `/health/ready` on purpose, because orchestrator probes would otherwise restart healthy containers:
 
 - **Trusted host check.** Probes call `localhost` or the pod IP, which are not in `ALLOWED_HOST`. The host check is skipped for these two probe paths only.
-- **Rate limiting.** `/ping` and `/health/ready` are always excluded, so a cache store outage (for example Redis) does not fail the probe through the rate limiter. The production template also lists it in `rate_limit.exclude_paths`.
+- **Rate limiting.** `/ping` and `/health/ready` are always excluded, so a cache store outage (for example Redis) does not fail the probe through the rate limiter. The Full setup also lists it in `rate_limit.exclude_paths`.
 - **Authentication.** No token is needed.
 
 ---

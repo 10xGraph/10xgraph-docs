@@ -75,7 +75,7 @@ In `10xgraph.json`:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `false` | The audit log is off unless you set it. `10xgraph init --template production` writes `true`. |
+| `enabled` | `false` | The audit log is off unless you set it. `10xgraph init --mode full` writes `true`. |
 | `sinks` | `["log"]` | Where events go. See Sinks. |
 | `include_reads` | `true` | Set `false` to keep denials, authentication failures and changes, and drop allowed reads and invokes. Use it to cut volume. |
 

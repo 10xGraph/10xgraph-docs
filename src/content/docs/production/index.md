@@ -26,7 +26,7 @@ This page lists what the platform provides, what you switch on, and what it does
 | Capability | Available in 1.0 | Opt-in (what turns it on) | Not provided |
 |---|---|---|---|
 | [API server and streaming](/docs/server) | REST, SSE streaming and WebSocket routes generated from your graph; liveness and readiness probes | Run with `10xgraph dev` or the image from `10xgraph build` | A hosted service |
-| [Auth](/docs/server/auth) | JWT and custom `BaseAuth`; the `10xgraph init` production template turns it on | `auth` in `10xgraph.json` (it is off until you set it) | An identity provider, user management |
+| [Auth](/docs/server/auth) | JWT and custom `BaseAuth`; the `10xgraph init` Full setup turns it on | `auth` in `10xgraph.json` (it is off until you set it) | An identity provider, user management |
 | [RBAC and reach](/docs/server/auth) | Permissions per route; reach `own`, `tenant` or `all` | `roles` and `tenant_claims` inside the `auth` object | Per-tool permissions (permissions apply per route) |
 | [Tenant isolation](/docs/guides/multi-tenant-data) | Tenant columns you declare, filled from the verified identity | `tenant_columns` on `PgCheckpointer` and `PgVectorStore`; Postgres row-level security with `row_level_security` | Tenant isolation without declared tenant columns, or on SQLite and in-memory checkpointers |
 | [Durable state](/docs/guides/set-up-checkpointing) | Versioned thread state in Postgres or SQLite; Redis as hot cache | Pass `PgCheckpointer` or the SQLite checkpointer to `compile()` | Backups and retention policy |
@@ -37,7 +37,7 @@ This page lists what the platform provides, what you switch on, and what it does
 | [Background jobs and scheduler](/docs/server/background-tasks) | TaskIQ broker, `10xgraph worker`, `10xgraph scheduler`, `/v1/tasks` routes | `worker` config and a broker (Redis Streams, RabbitMQ or Kafka); results and schedules live in Redis | Exactly-once delivery (it is at-least-once) |
 | [Metrics (Prometheus)](/docs/guides/metrics-prometheus-grafana) | Scrape route or OTLP push for the API and the worker | `metrics` block in `10xgraph.json` | Dashboards and alert rules |
 | [Tracing](/docs/server/observability) | OTLP, [Phoenix](/docs/guides/send-traces-to-phoenix), [Logfire and LangSmith](/docs/guides/send-traces-to-logfire-langsmith) through the OTEL publisher | `OTEL_ENABLED` and the `otel` extra, or a publisher | A trace backend |
-| [Audit log and JSON logs](/docs/server/audit-log) | Metadata-only audit events and structured JSON log lines | `audit` block in `10xgraph.json` and `LOG_FORMAT=json`; the production template turns them on | Log storage, retention and tamper protection (your log pipeline does that) |
+| [Audit log and JSON logs](/docs/server/audit-log) | Metadata-only audit events and structured JSON log lines | `audit` block in `10xgraph.json` and `LOG_FORMAT=json`; the Full setup turns them on | Log storage, retention and tamper protection (your log pipeline does that) |
 | [Deploy files](/docs/server/deploy) | Dockerfile, Compose and Kubernetes manifest from `10xgraph build` | `--docker-compose`, `--k8s` | Cluster, TLS, secrets and backups |
 | [TypeScript client](/docs/client) | `10xgraph-client` covers the API: invoke, stream, threads, memory, files | `npm install 10xgraph-client` | React hooks |
 | [Playground](/docs/server/playground) | Opens with `10xgraph dev` | Not for production; run trace is off in production mode | Use by end users |
@@ -82,6 +82,6 @@ The [limits page](/docs/production/limits) explains each of these and what to do
 
 ## The path to production
 
-1. **Start from the production template.** Run `10xgraph init --template production`. It scaffolds the graph, an auth class, evals and tests, and a `10xgraph.json` with auth and rate limiting.
+1. **Start from the Full setup.** Run `10xgraph init --mode full`. It scaffolds the graph, an auth class, evals and tests, and a `10xgraph.json` with auth and rate limiting.
 2. **Configure.** Set `auth`, pass a `PgCheckpointer` to `compile()`, set `MODE=production`, `ORIGINS`, `JWT_SECRET_KEY`, `DATABASE_URL` and `REDIS_URL`. Read [Security in five minutes](/docs/get-started/security-in-five-minutes), then the [security model](/docs/production/security-model), and test with [Test before production](/docs/testing/before-production).
 3. **Build and deploy.** Run `10xgraph build --docker-compose --k8s`, then follow the [production checklist](/docs/server/production-checklist) and the [scaling guide](/docs/production/scaling). For how the pieces fit, see the [architecture](/docs/production/architecture). To see what teams build with it, browse [/build](/build).

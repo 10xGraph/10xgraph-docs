@@ -54,7 +54,7 @@ The first rows are where the two differ most. Orchestration basics are at the bo
 
 ## Why teams choose 10xGraph over ADK
 
-1. **Auth and isolation are generated.** The `adk api_server` page documents session and run endpoints but no authentication ([API server docs](https://adk.dev/runtime/api-server/)). 10xGraph's production template turns on JWT auth, owner-only threads and a Redis rate limit in `10xgraph.json`.
+1. **Auth and isolation are generated.** The `adk api_server` page documents session and run endpoints but no authentication ([API server docs](https://adk.dev/runtime/api-server/)). 10xGraph's Full setup turns on JWT auth, owner-only threads and a Redis rate limit in `10xgraph.json`.
 2. **Side effects survive crashes.** 10xGraph's tool ledger skips tools that already ran when a run resumes. See [replay-safe tools](/docs/concepts/replay-safe-tools).
 3. **Compare-and-swap on durable writes.** `PgCheckpointer` checks a state version on write and guards the Redis cache write by version, so a stale run cannot overwrite a newer one.
 4. **Deploy files for two targets.** `10xgraph build --docker-compose --k8s` writes the files you would otherwise write by hand.
@@ -124,7 +124,7 @@ app.invoke(
 
 ```bash
 pip install 10xgraph 10xgraph-api google-genai
-10xgraph init --yes --template production --auth jwt
+10xgraph init --yes --mode full --auth jwt
 10xgraph dev --host 0.0.0.0 --port 8000 --no-open
 10xgraph build --docker-compose --k8s
 ```

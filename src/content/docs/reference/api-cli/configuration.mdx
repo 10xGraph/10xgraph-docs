@@ -244,7 +244,7 @@ Off unless set. One JSON line per event with ids and results only: no prompts, a
 
 | Key | Type | Default | Purpose |
 |---|---|---|---|
-| `audit.enabled` | boolean | `false` | Turn the audit log on. The production template writes `true` |
+| `audit.enabled` | boolean | `false` | Turn the audit log on. The Full setup writes `true` |
 | `audit.sinks` | array of strings | `["log"]` | `"log"` writes JSON lines to the `tenxgraph_api.audit` logger on stdout. `"publisher"` also sends events through the configured publisher (best effort). `"module:Class"` loads a `BaseAuditSink` subclass |
 | `audit.include_reads` | boolean | `true` | `false` keeps denials, auth failures and changes, and drops allowed reads and invokes to cut volume |
 

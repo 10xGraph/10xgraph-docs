@@ -5,6 +5,7 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { SITE } from '../lib/site';
 import '../styles/home.css';
+import stats from '../data/project-stats.json';
 
 // One definition sentence, reused in the first FAQ answer, the JSON-LD and the visible definition.
 const definition = "10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.";
@@ -22,32 +23,48 @@ const faq = [
     a: "You write the agents, tools, tasks and prompts in Python. 10xGraph runs the API server, authentication, roles and tenant isolation, durable state, background jobs, metrics, tracing and the audit log, and writes the Docker and Kubernetes files."
   },
   {
-    q: "Is it only for agents?",
-    a: "Agents are the main workload, and the graph engine is part of the install. Background jobs run any Python task on a worker with the same identity and access rules."
+    q: "Why not use an agent framework with my own FastAPI server?",
+    a: "You can. You would then write and maintain the API server, authentication and roles, the tenant filter in every query, the job worker, metrics and the deploy files yourself. 10xGraph ships that layer as one install, and each part can still be replaced: the auth class, the storage backends and the cache store."
   },
   {
     q: "How does it keep tenants apart?",
     a: "Your auth class verifies the token. Roles give permissions and a reach of own, tenant or all. Tenant columns on the checkpointer and store are filled from the verified identity, and every query filters by them. A thread from another tenant answers 404. Row-level security in Postgres is opt-in."
   },
   {
-    q: "Do I have to use Postgres?",
-    a: "No. Postgres and Redis are the defaults, SQLite works for local development, and each storage layer is an interface you can implement for the database you run: `BaseCheckpointer` for threads, `BaseStore` for memory and `BaseCacheStore` for shared server state."
+    q: "Is authentication on by default?",
+    a: "No. Auth is off until you configure it, which suits local development. The Full setup in `10xgraph init` turns on JWT auth, rate limits and token revocation."
   },
   {
-    q: "Does 10xGraph help with SOC 2 or ISO 27001?",
-    a: "10xGraph is software you run, so it holds no certification itself; your organization and deployment are what get audited. The control mapping shows which controls its features support, such as access control, rate limiting and the audit log, and which stay yours, such as encryption at rest and backups."
-  },
-  {
-    q: "Can it run background jobs?",
-    a: "Yes. Tasks are TaskIQ tasks run by `10xgraph worker`, with `10xgraph scheduler` for cron schedules, on Redis Streams, RabbitMQ or Kafka. A task runs as the user who queued it."
+    q: "What do I have to run in production?",
+    a: "The API server, Postgres for durable state, and Redis for the cache store once you run more than one worker. The job worker and the scheduler are separate processes that you start only if you use background jobs. `10xgraph build` writes the Dockerfile, docker-compose.yml and Kubernetes manifest for them."
   },
   {
     q: "What happens if the server crashes mid-run?",
-    a: "With a checkpointer configured, 10xGraph records the current node before running it and keeps a ledger of every completed tool call. When the run resumes, on the same process or a new pod, the interrupted node runs again, but any tool call already in the ledger is skipped instead of executed. A payment tool that finished before the crash does not charge the card a second time."
+    a: "With a checkpointer configured, 10xGraph records the current node before running it and keeps a ledger of every completed tool call. When the run resumes, on the same process or a new pod, the interrupted node runs again, but any tool call already in the ledger is skipped instead of executed. A payment tool that finished before the crash does not charge the card a second time. A crash before a tool returns, or in the short gap before its record is written, can still repeat that tool, so give payment and other side-effecting tools an idempotency key derived from stable inputs."
+  },
+  {
+    q: "Can it run background jobs?",
+    a: "Yes. `10xgraph worker` runs your Python tasks and `10xgraph scheduler` runs cron schedules, on Redis Streams, RabbitMQ or Kafka. Tasks are built on TaskIQ. A task runs as the user who queued it."
+  },
+  {
+    q: "Is it only for agents?",
+    a: "Agents are the main workload, and the graph engine is part of the install. Background jobs run any Python task on a worker with the same identity and access rules."
+  },
+  {
+    q: "Do I have to use Postgres?",
+    a: "No. Postgres and Redis are the defaults, and SQLite works for local development. Each storage layer is an interface, so you can write an adapter for the database you already run: `BaseCheckpointer` for threads, `BaseStore` for memory and `BaseCacheStore` for shared server state."
   },
   {
     q: "How does my frontend talk to the server?",
     a: "Through the typed TypeScript client, installed with npm install 10xgraph-client. It covers invoke, streaming, threads, memory and file uploads, and it sends the same JWT the server checks. It works in Next.js, Vite and Node. Tools can also run in the browser, for work only the user's device can do."
+  },
+  {
+    q: "Can I move an existing LangGraph agent to 10xGraph?",
+    a: "Yes. The graph model is similar: `StateGraph`, checkpointers and thread ids have direct equivalents, while message classes and prebuilt agents need replacing. The LangGraph comparison page in the docs lists the steps."
+  },
+  {
+    q: "Does 10xGraph help with SOC 2 or ISO 27001?",
+    a: "10xGraph is software you run, so it holds no certification itself; your organization and deployment are what get audited. The control mapping shows which controls its features support, such as access control, rate limiting and the audit log, and which stay yours, such as encryption at rest and backups."
   },
   {
     q: "Do I need LangChain?",
@@ -131,7 +148,10 @@ const jsonLd = [
           <a class="btn btn-primary" href="/docs/get-started/first-agent">Build your first app <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5L12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
           <button class="pill" type="button" data-copy="pip install 10xgraph 10xgraph-api"><span class="prompt" aria-hidden="true">$</span><code>pip install 10xgraph 10xgraph-api</code><span class="cp" aria-live="polite">Copy</span></button>
         </div>
+        <div class="hero-links">
         <a class="link star" href="https://github.com/10xGraph/10xGraph"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>Star on GitHub · MIT, self-hosted</a>
+        <a class="link" href="/docs/get-started/security-in-five-minutes">See tenant isolation in five minutes &rarr;</a>
+      </div>
       </div>
 
       <div class="stage" id="stage" role="region" aria-label="Animation: your code unfolds into a running AI infrastructure">
@@ -202,6 +222,7 @@ const jsonLd = [
         <tr><td data-label="Without 10xGraph, you build">Dockerfiles and Kubernetes manifests</td><td data-label="With 10xGraph"><code>10xgraph build</code></td></tr>
       </tbody>
     </table>
+      <p class="center-link"><a href="/docs/compare/10xgraph-vs-langgraph">Coming from LangGraph? Compare the production layer &rarr;</a> <a href="/docs/get-started/why-10xgraph">Why 10xGraph &rarr;</a></p>
     </div>
   </div>
 </section>
@@ -235,7 +256,10 @@ const jsonLd = [
 
         <h3 class="pt" id="p4h">One stack, Python backend to TypeScript frontend</h3>
         <p class="lede">An official typed TypeScript client covers invoke, streaming, threads, memory and files. Tools can run in the user's browser through remote tools.</p>
-              <div class="code"><div class="cap"><span>agent.py</span><span>python</span></div><pre tabindex="0"><code><span class="k">def</span> lookup_order(order_id: str) -&gt; str:
+        <p class="leadin">REST, SSE streaming, WebSocket, realtime audio and AG-UI endpoints, generated from your graph.</p>
+              <div class="code"><div class="cap"><span>agent.py</span><span>python</span></div><pre tabindex="0"><code><span class="k">from</span> tenxgraph.prebuilt.agent <span class="k">import</span> ReactAgent
+
+<span class="k">def</span> lookup_order(order_id: str) -&gt; str:
     <span class="s">"""Look up an order by id."""</span>
     ...
 
@@ -261,11 +285,12 @@ agent = ReactAgent(
       <article class="panel" id="step-2" aria-labelledby="p-tenancy">
         <div class="panel-row"><span>Step 2 of 7</span></div>
 
-        <h3 class="pt" id="p-tenancy">Multi-tenant from the first request</h3>
+        <h3 class="pt" id="p-tenancy">Each customer sees only their own data</h3>
         <p class="lede">Your customers must never see each other's data. 10xGraph checks it in storage, on every route, from the verified token.</p>
         <p class="leadin">JWT or your own auth class. Roles with permissions and a reach of own, tenant or all. Rate limits, token revocation and prompt-injection validators.</p>
+        <p class="leadin">Auth is off until you configure it. The Full setup in <code>10xgraph init</code> turns it on.</p>
         <ul class="pts c2">
-        <li class="item"><h4>Tenant from the token</h4><p>Tenant columns are filled from claims your auth class verified, never from client input.</p></li>
+        <li class="item"><h4>Tenant from the token</h4><p>You declare tenant columns on the checkpointer and store. They are filled from claims your auth class verified, never from client input.</p></li>
         <li class="item"><h4>A foreign thread answers 404</h4><p>Another tenant's thread, message, memory or file is not found, so ids do not leak.</p></li>
         <li class="item"><h4>Reach per role</h4><p>Members see their own data. Admins can read across their tenant. Runs and writes stay with the caller.</p></li>
         <li class="item"><h4>Checked at boot</h4><p>The server refuses to start if a route has no permission guard or tenant claims and storage columns disagree.</p></li>
@@ -292,7 +317,6 @@ agent = ReactAgent(
       </article>
       <article class="panel" id="step-3" aria-labelledby="p2h">
         <div class="panel-row"><span>Step 3 of 7</span></div>
-        <p class="leadin">REST, SSE streaming, WebSocket, realtime audio and AG-UI endpoints, generated from your graph.</p>
         <h3 class="pt" id="p2h">Crash mid-run. Resume without charging the card twice.</h3>
         <p class="lede">A process can die between two tool calls. When the run resumes, 10xGraph replays the interrupted step but checks a tool ledger first, so tools that already finished are skipped instead of executed again.</p>
     <div class="replay" role="group" aria-label="Replay example">
@@ -308,13 +332,14 @@ agent = ReactAgent(
         <div class="tc skip"><code>charge_card</code><span>skipped · in ledger</span></div>
         <div class="tc ran"><code>send_receipt</code><span>ran · recorded</span></div>
       </div>
-      <div class="replay-foot">Requires a checkpointer. Ledger entries are keyed by the assistant message that issued the call plus the tool call id.</div>
+      <div class="replay-foot">Requires a checkpointer. Ledger entries are keyed by the assistant message that issued the call plus the tool call id. A crash before a tool returns, or in the short gap before its record is written, can repeat that tool, so send an idempotency key derived from stable inputs to payment providers. <a href="/docs/production/limits">Limits</a></div>
     </div>
         <ul class="pts c1">
       <li class="item"><h4>Tool ledger</h4><p>Each completed tool call is recorded as soon as it returns. Keys include the issuing message, so models that reuse ids like <code>call_1</code> never collide across turns.</p></li>
       <li class="item"><h4>Versioned state writes</h4><p>Durable writes use an optimistic version check, so two runs on the same thread cannot overwrite each other. The Redis cache is version-guarded too.</p></li>
       <li class="item"><h4>Real timeouts</h4><p><code>node_timeout</code> and <code>tool_timeout</code> stop a hung tool from holding a worker forever.</p></li>
         </ul>
+        <p class="center-link"><a href="/docs/concepts/replay-safe-tools">How replay-safe tools work &rarr;</a></p>
       </article>
       <article class="panel" id="step-4" aria-labelledby="p-data">
         <div class="panel-row"><span>Step 4 of 7</span></div>
@@ -375,7 +400,7 @@ app = graph.compile(
         <p class="leadin"><code>10xgraph build</code> writes the Dockerfile, docker-compose.yml and a Kubernetes manifest, with liveness and readiness probes.</p>
         <h3 class="pt" id="cli-path">Three commands from empty folder to running service</h3>
         <ol class="cmds">
-      <li class="item"><span class="step-n">01</span><div class="tb"><span>$</span>10xgraph init</div><p>Scaffold a project. Three questions: name, template, provider. The Production template turns on auth, rate limits and token revocation.</p></li>
+      <li class="item"><span class="step-n">01</span><div class="tb"><span>$</span>10xgraph init</div><p>Scaffold a project. Three questions: name, setup, provider. The Full setup turns on auth, rate limits and token revocation.</p></li>
       <li class="item"><span class="step-n">02</span><div class="tb"><span>$</span>10xgraph dev</div><p>Start the API server and open the playground. Chat with your agent, inspect threads and runs.</p></li>
       <li class="item"><span class="step-n">03</span><div class="tb"><span>$</span>10xgraph build</div><p>Write the Dockerfile, and with flags docker-compose.yml and a Kubernetes manifest.</p></li>
         </ol>
@@ -393,8 +418,9 @@ app = graph.compile(
       <div class="bcell l" id="in-production">
         <span class="kicker">In production</span>
         <h2 id="prod-h">Zilogue runs on 10xGraph</h2>
-        <p>Zilogue, the AI interview platform for hiring teams, runs on 10xGraph in production. It is built by 10xScale, the team that builds and maintains 10xGraph, so every release runs under real customer load before it ships.</p>
+        <p>Zilogue, the AI interview platform for hiring teams, runs on 10xGraph in production. It is built by 10xScale, the team that builds and maintains 10xGraph, so the maintainers depend on it in their own product.</p>
         <p class="center-link"><a href="https://www.zilogue.com/" target="_blank" rel="noopener">Visit Zilogue<span class="sr-only"> (opens in a new tab)</span> &rarr;</a></p>
+        <p>{stats.releases.total} releases, {stats.commits.last30Days} commits in the last 30 days. <a href="/maintainers">Maintainers</a>, <a href="/changelog">Changelog</a>, <a href="/docs/security">Security</a>.</p>
       </div>
       <div class="bcell r">
         <h2 id="comp-h">Built for teams going through SOC 2 and ISO 27001 audits</h2>
@@ -527,19 +553,6 @@ app = graph.compile(
     });
   });
 
-  /* model switch */
-  var seg = document.querySelector(".seg");
-  var mstr = document.getElementById("mstr");
-  if (seg && mstr) {
-    seg.hidden = false;
-    seg.querySelectorAll("button").forEach(function (b) {
-      b.addEventListener("click", function () {
-        seg.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
-        mstr.textContent = '"' + b.getAttribute("data-m") + '"';
-      });
-    });
-  }
-
   /* hero stage: isometric build-up, then illustrative traffic through the infrastructure layers */
   (function () {
     var stage = document.getElementById("stage");
@@ -620,7 +633,7 @@ app = graph.compile(
     var platLab = el("text", { "class": "lbl n", x: iso(9, 0, -.35)[0] - 8, y: iso(9, 0, -.35)[1] + 20, "text-anchor": "end" }, labels); platLab.textContent = "Kubernetes";
 
     // editor
-    var F1 = [["kw", "from"], [" ", " tenxgraph "], ["kw", "import"], [" ", " ReactAgent\n\nagent = "], ["fn", "ReactAgent"], [" ", "(\n    model="], ["str", '"google/gemini-2.5-flash"'], [" ", ",\n    tools=[lookup_order, refund],\n)\napp = agent."], ["fn", "compile"], [" ", "()"]];
+    var F1 = [["kw", "from"], [" ", " tenxgraph.prebuilt "], ["kw", "import"], [" ", " ReactAgent\n\nagent = "], ["fn", "ReactAgent"], [" ", "(\n    model="], ["str", '"google/gemini-2.5-flash"'], [" ", ",\n    tools=[lookup_order, refund],\n)\napp = agent."], ["fn", "compile"], [" ", "(checkpointer=pg)"]];
     var F2 = [[" ", "{\n  "], ["str", '"agent"'], [" ", ": "], ["str", '"agent:app"'], [" ", ",\n  "], ["str", '"auth"'], [" ", ": {\n    "], ["str", '"method"'], [" ", ": "], ["str", '"jwt"'], [" ", ",\n    "], ["str", '"tenant_claims"'], [" ", ": ["], ["str", '"org_id"'], [" ", "]\n  },\n  "], ["str", '"cache_store"'], [" ", ": { "], ["str", '"type"'], [" ", ": "], ["str", '"redis"'], [" ", " },\n  "], ["str", '"worker"'], [" ", ": {\n    "], ["str", '"broker"'], [" ", ": { "], ["str", '"type"'], [" ", ": "], ["str", '"redis_stream"'], [" ", " }\n  },\n  "], ["str", '"audit"'], [" ", ": { "], ["str", '"enabled"'], [" ", ": true }\n}"]];
     function len(f) { return f.reduce(function (n, c) { return n + c[1].length; }, 0); }
     function render(f, n) { var h = "", left = n; for (var i = 0; i < f.length && left > 0; i++) { var s = f[i][1].slice(0, left); left -= s.length; h += f[i][0] === " " ? s : '<span class="' + f[i][0] + '">' + s + "</span>"; } $("iso-pre").innerHTML = h + (n < len(f) ? '<i class="caret"></i>' : ""); }
@@ -633,7 +646,7 @@ app = graph.compile(
       [2700, function () { $("iso-tab1").className = ""; $("iso-tab2").className = "on"; phase.textContent = "writing 10xgraph.json"; }],
       [4500, function () { $("iso-ed").classList.add("fly"); phase.textContent = "your agent becomes the base"; }],
       [4900, function () { show([plat, core]); show(coreLab); }],
-      [5600, function (t) { phase.textContent = "generating the production server"; setCmd("10xgraph init --template production", t); }],
+      [5600, function (t) { phase.textContent = "generating the production server"; setCmd("10xgraph init --mode full", t); }],
       [5900, function () { show([LAY[0].el]); show(LAY[0].lab); }], [6250, function () { show([LAY[1].el]); show(LAY[1].lab); }],
       [6600, function () { show([LAY[2].el]); show(LAY[2].lab); }], [6950, function () { show([LAY[3].el]); show(LAY[3].lab); }],
       [7350, function () { show([LAY[4].el]); show(LAY[4].lab); }],
