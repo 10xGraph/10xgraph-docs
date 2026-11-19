@@ -99,6 +99,7 @@ const gaId = import.meta.env.PUBLIC_GA_ID;
     <!-- Machine-readable alternates: RSS for readers, markdown and llms.txt for AI agents -->
     <link rel="alternate" type="application/rss+xml" title={`${SITE.name} blog`} href="/rss.xml" />
     {markdownHref && <link rel="alternate" type="text/markdown" title="This page as Markdown" href={markdownHref} />}
+    <link rel="alternate" type="text/markdown" title="Agent quickstart: start here" href="/skill.md" />
     <link rel="alternate" type="text/plain" title="LLM-readable site index" href="/llms.txt" />
     <link rel="sitemap" href="/sitemap-index.xml" />
     <!-- Agent resource catalog (lib/ard.ts); "ai-catalog" is the older name some tools still read -->

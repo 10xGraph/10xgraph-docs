@@ -384,3 +384,12 @@ html:has(.home) { scroll-behavior: smooth; }
 .home .final :focus-visible { outline-color: var(--btn-ink); }
 @media (max-width: 1020px) { .home .final h2, .home .final-cta { grid-column: 1 / -1; } }
 
+
+/* agents and feedback */
+.home .agents-main { grid-column: 1 / 8; min-width: 0; }
+.home .agents-main .lede { margin-bottom: 24px; }
+.home .agents-main .lede code { color: var(--text); }
+.home .agents-note { margin: 24px 0 0; color: var(--muted); }
+.home .agents-feedback { grid-column: 9 / 13; min-width: 0; padding-top: 8px; }
+.home .agents-feedback p { color: var(--muted); margin: 12px 0 0; }
+@media (max-width: 1020px) { .home .agents-main, .home .agents-feedback { grid-column: 1 / -1; } .home .agents-feedback { margin-top: 40px; } }

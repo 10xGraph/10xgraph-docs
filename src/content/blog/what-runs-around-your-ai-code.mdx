@@ -62,7 +62,7 @@ Tracing goes to Logfire, LangSmith, Phoenix or any OTLP endpoint. Metrics go to 
 
 ## Deploy
 
-`10xgraph build --docker-compose --k8s` writes a Dockerfile, a `docker-compose.yml` and a Kubernetes manifest. The image is multi-stage and runs as non-root. The cluster, TLS, secrets and backups stay yours.
+`10xgraph build --docker-compose --k8s` writes a Dockerfile, a `docker-compose.yml` and a Kubernetes manifest. The image is multi-stage and runs as non-root. The cluster and backups stay yours. Built-in TLS and secrets management are upcoming; today, terminate TLS at your ingress and inject secrets from your secret manager.
 
 **You write:** the infrastructure the files run on. **Runs for you:** the generated files and the probes. See [deploy](/docs/deploy).
 
@@ -137,7 +137,7 @@ If an auditor asks for access control, logging and change evidence, 10xGraph pro
 - There is no hosted service. You run it, or nobody does.
 - Auth is off until you configure it. The production template, `10xgraph init --template production`, turns it on.
 - Tenant isolation needs the columns you declare. It is not automatic.
-- Permissions apply per route, not per tool. A tool that reads customer data must check the caller itself.
+- Routes have role permissions, and a tool that reads customer data checks the caller with the verified identity in `config`.
 - The community is smaller than LangGraph's or CrewAI's, and there are fewer integrations.
 
 ## Where to start

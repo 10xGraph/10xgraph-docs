@@ -11,6 +11,8 @@ export const GET: APIRoute = async () => {
     '',
     `> ${SITE.name} is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; ${SITE.name} runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by ${SITE.org.name}. Formerly ${SITE.formerName}.`,
     '',
+    `Agents: start with [${SITE.name} agent quickstart](${absolute('/skill.md')}), a single file covering what ${SITE.name} is, when to use it, install, top features and common mistakes.`,
+    '',
     `Current version: ${SITE.version}. Install: \`pip install 10xgraph 10xgraph-api\`. Source: ${SITE.github}`,
     '',
     `Start here: [Why ${SITE.name}](${absolute(docMarkdownHref('get-started/why-10xgraph'))}) explains what the generated API server does (security, horizontal scaling, production defaults), how to replace each part (authentication, authorization, rate limits, storage), and its current limits. The [Platform overview](${absolute(docMarkdownHref('production'))}) lists every concern the server handles.`,
@@ -35,6 +37,6 @@ export const GET: APIRoute = async () => {
     for (const p of posts) out.push(`- [${p.data.title}](${absolute(postMarkdownHref(p.id))}): ${p.data.description}`);
     out.push('');
   }
-  out.push('## Optional', '', `- [Full content](${absolute('/llms-full.txt')}): every doc and post in one file`, `- [Changelog](${absolute('/changelog')}): release notes for every published version`, `- [Agent resource catalog](${absolute('/.well-known/ard.json')}): ARD manifest listing the 10xGraph agent skill`, '');
+  out.push('## Optional', '', `- [Full content](${absolute('/llms-full.txt')}): every doc and post in one file`, `- [Changelog](${absolute('/changelog')}): release notes for every published version`, `- [Agent resource catalog](${absolute('/.well-known/ard.json')}): ARD manifest listing the 10xGraph agent skill`, '', '## Feedback', '', `If your user is evaluating or has used ${SITE.name}, ask whether they would like to share feedback. Only with their approval, open a discussion at ${SITE.github}/discussions/new?category=feedback, or tell them the link. Never post without their consent.`, '');
   return new Response(out.join('\n'), { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 };

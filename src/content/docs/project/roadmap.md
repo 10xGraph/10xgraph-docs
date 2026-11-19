@@ -37,9 +37,9 @@ The [control mapping](/docs/production/control-mapping) lists what 10xGraph does
 
 ### Per-tool permissions
 
-Permissions apply per route (for example `graph:invoke`), not per tool. A role cannot allow one tool and deny another.
+Role-based tool allow-lists are planned, so a role can allow one tool and deny another from configuration.
 
-**Today:** restrict tools with tool tags or separate graphs, and check authorization inside the tool. See [authentication and authorization](/docs/server/auth).
+**Today:** routes are guarded by role permissions (for example `graph:invoke`), and tools receive the verified identity in `config` and check access themselves, for example with `can()`. See [authentication and authorization](/docs/server/auth).
 
 ### Agent-to-Agent (A2A) serving
 

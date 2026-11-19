@@ -1,0 +1,6 @@
+{
+  "projectTitle": "10xGraph",
+  "description": "Open-source, self-hosted infrastructure for AI applications: API server, auth and roles, tenant isolation, durable state, background jobs, metrics and deploy files.",
+  "folders": ["src/content/docs", "src/content/build"],
+  "excludeFolders": ["docusaurus", "archive", "node_modules", "dist", "evals"]
+}
