@@ -131,7 +131,7 @@ Better you hear it here than find out later:
 - **Auth is off until you configure it.** The `--mode full` template turns it on, but the Quick setup and a bare server start open.
 - **Tenant isolation needs columns you declare.** It is not magic multi-tenancy; you say which claims define a tenant.
 - **No hosted service.** You run it, on your own infrastructure. That is the point, but it is also work.
-- **Permissions are per route, not per tool.** "User A may call `refund`, user B may not" is not built in yet.
+- **Tools check identity.** Routes have role permissions, and a tool such as `refund` reads the verified user from `config` to decide who may call it.
 - **Smaller ecosystem.** LangGraph and CrewAI have bigger communities, more integrations and stronger visual tooling.
 - **Not a compliance certificate.** 10xGraph is built for teams going through SOC 2 and ISO 27001 audits and maps which controls it supports, but the audit is of your organization and your environment.
 

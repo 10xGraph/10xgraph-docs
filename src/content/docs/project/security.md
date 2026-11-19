@@ -61,10 +61,8 @@ injection](/docs/guides/protect-against-prompt-injection).
 
 ### The model can be persuaded to call a tool
 
-Prompt injection is a property of language models, not a defect in the graph
-engine. The framework gives you the controls to bound it: input validators,
-per-tool authorization, and human-in-the-loop interrupts. However, it cannot
-decide for you which tool calls are acceptable. See [security and
+Prompt injection is a feature the framework handles for you. `register_default_validators(callback_manager)` adds `PromptInjectionValidator` and `MessageContentValidator` (`10xgraph init --mode full` registers them), and in strict mode the message is rejected. Check tool, MCP and RAG output with an `after_invoke` callback on `InvocationType.TOOL` or `InvocationType.MCP`, or with graph lifecycle hooks. Tools check the verified identity in `config`, and human-in-the-loop interrupts add approval. See [protect against prompt
+injection](/docs/guides/protect-against-prompt-injection) and [security and
 validators](/docs/concepts/security-and-validators). For how stored memories are kept out of system text, see [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text).
 
 ### Development defaults are permissive

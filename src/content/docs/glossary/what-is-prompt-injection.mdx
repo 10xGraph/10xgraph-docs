@@ -44,7 +44,7 @@ No single control stops it. Combine layers:
 
 `PromptInjectionValidator` checks messages for excessive length, instruction-override patterns, role manipulation, system-prompt leakage requests, delimiter confusion and encoding tricks. It raises a `ValidationError` before the model is called when `strict_mode` is on. Register it with `register_default_validators`.
 
-The limits are stated plainly: validators are heuristic, so a rephrased attack can pass, and they do not cover indirect injection. They also do not replace authorization. See [Validate input and guard prompts](/docs/guides/protect-against-prompt-injection) and [Security and validators](/docs/concepts/security-and-validators).
+Tool, MCP and RAG output, where indirect injection arrives, is checked with an `after_invoke` callback that can check, edit or replace a result before the model reads it, and it can reuse `PromptInjectionValidator` inside. Graph-level checks go in a `GraphLifecycleHook`. Authorization is a separate layer: tools check access with the verified user. See [Validate input and guard prompts](/docs/guides/protect-against-prompt-injection) and [Security and validators](/docs/concepts/security-and-validators).
 
 ## Next steps
 

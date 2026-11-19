@@ -34,6 +34,19 @@ export const ardManifest = {
         'How do I persist 10xGraph threads with a Postgres checkpointer?',
       ],
     },
+    {
+      identifier: 'urn:air:10xgraph.com:skills:quickstart',
+      displayName: '10xGraph agent quickstart',
+      type: 'text/markdown; profile="urn:air:agent-skills"',
+      url: `${SITE.url}/skill.md`,
+      description:
+        'One-file quickstart for agents evaluating or starting with 10xGraph: what it is, when to use it, install, top features and common mistakes.',
+      tags: ['10xgraph', 'python', 'agent-framework', 'quickstart', 'skill'],
+      representativeQueries: [
+        'What is 10xGraph and when should I use it?',
+        'How do I install and run 10xGraph?',
+      ],
+    },
   ],
 };
 

@@ -129,7 +129,7 @@ Validators run synchronously from the graph's perspective; make them fast and de
 
 ### PromptInjectionValidator
 
-This validator detects prompt injection and jailbreak attempts using pattern matching, keyword analysis, and heuristics. It checks for:
+This validator detects prompt injection and jailbreak attempts using pattern matching and keyword analysis. It checks for:
 
 - NUL characters (`\x00`), refused with violation type `invalid_character`. They are also refused when a run loads its state, even with no validator registered. Text from the model or a tool is cleaned instead of refused; see [Errors and limits](/docs/concepts/errors-and-limits)
 - Excessive length (configurable, default 10000 characters)
@@ -202,15 +202,15 @@ When you run `10xgraph init --mode full`, the generated project includes a secur
 
 The template also sets up `10xgraph.json` with an `auth` entry; choose the mode with `--auth none|jwt|custom`. The validators catch suspicious input before it reaches the model.
 
-## Limitations and tradeoffs
+## How tool output and authorization fit in
 
-- **Validators are heuristic.** A rephrased attack or one in a language the validator does not recognize may pass. A legitimate message with unlucky wording may be incorrectly rejected. Test with your real users.
+- **Tool, MCP and RAG output is checked with a callback.** Input validators run on the messages entering the graph. For content a tool fetches, such as a document or web page, you add an `after_invoke` callback on `InvocationType.TOOL` and `InvocationType.MCP`. It can check, edit or replace any result before the model reads it, and it can reuse `PromptInjectionValidator` inside. For checks on graph state, register a `GraphLifecycleHook`. See [Validate tool, MCP and RAG output](/docs/guides/protect-against-prompt-injection#validate-tool-mcp-and-rag-output) and [Where each check runs](/docs/guides/protect-against-prompt-injection#where-each-check-runs).
 
-- **Indirect injection is yours to place.** Input validators do not see tool, MCP or RAG output. If a tool fetches a document or web page containing malicious instructions, you decide where to check it: an `after_invoke` callback on `InvocationType.TOOL` and `InvocationType.MCP` can validate, edit or replace any result before the model reads it, and you can reuse a validator inside it. See [Validate tool, MCP and RAG output](/docs/guides/protect-against-prompt-injection#validate-tool-mcp-and-rag-output).
+- **Authorization is a separate layer.** Tools check access with the verified user in `config` and `can()`. Narrow tool permissions, and design tool side effects (refunds, deletions) to be idempotent and replay-safe.
 
-- **Validators do not replace authorization.** Narrow tool permissions, check permissions inside tools with `can()`, and design tool side effects (refunds, deletions) to be idempotent and replay-safe so that authorization failures do not leave data in an inconsistent state.
+- **Tune strictness to your users.** Strict mode rejects a message that matches a pattern, so test with real messages and use `strict_mode=False` or narrower patterns where legitimate wording is flagged.
 
-- **Validators add latency.** Each message passes through every validator before the graph runs. Keep them fast; avoid I/O and LLM calls inside validators.
+- **Keep validators fast.** Each message passes through every validator before the graph runs. Avoid I/O and LLM calls inside validators.
 
 ## Best practices
 

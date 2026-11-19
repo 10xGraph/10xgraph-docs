@@ -13,7 +13,7 @@ faq:
   - q: Does the server force me to configure authentication?
     a: No. With auth set to null the server starts and is open, also with MODE=production. Nothing refuses it, so set auth to jwt or a custom BaseAuth class before you expose the server.
   - q: Does 10xGraph stop prompt injection?
-    a: No. Validators, approval steps and tool allow-lists bound what a model can be talked into, but they do not remove prompt injection. The limits page lists what the server does not protect.
+    a: Yes. `register_default_validators` adds the prompt injection and message content validators, and an `after_invoke` callback checks tool, MCP and RAG output. Approval steps and tool allow-lists add more control.
 ---
 
 "Production ready" is an adjective until you can list what it means. 10xGraph is open-source, self-hosted infrastructure for AI applications, and this post lists what that infrastructure does for one setup: you write a graph, compile it, and serve it with `10xgraph-api`. For each protection you get the default, the config that changes it, and what stays on your side. It is written for a platform lead evaluating infrastructure, so the "you still must" parts are as long as the "we do" parts.
@@ -42,7 +42,7 @@ The short version: you write the agents, tools and tasks, and the server owns th
 
 **Config:** add `roles` to the `auth` object, each with permissions and a reach, or override `BaseAuth.authorize`. See [Auth](/docs/server/auth).
 
-**You still must:** issue narrow roles, and check permissions inside tools that touch sensitive data. Permissions apply per route, not per tool: the server authorizes the request, not the business logic inside your tool.
+**You still must:** issue narrow roles, and check permissions inside tools that touch sensitive data. Routes are guarded by permissions, and tools receive the verified identity in `config` and check access themselves.
 
 ## 4. What a client may send: input shaping
 
@@ -116,7 +116,7 @@ Regardless of how many boxes above are ticked:
 - **Auth is not forced.** `auth: null` serves everyone, including in production. The production template turns it on; the bare server does not.
 - **Prompt injection is not solved.** Validators and approval steps bound what a model can be talked into. They do not remove it.
 - **Your tools are your code.** The server cannot know what a tool should be allowed to read.
-- **Secrets, TLS, backups, retention** are infrastructure you run.
+- **Secrets and TLS** have built-in support upcoming; today, inject secrets from your secret manager and terminate TLS at your load balancer or ingress. **Backups and retention** are infrastructure you run.
 - 10xGraph needs Python 3.12 or newer and has a smaller community than LangGraph or CrewAI. Pin versions and read the [changelog](/changelog).
 - **Exactly-once is not on offer.** Replayed tools and jobs are at-least-once. Send idempotency keys to anything that moves money.
 

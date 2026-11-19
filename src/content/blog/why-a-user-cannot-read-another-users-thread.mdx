@@ -105,7 +105,7 @@ The names must match. `tenant_claims` in the `auth` object and the tenant column
 
 - **Auth is off until you configure it.** The bare server has no owner for any thread. The production template (`10xgraph init --template production`) turns it on. Running in production mode with auth off gives a warning, because any caller can then use every endpoint.
 - **Tenant isolation needs columns you declare.** 10xGraph is not multi-tenant by default. Reach `tenant` and the boot check are only as strong as the columns you declare and the claims your tokens carry. Threads created before a column existed hold NULL there and stay invisible to tenant scopes until you backfill them.
-- **Permissions apply per route, not per tool.** You can say a role may call `graph:invoke`. You cannot yet say user A may call your `refund_order` tool and user B may not. Tool-level rules belong in the tool, which receives the verified identity through dependency injection.
+- **Routes have permissions, tools check identity.** A role may call `graph:invoke`. Tool-level rules, such as user A may call your `refund_order` tool and user B may not, live in the tool, which receives the verified identity through `config`.
 - **Your tools are your code.** The server isolates its own storage. A tool that queries your orders database without filtering by the caller's tenant can still leak. Use the identity you are given.
 - **Identity provider and database roles stay with you.** Token issuing, key storage and Postgres credentials are part of your environment.
 

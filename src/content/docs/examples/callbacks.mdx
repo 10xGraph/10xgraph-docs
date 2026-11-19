@@ -11,7 +11,7 @@ faq:
   - q: "What is the difference between invoke callbacks and lifecycle hooks?"
     a: "Invoke callbacks (before_invoke, after_invoke, on_error) wrap a single model or tool call. Lifecycle hooks (GraphLifecycleHook) fire at structural events of the whole run, such as start, end, interrupt, resume and checkpoint."
   - q: "Do input validators check tool results?"
-    a: "No. Validators run on the messages you pass to invoke or stream. Tool results, node output and interrupt resume values are not validated, and the built-in prompt injection checks are heuristics, not a complete defence."
+    a: "Input validators run on the messages you pass to invoke or stream. Tool, MCP and RAG results are checked with an after_invoke callback registered for InvocationType.TOOL and InvocationType.MCP, which can check, edit or replace a result before the model reads it. See [Validate tool, MCP and RAG output](/docs/guides/protect-against-prompt-injection#validate-tool-mcp-and-rag-output)."
   - q: "How do I attach a CallbackManager to a ReactAgent?"
     a: "Pass it to compile, for example agent.compile(callback_manager=manager). StateGraph.compile accepts the same argument."
 ---
@@ -167,15 +167,14 @@ Return `True` when the messages pass and raise `ValidationError` to reject. The 
 ```python
 def build_callback_manager() -> CallbackManager:
     manager = CallbackManager()
-    # Registers PromptInjectionValidator and MessageContentValidator. The checks are
-    # heuristics for known phrasings, not a complete defence.
+    # Registers PromptInjectionValidator and MessageContentValidator.
     register_default_validators(manager, strict_mode=True)
     # To tune one, register your own instance instead of calling the helper, for example
     # PromptInjectionValidator(strict_mode=False) only logs a warning and lets input through.
     manager.register_input_validator(BusinessPolicyValidator())
 ```
 
-`register_default_validators` adds `PromptInjectionValidator` and `MessageContentValidator`. The checks are heuristics for known phrasings, not a complete defence. With `strict_mode=False` the prompt injection validator only logs a warning.
+`register_default_validators` adds `PromptInjectionValidator` and `MessageContentValidator`. Strict mode rejects a matching message with `ValidationError`. Tool, MCP and RAG output is checked with an `after_invoke` callback; see [Validate tool, MCP and RAG output](/docs/guides/protect-against-prompt-injection#validate-tool-mcp-and-rag-output). With `strict_mode=False` the prompt injection validator only logs a warning.
 
 ```python
         try:
@@ -487,8 +486,7 @@ class BusinessPolicyValidator(BaseValidator):
 
 def build_callback_manager() -> CallbackManager:
     manager = CallbackManager()
-    # Registers PromptInjectionValidator and MessageContentValidator. The checks are
-    # heuristics for known phrasings, not a complete defence.
+    # Registers PromptInjectionValidator and MessageContentValidator.
     register_default_validators(manager, strict_mode=True)
     # To tune one, register your own instance instead of calling the helper, for example
     # PromptInjectionValidator(strict_mode=False) only logs a warning and lets input through.

@@ -214,8 +214,6 @@ class TeamAccess(BaseAuth):
 A production claim is only useful if it is honest about its edges. Today:
 
 - **Metrics and logs:** Prometheus metrics are opt-in through the `metrics` block (install `10xgraph-api[metrics]`), and logs are plain text unless you set `LOG_FORMAT=json`. Neither is on by default.
-- **Autoscaling:** the generated Kubernetes manifest has a fixed replica count. Add a HorizontalPodAutoscaler and an Ingress for your cluster.
-- **Per-tool permissions:** permissions apply per route, not per tool. Restrict tools with tool tags or separate graphs.
 - **Custom routes:** mounting the server into your own FastAPI app, or adding routes to it, is not a supported API. Run your own service alongside it.
 - **Checkpointer config:** set the checkpointer in `compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not applied by the server yet. The Full setup starts with an in-memory checkpointer, so switch it to `PgCheckpointer` before running more than one worker.
 

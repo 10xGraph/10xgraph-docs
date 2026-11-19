@@ -8,7 +8,7 @@ label: Platform overview
 updated: "2026-11-10"
 faq:
   - q: "Is 10xGraph production ready?"
-    a: "The server enforces reach-scoped thread access (own thread by default), permission checks, input limits, run limits and production-mode checks by default, and stores state durably when you use `PgCheckpointer` (Postgres). You still own auth configuration, secrets, TLS, backups and your tools' own authorization. The limits page lists what it does not protect."
+    a: "The server enforces reach-scoped thread access (own thread by default), permission checks, input limits, run limits and production-mode checks by default, and stores state durably when you use `PgCheckpointer` (Postgres). You still own auth configuration, secrets, TLS, backups and the checks inside your tools. The limits page lists what it does not protect."
   - q: "Do I have to write the API server myself?"
     a: "No. You write the graph and point 10xgraph.json at it. 10xgraph-api generates the REST and WebSocket server, and 10xgraph build generates the Dockerfile, compose file and Kubernetes manifest."
   - q: "What happens if I run in production without auth?"
@@ -71,12 +71,12 @@ The first three rows decide who can reach what. If you only do one thing beyond 
 The server cannot do these for you.
 
 - **Auth must be set.** `auth: null` starts an open server, also in production. Nothing refuses it.
-- **Secrets.** `JWT_SECRET_KEY` (32 or more random characters), provider API keys and database URLs come from your secret store, not from the repository.
+- **Secrets.** Built-in secrets management is upcoming. Today, `JWT_SECRET_KEY` (32 or more random characters), provider API keys and database URLs come from your secret manager, not from the repository.
 - **Origins and hosts.** Set `ORIGINS` and `ALLOWED_HOST` to your real values.
-- **Your tools' own authorization.** A tool that reads a customer record must check that the caller may see it. The server authorizes the request, not the business logic inside your tool.
-- **Prompts and model behavior.** Validators, approval steps and tool allow-lists bound what a model can be talked into. They do not remove prompt injection.
+- **Tool-level authorization.** Routes are guarded by role permissions. Tools receive the verified identity in `config` and check access themselves, for example with `can()`.
+- **Prompt injection.** `register_default_validators` adds the prompt injection and message content validators (`10xgraph init --mode full` registers them), and an `after_invoke` callback checks tool, MCP and RAG output. See [Protect against prompt injection](/docs/guides/protect-against-prompt-injection).
 - **Backups and retention.** Back up PostgreSQL and decide how long threads live.
-- **TLS.** Terminate it at your load balancer or ingress.
+- **TLS.** Built-in termination is upcoming. Today, terminate it at your load balancer or ingress.
 
 The [limits page](/docs/production/limits) explains each of these and what to do.
 

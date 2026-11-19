@@ -439,7 +439,7 @@ The production project template, generated with `10xgraph init --template produc
 
 ### Check the caller inside the tools that matter
 
-The API server verifies who is calling, and it guards every route with a permission such as `graph:invoke` or `threads:delete`. You give roles those permissions, and a reach (`own`, `tenant` or `all`), under the `auth` key in `10xgraph.json`. Permissions apply per route, not per tool: the server does not decide which tool a model may call. For that, check the verified identity inside the tool. 10xGraph injects tool parameters by name, so a tool that declares a `config` parameter receives the run config, with the caller's `Identity` in `config["user"]`. Injected parameters are hidden from the model's view of the tool:
+The API server verifies who is calling, and it guards every route with a permission such as `graph:invoke` or `threads:delete`. You give roles those permissions, and a reach (`own`, `tenant` or `all`), under the `auth` key in `10xgraph.json`. Routes have permissions, and tools check the verified identity themselves. 10xGraph injects tool parameters by name, so a tool that declares a `config` parameter receives the run config, with the caller's `Identity` in `config["user"]`. Injected parameters are hidden from the model's view of the tool:
 
 ```python title="graph/tools.py"
 from tenxgraph.core.authz import get_identity
