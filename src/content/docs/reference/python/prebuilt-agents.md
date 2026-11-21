@@ -4,7 +4,7 @@ description: "API reference for built-in agent patterns: ReactAgent, RAGAgent, P
 order: 240
 group: "Python library"
 section: Reference
-updated: "2026-10-27"
+updated: "2026-11-21"
 ---
 
 Prebuilt agents are ready-made graphs for common patterns such as tool loops, retrieval, planning and teams. Import them from `tenxgraph.prebuilt.agent`, construct one, and call `compile()` to get a `CompiledGraph`. Extra keyword arguments pass through to the internal `Agent`. To choose between them, see the [prebuilt agents guide](/docs/guides/prebuilt-agents).
@@ -92,7 +92,7 @@ def __init__(
 | `output_schema` | `Any` | `None` | Pydantic BaseModel or TypedDict for structured output. |
 | `main_node_name` | `str` | `"MAIN"` | Graph node name for the agent. |
 | `tool_node_name` | `str` | `"TOOL"` | Graph node name for tool execution. |
-| `**agent_kwargs` | `Any` | `{}` | Additional arguments forwarded to the internal `Agent`. |
+| `**agent_kwargs` | `Any` | `{}` | Additional arguments forwarded to the internal `Agent`, including `model_registry` and `model_config_key`. See [Model registry](/docs/reference/python/agent#model-registry). |
 
 **Returns:** `ReactAgent[StateT]`: a configured but uncompiled agent. Call `.compile()` to get a runnable `CompiledGraph`.
 
@@ -353,8 +353,8 @@ def __init__(
 | `publisher` | `BasePublisher \| list \| None` | `None` | Event publisher. |
 | `id_generator` | `BaseIDGenerator` | `DefaultIDGenerator()` | ID generator. |
 | `container` | `InjectQ \| None` | `None` | DI container. |
-| `plan_model` | `str \| None` | `None` | Override model for the planner (falls back to `model`). |
-| `reflect_model` | `str \| None` | `None` | Override model for the reflector. |
+| `plan_model` | `str \| None` | `None` | Override model for the planner (falls back to `model`). With a `model_registry` in `agent_kwargs`, an entry name. |
+| `reflect_model` | `str \| None` | `None` | Override model for the reflector. With a `model_registry`, an entry name. |
 | `plan_reasoning_config` | `dict \| bool \| None` | `None` | Override reasoning config for planner. |
 | `reflect_reasoning_config` | `dict \| bool \| None` | `None` | Override reasoning config for reflector. |
 | `client` | `Any` | `None` | MCP client. |
@@ -369,7 +369,7 @@ def __init__(
 | `retry_config` | `Any` | `True` | Retry policy. |
 | `fallback_models` | `list[str \| tuple] \| None` | `None` | Fallback models. |
 | `multimodal_config` | `MultimodalConfig \| None` | `None` | Multimodal config. |
-| `**agent_kwargs` | `Any` | `{}` | Additional Agent kwargs. |
+| `**agent_kwargs` | `Any` | `{}` | Additional Agent kwargs, including `model_registry` and `model_config_key`. See [Model registry](/docs/reference/python/agent#model-registry). |
 
 **Returns:** `PlanActReflectAgent[StateT]`: call `.compile()` for a `CompiledGraph`.
 
@@ -467,7 +467,7 @@ def __init__(
 | `retry_config` | `Any` | `True` | Retry policy. |
 | `fallback_models` | `list[str \| tuple] \| None` | `None` | Fallback models. |
 | `multimodal_config` | `MultimodalConfig \| None` | `None` | Multimodal config. |
-| `**agent_kwargs` | `Any` | `{}` | Additional Agent kwargs. |
+| `**agent_kwargs` | `Any` | `{}` | Additional Agent kwargs, including `model_registry` and `model_config_key`. The Gemini two-step path (schema and tools in separate calls) is chosen from the default entry when the graph is built, so a run that switches to a Gemini entry does not use it. |
 
 **Returns:** `StructuredOutputAgent[StateT]`: call `.compile()` for a `CompiledGraph`.
 
@@ -554,7 +554,7 @@ def __init__(
 | `publisher` | `BasePublisher \| list \| None` | `None` | Event publisher. |
 | `id_generator` | `BaseIDGenerator` | `DefaultIDGenerator()` | ID generator. |
 | `container` | `InjectQ \| None` | `None` | DI container. |
-| `**supervisor_kwargs` | `Any` | `{}` | Extra kwargs for the supervisor Agent. |
+| `**supervisor_kwargs` | `Any` | `{}` | Extra kwargs for the supervisor Agent, including `model_registry` and `model_config_key`. With a registry, `supervisor_model` is an entry name. |
 
 **Raises:** `ValueError` if no workers provided, or if a worker is named `"SUPERVISOR"`.
 

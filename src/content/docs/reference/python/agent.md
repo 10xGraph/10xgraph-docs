@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 30
 label: Agent
-updated: "2026-10-29"
+updated: "2026-11-21"
 ---
 
 The `Agent` class is a graph node that calls an LLM through the native OpenAI, Google, or Anthropic SDK. It handles message conversion, tool calls, memory retrieval, skills, streaming, and retries for you. Add it to a `StateGraph` as a node, and the graph supplies state and routing.
@@ -42,6 +42,8 @@ def __init__(
     fallback_models: list[str | tuple[str, str]] | None = None,
     multimodal_config: MultimodalConfig | None = None,
     output_schema: type[BaseModel] | None = None,
+    model_registry: dict[str, dict[str, Any]] | None = None,
+    model_config_key: str = "model",
     **kwargs,
 ) -> None
 ```
@@ -63,9 +65,11 @@ def __init__(
 | `skills` | `SkillConfig \| None` | `None` | Agent Skills configuration per agentskills.io spec. Injects skill catalog and activation/read tools. See [`skills`](/docs/reference/python/skills). |
 | `memory` | `MemoryConfig \| None` | `None` | Long-term memory config for retrieving relevant context before each LLM call. See [Memory](#memory-augmented-agent). |
 | `retry_config` | `RetryConfig \| bool \| None` | `True` | Retry logic for transient API errors. `True` uses defaults; `False` or `None` disables; pass `RetryConfig` for tuning. See [Retry configuration](#retry-configuration). |
-| `fallback_models` | `list[str \| tuple[str, str]] \| None` | `None` | Ordered fallback models to try if primary exhausts retries. Each entry: model string (inherits provider) or `(model, provider)` tuple. |
+| `fallback_models` | `list[str \| tuple[str, str]] \| None` | `None` | Ordered fallback models to try if primary exhausts retries. Each entry: model string (inherits provider) or `(model, provider)` tuple. A string that is a `model_registry` name is that entry. |
 | `multimodal_config` | `MultimodalConfig \| None` | `None` | Image and document handling limits for multimodal requests. See [`media`](/docs/reference/python/media#multimodalconfig). |
 | `output_schema` | `type[BaseModel] \| None` | `None` | Pydantic model that the final text output must conform to. Not allowed with `"image"`, `"video"`, or `"audio"` output. |
+| `model_registry` | `dict[str, dict] \| None` | `None` | Named models a run can pick from, as `{name: entry}`. With a registry, `model` names the default entry. See [Model registry](#model-registry). |
+| `model_config_key` | `str` | `"model"` | The run config key that names the entry for a run. Used only with `model_registry`. |
 | `use_vertex_ai` | `bool` | `False` | (via kwargs) Google provider only. Route Gemini through Vertex AI instead of Gemini API. Defaults to true when `GOOGLE_GENAI_USE_VERTEXAI=true`. For Claude it selects the Vertex backend. |
 | `base_url` | `str \| None` | `None` | (via kwargs) Base URL for OpenAI-compatible APIs (Ollama, vLLM, OpenRouter, DeepSeek, etc.). |
 | `**kwargs` | any | none | Additional provider-specific parameters: `temperature`, `max_tokens`, `top_p`, `top_k`, `organization_id`, `project_id`, etc. |
@@ -79,7 +83,7 @@ def __init__(
 | Exception | Condition |
 |---|---|
 | `ImportError` | Required provider SDK not installed (e.g., `google-genai`, `openai`, `anthropic` packages). |
-| `ValueError` | `output_type` is not supported by the resolved provider, `output_schema` is combined with image, video, or audio output, `api_style` is not `"chat"` or `"responses"`, or an explicit `provider` is not `google`, `openai`, or `anthropic`. |
+| `ValueError` | `output_type` is not supported by the resolved provider, `output_schema` is combined with image, video, or audio output, `api_style` is not `"chat"` or `"responses"`, or an explicit `provider` is not `google`, `openai`, or `anthropic`. A `model_registry` that is empty, has an entry without a `model` string, does not contain the name given as `model`, or is combined with `provider`, `base_url`, `api_key`, `api_style`, `use_vertex_ai` or `anthropic_backend` on the Agent also raises `ValueError`. |
 
 ### Example
 
@@ -253,6 +257,115 @@ agent = Agent(
 
 ---
 
+## Provider-specific settings
+
+Extra keyword arguments on the Agent go to the model call. 10xGraph sends a keyword only if the SDK being called defines it. Anything else is dropped with one warning that names the key and the provider. Because the check runs per call, one Agent can hold settings for several providers.
+
+- OpenAI (Responses API, the default): `prompt_cache_key`, `prompt_cache_retention`, `service_tier`.
+- Anthropic: `cache_control`, `service_tier`, `inference_geo`, `metadata`.
+- Google (`GenerateContentConfig` fields): `seed`, `safety_settings`, `cached_content`, `top_k`.
+
+The check is by name only. A name that two SDKs share with different meanings, such as `service_tier` or `metadata`, passes the check for both, so the provider can refuse the value. Put such a name in the registry entry of the one provider that means it.
+
+Keys 10xGraph reads itself (`provider`, `base_url`, `api_key`, `api_style`, `use_vertex_ai`, `anthropic_backend`, `anthropic_cache`, `stream_idle_timeout`) are never forwarded.
+
+---
+
+## Model registry
+
+One Agent can run on several models, each with its own provider, base URL, key and settings. Register them by name, then pick one per run. The registry you write is the allowlist: a run can only choose a name you registered.
+
+```python
+from tenxgraph.core.graph import Agent
+
+agent = Agent(
+    model="openai",  # the default entry
+    model_registry={
+        "openai": {"model": "gpt-5-mini"},
+        "gemini": {"model": "gemini-2.5-flash", "safety_settings": [...]},
+        "vllm": {
+            "provider": "openai",
+            "model": "deepseek-r1",
+            "base_url": "http://gpu1:8000/v1",
+            "api_style": "chat",
+        },
+    },
+    fallback_models=["gemini"],
+)
+
+# Default entry
+await app.ainvoke(state, config={"thread_id": "t1"})
+# Another entry
+await app.ainvoke(state, config={"thread_id": "t2", "model": "vllm"})
+```
+
+### Entries
+
+An entry is a plain dict. It takes the keys the Agent takes for a model:
+
+| Key | Notes |
+|---|---|
+| `model` | Required. The model string sent to the provider. |
+| `provider` | `"openai"`, `"google"` or `"anthropic"`. Inferred from `model` when omitted, as for a single model. |
+| `base_url`, `api_key`, `api_style`, `use_vertex_ai`, `anthropic_backend` | Endpoint and credentials of this entry only. `api_style` defaults to `"chat"` when `base_url` is set, else `"responses"`. |
+| `reasoning_config`, `retry_config` | This entry's own setting. |
+| Provider keywords | `temperature`, `service_tier`, `safety_settings` and so on, filtered by the entry's SDK. See [Provider-specific settings](#provider-specific-settings). |
+
+### Defaults and shared settings
+
+- `model=` names the default entry. A run that names no entry, or `None`, uses it.
+- With a registry, `provider`, `base_url`, `api_key`, `api_style`, `use_vertex_ai` or `anthropic_backend` on the Agent as well raises `ValueError`. Put them in the entries.
+- Provider keywords and `reasoning_config` on the Agent are shared defaults for every entry. An entry's own keys win.
+- Each call filters the keywords against that entry's SDK, so a default meant for one provider does not break another.
+
+### Pick a model per run
+
+Put the entry name in the run config under `model`, or under the key you set with `model_config_key`:
+
+```python
+await app.ainvoke(state, config={"thread_id": "t1", "model": "vllm"})
+```
+
+- A name that is not registered, or a value that is not a string, raises `ModelNotFoundError` before the model is called. The message lists the registered names: `model 'x' is not registered on agent node 'MAIN'; registered: openai, gemini, vllm`.
+- A raw model string is never accepted. `config={"model": "gpt-5"}` fails unless `"gpt-5"` is a registry name.
+- An Agent without a registry ignores the key.
+- Every Agent node with a registry in the graph reads its own key. Give a supervisor and a worker different `model_config_key` values, such as `"supervisor_model"` and `"worker_model"`, to pick them separately.
+
+`ModelNotFoundError` is in `tenxgraph.core.exceptions` and is a subclass of `ValueError`. It carries no keys or URLs.
+
+### Clients and concurrent runs
+
+Each entry gets its own client, built once on first use, with only that entry's `api_key` and `base_url`. The Agent is not changed by a run, so concurrent runs on different entries do not affect each other.
+
+### Fallbacks
+
+A string in `fallback_models` that is a registry name is that entry, with its own client and settings. Any other string, and `(model, provider)` tuples, work as before and use the default entry's provider and credentials.
+
+### Switching models in a thread
+
+You can switch entries between runs of the same thread. There is a cost: the earlier reasoning of the other provider is not replayed, and the prompt cache starts cold.
+
+### Prebuilt agents
+
+`ReactAgent`, `PlanActReflectAgent`, `StructuredOutputAgent` and `SupervisorTeamAgent` pass `model_registry` and `model_config_key` to their inner Agents.
+
+- `PlanActReflectAgent`: `plan_model` and `reflect_model` may be entry names.
+- `SupervisorTeamAgent`: pass them as keyword arguments, they go to the supervisor Agent. `supervisor_model` is an entry name. Workers are Agents you build, so give them their own registry if they need one.
+- `StructuredOutputAgent` chooses its Gemini two-step path (schema and tools in separate calls) from the default entry when the graph is built. A run that switches to a Gemini entry does not use it.
+
+### List the choices
+
+`generate_graph()["info"]["models"]` lists, per Agent node with a registry, the default, the names and the config key. It never holds model strings, keys or URLs:
+
+```python
+app.generate_graph()["info"]["models"]
+# {"MAIN": {"default": "openai", "names": ["openai", "gemini", "vllm"], "config_key": "model"}}
+```
+
+The API returns the same under `info.models` of [`GET /v1/graph`](/docs/reference/rest-api/graph#get-v1graph), so a frontend can build a model dropdown from it. See [Model providers](/docs/integrations/models#choose-the-model-per-run).
+
+---
+
 ## Memory-augmented agent
 
 Pass a `MemoryConfig` as `memory` to give the agent long-term memory. Here `my_qdrant_store` stands for a `BaseStore` you have created (see the memory stores reference):
@@ -309,6 +422,7 @@ agent = Agent(
 | `ImportError: google-genai SDK is required` | Google provider extra not installed. | Install: `pip install "10xgraph[google-genai]"` or `pip install google-genai`. |
 | `ImportError: openai SDK is required` | OpenAI provider extra not installed. | Install: `pip install "10xgraph[openai]"` or `pip install openai`. |
 | `ImportError: anthropic SDK is required` | Anthropic provider extra not installed. | Install: `pip install "10xgraph[anthropic]"` or `pip install anthropic`. |
+| `ModelNotFoundError` | The run config names a model that is not in the Agent's `model_registry`. | Use a registered name. See [Model registry](#model-registry). |
 | `ValueError: Invalid api_style` | `api_style` is not `"chat"` or `"responses"`. | Use one of the two supported values. |
 | `ValueError: ... doesn't support output_type` | The provider cannot generate that output, for example image output on Anthropic. | Use a provider that supports it, or switch to `output_type="text"`. |
 

@@ -6,7 +6,7 @@ section: Integrations
 group: Models
 order: 20
 label: Overview
-updated: "2026-10-08"
+updated: "2026-11-21"
 ---
 
 10xGraph talks to model providers through a unified `Agent` interface. You choose a model, and the library handles provider detection and SDK interaction. The three supported providers are OpenAI (including compatible endpoints), Google (Gemini and Vertex AI), and Anthropic (direct API, Vertex AI, and Bedrock). Once you select a provider, your graph code remains the same: you pass only the model name and optional configuration to the Agent, and the rest is transparent.
@@ -291,6 +291,42 @@ agent = Agent(
     api_style="chat",
 )
 ```
+
+## Choose the model per run
+
+To let a run choose between models, register them by name with `model_registry`. Each entry has its own provider, base URL, key and settings:
+
+```python
+from tenxgraph.core.graph import Agent
+
+agent = Agent(
+    model="openai",  # the default entry
+    model_registry={
+        "openai": {"model": "gpt-5-mini"},
+        "gemini": {"model": "gemini-2.5-flash"},
+        "vllm": {
+            "provider": "openai",
+            "model": "deepseek-r1",
+            "base_url": "http://gpu1:8000/v1",
+            "api_style": "chat",
+        },
+    },
+)
+```
+
+A run picks an entry by name in its config. No name means the default entry:
+
+```python
+await app.ainvoke(state, config={"thread_id": "t1", "model": "vllm"})
+```
+
+- A name that is not registered raises `ModelNotFoundError`. A raw model string is never accepted, so the registry is the list of models a caller can use.
+- Over the API, put the name in `config.model` of the invoke, stream or WebSocket request. An unknown name answers `422` before the run starts.
+- `GET /v1/graph` lists the names in `info.models`, so a frontend can build its dropdown from it.
+- With a registry, `provider`, `base_url`, `api_key`, `api_style`, `use_vertex_ai` and `anthropic_backend` go in the entries, not on the Agent.
+- A single `Agent(model=...)` without a registry works as before.
+
+See [Model registry](/docs/reference/python/agent#model-registry) for entry keys, shared defaults, fallbacks by name, prebuilt agents and the cost of switching models inside a thread.
 
 ## Related pages
 

@@ -6,7 +6,7 @@ section: Examples
 group: "Tools and integrations"
 order: 200
 label: "Providers"
-updated: "2026-10-28"
+updated: "2026-11-21"
 faq:
   - q: "How does 10xGraph know which provider to use?"
     a: "It detects the provider from the model string. gpt-* goes to OpenAI, gemini-* to Google, claude-* and anthropic.* to Anthropic. An unknown model name uses the OpenAI client, which is how DeepSeek and Ollama work with base_url."
@@ -16,6 +16,8 @@ faq:
     a: "Pass use_vertex_ai=True and set GOOGLE_CLOUD_PROJECT, and optionally GOOGLE_CLOUD_LOCATION. Authentication uses application default credentials instead of an API key."
   - q: "Do reasoning options work the same on every provider?"
     a: "reasoning_config is a single dict. effort applies to OpenAI, Google and Anthropic, summary is OpenAI only, and thinking_budget is Google only and overrides effort."
+  - q: "Can one agent switch between OpenAI, Gemini and Claude per message?"
+    a: "Yes. Give the agent a model_registry of named models and pass config={\"model\": name} on each run. The thread and its history stay the same while the model changes."
 ---
 
 In 10xGraph the model is a string. The same `ReactAgent` and the same tool run on OpenAI, Google Gemini, Anthropic Claude, DeepSeek or a local Ollama model, and you switch by changing the model string and a few options. This example keeps one weather-tool agent and selects the provider from a command-line argument. It also shows reasoning options and a node that calls a provider SDK directly.
@@ -69,6 +71,7 @@ python examples/providers/providers.py gemini
 python examples/providers/providers.py claude
 python examples/providers/reasoning.py openai
 python examples/providers/custom_converter.py gemini
+python examples/providers/model_registry.py
 ```
 
 ## How the code works
@@ -155,6 +158,18 @@ return await GoogleGenAIConverter().convert_response(response)
 ```
 
 The converter turns text, tool calls and token usage into the same `Message` shape that `Agent` produces, so the rest of the graph does not care how the message was made. The OpenAI node does the same with `OpenAIConverter`. The graph is just `START` to `MAIN` to `END`.
+
+## Switch models per run
+
+`model_registry.py` gives one `ReactAgent` a `model_registry` with three named entries: `claude` (`claude-haiku-5-5`), `gpt` (`gpt-5-mini`) and `gemini` (`gemini-2.5-flash`). Each message passes `config={"model": name}`, so one thread can move between providers. A commented fourth entry shows a self-hosted OpenAI-compatible server with `provider`, `base_url` and `api_style="chat"`.
+
+```bash
+python examples/providers/model_registry.py
+```
+
+Type a message to chat. Type `/model gpt` to switch the model and `/quit` to exit. An unknown name prints a `ModelNotFoundError` message and the chat continues. The entries need `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `GEMINI_API_KEY`, the same variables as the table above. You only need the key for the entries you use.
+
+See [the model registry reference](/docs/reference/python/agent#model-registry) and [choose the model per run](/docs/integrations/models#choose-the-model-per-run).
 
 ## Full code
 

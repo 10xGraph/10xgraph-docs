@@ -6,7 +6,7 @@ section: Reference
 group: "REST API"
 order: 310
 label: Graph
-updated: "2026-10-27"
+updated: "2026-11-21"
 ---
 
 The graph endpoints run your compiled graph over HTTP and WebSocket: invoke it for a complete result, stream it chunk by chunk, stop or repair a thread, and inspect the graph's nodes, tools, and state schema. This page lists each route with its permission, request body, and response.
@@ -60,6 +60,7 @@ Run the graph and return the complete result when all nodes finish.
 | `initial_state` | object | no | Initial state for the run. Only keys listed in `runs.state_keys` are accepted, none by default; built-in fields never are (see input rules below). Nested no deeper than 64 levels by default (`MAX_NESTING_DEPTH`). |
 | `config` | object | no | Run configuration. Nested no deeper than 64 levels by default (`MAX_NESTING_DEPTH`). |
 | `config.thread_id` | string | no | Id of an existing thread to continue. Must match `^[A-Za-z0-9._:@-]{1,128}$`, else `422`. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.meta.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `404`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
+| `config.model` | string | no | Name of a model the graph's Agent registers in its `model_registry`. Take the names from [`info.models`](#infomodels) of `GET /v1/graph`. No name means the default model. A name that is not registered answers `422` before the run starts, with the registered names in the message, in production too. A node can read another key (`config_key` in `info.models`). |
 | `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `collection` and `_`-prefixed keys. A client cannot choose a memory collection; it is ignored, not refused. See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). |
 | `recursion_limit` | integer | no | Maximum graph iterations. Default `25`, range `1`-`100`. |
 | `response_granularity` | string | no | `full`, `partial`, or `low`. Default `low`. |
@@ -240,7 +241,14 @@ Get metadata about the loaded graph: its nodes, edges, and an `info` block descr
       "id_generator": "SnowFlakeIdGenerator",
       "id_type": "BIGINT",
       "state_type": "AgentState",
-      "state_fields": ["context", "context_summary"]
+      "state_fields": ["context", "context_summary"],
+      "models": {
+        "MAIN": {
+          "default": "openai",
+          "names": ["openai", "gemini", "vllm"],
+          "config_key": "model"
+        }
+      }
     },
     "nodes": [
       {"id": "MAIN", "name": "MAIN"},
@@ -264,6 +272,24 @@ Get metadata about the loaded graph: its nodes, edges, and an `info` block descr
 | `true` | `WS /v1/graph/live` |
 
 Connecting to the wrong one is rejected at the handshake with close code `1008`, so read this field once at startup and route accordingly.
+
+### `info.models`
+
+`models` maps each agent node that has a `model_registry` to the models a run may pick. It is `{}` when no node has a registry. It holds names only, never model strings, keys or URLs.
+
+| Field | Meaning |
+| --- | --- |
+| `default` | The entry used when the run config names none. |
+| `names` | The registered names a client may pick. |
+| `config_key` | The `config` key that carries the name. `model` unless the Agent sets `model_config_key`. |
+
+Build a model dropdown from `names`, and send the choice as `config[config_key]` on invoke, stream or the WebSocket run frame:
+
+```json
+{"messages": [...], "config": {"thread_id": "t1", "model": "vllm"}}
+```
+
+An unregistered name answers `422` on invoke and stream, before the run starts. On the WebSocket the server sends an `error` chunk before the run. The message names the registered models and is not replaced in production. There is no setting in `10xgraph.json` for this: the registry in your code is the allowlist. See [Model registry](/docs/reference/python/agent#model-registry).
 
 ---
 

@@ -4,7 +4,7 @@ description: "Exception hierarchy for graph execution, storage, timeouts, and me
 order: 120
 group: "Python library"
 section: Reference
-updated: "2026-10-27"
+updated: "2026-11-21"
 ---
 
 10xGraph raises typed exceptions that distinguish retryable storage failures from permanent errors, execution faults from control flow, and capability mismatches from input corruption. Most carry an error code and a context dict, and serialize to a dictionary through `to_dict()`. This page lists every class in `tenxgraph.core.exceptions`, with signatures, defaults and examples.
@@ -16,6 +16,7 @@ from tenxgraph.core.exceptions import (
     GraphStopRequested,
     InterruptMismatchError,
     MetricsError,
+    ModelNotFoundError,
     NodeError,
     NodeTimeoutError,
     ResourceNotFoundError,
@@ -52,6 +53,7 @@ Exception
     ResourceNotFoundError
   MetricsError
   UnsupportedMediaInputError
+  ModelNotFoundError (also ValueError)
 ```
 
 | Exception | HTTP status from the API server |
@@ -64,6 +66,7 @@ Exception
 | InterruptMismatchError | 409 (raised by a resume that names the wrong interrupt) |
 | ResumeValidationError | 422 |
 | MetricsError | 500 |
+| ModelNotFoundError | 422, with its message kept in production |
 
 `str(error)` returns `"[error_code] message"`. Each constructor also logs the error on the `tenxgraph.exceptions` logger.
 
@@ -701,4 +704,36 @@ raise UnsupportedMediaInputError(
     source_kind="url",
     transports_attempted=[MediaTransportMode.remote_url],
 )
+```
+
+## ModelNotFoundError
+
+Raised when the run config names a model that is not in the Agent's `model_registry`. It is a subclass of `ValueError`, has no error code, and is raised before the model is called. See [Model registry](/docs/reference/python/agent#model-registry).
+
+**Signature**
+
+```python
+class ModelNotFoundError(ValueError):
+    def __init__(self, name: object, node_name: str | None, registered: list[str]) -> None: ...
+```
+
+**Attributes**
+
+| Name | Type | Description |
+|---|---|---|
+| name | object | The value the run config carried. |
+| node_name | str \| None | The Agent node that read it. |
+| registered | list[str] | The registered names. |
+
+The message has the form `model 'x' is not registered on agent node 'MAIN'; registered: openai, gemini, vllm`. It lists names only, no keys or URLs, so the API server returns it as a `422` in production too.
+
+**Example**
+
+```python
+from tenxgraph.core.exceptions import ModelNotFoundError
+
+try:
+    await app.ainvoke(state, config={"thread_id": "t1", "model": "gpt-5"})
+except ModelNotFoundError as err:
+    print(err.registered)
 ```
