@@ -6,12 +6,12 @@ section: Integrations
 group: "Models"
 order: 30
 label: OpenAI
-updated: "2026-10-08"
+updated: "2026-11-20"
 faq:
   - question: "Which OpenAI models work with 10xGraph?"
     answer: "Any model your OpenAI account can call, for example gpt-4o, gpt-4o-mini and o4-mini. Names starting with gpt-, o1-, o3- or o4- are detected as OpenAI automatically. See platform.openai.com for the current list."
   - question: "How do I enable caching for OpenAI?"
-    answer: "Prompt caching is automatic on OpenAI. Cache hits are logged at DEBUG level. Pass prompt_cache_key for stable cross-request hits."
+    answer: "Prompt caching is automatic on OpenAI, so there is nothing to switch on. Cache hits are logged at DEBUG level. Pass prompt_cache_key to Agent for stable cross-request hits."
   - question: "Do I need to change code to use the Responses API?"
     answer: "No. The Responses API is the default for the Agent. With a base_url the default is Chat Completions. Pass api_style='chat' to use Chat Completions, or api_style='responses' to force the Responses API."
 ---
@@ -216,8 +216,8 @@ agent = Agent(
 )
 ```
 
-This is an OpenAI request-level parameter forwarded directly through `llm_kwargs`. It is
-**not** in `CALL_EXCLUDED_KWARGS` so it reaches the API unchanged.
+This is an OpenAI request-level parameter. 10xGraph forwards it because the installed
+`openai` SDK defines it on the method being called.
 
 ### `prompt_cache_retention`
 
@@ -324,8 +324,17 @@ local servers unless the server explicitly implements them.
 
 ## `llm_kwargs` Reference
 
-All unrecognised keyword arguments passed to `Agent(...)` land in `self.llm_kwargs` and
-are forwarded to the underlying API call.
+Pass any OpenAI request setting to `Agent(...)` (or `ReactAgent(...)`) as a keyword
+argument, named as the `openai` SDK names it. Unrecognised keyword arguments land in
+`self.llm_kwargs`. 10xGraph forwards a key only if the SDK method being called
+(`responses.create` or `chat.completions.create`, and their `parse` variants) defines it.
+Any other key is not sent, and a warning names the key and the provider. A new SDK
+parameter works after you upgrade the SDK, with no 10xGraph release.
+
+The check is by name only. If the SDK accepts the name but the API or model refuses the
+value, or a name means something different on another provider (`service_tier`,
+`metadata`), OpenAI returns its error as usual. Examples on the Responses API:
+`prompt_cache_key`, `prompt_cache_retention`, `service_tier`.
 
 | kwarg | Type | Applies to | Notes |
 |---|---|---|---|
