@@ -72,7 +72,23 @@ def __init__(
 | `model_config_key` | `str` | `"model"` | The run config key that names the entry for a run. Used only with `model_registry`. |
 | `use_vertex_ai` | `bool` | `False` | (via kwargs) Google provider only. Route Gemini through Vertex AI instead of Gemini API. Defaults to true when `GOOGLE_GENAI_USE_VERTEXAI=true`. For Claude it selects the Vertex backend. |
 | `base_url` | `str \| None` | `None` | (via kwargs) Base URL for OpenAI-compatible APIs (Ollama, vLLM, OpenRouter, DeepSeek, etc.). |
-| `**kwargs` | any | none | Additional provider-specific parameters: `temperature`, `max_tokens`, `top_p`, `top_k`, `organization_id`, `project_id`, etc. |
+| `**kwargs` | any | none | Provider-specific settings, named as the provider SDK names them (`temperature`, `max_tokens`, `top_p`, `top_k`, `service_tier`, `cache_control`, `seed`, ...). Forwarded only when the SDK being called defines them. See [Provider-specific settings](#provider-specific-settings). |
+
+### Provider-specific settings
+
+Keyword arguments that `Agent` does not read itself are kept in `llm_kwargs` and passed to the provider call. `ReactAgent(...)` forwards its extra keyword arguments to `Agent`. Name each one as the provider SDK does:
+
+| Provider | Examples | Checked against |
+|---|---|---|
+| Anthropic | `cache_control`, `service_tier`, `inference_geo`, `metadata` | the parameters of `messages.create` / `messages.stream` |
+| OpenAI (Responses API, the default) | `prompt_cache_key`, `prompt_cache_retention`, `service_tier` | the parameters of `responses.create` / `chat.completions.create` |
+| Google | `seed`, `safety_settings`, `cached_content`, `top_k` | the fields of `types.GenerateContentConfig` |
+
+10xGraph forwards a setting only if the SDK being called defines it. Otherwise it is not sent and a warning names the key and the provider. This means one agent can carry settings for several providers, which works when the model is picked at runtime or a fallback model switches provider. A parameter added in a newer SDK works after you upgrade the SDK, with no 10xGraph release.
+
+The check is by name only. If the SDK accepts the name but the API or model refuses the value (a wrong value, a model without that feature, or a name two SDKs share with different meanings such as `metadata` or `service_tier`), the provider returns its error as usual. With a [model registry](#model-registry), put such a name in the entry of the one provider that means it.
+
+Settings 10xGraph reads itself (`provider`, `base_url`, `api_key`, `api_style`, `use_vertex_ai`, `anthropic_backend`, `anthropic_cache`, `stream_idle_timeout`) are not forwarded. Anthropic prompt caching is on by default; `anthropic_cache=False` turns it off. See [Anthropic](/docs/integrations/anthropic#prompt-caching). OpenAI and Gemini cache on the provider side, with nothing to switch on.
 
 ### Returns
 
@@ -254,20 +270,6 @@ agent = Agent(
     ],
 )
 ```
-
----
-
-## Provider-specific settings
-
-Extra keyword arguments on the Agent go to the model call. 10xGraph sends a keyword only if the SDK being called defines it. Anything else is dropped with one warning that names the key and the provider. Because the check runs per call, one Agent can hold settings for several providers.
-
-- OpenAI (Responses API, the default): `prompt_cache_key`, `prompt_cache_retention`, `service_tier`.
-- Anthropic: `cache_control`, `service_tier`, `inference_geo`, `metadata`.
-- Google (`GenerateContentConfig` fields): `seed`, `safety_settings`, `cached_content`, `top_k`.
-
-The check is by name only. A name that two SDKs share with different meanings, such as `service_tier` or `metadata`, passes the check for both, so the provider can refuse the value. Put such a name in the registry entry of the one provider that means it.
-
-Keys 10xGraph reads itself (`provider`, `base_url`, `api_key`, `api_style`, `use_vertex_ai`, `anthropic_backend`, `anthropic_cache`, `stream_idle_timeout`) are never forwarded.
 
 ---
 
