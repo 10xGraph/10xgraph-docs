@@ -6,7 +6,7 @@ section: Integrations
 group: "Models"
 order: 40
 label: Google
-updated: "2026-10-08"
+updated: "2026-11-20"
 ---
 
 Run Gemini models through Google GenAI. The same models and features work through two backends, so you choose based on your infrastructure: a single API key for quick development, or Google Cloud integration for enterprise security and compliance.
@@ -374,18 +374,17 @@ agent = Agent(
 
 ## `llm_kwargs` Reference
 
-All unrecognised keyword arguments passed to `Agent(...)` land in `self.llm_kwargs` and
-are stored there; for Google only the keys below reach `GenerateContentConfig`.
+Pass any `GenerateContentConfig` setting to `Agent(...)` (or `ReactAgent(...)`) as a keyword
+argument, named as the `google-genai` SDK names it. 10xGraph forwards a key only if it is a
+field of `types.GenerateContentConfig` in the installed SDK. Any other key is not sent, and a
+warning names the key and the provider. New config fields work after you upgrade the SDK, with
+no 10xGraph release.
+
+The check is by name only. If the field exists but the API or model refuses the value,
+Gemini returns its error as usual.
 
 | kwarg | Type | Notes |
-|---|---|---|
-| `cached_content` | `str` | Name of an explicit Gemini cache (e.g. `"cachedContents/abc123"`). Mutually exclusive with `system_instruction` in the config, 10xGraph handles this automatically. |
-| `temperature` | `float` | Sampling temperature. |
-| `max_tokens` / `max_output_tokens` | `int` | Maximum output tokens. Both aliases are accepted. |
-
-Other keyword arguments (such as `top_p` and `top_k`) are not forwarded to Gemini.
-
----
+|---
 
 ## Environment Variables
 

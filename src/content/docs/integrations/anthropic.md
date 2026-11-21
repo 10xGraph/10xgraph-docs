@@ -6,7 +6,7 @@ section: Integrations
 group: "Models"
 order: 50
 label: Anthropic
-updated: "2026-10-08"
+updated: "2026-11-20"
 ---
 
 Run Claude models through the Anthropic Messages API, or reach Claude on Google Cloud Vertex AI or Amazon Bedrock. 10xGraph manages all three backends with a single provider configuration, translating your graph code to Anthropic's API while handling defaults, sampling parameters, caching, and error recovery automatically.
@@ -205,30 +205,40 @@ Older Claude models still accept these parameters, so they are stripped per-mode
 
 If your code passes sampling parameters and you see them silently dropped, switch to using `reasoning_config` with the `effort` parameter to control the model's reasoning depth, or use `temperature` on older models that accept it.
 
-## Prompt caching
+## Provider-specific settings
 
-Prompt caching reduces costs and latency when your agent uses the same system prompt and tools repeatedly. Enable it with `anthropic_cache`:
+Pass any Messages API setting to `Agent(...)` (or `ReactAgent(...)`) as a keyword argument, named exactly as the Anthropic SDK names it, for example `service_tier`, `inference_geo`, `metadata` or `cache_control`:
 
 ```python
 agent = Agent(
     model="claude-opus-5",
-    anthropic_cache=True,  # Simple: ephemeral cache with default TTL
-)
-
-# Or with explicit settings
-agent = Agent(
-    model="claude-opus-5",
-    anthropic_cache={"type": "ephemeral", "ttl": "1h"},  # 1 hour retention
+    service_tier="auto",
+    metadata={"user_id": "u-123"},
 )
 ```
 
-Caching works at the prefix level. 10xGraph renders requests in a stable order: `tools` → `system` → `messages`. The cache breakpoint is placed at the end of the stable prefix (the last tool definition when tools are present, otherwise the last system block), leaving per-request messages after it. This means your tools and system prompt are cached across requests, but each message is fresh.
+10xGraph sends a setting only if the installed `anthropic` SDK defines it on the method being called. A name the SDK does not define is not sent, and a warning names the key and the provider. A new SDK parameter works after you upgrade the SDK, with no 10xGraph release. The check is by name only: if the SDK accepts the name but the API or model refuses the value, Anthropic returns its error as usual. See [`Agent` keyword arguments](/docs/reference/python/agent#provider-specific-settings).
 
-Because caching is a prefix match, any byte change after the breakpoint invalidates cached tokens. The minimum cacheable prefix is roughly 1024 tokens; shorter prefixes cache silently with no effect.
+## Prompt caching
 
-Cache hits are logged at `DEBUG` level by the `tenxgraph.agent` logger as `Cache hit: N cached tokens (Anthropic messages)`, read from `usage.cache_read_input_tokens`.
+Prompt caching is on by default. Each request carries a cache breakpoint on the last system block (or on the last tool when there is no system prompt), plus top-level automatic caching. The automatic marker caches the whole conversation so far and moves forward on every call, so a long thread keeps reusing its prefix.
 
-If you pass your own top-level `cache_control` keyword argument to the `Agent`, 10xGraph does not add its own breakpoints, so you can customize the caching strategy.
+Turn it off, or change the lifetime, with `anthropic_cache`:
+
+```python
+agent = Agent(model="claude-opus-5", anthropic_cache=False)  # no caching
+
+agent = Agent(
+    model="claude-opus-5",
+    anthropic_cache={"type": "ephemeral", "ttl": "1h"},  # 1 hour TTL for both markers
+)
+```
+
+Caching is a prefix match, so any change before the breakpoint invalidates the cache. The minimum cacheable length depends on the model; a shorter prefix is not cached and is not an error. A cache write costs more than normal input (1.25x for the 5 minute TTL) and a read costs much less, so a second call that reuses the prefix already pays off.
+
+Check that it works through `usage.cache_read_input_tokens`. 10xGraph records it on `Message.usages.cache_read_input_tokens` and logs hits at `DEBUG` level on the `tenxgraph.agent` logger as `Cache hit: N cached tokens (Anthropic messages)`.
+
+If you set `cache_control` yourself anywhere (a top-level keyword argument, on a system block, or on a tool), 10xGraph adds nothing and keeps yours. This gives you full control and avoids errors from mixing your breakpoints with automatic ones.
 
 ## Batch processing for high-volume work
 
