@@ -5,7 +5,7 @@ group: "Errors"
 section: Reference
 order: 570
 label: Error Codes
-updated: "2026-11-10"
+updated: "2026-11-21"
 faq:
   - q: "Which 10xGraph errors can I retry?"
     a: "TransientStorageError (STORAGE_TRANSIENT_000) is retryable with backoff. StaleStateError (STORAGE_CONFLICT_000) is retryable after you reload the latest state. NodeTimeoutError is sometimes retryable, depending on whether the hang was transient."
@@ -96,6 +96,7 @@ Use this table to find an exception by its code prefix. Codes ending in `_000` a
 | `STORAGE_CONFLICT_000` | `StaleStateError` | Yes, after reloading state | 500 |
 | `METRICS_000` | `MetricsError` | No | 500 |
 | none | `UnsupportedMediaInputError` | No | not mapped by the server |
+| none | `ModelNotFoundError` | No, use a registered model name | 422 |
 | none | `ValidationError` | No | 422 |
 | none | `GraphStopRequested` | Not applicable | never reaches the server |
 

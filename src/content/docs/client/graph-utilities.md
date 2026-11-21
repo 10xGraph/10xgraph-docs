@@ -5,7 +5,7 @@ section: TypeScript client
 group: Features
 order: 90
 label: Graph utilities
-updated: "2026-10-27"
+updated: "2026-11-21"
 ---
 
 The `10xgraph-client` TypeScript client exposes utility methods for inspecting graph metadata, controlling execution, repairing state, and handling human-in-the-loop workflows. Use these methods to build observability dashboards, debugging tools, and approval interfaces.
@@ -77,6 +77,7 @@ interface GraphResponse {
       id_type: string;
       state_type: string;
       state_fields: string[];
+      models?: Record<string, GraphModelChoice>; // names a run may pick, see the reference
     };
     nodes: Array<{ id: string; name: string }>;
     edges: Array<{ id: string; source: string; target: string }>;

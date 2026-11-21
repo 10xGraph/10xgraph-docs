@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 490
 label: "invoke()"
-updated: "2026-10-27"
+updated: "2026-11-21"
 faq:
   - q: "When should I use invoke() instead of stream()?"
     a: "Use invoke() when you need the complete answer before updating your UI or returning from a function. Use stream() when you want tokens or messages as they are produced."
@@ -66,7 +66,7 @@ All options are optional. The defaults below are the values the client applies w
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `initial_state` | `Record<string, any>` | none | State values to seed the graph. Sent only on the first request of a call, not on the follow-up requests that return tool results. |
-| `config` | `Record<string, any>` | none | Run configuration. Put `thread_id` at the top level of this object to continue an existing thread. Omit it to start a new one. |
+| `config` | `Record<string, any>` | none | Run configuration. Put `thread_id` at the top level of this object to continue an existing thread. Omit it to start a new one. Put `model` there to pick an entry of the Agent's `model_registry`; the names are in `info.models` from [`graph()`](/docs/reference/client/graph#model-choices). An unknown name is a `ValidationError` (422). |
 | `recursion_limit` | `number` | `25` | Maximum number of requests the client makes in one `invoke()` call. The server accepts values from 1 to 100. |
 | `on_busy` | `'wait' \| 'cancel'` | server default (`'wait'`) | What the server does when another run is active on the same thread. `'wait'` queues behind it for up to 30 seconds, then fails with `ConflictError`. `'cancel'` stops the running run and starts this one. Needs a `10xgraph-api` version that supports it. |
 | `resume` | `unknown` | none | The answer to an `interrupt()` pause on the thread (any JSON value, `null` to cancel). Pass an empty `messages` array with it. |

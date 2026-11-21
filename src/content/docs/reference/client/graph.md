@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 470
 label: Graph control
-updated: "2026-10-27"
+updated: "2026-11-21"
 ---
 
 Seven methods on `TenxGraphClient` inspect the graph and control its execution. They check server health, retrieve the graph's topology, list available tools, fetch observability data for a run, return the state schema, and stop or repair a thread. All are imported from `10xgraph-client` and called on a client instance.
@@ -84,6 +84,7 @@ interface GraphResponse {
       id_type: string;
       state_type: string;
       state_fields: string[];
+      models?: Record<string, GraphModelChoice>;
     };
     nodes: Array<{ id: string; name: string }>;
     edges: Array<{ id: string; source: string; target: string }>;
@@ -101,6 +102,31 @@ interface GraphResponse {
 | `interrupt_before` / `interrupt_after` | Node names where the graph pauses for human input. See `execution_meta.status` below. |
 | `id_type` / `id_generator` | How thread and message ids are minted on this server. |
 | `state_fields` | The field names of the graph's state type; `graphStateSchema()` returns their full schema. |
+| `models` | Per agent node with a `model_registry`, the model names a run may pick. Absent on older servers. See below. |
+
+### Model choices
+
+```ts
+interface GraphModelChoice {
+  default: string;      // entry used when the run config names none
+  names: string[];      // registered names a run may pick
+  config_key: string;   // run config key that carries the name, "model" by default
+}
+```
+
+`GraphInfo.models` is `Record<string, GraphModelChoice>`, keyed by node name. It holds names only. Build a dropdown from `names` and send the choice in the run config. An unregistered name answers `422`.
+
+```ts
+const { info } = (await client.graph()).data;
+const choice = info.models?.MAIN;
+
+if (choice) {
+  await client.invoke(messages, {
+    config: { thread_id: 't1', [choice.config_key]: choice.names[1] },
+  });
+}
+```
+
 
 The server also returns `info.is_realtime`, which is `true` when the graph is rooted at a live agent and therefore accepts `realtime()` over `WS /v1/graph/live` rather than `invoke`/`stream`/`wsStream`. It is not on the `GraphInfo` TypeScript interface yet, so read it with a cast:
 

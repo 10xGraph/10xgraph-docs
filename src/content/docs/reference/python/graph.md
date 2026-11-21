@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 20
 label: Graph
-updated: "2026-10-08"
+updated: "2026-11-21"
 ---
 
 The graph module provides the core building blocks for constructing and executing agent workflows. `StateGraph` builds workflows, `CompiledGraph` runs them, and supporting classes like `Node`, `Edge`, `BaseAgent`, and `RemoteToolConfig` configure execution. Every 10xGraph application starts with a graph.
@@ -597,6 +597,7 @@ The `config` dict passed to `invoke`, `ainvoke`, `stream`, `astream` and `stop` 
 | `timestamp` | `str` | Yes | ISO 8601 timestamp of the run. |
 | `node_timeout` | `float \| None` | No (default: `None`, no limit) | Deadline for a single node execution. |
 | `tool_timeout` | `float \| None` | No (default: `None`, no limit) | Deadline for a single tool call inside a `ToolNode`. |
+| `model` | `str \| None` | No (default entry) | Name of a `model_registry` entry for Agent nodes that have a registry. An unknown name raises `ModelNotFoundError`. An Agent can read another key through `model_config_key`. See [Model registry](/docs/reference/python/agent#model-registry). |
 | `durable_checkpoint_every_step` | `bool` | No (default `True`) | Persist state and new messages after each completed step. See [Set up checkpointing](/docs/guides/set-up-checkpointing). |
 
 ### Execution deadlines

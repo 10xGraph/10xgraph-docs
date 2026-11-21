@@ -4,7 +4,7 @@ description: "Inspect and visualize your compiled graph structure to understand 
 order: 70
 group: "Agents and graphs"
 section: "Build agents"
-updated: "2026-10-27"
+updated: "2026-11-21"
 seoTitle: "Graph Visualization"
 faq:
   - q: "Can I export the graph as a diagram?"
@@ -70,6 +70,7 @@ The returned dictionary contains three sections:
 - `checkpointer` and `checkpointer_type`: persistence configuration
 - `publisher` and `store`: whether each is configured
 - `state_type` and `state_fields`: the state shape
+- `models`: per Agent node with a `model_registry`, its `default` entry, the `names` a run may pick and the `config_key` that carries the name. Names only, no keys or URLs. See [Model registry](/docs/reference/python/agent#model-registry)
 - `interrupt_before` and `interrupt_after`: human-in-the-loop settings
 - `context_type`, `id_generator` and `id_type`: runtime configuration
 

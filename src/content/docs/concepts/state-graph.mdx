@@ -5,7 +5,7 @@ description: How StateGraph models an agent as nodes, edges and shared state, co
 section: Concepts
 order: 20
 group: "Foundations"
-updated: "2026-11-15"
+updated: "2026-11-21"
 faq:
   - q: What is the difference between StateGraph and ReactAgent?
     a: ReactAgent is a prebuilt that creates a StateGraph for you, with one agent node, one tool node and a conditional edge between them. Build a StateGraph yourself when you need your own nodes, routing or several agents.
@@ -307,6 +307,7 @@ The config dict passed to `invoke()` and `stream()` controls how the graph execu
 | `user_id` | Owner of the thread. Defaults to `anonymous`. Used for access control and logging. |
 | `recursion_limit` | Maximum steps before stopping (default 25). See [Understanding recursion limits](#understanding-recursion-limits). |
 | `run_id` | Optional unique identifier for this specific run. Used in logging and tracing. If not provided, one is generated. |
+| `model` | Name of a `model_registry` entry that an Agent node runs on for this run. No name means the Agent's default entry. See [Model registry](/docs/reference/python/agent#model-registry). |
 
 **response_granularity** determines what the result or each stream chunk contains:
 
