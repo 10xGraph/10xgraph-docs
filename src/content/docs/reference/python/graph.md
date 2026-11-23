@@ -188,24 +188,19 @@ app = graph.compile(
 
 **Raises:** `GraphError` with `GRAPH_002` if no entry point is set, `GRAPH_003` if a node is orphaned (no edge touches it), or `GRAPH_004` if an edge target or an interrupt node does not exist.
 
-**One graph per container.** A process runs one graph per DI container. Without `container=`, every `StateGraph` uses the global `InjectQ` singleton, so a second graph shares the first graph's checkpointer, store and context manager. Its threads then land in the first graph's database. `compile()` logs a WARNING when a checkpointer is already used by another compiled graph in the process.
-
-Passing `container=InjectQ()` alone is not enough, because a second graph that reuses the same checkpointer object still shares its threads. To run two graphs in one process, give each graph its own container and its own checkpointer instance (and its own store, if you use one):
+**Several graphs in one process.** Since 1.1.0 each `StateGraph` keeps its own checkpointer, store, callback manager and publisher in its own container (`GraphContainer`). Its parent is the global `InjectQ` container, or the `container=` you pass. Two graphs in one process do not share these, and a run resolves them from its own graph. Bindings you make in the global or your own container, such as a `db`, still resolve in nodes and tools.
 
 ```python
-from injectq import InjectQ
-from tenxgraph.storage.checkpointer import InMemoryCheckpointer
-
-graph_a = StateGraph(container=InjectQ())
+graph_a = StateGraph()
 # ... add nodes and edges to graph_a ...
 app_a = graph_a.compile(checkpointer=InMemoryCheckpointer())
 
-graph_b = StateGraph(container=InjectQ())
+graph_b = StateGraph()
 # ... add nodes and edges to graph_b ...
 app_b = graph_b.compile(checkpointer=InMemoryCheckpointer())
 ```
 
-With `PgCheckpointer`, create one instance per graph, each with its own DSN or `schema=`. The simplest and safest setup is one graph per process or container, which is also how the API server runs.
+`compile()` without `callback_manager` gives each graph a new `CallbackManager`. If you pass the same checkpointer instance to two graphs, they still share its threads, and `compile()` logs a WARNING. With `PgCheckpointer`, use one instance per graph, each with its own DSN or `schema=`, when the graphs must not share threads.
 
 ---
 

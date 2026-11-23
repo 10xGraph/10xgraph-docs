@@ -154,8 +154,8 @@ On resume, the tool node runs again from its first line, so `refund_order` is ca
 The same ledger covers a crash. If a worker dies after the refund went out but before the step finished, the next run of that step finds the recorded result and does not call `refund_order` again. Read [Replay-safe tools](/docs/concepts/replay-safe-tools) for the limits, which are real:
 
 - A crash before the tool returns, or in the moment between the return and the ledger write, can run it again. That is why `refund_order` sends `idempotency_key=f"refund:{order_id}"` to the provider. Keep both layers.
-- The ledger needs a checkpointer that implements it. `PgCheckpointer` stores it in Postgres. `InMemoryCheckpointer` keeps it in the process, so it does not survive a restart, and `SqliteCheckpointer` has no ledger.
-- Streamed runs do not use the ledger.
+- The ledger needs a checkpointer that implements it. `PgCheckpointer` stores it in Postgres. `SqliteCheckpointer` keeps it in a local file. `InMemoryCheckpointer` keeps it in the process, so it does not survive a restart.
+- Streamed runs use the ledger too, the same as invoke.
 
 I did not kill a process mid-run for this guide, and I did not run Postgres. The skip on re-run was observed in-process, as above. The survive-a-restart claim rests on the Postgres ledger described in the concept page and the core tests, not on a run here.
 

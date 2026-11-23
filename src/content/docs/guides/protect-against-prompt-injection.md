@@ -357,7 +357,7 @@ Things to know:
 
 - **Where the callback runs.** It runs inside the `ToolNode`, so it covers both `invoke` and `stream` runs and the realtime path. Register it on the same `CallbackManager` you pass to `compile()`.
 - **Failures count too.** For an MCP call the callback also receives the "No MCP client configured" and "Ping failed" error messages. For a local tool it runs only when the function returned; a raised exception goes to your `on_error` callbacks instead.
-- **Published events.** For MCP tools the `TOOL_EXECUTION` end event published to your publishers carries the raw result, not the replacement. The model, the saved state and the checkpoint carry the replacement. If your event sink must not store the raw text, redact it in the tool or the MCP server, or in a custom publisher.
+- **Published events.** For MCP tools the `TOOL_EXECUTION` end event published to your publishers carries what `after_invoke` returned, the same result the model, the saved state and the checkpoint carry. A check that only logs and returns the input unchanged leaves the raw text in the event, so redact in the callback (or in the tool or MCP server) when your event sink must not store it.
 - **Size.** To cap the size of a result without writing a callback, use the `max_result_chars` and `mcp_max_result_chars` options on `ToolNode`.
 
 ### RAG documents
@@ -486,6 +486,7 @@ Validators run inside your graph, so they apply to every request the server forw
 
 ## Related pages
 
+- [Zero-trust agents](/docs/security/zero-trust-agents): Tool result fencing, ToolGuard permissions and approvals, and what stays your job.
 - [Use callbacks](/docs/guides/use-callbacks): Callbacks and lifecycle hooks.
 - [Authorization scopes](/docs/guides/authorization-scopes): Per-user permissions.
 - [Server auth](/docs/server/auth): Authentication for the REST API.

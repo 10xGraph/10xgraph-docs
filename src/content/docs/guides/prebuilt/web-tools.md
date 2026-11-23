@@ -9,6 +9,12 @@ label: Web Tools
 updated: "2026-10-27"
 ---
 
+<aside class="callout callout-warning" role="note"><p class="callout-title">Deprecated in 1.1.0, removed in 2.0</p>
+
+`fetch_url`, `google_web_search`, `vertex_ai_search` and their `create_*` factories are deprecated in 10xGraph 1.1.0 and will be removed in 2.0. They keep working and emit a `DeprecationWarning` when they run. These are generic tools that you should own: your own `@tool` gives you the validation, auth and limits your app needs, and an MCP server can provide the same capability. Write your own with [Use the tool decorator](/docs/guides/use-tool-decorator), or connect an MCP server with [Use MCP](/docs/guides/use-mcp).
+
+</aside>
+
 The web tools package provides three complementary prebuilt tools for agents that research, fact-check, or ground their answers in real-time data. `fetch_url` retrieves and parses a single web page with built-in SSRF protection; `google_web_search` searches the public web with source attribution; and `vertex_ai_search` searches private datastore collections. Together they enable research workflows where agents discover relevant sources, fetch full content, and synthesize findings.
 
 **Import path:** `tenxgraph.prebuilt.tools`

@@ -447,6 +447,6 @@ The model sees only a generic failure message when a tool raises, with a referen
 ## Next steps
 
 - [Build a graph](/docs/guides/build-a-graph) to see how tools wire into the full workflow.
-- [Use prebuilt tools](/docs/guides/prebuilt-tools) for ready-made web, file, and search tools.
+- [Use prebuilt tools](/docs/guides/prebuilt-tools) for the handoff and memory tools. The web, file, search and calculator tools there are deprecated.
 - [Emit tool progress](/docs/guides/emit-tool-progress) to stream live updates to the user during long operations.
 - [Use dependency injection](/docs/guides/use-dependency-injection) to pass application state and services into tools.

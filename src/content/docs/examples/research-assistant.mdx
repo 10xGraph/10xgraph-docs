@@ -141,6 +141,10 @@ The report schema. A `Finding` is one claim with its evidence and a source URL, 
 
 ### tools.py
 
+<Callout type="warning" title="Deprecated in 1.1.0, removed in 2.0">
+`google_web_search` and `fetch_url` are deprecated in 10xGraph 1.1.0 and will be removed in 2.0. They keep working and emit a `DeprecationWarning`. For your own app, replace the wrappers below with your own `@tool` functions or an MCP server. Write your own `@tool` (see [Use the tool decorator](/docs/guides/use-tool-decorator)) or use an MCP server (see [Use MCP](/docs/guides/use-mcp)).
+</Callout>
+
 ```python
 async def web_search(query: str) -> str:
     """Search the web and return a grounded summary with sources as JSON."""

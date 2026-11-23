@@ -147,7 +147,6 @@ By default, each invocation is independent. To support multi-turn conversations,
 ```python
 import asyncio
 from tenxgraph.prebuilt.agent import ReactAgent
-from tenxgraph.prebuilt.tools import fetch_url
 from tenxgraph.storage.checkpointer import PgCheckpointer
 from tenxgraph.core.state import Message
 
@@ -158,26 +157,30 @@ checkpointer = PgCheckpointer(
     redis_url="redis://localhost:6379",  # PgCheckpointer needs Redis as well as Postgres
 )
 
+def get_weather(city: str) -> str:
+    """Return current weather for a city."""
+    return f"Weather in {city}: 22°C, partly cloudy."
+
 # Build the agent
 agent = ReactAgent(
     model="gpt-4o-mini",
-    tools=[fetch_url],
+    tools=[get_weather],
 )
 
 # Compile with the checkpointer
 app = agent.compile(checkpointer=checkpointer)
 
 async def main():
-    # First turn: user asks the agent to fetch a page
+    # First turn: user asks for the weather
     result = await app.ainvoke(
-        {"messages": [Message.text_message("Fetch https://example.com and summarize the title")]},
+        {"messages": [Message.text_message("What is the weather in Paris?")]},
         config={"thread_id": "user-session-1"},
     )
     print("Turn 1:", result["messages"][-1].text())
 
     # Second turn: same thread, agent remembers the previous exchange
     result = await app.ainvoke(
-        {"messages": [Message.text_message("Now translate that summary to Spanish")]},
+        {"messages": [Message.text_message("Now say that in Spanish")]},
         config={"thread_id": "user-session-1"},
     )
     print("Turn 2:", result["messages"][-1].text())
@@ -189,27 +192,32 @@ asyncio.run(main())
 
 ---
 
-## Using prebuilt tools
+## Adding tools
 
-Instead of writing tools from scratch, you can use the prebuilt tool library.
+Tools are plain Python functions. For other capabilities, use an MCP server. See [Use the tool decorator](/docs/guides/use-tool-decorator) and [Use MCP](/docs/guides/use-mcp).
 
 ```python
 from tenxgraph.prebuilt.agent import ReactAgent
-from tenxgraph.prebuilt.tools import fetch_url, safe_calculator, google_web_search
+
+def get_weather(city: str) -> str:
+    """Return current weather for a city."""
+    return f"Weather in {city}: 22°C, partly cloudy."
+
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
 
 agent = ReactAgent(
     model="gpt-4o-mini",
-    tools=[fetch_url, safe_calculator, google_web_search],
+    tools=[get_weather, multiply],
     system_prompt=[{
         "role": "system",
-        "content": "You are a helpful assistant with web search and calculator tools.",
+        "content": "You are a helpful assistant. Use the tools for weather and arithmetic.",
     }],
 )
 
 app = agent.compile()
 ```
-
-See `/docs/guides/prebuilt-tools` for the full catalog.
 
 ---
 
@@ -248,13 +256,13 @@ Control the agent's behavior with a detailed system prompt.
 ```python
 agent = ReactAgent(
     model="gpt-4o-mini",
-    tools=[fetch_url],
+    tools=[get_weather],
     system_prompt=[{
         "role": "system",
         "content": (
-            "You are an expert researcher. "
-            "Always verify information by fetching primary sources. "
-            "Cite your sources in the final answer."
+            "You are a travel assistant. "
+            "Always call get_weather instead of guessing. "
+            "Say which tool result you used."
         ),
     }],
 )
@@ -267,7 +275,7 @@ If conversations grow large, trim old messages to keep tokens down.
 ```python
 agent = ReactAgent(
     model="gpt-4o-mini",
-    tools=[safe_calculator],
+    tools=[multiply],
     trim_context=True,  # Automatically trim old messages
 )
 ```
@@ -281,7 +289,7 @@ Enable extended reasoning for complex tasks (available on models that support it
 ```python
 agent = ReactAgent(
     model="gpt-4o",
-    tools=[fetch_url],
+    tools=[get_weather],
     reasoning_config={"effort": "high"},  # Extended reasoning
 )
 ```
@@ -307,7 +315,7 @@ Specify a backup model if the primary fails.
 agent = ReactAgent(
     model="gpt-4o",
     fallback_models=["gpt-4o-mini", "gpt-3.5-turbo"],
-    tools=[fetch_url],
+    tools=[get_weather],
 )
 ```
 
@@ -330,7 +338,7 @@ agent = ReactAgent(
 When you call `.compile()`, you can pass additional options.
 
 ```python
-agent = ReactAgent(model="gpt-4o-mini", tools=[fetch_url])
+agent = ReactAgent(model="gpt-4o-mini", tools=[get_weather])
 
 app = agent.compile(
     checkpointer=checkpointer,  # For persistence
@@ -360,11 +368,14 @@ To test your agent interactively, use the playground.
 
 ```python title="graph.py"
 from tenxgraph.prebuilt.agent import ReactAgent
-from tenxgraph.prebuilt.tools import fetch_url, safe_calculator, google_web_search
+
+def get_weather(city: str) -> str:
+    """Return current weather for a city."""
+    return f"Weather in {city}: 22°C, partly cloudy."
 
 agent = ReactAgent(
     model="gpt-4o-mini",
-    tools=[fetch_url, safe_calculator, google_web_search],
+    tools=[get_weather],
 )
 
 app = agent.compile()

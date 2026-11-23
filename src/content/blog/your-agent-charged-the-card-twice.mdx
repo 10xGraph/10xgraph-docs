@@ -12,7 +12,7 @@ faq:
   - q: Does 10xGraph guarantee a tool runs exactly once?
     a: No. The ledger records a call after it returns, so a crash in the short window between the side effect and the record can still re-run it. Pass an idempotency key to the downstream API to cover that window.
   - q: Which checkpointers support the tool ledger?
-    a: PgCheckpointer stores it durably in a tool_executions table. InMemoryCheckpointer keeps it in process memory. SqliteCheckpointer does not implement it, so tools there run at least once, as before.
+    a: PgCheckpointer stores it durably in a tool_executions table. InMemoryCheckpointer keeps it in process memory. SqliteCheckpointer keeps it too, in an `af_tool_executions` table.
   - q: Does the ledger work for streaming runs?
     a: Yes. The ledger, per-step durable checkpoints and node and tool timeouts apply to invoke, ainvoke, stream and astream.
   - q: What happens if recording a tool result fails?
@@ -131,7 +131,7 @@ The thread ID column type follows your configured ID type. Three details matter 
 - **Inserts use `ON CONFLICT DO NOTHING`.** If two attempts ever race to record the same call, the first recorded result stays authoritative.
 - **Deleting a thread deletes its ledger** through the foreign key cascade, so there is no separate cleanup job.
 
-`InMemoryCheckpointer` implements the same interface with a dictionary, which is useful in tests but only protects replays inside one process. `SqliteCheckpointer` does not implement the ledger. It inherits the base class default, which always returns "no record", so tools behave as they did before: at least once.
+`InMemoryCheckpointer` implements the same interface with a dictionary, which is useful in tests but only protects replays inside one process. `SqliteCheckpointer` implements the ledger too, in the `af_tool_executions` table. A custom checkpointer that does not implement it inherits the base class default, which always returns "no record", so tools behave as they did before: at least once.
 
 ## What happens when the ledger itself fails?
 
@@ -276,7 +276,7 @@ These are the limits we know about as of 1.0.
 
 - **At least once, not exactly once.** The window between a side effect and its ledger record is small but real. See the section above.
 - **The ledger records outcomes, not intent.** A tool that starts a long external job and crashes before returning has no record, so it is started again on replay. For long-running work, have the tool return a job handle quickly and track the job's progress separately.
-- **SQLite has no ledger.** Use `PgCheckpointer` anywhere double execution matters.
+- **SQLite is for one process.** It keeps the ledger, but it is not built for concurrent writers. Use `PgCheckpointer` when several processes or users share a backend.
 
 ## Production checklist
 

@@ -244,7 +244,7 @@ flowchart TD
 
 ## Prebuilt tools
 
-Tools are separate from agents. The package ships ready-made functions you can pass to any `ToolNode` or `tools=` list, such as `safe_calculator`, `fetch_url`, `file_read`, `file_write`, `file_search`, `google_web_search`, `vertex_ai_search`, the memory tool factories (`make_user_memory_tool`, `make_agent_memory_tool`) and the handoff helpers (`create_handoff_tool`, `is_handoff_tool`). The [prebuilt tools guide](/docs/guides/prebuilt-tools) covers each one.
+Tools are separate from agents. The package ships the memory tool factories (`make_user_memory_tool`, `make_agent_memory_tool`) and the handoff helpers (`create_handoff_tool`, `is_handoff_tool`), which you can pass to any `ToolNode` or `tools=` list. For everything else, write your own `@tool` (see [Use the tool decorator](/docs/guides/use-tool-decorator)) or connect an MCP server (see [Use MCP](/docs/guides/use-mcp)). The calculator, fetch, search and file tools are deprecated in 1.1.0 and removed in 2.0. The [prebuilt tools guide](/docs/guides/prebuilt-tools) covers each one.
 
 ## Related pages
 

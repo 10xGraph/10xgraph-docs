@@ -59,9 +59,16 @@ A module that moves keeps working at its old import path until 2.0.
   `AGENTFLOW_*` CLI environment variables (use `TENXGRAPH_*`).
 - The `agentflow-bearer` WebSocket subprotocol on the server (use `10xgraph-bearer`).
 - The `AgentFlow*` aliases in the TypeScript client (use the `TenxGraph*` names).
-- The module-level file tools and their root from the run config (use
-  `create_file_tools(root=...)`).
+- The module-level file tools and their root from the run config.
 - `PgVectorStore.adrop_legacy_key_index()` and the legacy key index handling.
+- The prebuilt tools `safe_calculator`, `fetch_url`, `google_web_search`, `vertex_ai_search`,
+  `file_read`, `file_write`, `file_search` and the `create_*` factories for them, including
+  `create_file_tools`. They are deprecated in 1.1.0, emit a `DeprecationWarning` and are removed
+  in 2.0. Write your own `@tool` or use an MCP server.
+
+One exception: `AnthropicBatch`, `OpenAIBatch` and `BatchResult` were removed in 1.1.0 without a
+deprecation period. They were unfinished and no part of the graph runtime used them. Call the
+provider SDK's batch API directly.
 
 ## Versions across the three packages
 

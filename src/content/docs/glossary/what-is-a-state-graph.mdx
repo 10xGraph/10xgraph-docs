@@ -62,7 +62,6 @@ Three components:
 ```python
 from tenxgraph.core.graph import Agent, StateGraph, ToolNode
 from tenxgraph.core.state import AgentState, Message
-from tenxgraph.prebuilt.tools import safe_calculator
 from tenxgraph.utils import END
 
 # Define tools
@@ -70,11 +69,14 @@ def search(query: str) -> str:
     """Search the web."""
     return f"Results for: {query}"
 
-# For arithmetic use the prebuilt safe_calculator. Never pass model output to eval(),
-# even with empty builtins: it can be escaped, and 9**9**9 hangs the process.
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
+# Never pass model output to eval(): do the arithmetic in a typed function like this one.
 
 # Create nodes
-tool_node = ToolNode([search, safe_calculator])
+tool_node = ToolNode([search, multiply])
 agent_node = Agent(
     model="google/gemini-2.5-flash",
     system_prompt=[{"role": "system", "content": "Helpful assistant. Use tools when needed."}],

@@ -137,7 +137,7 @@ agent = Agent(
 )
 ```
 
-If retries are exhausted, you are likely over your quota or tier limit. Reduce concurrency, move bulk work to [batch LLM calls](/docs/guides/batch-llm-calls), or raise your account tier. Pass `retry_config=False` only if you want failures to surface immediately.
+If retries are exhausted, you are likely over your quota or tier limit. Reduce concurrency, move bulk work to the provider's batch API, or raise your account tier. Pass `retry_config=False` only if you want failures to surface immediately.
 
 ## Configure Vertex AI
 

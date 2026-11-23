@@ -403,7 +403,7 @@ assert "Alice" in result2["messages"][-1].content
 
 ## Run it in production
 
-The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The `checkpointer` key in `10xgraph.json` is not read. Use `PgCheckpointer` when you run more than one worker, since workers share state only through it. Run one graph per process or container. Two graphs in one process share a checkpointer unless each gets its own checkpointer instance and its own `container=InjectQ()`; see [`compile`](/docs/reference/python/graph#compile). See [Scaling and reliability](/docs/production/scaling) and [Backup and restore](/docs/server/backup-and-restore).
+The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The `checkpointer` key in `10xgraph.json` is not read. Use `PgCheckpointer` when you run more than one worker, since workers share state only through it. Two graphs in one process keep separate checkpointers, but graphs you compile with the same checkpointer instance share its threads; see [`compile`](/docs/reference/python/graph#compile). See [Scaling and reliability](/docs/production/scaling) and [Backup and restore](/docs/server/backup-and-restore).
 
 ## Next steps
 

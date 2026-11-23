@@ -146,15 +146,18 @@ Verify that the agent used the MCP tools by checking the message history for `To
 You can register both local Python functions and MCP tools in the same `ToolNode`. The runtime automatically routes each tool call to the correct backend (local or remote):
 
 ```python
-from tenxgraph.prebuilt.tools import safe_calculator
+# Local functions
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
 
-# Local function
+
 def my_custom_tool(query: str) -> str:
     return f"Custom result: {query}"
 
 # Both local and MCP tools available
 tool_node = ToolNode(
-    tools=[safe_calculator, my_custom_tool],
+    tools=[multiply, my_custom_tool],
     client=client,
 )
 ```

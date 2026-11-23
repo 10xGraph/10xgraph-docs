@@ -15,6 +15,12 @@ faq:
     a: "Yes. safe_calculator blocks code execution, fetch_url restricts to public hosts, and file tools enforce workspace boundaries."
 ---
 
+<aside class="callout callout-warning" role="note"><p class="callout-title">Deprecated in 1.1.0, removed in 2.0</p>
+
+The calculator, fetch, search and file tools on this page (`safe_calculator`, `fetch_url`, `google_web_search`, `vertex_ai_search`, `file_read`, `file_write`, `file_search` and their `create_*` factories) are deprecated in 10xGraph 1.1.0 and will be removed in 2.0. The handoff and memory tools stay. They keep working and emit a `DeprecationWarning` when they run. These are generic tools that you should own: your own `@tool` gives you the validation, auth and limits your app needs, and an MCP server can provide the same capability. Write your own with [Use the tool decorator](/docs/guides/use-tool-decorator), or connect an MCP server with [Use MCP](/docs/guides/use-mcp).
+
+</aside>
+
 10xGraph ships a library of production-ready tools in `tenxgraph.prebuilt.tools`. Each tool is designed to be safe, well-bounded, and easy to compose. Add them to any graph by passing them to a `ToolNode` or prebuilt agent.
 
 ## Overview

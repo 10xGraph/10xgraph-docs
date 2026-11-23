@@ -343,7 +343,7 @@ For multi-tenant apps, `PgCheckpointer` can also keep your own tenant columns on
 
 You do not need Redis and Postgres running to build an agent. `SqliteCheckpointer` keeps durable state, the state cache, messages and threads in one local SQLite file, with WAL mode for concurrent reads. `InMemoryCheckpointer` keeps everything in process, which suits tests. Graph code stays the same. You change the checkpointer and move to `PgCheckpointer` when you deploy.
 
-One difference matters before production: `SqliteCheckpointer` does not implement the tool ledger, so replay safety requires `PgCheckpointer`.
+`SqliteCheckpointer` keeps the tool ledger too, in the `af_tool_executions` table. What it does not give you is safe concurrent writers, so move to `PgCheckpointer` when several processes or users share a backend.
 
 ## The same rule in the API server
 

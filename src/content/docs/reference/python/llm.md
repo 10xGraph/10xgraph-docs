@@ -1,7 +1,7 @@
 ---
 title: LLM Utilities
 seoTitle: "LLM utilities API reference (Python)"
-description: "Provider detection, LLM client creation, batch processing, and timeout controls from tenxgraph.core.llm."
+description: "Provider detection, LLM client creation, and timeout controls from tenxgraph.core.llm."
 section: Reference
 group: "Python library"
 order: 80
@@ -9,22 +9,19 @@ label: LLM utilities
 updated: "2026-10-08"
 ---
 
-The `tenxgraph.core.llm` module is the provider layer under `Agent`. It detects the provider from a model name, makes single-turn calls to Google, OpenAI, or Anthropic, builds native async SDK clients, sets the default request timeout, and submits asynchronous batches through `OpenAIBatch` and `AnthropicBatch`.
+The `tenxgraph.core.llm` module is the provider layer under `Agent`. It detects the provider from a model name, makes single-turn calls to Google, OpenAI, or Anthropic, builds native async SDK clients, and sets the default request timeout.
 
 ## When to use this
 
-`tenxgraph.core.llm` is the thin provider layer that `Agent` and the evaluation judges sit on. Use it directly when you need a single-turn LLM call outside a graph, when you want a raw provider SDK client, when you need to submit large batches of requests at reduced cost, or when you need to change the default request timeout process-wide.
+`tenxgraph.core.llm` is the thin provider layer that `Agent` and the evaluation judges sit on. Use it directly when you need a single-turn LLM call outside a graph, when you want a raw provider SDK client, or when you need to change the default request timeout process-wide.
 
-For agent behaviour inside a graph, use [`Agent`](/docs/reference/python/agent) instead. This module has no state, no tools, and no retries. Batches are a separate service that run asynchronously and are not suitable for interactive, stateful graph execution.
+For agent behaviour inside a graph, use [`Agent`](/docs/reference/python/agent) instead. This module has no state, no tools, and no retries. For batch jobs, call the provider SDK's batch API directly.
 
 ## Import paths
 
 ```python
 from tenxgraph.core.llm import (
-    AnthropicBatch,
-    BatchResult,
     DEFAULT_LLM_TIMEOUT_SECONDS,
-    OpenAIBatch,
     call_llm,
     create_llm_client,
     detect_provider,
@@ -247,188 +244,12 @@ This bounds the provider request only. Node and tool execution have their own de
 
 ---
 
-## Batch processing
-
-Batch helpers submit many requests to a provider batch service, which runs them asynchronously at reduced cost when latency does not matter. Results can arrive in any order, so they are keyed by a `custom_id` you assign. `OpenAIBatch` and `AnthropicBatch` share one interface and both return `BatchResult` objects. For a walkthrough, see the [batch LLM calls guide](/docs/guides/batch-llm-calls).
-
-### `OpenAIBatch`
-
-```python
-class OpenAIBatch:
-    model: str
-    completion_window: str = "24h"
-    endpoint: str = "/v1/chat/completions"
-    client: Any = None
-
-    def add(
-        self,
-        custom_id: str,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[Any] | None = None,
-        **params: Any,
-    ) -> OpenAIBatch
-    async def submit(self) -> str
-    async def status(self, batch_id: str) -> str
-    async def wait(
-        self,
-        batch_id: str,
-        *,
-        poll_interval: float = 30.0,
-        timeout: float | None = None,
-    ) -> dict[str, BatchResult]
-    async def results(self, batch_id: str) -> dict[str, BatchResult]
-```
-
-Builds, submits, and collects results from an OpenAI batch. `submit` uploads the queued requests as a JSONL file, and `results` downloads and parses the output file. The constructor creates an OpenAI client with `create_llm_client("openai")` unless you pass `client`.
-
-| Field | Default | Description |
-|---|---|---|
-| `model` | required | Model name placed in every request. |
-| `completion_window` | `"24h"` | Batch completion window. |
-| `endpoint` | `"/v1/chat/completions"` | Endpoint each request targets. |
-| `client` | `None` | An existing async OpenAI client. Created automatically when omitted. |
-
-| Method | Purpose |
-|---|---|
-| `add` | Queue one request with a unique `custom_id`. Returns self for chaining. `messages` use 10xGraph's internal, OpenAI-shaped format, so no translation happens. Extra `params` go into the request body. Raises `ValueError` if `custom_id` is a duplicate. |
-| `submit` | Upload the request file to OpenAI, create the batch, and return its `batch_id`. Raises `ValueError` if no requests have been added. |
-| `status` | Return the current status string of a batch by id. |
-| `wait` | Poll every `poll_interval` seconds (default `30.0`) until the batch reaches a terminal status (`completed`, `failed`, `expired`, or `cancelled`), then fetch results. `timeout=None` waits forever. Raises `TimeoutError` if `timeout` elapses first. |
-| `results` | Download and parse the output file for a finished batch. Returns results keyed by `custom_id`, or an empty dict if the batch has no output. |
-
-```python
-from tenxgraph.core.llm import OpenAIBatch
-
-import asyncio
-
-
-async def main() -> None:
-    batch = OpenAIBatch(model="gpt-4o-mini")  # needs OPENAI_API_KEY
-    batch.add("request-1", [{"role": "user", "content": "Summarise: the meeting ran long."}])
-    batch.add("request-2", [{"role": "user", "content": "Translate to French: good morning."}])
-
-    batch_id = await batch.submit()
-    print(f"Submitted batch {batch_id}")
-
-    results = await batch.wait(batch_id, timeout=3600.0)
-    print(results["request-1"].text)
-
-
-asyncio.run(main())
-```
-
-### `AnthropicBatch`
-
-```python
-class AnthropicBatch:
-    model: str
-    max_tokens: int = 16000
-    anthropic_backend: str | None = None
-    client: Any = None
-
-    def add(
-        self,
-        custom_id: str,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[Any] | None = None,
-        **params: Any,
-    ) -> AnthropicBatch
-    async def submit(self) -> str
-    async def status(self, batch_id: str) -> str
-    async def wait(
-        self,
-        batch_id: str,
-        *,
-        poll_interval: float = 30.0,
-        timeout: float | None = None,
-    ) -> dict[str, BatchResult]
-    async def results(self, batch_id: str) -> dict[str, BatchResult]
-```
-
-Builds, submits, and collects results from an Anthropic Message Batch. Messages are translated automatically from 10xGraph's internal format to Anthropic's request format (system prompt split out, tool results merged, a trailing assistant turn dropped), so no conversion is needed. The constructor creates an Anthropic client for `anthropic_backend` unless you pass `client`.
-
-| Field | Default | Description |
-|---|---|---|
-| `model` | required | Model name placed in every request. |
-| `max_tokens` | `16000` | Default `max_tokens` per request. Override per request with `max_tokens=` in `add`. |
-| `anthropic_backend` | `None` | `None`, `"vertex"`, or `"bedrock"`, as in `create_llm_client`. |
-| `client` | `None` | An existing async Anthropic client. Created automatically when omitted. |
-
-| Method | Purpose |
-|---|---|
-| `add` | Queue one request with a unique `custom_id`. Returns self for chaining. Messages use 10xGraph's internal format and are translated internally. Raises `ValueError` if `custom_id` is a duplicate. |
-| `submit` | Create the batch with Anthropic and return its `batch_id`. Raises `ValueError` if no requests have been added. |
-| `status` | Return the batch `processing_status` by id. |
-| `wait` | Poll every `poll_interval` seconds (default `30.0`) until the status is `ended`, then fetch results. `timeout=None` waits forever. Raises `TimeoutError` if `timeout` elapses first. |
-| `results` | Collect results for a finished batch, keyed by `custom_id`. |
-
-```python
-from tenxgraph.core.llm import AnthropicBatch
-
-import asyncio
-
-
-async def main() -> None:
-    batch = AnthropicBatch(model="claude-haiku-4-5")  # needs ANTHROPIC_API_KEY
-    batch.add("case-1", [{"role": "user", "content": "Summarise: the meeting ran long."}])
-    batch.add("case-2", [{"role": "user", "content": "Classify the sentiment: great product."}])
-
-    batch_id = await batch.submit()
-    results = await batch.wait(batch_id)
-    for custom_id, result in results.items():
-        if result.ok:
-            print(f"{custom_id}: {result.text}")
-        else:
-            print(f"{custom_id} failed: {result.status} {result.error}")
-
-
-asyncio.run(main())
-```
-
-### `BatchResult`
-
-```python
-@dataclass
-class BatchResult:
-    custom_id: str
-    status: str
-    text: str = ""
-    stop_reason: str | None = None
-    input_tokens: int = 0
-    output_tokens: int = 0
-    error: Any = None
-    raw: Any = None
-
-    @property
-    def ok(self) -> bool
-```
-
-One entry from a completed batch, normalised across providers.
-
-| Field | Type | Description |
-|---|---|---|
-| `custom_id` | `str` | The identifier you assigned when calling `add()`. |
-| `status` | `str` | `"succeeded"`, `"errored"`, `"canceled"`, or `"expired"`. |
-| `text` | `str` | The response text on success, empty on error. |
-| `stop_reason` | `str \| None` | The provider's stop reason, e.g. `"end_turn"`, `"max_tokens"`, or `None` on error. |
-| `input_tokens` | `int` | Number of input tokens, or `0` if not reported. |
-| `output_tokens` | `int` | Number of output tokens, or `0` if not reported. |
-| `error` | `Any` | The error details on failure, `None` on success. |
-| `raw` | `Any` | The raw provider response for debugging. |
-| `ok` (property) | `bool` | Shorthand: `True` if status is `"succeeded"`. |
-
----
-
 ## Common errors
 
 | Error | Cause | Fix |
 |---|---|---|
 | `ValueError: Unsupported provider: '...'` | A provider other than `"google"`, `"openai"`, or `"anthropic"` was passed to `create_llm_client`. | Use one of the three. Reach other models through an OpenAI-compatible `base_url`. |
 | `ValueError: Unsupported anthropic_backend` | `anthropic_backend` is not `None`, `"vertex"`, or `"bedrock"`. | Use a supported value. |
-| `ValueError: Cannot submit an empty batch` or `Duplicate custom_id` | `submit` before any `add`, or the same `custom_id` added twice. | Call `add` first and keep each `custom_id` unique. |
-| `TimeoutError: Batch ... still ...` | `wait` hit its `timeout` before the batch finished. | Raise `timeout`, or poll `status` and call `results` later. |
 | `ImportError: google-genai SDK is required` | Google provider selected without the SDK. | `pip install "10xgraph[google-genai]"`. |
 | `ImportError` on the OpenAI client | OpenAI provider selected without the SDK. | `pip install "10xgraph[openai]"`. |
 | `ValueError: LLM timeout must be a positive number of seconds.` | `set_default_llm_timeout` called with `0` or a negative value. | Pass a positive number, or `None` to clear the override. |
@@ -440,4 +261,3 @@ One entry from a completed batch, normalised across providers.
 
 - [Agent reference](/docs/reference/python/agent)
 - [Integrations and models](/docs/integrations/models)
-- [Batch LLM calls guide](/docs/guides/batch-llm-calls)

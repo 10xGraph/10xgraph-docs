@@ -342,7 +342,7 @@ app = graph.compile(callback_manager=cbm)
 
 ## Run it in production
 
-Hooks and validators resolve from the global InjectQ container, so graphs in one server process share the same `CallbackManager` unless you give each graph its own container. Hooks run on every request, so keep them fast and do not put secrets in logged payloads. See the [Security model](/docs/production/security-model).
+Each compiled graph has its own `CallbackManager` (since 1.1.0), so hooks and validators you register on one graph do not run for another. Pass the same `callback_manager` to `compile()` to share one. Hooks run on every request, so keep them fast and do not put secrets in logged payloads. See the [Security model](/docs/production/security-model).
 
 ## Related pages
 

@@ -242,25 +242,7 @@ If you set `cache_control` yourself anywhere (a top-level keyword argument, on a
 
 ## Batch processing for high-volume work
 
-For offline, asynchronous processing of many requests at reduced cost, use the `AnthropicBatch` utility:
-
-```python
-from tenxgraph.core.llm import AnthropicBatch
-
-# Run inside an async function
-batch = AnthropicBatch(model="claude-haiku-4-5")
-batch.add("request-1", [{"role": "user", "content": "Summarize..."}])
-batch.add("request-2", [{"role": "user", "content": "Analyze..."}])
-batch.add("request-3", [{"role": "user", "content": "Extract..."}])
-
-batch_id = await batch.submit()
-results = await batch.wait(batch_id)  # keyed by custom_id
-print(results["request-1"].text)
-```
-
-Results are keyed by the `custom_id` you provide because they may arrive in any order; indexing by position is a common source of silent data mismatch bugs. The batch API is well suited to processing large datasets or generating training data because it runs asynchronously and costs less. For interactive, stateful agent runs, use the compiled graph's `invoke()` or `astream()` instead.
-
-You can also use `status(batch_id)` to poll the status once without blocking, and `results(batch_id)` to retrieve results from a batch you already know has completed. Messages you pass to `batch.add()` use 10xGraph's internal message format and go through the same translation as live calls, so system prompts and tool results are shaped correctly.
+For offline, asynchronous batch jobs, call the Anthropic SDK's batch API directly (`client.messages.batches`). 10xGraph does not wrap it.
 
 ## Environment variables
 
@@ -288,4 +270,3 @@ For the direct Claude API, you need at least one credential source to resolve. 1
 - [Configure an Agent](/docs/guides/configure-agent): Learn how to set up agents with different model parameters, tools, and reasoning modes.
 - [Provider selection guide](/docs/integrations/models): See a capability matrix and compare Anthropic with other providers.
 - [Installation and API keys](/docs/get-started/installation): Get all providers and extras set up.
-- [Batch processing guide](/docs/guides/batch-llm-calls): Process large datasets with batch APIs for reduced cost.

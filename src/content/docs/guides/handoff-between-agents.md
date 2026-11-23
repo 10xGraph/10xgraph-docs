@@ -1,17 +1,17 @@
 ---
 title: Route between agents with handoff
-description: "Transfer control between agents in a multi-agent graph using handoff tools and Command routing."
+description: "Transfer control between agents with handoff tools and Command routing, and run a sub-workflow as a tool call that keeps its data in a custom state field."
 section: "Build agents"
 group: "Control flow"
 order: 250
-updated: "2026-11-15"
+updated: "2026-11-22"
 faq:
   - q: "When should I use this instead of SwarmAgent?"
     a: "Use manual handoff when you need full control over graph topology or custom routing logic. Use SwarmAgent when all agents are peers and you want automatic handoff tool injection."
   - q: "Can handoff tools route to agents that do not exist?"
     a: "The handoff is detected and routed before tool execution, so the target node must exist in the graph. A target that is not a node raises a GraphError with code GRAPH_007."
   - q: "Can I put a compiled graph inside another graph as a node?"
-    a: "No. 10xGraph does not support nested graphs. add_node raises ValueError: Invalid arguments for add_node when given a compiled graph. Use one graph with several Agent nodes and route between them with handoff tools or Command."
+    a: "No. 10xGraph does not support nested graphs. add_node raises ValueError: Invalid arguments for add_node when given a compiled graph. Wrap the sub-workflow as a tool: the tool runs it, keeps the full data in a custom state field and returns a short summary to the model."
   - q: "How do I prevent routing loops?"
     a: "Ensure at least one agent has a conditional edge that routes to END when no handoff is called, breaking the cycle."
 ---
@@ -25,6 +25,8 @@ In a multi-agent graph, agents often need to delegate tasks to specialists. 10xG
 **Command routing** works when a dedicated node (often a router or condition function) makes routing decisions based on message content or logic you define. Return `Command(goto="TARGET_NODE")` from any custom node function to navigate explicitly. This is useful when routing decisions come from parsing outputs, matching patterns, or applying complex rules that the LLM should not see.
 
 If your agents are all peers (equal, collaborative) and you want automatic handoff tool injection, consider `/docs/guides/prebuilt/swarm-agent` instead. If you have a supervisor that delegates to workers, use `/docs/guides/prebuilt/supervisor-team-agent`. Use manual handoff when you need full control over the graph topology or custom routing.
+
+**A sub-workflow as a tool** fits when one step is a workflow of its own and the model needs only its result. The tool runs it, keeps the full data in a custom state field and returns a short summary. See [Run a sub-workflow as a tool call](#run-a-sub-workflow-as-a-tool-call).
 
 ## How handoff tools work
 
@@ -196,38 +198,100 @@ graph.set_entry_point("router")
 
 Command routing is useful when decisions come from parsing outputs, applying business logic, or orchestrating multi-turn flows where the LLM should not see routing logic.
 
-## Nested graphs are not supported
+## Run a sub-workflow as a tool call
 
-A compiled graph cannot be a node of another `StateGraph`. `add_node` accepts only a function, a `ToolNode` or an `Agent`, and a compiled graph raises `ValueError: Invalid arguments for add_node`. Running another compiled graph from inside a custom node (`await other_app.ainvoke(...)`) is not supported either: its streaming, tool calls, client tools and interrupts do not pass through to the outer graph.
+10xGraph does not support nested graphs. A compiled graph cannot be a node of another `StateGraph`: `add_node` accepts a function, a `ToolNode` or an `Agent`, and a compiled graph raises `ValueError: Invalid arguments for add_node`. There is no jump to a parent graph either.
 
-Build a multi-agent system as one graph instead: several `Agent` nodes and `ToolNode`s, connected by edges, conditional edges, `Command(goto=...)` and handoff tools, as in the example above. A minimal sketch:
+When one step of your agent is a whole workflow of its own (research, data collection, a multi-step lookup), wrap it as a tool:
+
+1. The tool runs the sub-workflow. It can be plain Python code, or a second compiled graph that the tool calls with `await sub_app.ainvoke(...)`.
+2. The tool writes the full intermediate data to a custom state field.
+3. The tool returns only a short summary to the model.
+
+A custom state field is saved per thread with the checkpoint. The model does not see it unless you put it in the prompt (for example with a `{field}` placeholder in the system prompt), so the model context stays small however much data the sub-workflow produces. Later tools and nodes read the full data from `state`.
 
 ```python
-from tenxgraph.core import Agent, StateGraph, ToolNode
-from tenxgraph.prebuilt.tools import create_handoff_tool
+from typing import Annotated
+
+from pydantic import Field
+
+from tenxgraph.core import Agent, Message, StateGraph, ToolNode
+from tenxgraph.core.state import AgentState, ToolResult
+from tenxgraph.storage.checkpointer import InMemoryCheckpointer
 from tenxgraph.utils import END
+from tenxgraph.utils.decorators import tool
 
-triage = Agent(model="gemini-2.5-flash", provider="google", tool_node="triage_tools",
-               system_prompt=[{"role": "system", "content": "Route the request."}])
-writer = Agent(model="gemini-2.5-flash", provider="google",
-               system_prompt=[{"role": "system", "content": "Draft the answer."}])
 
-graph = StateGraph()
-graph.add_node("triage", triage)
-graph.add_node("triage_tools", ToolNode([create_handoff_tool("writer", "Hand off to writer.")]))
-graph.add_node("writer", writer)
-graph.set_entry_point("triage")
-graph.add_edge("triage_tools", "triage")
-graph.add_conditional_edges(
-    "triage",
-    lambda state: "triage_tools" if state.context and state.context[-1].tools_calls else END,
-    {"triage_tools": "triage_tools", END: END},
+# The sub-workflow: its own small graph. Replace collect with your own steps or Agent nodes.
+def collect(state: AgentState) -> Message:
+    topic = state.context[-1].text()
+    notes = [f"{topic}: finding {i}" for i in range(1, 21)]
+    return Message.text_message("\n".join(notes), role="assistant")
+
+
+sub = StateGraph()
+sub.add_node("collect", collect)
+sub.set_entry_point("collect")
+sub.add_edge("collect", END)
+research_app = sub.compile()
+
+
+# Outer state: the sub-workflow's data lives in a custom field, not in the messages.
+def merge_notes(left: dict, right: dict) -> dict:
+    return {**left, **right}
+
+
+class DeskState(AgentState):
+    research_notes: Annotated[dict[str, list[str]], merge_notes] = Field(default_factory=dict)
+
+
+@tool
+async def research(topic: str, state: DeskState) -> ToolResult:
+    """Research a topic. Returns a short summary; the full notes are kept in state."""
+    result = await research_app.ainvoke({"messages": [Message.text_message(topic)]})
+    notes = result["messages"][-1].text().splitlines()
+    return ToolResult(
+        message=f"Collected {len(notes)} notes on {topic}. First: {notes[0]}",
+        state={"research_notes": {**state.research_notes, topic: notes}},
+    )
+
+
+agent = Agent(
+    model="gemini-2.5-flash",
+    provider="google",
+    system_prompt=[{"role": "system", "content": "Use the research tool, then answer briefly."}],
+    tool_node="tools",
 )
-graph.add_edge("writer", END)
-app = graph.compile()
+
+graph = StateGraph(DeskState())
+graph.add_node("agent", agent)
+graph.add_node("tools", ToolNode([research]))
+graph.set_entry_point("agent")
+graph.add_conditional_edges(
+    "agent",
+    lambda state: "tools" if state.context and state.context[-1].tools_calls else END,
+    {"tools": "tools", END: END},
+)
+graph.add_edge("tools", "agent")
+app = graph.compile(checkpointer=InMemoryCheckpointer())
+
+result = app.invoke(
+    {"messages": [Message.text_message("Research solar and wind power.")]},
+    config={"thread_id": "desk-1"},
+)
+for msg in result["messages"]:
+    print(f"{msg.role}: {msg.text()}")
 ```
 
-This may be revisited in a later major version.
+The model sees one summary line per tool call. The 20 notes per topic stay in `state.research_notes` and are saved with the thread. How it works:
+
+- `state` is an injected parameter. The tool gets the current state, and the model never sees the parameter in the tool schema.
+- `ToolResult(message=..., state=...)` returns the message to the model and sets the named state fields. A name that is not a field of the state is ignored.
+- When the model makes several tool calls in one turn, they run in parallel and each call works on its own copy of the state. If two calls change the same field, the field's reducer combines the values. Without a reducer the last write wins and a warning is logged, so a field that several calls fill needs one (here `merge_notes`).
+
+Keep these limits in mind when the sub-workflow is a compiled graph. It runs as a separate run inside the tool call. Its stream chunks and tool calls do not appear in the outer stream, client tools of the outer run (`config["remote_tools"]`) do not reach it, and an `interrupt()` inside it does not pause the outer run. Put human approval in the outer graph (see [Add human approval](/docs/guides/add-human-approval)). Compile the sub-workflow without a checkpointer, or give it its own: one checkpointer instance serves one state class.
+
+If the specialists should talk to the user directly or take turns in one conversation, use Agent nodes and handoff tools in one graph, as in the examples above.
 
 ## Routing topologies
 

@@ -62,7 +62,7 @@ Tracing goes to Logfire, LangSmith, Phoenix or any OTLP endpoint. Metrics go to 
 
 ## Deploy
 
-`10xgraph build --docker-compose --k8s` writes a Dockerfile, a `docker-compose.yml` and a Kubernetes manifest. The image is multi-stage and runs as non-root. The cluster and backups stay yours. Built-in TLS and secrets management are upcoming; today, terminate TLS at your ingress and inject secrets from your secret manager.
+`10xgraph build --docker-compose --k8s` writes a Dockerfile, a `docker-compose.yml` and a Kubernetes manifest. The image is multi-stage and runs as non-root. The cluster and backups stay yours. Built-in secrets management is upcoming; today, inject secrets from your secret manager. TLS and mTLS end at your proxy or mesh.
 
 **You write:** the infrastructure the files run on. **Runs for you:** the generated files and the probes. See [deploy](/docs/deploy).
 

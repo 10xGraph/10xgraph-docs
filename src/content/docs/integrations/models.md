@@ -158,7 +158,6 @@ The table below shows which provider supports each capability. A check mark mean
 | **Prompt caching** | Automatic | Implicit, plus explicit `cached_content` | `anthropic_cache` |
 | **Multimodal input** | Image, audio, document | Image, video, audio, document | Image, PDF (audio and video are not supported) |
 | **Other output types** (`output_type`) | image, audio | image, video, audio | none (text and json only) |
-| **Batch API** | `OpenAIBatch` | - | `AnthropicBatch` |
 
 ### Tools
 
@@ -252,14 +251,7 @@ See `/docs/guides/send-media` for detailed examples.
 
 ### Batch API
 
-For cost-sensitive bulk processing, OpenAI and Anthropic offer batch APIs:
-
-- **OpenAI:** `OpenAIBatch` class.
-- **Anthropic:** `AnthropicBatch` class. Same interface: `add`, `submit`, `status`, `wait`, `results`.
-
-Both live in `tenxgraph.core.llm`.
-
-Batch is not for interactive workloads; use the regular invoke/stream API for agent interactions. See `/docs/guides/batch-llm-calls` for examples.
+For bulk jobs, call the provider SDK's batch API directly (`client.batches` for OpenAI, `client.messages.batches` for Anthropic). 10xGraph does not wrap it.
 
 ## Other models: OpenAI-compatible endpoints
 

@@ -10,6 +10,12 @@ updated: "2026-10-29"
 
 Publishers allow you to observe and audit agent execution by forwarding structured events to external systems. Every time your graph runs, publishers emit events for graph starts and ends, node execution, tool calls, LLM requests, state updates, errors, and streaming tokens. You can subscribe to these events in real-time to monitor your agent, log audits, trigger alerts, or analyze behavior. Publishers are optional: your graph works without them, but adding one is essential for production deployments.
 
+<aside class="callout callout-note" role="note"><p class="callout-title">The set is closed</p>
+
+The publishers listed on this page are a closed set, and new destinations are not being added. For another destination, write a [callback](/docs/guides/use-callbacks), subclass `BasePublisher` as shown below, or send traces through the OTEL publisher to any OTLP backend (see [Send traces to OTLP](/docs/guides/send-traces-to-otlp)).
+
+</aside>
+
 ## Why publishers matter
 
 In development, you might test your agent locally and call it once. In production, you're serving many requests concurrently, and something goes wrong. Without visibility into what the agent was doing, debugging becomes expensive. Publishers create an event stream that records the exact sequence of execution, including what the agent decided and why. You can stream these events to monitoring platforms, log aggregators, or data warehouses for analysis.

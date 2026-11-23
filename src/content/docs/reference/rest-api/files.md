@@ -81,7 +81,7 @@ curl -X POST http://127.0.0.1:8000/v1/files/upload \
 | `file_id` | Opaque storage key. Reference this from message content blocks. |
 | `mime_type` | The content type the server recorded. |
 | `size_bytes` | Stored size in bytes. |
-| `filename` | The uploaded filename, cleaned: base name only, no control or bidi characters, at most 255 characters. |
+| `filename` | The uploaded filename, cleaned: base name only, no control, zero-width or bidi characters, no `<>:"/\|?*`, at most 255 characters, `unnamed` if nothing is left. |
 | `extracted_text` | Extracted document text, when `DOCUMENT_HANDLING=extract_text` and the type is extractable. `null` otherwise, and also `null` for HTML, XML, CSV, Markdown, JSON and plain-text files over 5 MiB, which are stored without extraction. |
 | `url` | API-relative retrieval path. |
 | `direct_url` | Signed direct URL, when the storage backend can produce one. |

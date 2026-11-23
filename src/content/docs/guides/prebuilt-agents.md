@@ -10,6 +10,12 @@ updated: "2026-10-27"
 
 10xGraph ships seven prebuilt agent classes that wrap a fully wired `StateGraph` behind a single constructor and `compile()` call. Each is a ready-made pattern for a common orchestration task. They compile to a `CompiledGraph` you can `invoke()`, `astream()`, or serve over the API server just like any graph you wrote by hand. This page helps you choose the right agent and points to detailed guides for each.
 
+<aside class="callout callout-note" role="note"><p class="callout-title">The set is closed</p>
+
+The prebuilt agents cover the common patterns and are not growing. For anything else, build your own graph with `StateGraph` and `Agent`. See [Build a graph](/docs/guides/build-a-graph).
+
+</aside>
+
 Install the core package with the provider extra your samples use, for example `pip install "10xgraph[openai]"` or `pip install "10xgraph[google-genai]"`. RAGAgent also needs the `qdrant` extra, and AudioAgent needs `google-genai` and `realtime`.
 
 ## Why prebuilt agents
@@ -36,11 +42,14 @@ The most common pattern. A single LLM calls tools in a loop, processes results, 
 
 ```python
 from tenxgraph.prebuilt.agent import ReactAgent
-from tenxgraph.prebuilt.tools import fetch_url, safe_calculator
+
+def get_order_status(order_id: str) -> str:
+    """Fetch the status of an order."""
+    return f"Order {order_id}: shipped."
 
 agent = ReactAgent(
     model="gpt-4o",
-    tools=[fetch_url, safe_calculator],
+    tools=[get_order_status],
 )
 app = agent.compile()
 ```
@@ -55,11 +64,14 @@ Breaks complex multi-step tasks into three phases: first the LLM plans the steps
 
 ```python
 from tenxgraph.prebuilt.agent import PlanActReflectAgent
-from tenxgraph.prebuilt.tools import fetch_url, google_web_search
+
+def search_docs(query: str) -> str:
+    """Search the internal docs."""
+    return f"Results for: {query}"
 
 agent = PlanActReflectAgent(
     model="gpt-4o",
-    tools=[fetch_url, google_web_search],
+    tools=[search_docs],
 )
 app = agent.compile()
 ```
@@ -188,11 +200,14 @@ Enables real-time audio-to-audio conversations through Gemini Live (streaming au
 
 ```python
 from tenxgraph.prebuilt.agent import AudioAgent
-from tenxgraph.prebuilt.tools import fetch_url, safe_calculator
+
+def get_order_status(order_id: str) -> str:
+    """Fetch the status of an order."""
+    return f"Order {order_id}: shipped."
 
 agent = AudioAgent(
     model="gemini-2.5-flash",
-    tools=[fetch_url, safe_calculator],
+    tools=[get_order_status],
 )
 # Driven by CompiledGraph.arealtime(), not invoke() or stream()
 ```
@@ -203,19 +218,22 @@ See [AudioAgent](/docs/guides/prebuilt/audio-agent) for realtime configuration, 
 
 ## Extending with custom tools
 
-ReactAgent, PlanActReflectAgent, StructuredOutputAgent and AudioAgent accept a `tools` list. (Supervisor and Swarm members carry tools on their own `Agent`, as shown above.) Pass prebuilt tools together with your own functions:
+ReactAgent, PlanActReflectAgent, StructuredOutputAgent and AudioAgent accept a `tools` list. (Supervisor and Swarm members carry tools on their own `Agent`, as shown above.) Pass your own functions, or tools from an MCP server (see [Use MCP](/docs/guides/use-mcp)):
 
 ```python
 from tenxgraph.prebuilt.agent import ReactAgent
-from tenxgraph.prebuilt.tools import safe_calculator
 
 def lookup_order(order_id: str) -> str:
     """Fetch the status of an order."""
     return f"Order {order_id}: shipped."
 
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
 agent = ReactAgent(
     model="gpt-4o-mini",
-    tools=[lookup_order, safe_calculator],
+    tools=[lookup_order, multiply],
 )
 app = agent.compile()
 ```

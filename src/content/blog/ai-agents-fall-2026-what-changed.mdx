@@ -276,7 +276,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-The `container=InjectQ()` argument matters when you build several graphs in one process. Without it, graphs share one dependency container, and the second graph's trajectory collector records nothing.
+In 1.0 the `container=InjectQ()` argument mattered when you built several graphs in one process: without it, graphs shared one dependency container, and the second graph's trajectory collector recorded nothing. Since 1.1.0 each graph keeps its own checkpointer, store, callback manager and publisher.
 
 The `CriterionConfig` factories cover the common checks:
 

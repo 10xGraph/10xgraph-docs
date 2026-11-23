@@ -100,7 +100,7 @@ Create a PlanActReflectAgent by passing a model and optionally tools and configu
 agent = PlanActReflectAgent(
     model="gpt-4o-mini",
     provider="openai",
-    tools=[google_web_search, fetch_url],
+    tools=[search_web, fetch_page],
     max_iterations=4,
 )
 app = agent.compile()
@@ -173,8 +173,17 @@ This example demonstrates the full plan-act-reflect loop on a research task. The
 import asyncio
 from dotenv import load_dotenv
 from tenxgraph.prebuilt.agent import PlanActReflectAgent
-from tenxgraph.prebuilt.tools import fetch_url, google_web_search
 from tenxgraph.core.state import Message
+
+def fetch_page(url: str) -> str:
+    """Fetch a page. Replace with your own fetcher or an MCP server."""
+    return f"Content of {url}"
+
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 load_dotenv()
 
@@ -185,7 +194,7 @@ def summarize_findings(text: str) -> str:
 agent = PlanActReflectAgent(
     model="gpt-4o-mini",
     provider="openai",
-    tools=[fetch_url, google_web_search, summarize_findings],
+    tools=[fetch_page, search_web, summarize_findings],
     max_iterations=4,
 )
 
@@ -209,12 +218,21 @@ Override the default prompts to steer the agent's behavior. This is useful for d
 
 ```python
 from tenxgraph.prebuilt.agent import PlanActReflectAgent
-from tenxgraph.prebuilt.tools import fetch_url, google_web_search
+
+def fetch_page(url: str) -> str:
+    """Fetch a page. Replace with your own fetcher or an MCP server."""
+    return f"Content of {url}"
+
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 agent = PlanActReflectAgent(
     model="gpt-4o",
     provider="openai",
-    tools=[fetch_url, google_web_search],
+    tools=[fetch_page, search_web],
     max_iterations=5,
     plan_system_prompt=[{
         "role": "system",
@@ -265,14 +283,23 @@ Add a checkpointer to persist state across runs. Pass the same `thread_id` in th
 ```python
 import asyncio
 from tenxgraph.prebuilt.agent import PlanActReflectAgent
-from tenxgraph.prebuilt.tools import fetch_url, google_web_search
 from tenxgraph.storage.checkpointer import PgCheckpointer
 from tenxgraph.core.state import Message
+
+def fetch_page(url: str) -> str:
+    """Fetch a page. Replace with your own fetcher or an MCP server."""
+    return f"Content of {url}"
+
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 agent = PlanActReflectAgent(
     model="gpt-4o-mini",
     provider="openai",
-    tools=[fetch_url, google_web_search],
+    tools=[fetch_page, search_web],
     max_iterations=4,
 )
 
@@ -299,12 +326,16 @@ PlanActReflectAgent works with any provider. Here is an example using Gemini wit
 
 ```python
 from tenxgraph.prebuilt.agent import PlanActReflectAgent
-from tenxgraph.prebuilt.tools import google_web_search
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 agent = PlanActReflectAgent(
     model="gemini-2.5-flash",
     provider="google",
-    tools=[google_web_search],
+    tools=[search_web],
     max_iterations=4,
     trim_context=True,
 )
@@ -350,12 +381,26 @@ To test your agent interactively or deploy it as a REST API, use the `10xgraph` 
 
 ```python
 from tenxgraph.prebuilt.agent import PlanActReflectAgent
-from tenxgraph.prebuilt.tools import fetch_url, google_web_search, safe_calculator
+
+def fetch_page(url: str) -> str:
+    """Fetch a page. Replace with your own fetcher or an MCP server."""
+    return f"Content of {url}"
+
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
+
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
 
 agent = PlanActReflectAgent(
     model="gpt-4o-mini",
     provider="openai",
-    tools=[fetch_url, google_web_search, safe_calculator],
+    tools=[fetch_page, search_web, multiply],
     max_iterations=4,
 )
 

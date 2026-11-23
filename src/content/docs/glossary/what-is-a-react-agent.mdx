@@ -59,7 +59,6 @@ Each cycle is a "thought → action → observation" triplet. The loop continues
 ```python
 from tenxgraph.prebuilt.agent import ReactAgent
 from tenxgraph.core.state import AgentState, Message
-from tenxgraph.prebuilt.tools import safe_calculator
 
 def get_stock_price(ticker: str) -> str:
     """Get the current stock price for a ticker symbol."""
@@ -67,13 +66,16 @@ def get_stock_price(ticker: str) -> str:
     prices = {"AAPL": "182.50", "GOOG": "175.30", "MSFT": "420.10"}
     return f"${prices.get(ticker.upper(), 'not found')}"
 
-# For arithmetic use the prebuilt safe_calculator. Never pass model output to eval(),
-# even with empty builtins: it can be escaped, and 9**9**9 hangs the process.
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
+# Never pass model output to eval(): do the arithmetic in a typed function like this one.
 
 agent = ReactAgent(
     model="google/gemini-2.5-flash",
     system_prompt=[{"role": "system", "content": "You are a financial assistant. Use tools to look up real data."}],
-    tools=[get_stock_price, safe_calculator],
+    tools=[get_stock_price, multiply],
 )
 
 app = agent.compile()
@@ -84,7 +86,7 @@ result = app.invoke(
 )
 print(result["messages"][-1].text())
 # Agent will: call get_stock_price("AAPL") → get $182.50
-# Then call: safe_calculator("182.50 * 100") → get 18250.0
+# Then call: multiply(182.50, 100) → get 18250.0
 # Then respond: "100 shares of AAPL are worth $18,250."
 ```
 
@@ -97,7 +99,7 @@ from tenxgraph.core.graph import Agent, StateGraph, ToolNode
 from tenxgraph.core.state import AgentState, Message
 from tenxgraph.utils import END
 
-tools = [get_stock_price, safe_calculator]
+tools = [get_stock_price, multiply]
 tool_node = ToolNode(tools)
 
 agent_node = Agent(

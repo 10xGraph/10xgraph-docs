@@ -511,7 +511,15 @@ Validate file content, sanitize filenames, and enforce size limits.
 
 ### `validate_magic_bytes`
 
-Check that raw file bytes match the claimed MIME type using magic bytes (file signatures). Known types are `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/bmp`, `image/tiff`, `application/pdf` and `application/zip`.
+Check that raw file bytes match the claimed MIME type using magic bytes (file signatures). The MIME type is lowercased and its parameters are dropped, so `IMAGE/PNG; x=1` is checked as `image/png`. These types are checked:
+
+- Images: `image/png`, `image/jpeg` and `image/jpg`, `image/gif`, `image/webp`, `image/bmp`, `image/tiff`, `image/x-icon` and `image/vnd.microsoft.icon`.
+- `application/pdf`: the `%PDF-` header may sit anywhere in the first 1 KiB.
+- ZIP and Office Open XML (`application/zip`, and the `.docx`, `.xlsx` and `.pptx` types): a ZIP signature.
+- Old Office (`application/msword`, `application/vnd.ms-excel`, `application/vnd.ms-powerpoint`): an OLE signature.
+- Audio: `audio/mpeg` and `audio/mp3` (an ID3 tag or an MPEG frame sync), `audio/wav`, `audio/x-wav` and `audio/wave` (RIFF WAVE), `audio/ogg`, `video/ogg` and `application/ogg` (OggS), `audio/flac` and `audio/x-flac`.
+- MP4 and M4A (`video/mp4`, `audio/mp4`, `audio/x-m4a`): an `ftyp` box.
+- WebM (`video/webm`, `audio/webm`): an EBML header.
 
 ```python
 from tenxgraph.storage.media import validate_magic_bytes
@@ -527,14 +535,22 @@ if not validate_magic_bytes(data, "image/jpeg"):
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `data` | `bytes` | required | Raw file bytes (at least first 12 bytes needed). |
+| `data` | `bytes` | required | Raw file bytes (the first KiB is enough). |
 | `claimed_mime` | `str` | required | The MIME type the uploader claims. |
 
-**Returns:** `True` if magic bytes match or MIME type is unknown (unknown types pass by default); `False` if data is empty or bytes contradict the claim.
+**Returns:** `True` if magic bytes match or the MIME type has no known signature (plain text, CSV, JSON and other types pass); `False` if data is empty or bytes contradict the claim.
 
 ### `sanitize_filename`
 
-Sanitize a user-provided filename for safe filesystem storage. It normalizes Unicode (NFC), keeps only the basename, removes `..`, characters such as `<>:"/\|?*` and control characters, strips surrounding spaces and dots, truncates to 255 characters keeping the extension, and returns `"unnamed"` for empty results.
+Sanitize a user-provided filename for safe filesystem storage. The rules:
+
+- Normalizes Unicode (NFC).
+- Keeps only the base name, the part after the last `/` or `\`. A Windows path works on Linux too.
+- Removes `..`.
+- Removes control characters (C0 and C1), the zero-width characters U+200B to U+200F, the line and paragraph separators and bidi controls U+2028 to U+202E, U+2060, U+2066 to U+2069, U+FEFF, and the characters `<>:"/\|?*`.
+- Strips leading and trailing spaces and dots.
+- Returns `"unnamed"` if nothing is left.
+- Truncates to 255 characters, keeping the extension.
 
 ```python
 from tenxgraph.storage.media import sanitize_filename

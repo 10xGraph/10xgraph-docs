@@ -166,10 +166,10 @@ Call `.compile()` on the SwarmAgent instance to wire the graph and prepare it fo
 
 Build a swarm where a triage agent routes research and writing tasks, a researcher gathers facts, and a writer produces the final document. This example shows the full pattern: custom tools, member independence, and handoff routing.
 
-The examples use OpenAI models and `google_web_search`, so install both extras:
+The examples use OpenAI models and small stand-in tools, so install the OpenAI extra:
 
 ```bash
-pip install "10xgraph[openai,google-genai]"
+pip install "10xgraph[openai]"
 ```
 
 ```python
@@ -178,8 +178,17 @@ from dotenv import load_dotenv
 from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.prebuilt.agent import SwarmAgent
 from tenxgraph.prebuilt.agent.swarm import SwarmMemberConfig
-from tenxgraph.prebuilt.tools import fetch_url, google_web_search
 from tenxgraph.core.state import Message
+
+def fetch_page(url: str) -> str:
+    """Fetch a page. Replace with your own fetcher or an MCP server."""
+    return f"Content of {url}"
+
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 load_dotenv()
 
@@ -202,7 +211,7 @@ triage_agent = Agent(
 researcher_agent = Agent(
     model="gpt-4o",
     provider="openai",
-    tool_node=ToolNode([fetch_url, google_web_search]),
+    tool_node=ToolNode([fetch_page, search_web]),
     system_prompt=[{
         "role": "system",
         "content": "You are a research specialist. Gather facts and hand off to the writer.",
@@ -263,20 +272,29 @@ import asyncio
 from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.prebuilt.agent import SwarmAgent
 from tenxgraph.prebuilt.agent.swarm import SwarmMemberConfig
-from tenxgraph.prebuilt.tools import google_web_search, safe_calculator
 from tenxgraph.core.state import Message
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
+
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
 
 researcher = Agent(
     model="gpt-4o-mini",
     provider="openai",
-    tool_node=ToolNode([google_web_search]),
+    tool_node=ToolNode([search_web]),
     system_prompt=[{"role": "system", "content": "Research topics and hand off to analyst when done."}],
 )
 
 analyst = Agent(
     model="gpt-4o-mini",
     provider="openai",
-    tool_node=ToolNode([safe_calculator]),
+    tool_node=ToolNode([multiply]),
     system_prompt=[{"role": "system", "content": "Analyse data and produce a final answer."}],
 )
 
@@ -316,13 +334,17 @@ from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.prebuilt.agent import SwarmAgent
 from tenxgraph.prebuilt.agent.swarm import SwarmMemberConfig
 from tenxgraph.storage.checkpointer import PgCheckpointer
-from tenxgraph.prebuilt.tools import google_web_search
 from tenxgraph.core.state import Message
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 triage = Agent(model="gpt-4o-mini", provider="openai",
                system_prompt=[{"role": "system", "content": "Route requests."}])
 researcher = Agent(model="gpt-4o-mini", provider="openai",
-                   tool_node=ToolNode([google_web_search]),
+                   tool_node=ToolNode([search_web]),
                    system_prompt=[{"role": "system", "content": "Research and answer."}])
 
 swarm = SwarmAgent(
@@ -358,12 +380,16 @@ Members are not constrained to the same provider. Here, a researcher uses Google
 from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.prebuilt.agent import SwarmAgent
 from tenxgraph.prebuilt.agent.swarm import SwarmMemberConfig
-from tenxgraph.prebuilt.tools import google_web_search
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 researcher = Agent(
     model="gemini-2.5-flash",
     provider="google",
-    tool_node=ToolNode([google_web_search]),
+    tool_node=ToolNode([search_web]),
     system_prompt=[{"role": "system", "content": "Research and hand off to writer."}],
     trim_context=True,
 )
@@ -403,7 +429,11 @@ Create a `graph.py` file with your SwarmAgent:
 from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.prebuilt.agent import SwarmAgent
 from tenxgraph.prebuilt.agent.swarm import SwarmMemberConfig
-from tenxgraph.prebuilt.tools import google_web_search
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 triage = Agent(
     model="gpt-4o-mini",
@@ -413,7 +443,7 @@ triage = Agent(
 researcher = Agent(
     model="gpt-4o-mini",
     provider="openai",
-    tool_node=ToolNode([google_web_search]),
+    tool_node=ToolNode([search_web]),
     system_prompt=[{"role": "system", "content": "Research the topic and hand off to writer."}],
 )
 writer = Agent(
@@ -515,16 +545,25 @@ This is useful when members loop and generate many messages. See `/docs/guides/u
 Each member can have its own tools. For example, only the researcher accesses web search, and only the writer has the calculator:
 
 ```python
-from tenxgraph.prebuilt.tools import google_web_search, safe_calculator
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
+
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
+
 
 researcher = Agent(
     model="gpt-4o",
-    tool_node=ToolNode([google_web_search]),
+    tool_node=ToolNode([search_web]),
 )
 
 writer = Agent(
     model="gpt-4o-mini",
-    tool_node=ToolNode([safe_calculator]),
+    tool_node=ToolNode([multiply]),
 )
 
 swarm = SwarmAgent(

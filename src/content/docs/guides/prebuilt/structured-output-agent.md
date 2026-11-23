@@ -174,7 +174,7 @@ Compile parameters:
 
 ### Basic usage with Pydantic schema
 
-The simplest case: define your output schema as a Pydantic model, create the agent, and invoke it. Install the OpenAI extra first: `pip install "10xgraph[openai]"`. The tools example below also needs `google-genai`, and the Gemini example needs `google-genai` instead of `openai`.
+The simplest case: define your output schema as a Pydantic model, create the agent, and invoke it. Install the OpenAI extra first: `pip install "10xgraph[openai]"`. The Gemini example needs `google-genai` instead of `openai`.
 
 ```python
 import asyncio
@@ -257,8 +257,12 @@ Tools run inside the agent's generation loop, before validation occurs. Use tool
 
 ```python
 from tenxgraph.prebuilt.agent import StructuredOutputAgent
-from tenxgraph.prebuilt.tools import google_web_search
 from pydantic import BaseModel
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 class ProductAnalysis(BaseModel):
     product_name: str
@@ -269,7 +273,7 @@ class ProductAnalysis(BaseModel):
 agent = StructuredOutputAgent(
     model="gpt-4o-mini",
     output_schema=ProductAnalysis,
-    tools=[google_web_search],
+    tools=[search_web],
     system_prompt=[{
         "role": "system",
         "content": (
@@ -442,6 +446,6 @@ The command starts the API server and opens the hosted playground. Type a messag
 
 - **See it in action:** Full reference of all StructuredOutputAgent parameters is at `/docs/reference/python/prebuilt-agents`.
 - **Handle longer conversations:** Use `/docs/guides/set-up-checkpointing` to persist state across threads, so the agent remembers previous turns.
-- **Add more tools:** Pass additional tools via the `tools=` parameter, or see `/docs/guides/prebuilt-tools` for a catalog of prebuilt tools.
+- **Add more tools:** Pass additional tools via the `tools=` parameter, or connect an MCP server (see `/docs/guides/use-mcp`).
 - **Stream and monitor:** Use `/docs/guides/stream-graph` to process events as the agent runs, or `/docs/guides/use-publishers` to emit events to observability platforms.
 - **Build a custom graph:** If you need more control over routing or node execution, see `/docs/guides/build-a-graph` to build a plain `StateGraph` and add your own nodes.

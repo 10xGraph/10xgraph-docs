@@ -1,7 +1,7 @@
 ---
 title: What 10xGraph does not protect
 seoTitle: "What 10xGraph does not protect"
-description: "The limits of the 10xGraph server: open auth, upcoming secrets management and TLS, backups, streaming replay, release-candidate status and Python 3.12+."
+description: "The limits of the 10xGraph server: open auth, upcoming secrets management, TLS at your proxy, backups, streaming replay, release-candidate status and Python 3.12+."
 section: "Platform"
 order: 50
 label: What it does not protect
@@ -29,7 +29,7 @@ What to do: inject provider keys, `JWT_SECRET_KEY` and database URLs from your s
 
 ## TLS and network edge
 
-TLS termination is an upcoming feature. Today the container serves plain HTTP. The server sets security headers and can emit HSTS, but it does not terminate TLS, filter by network, or protect against volumetric attacks.
+TLS and mTLS end at your proxy or mesh. The container serves plain HTTP. The server sets security headers and can emit HSTS, but it does not terminate TLS, filter by network, or protect against volumetric attacks.
 
 What to do: terminate TLS at your load balancer or ingress, set `ALLOWED_HOST` and `ORIGINS`, and if you use client IP rate limiting behind a proxy, set `cache_store.rate_limit.trusted_proxies`. See [CORS and security headers](/docs/server/cors-and-security-headers) and [Kubernetes](/docs/server/kubernetes).
 

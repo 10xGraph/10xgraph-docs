@@ -122,7 +122,8 @@ container.bind_instance(DatabaseClient, db)
 
 graph1 = StateGraph()  # uses the global container
 graph2 = StateGraph()  # also uses the global container
-# Both graphs share the same db instance
+# Both graphs resolve the same db instance. Each graph still keeps its own
+# checkpointer, store, callback manager and publisher.
 ```
 
 **Scoped container** (isolated per graph, useful for tests):

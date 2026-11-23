@@ -14,6 +14,12 @@ faq:
     a: The server checks the URL against the graph's MediaFetchPolicy before the run starts. Set your own policy with graph.compile(media_policy=...); the API has no setting for it.
 ---
 
+<aside class="callout callout-warning" role="note"><p class="callout-title">Deprecated in 1.1.0, removed in 2.0</p>
+
+The prebuilt `fetch_url` and `create_file_tools` used here are deprecated in 10xGraph 1.1.0 and will be removed in 2.0. They keep working and emit a `DeprecationWarning`. The pattern still applies: put limits in code the model cannot edit. Write your own `@tool` (see [Use the tool decorator](/docs/guides/use-tool-decorator)) or use an MCP server (see [Use MCP](/docs/guides/use-mcp)).
+
+</aside>
+
 Tools are where an agent touches the outside world, so they are where a prompt injection or a bad guess does damage. This example builds a support agent with a knowledge-base folder it can read, a web tool that can only reach your own help site, and a download policy for images customers link to. All three limits are set in your code, not in the prompt, so the model cannot talk its way past them.
 
 **Needs:** `pip install "10xgraph[openai]"` and `OPENAI_API_KEY` (swap `provider` and `model` for Google or Anthropic with the matching extra and key). Create a `kb/` folder with a few `.md` files.

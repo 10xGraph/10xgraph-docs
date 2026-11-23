@@ -28,7 +28,7 @@ Five short scripts, one per tool feature. They use DeepSeek (`deepseek-chat`) th
 - `Agent(tools_tags=...)` / `ReactAgent(tools_tags=...)`: show the model only tools matching a tag. Untagged tools are always shown.
 - Injected parameters: `state`, `config`, `tool_call_id` are filled by `ToolNode`.
 - `ToolResult(message, state)`: returns text to the model and writes fields into state.
-- `safe_calculator`, `fetch_url`, `create_file_tools(root)`: prebuilt tools in `tenxgraph.prebuilt.tools`.
+- `safe_calculator`, `fetch_url`, `create_file_tools(root)`: prebuilt tools in `tenxgraph.prebuilt.tools`. Deprecated in 1.1.0, removed in 2.0.
 - `attach_remote_tools` / `config["remote_tools"]`: tools the client executes.
 
 ## Run it
@@ -115,6 +115,10 @@ return ToolResult(
 `message` goes back to the model. The keys in `state` must be fields on your `AgentState` subclass, here `CartState`, passed as `ReactAgent(state=CartState())`. The tool reads the current state through its `state: CartState` parameter, then returns only the fields that change. The script asks for `ResponseGranularity.FULL` so it can read `result["state"].cart` afterwards.
 
 ### prebuilt_tools.py
+
+<Callout type="warning" title="Deprecated in 1.1.0, removed in 2.0">
+These prebuilt tools are deprecated in 10xGraph 1.1.0 and will be removed in 2.0. They keep working and emit a `DeprecationWarning`. Write your own `@tool` (see [Use the tool decorator](/docs/guides/use-tool-decorator)) or use an MCP server (see [Use MCP](/docs/guides/use-mcp)).
+</Callout>
 
 Prebuilt tools are passed to an agent like your own functions:
 

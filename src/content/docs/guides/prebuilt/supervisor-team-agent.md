@@ -155,8 +155,12 @@ from dotenv import load_dotenv
 from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.prebuilt.agent import SupervisorTeamAgent
 from tenxgraph.prebuilt.agent.supervisor_team import WorkerConfig
-from tenxgraph.prebuilt.tools import google_web_search
 from tenxgraph.core.state import Message
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 load_dotenv()
 
@@ -176,7 +180,7 @@ agent = SupervisorTeamAgent(
             agent=Agent(
                 model="gpt-4o-mini",
                 provider="openai",
-                tool_node=ToolNode([google_web_search]),
+                tool_node=ToolNode([search_web]),
                 system_prompt=[{
                     "role": "system",
                     "content": "Search the web and return factual results."
@@ -215,10 +219,10 @@ async def main():
 asyncio.run(main())
 ```
 
-Install the extras the example uses and run it with your OpenAI and Google API keys set in the environment:
+Install the extra the example uses and run it with your OpenAI API key set in the environment:
 
 ```bash
-pip install "10xgraph[openai,google-genai]"
+pip install "10xgraph[openai]"
 python supervisor_team_example.py
 ```
 
@@ -234,7 +238,11 @@ By default, the supervisor prompt is built automatically. To enforce a specific 
 from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.prebuilt.agent import SupervisorTeamAgent
 from tenxgraph.prebuilt.agent.supervisor_team import WorkerConfig
-from tenxgraph.prebuilt.tools import google_web_search
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 
 def run_python(code: str) -> str:
@@ -247,7 +255,7 @@ agent = SupervisorTeamAgent(
     provider="openai",
     workers={
         "RESEARCHER": WorkerConfig(
-            agent=Agent(model="gpt-4o-mini", provider="openai", tool_node=ToolNode([google_web_search])),
+            agent=Agent(model="gpt-4o-mini", provider="openai", tool_node=ToolNode([search_web])),
             description="Searches the web for facts.",
         ),
         "CODER": WorkerConfig(
@@ -277,8 +285,17 @@ from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.prebuilt.agent import SupervisorTeamAgent
 from tenxgraph.prebuilt.agent.supervisor_team import WorkerConfig
 from tenxgraph.storage.checkpointer import PgCheckpointer
-from tenxgraph.prebuilt.tools import google_web_search, safe_calculator
 from tenxgraph.core.state import Message
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
+
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
 
 agent = SupervisorTeamAgent(
     supervisor_model="gpt-4o-mini",
@@ -288,7 +305,7 @@ agent = SupervisorTeamAgent(
             agent=Agent(
                 model="gpt-4o-mini",
                 provider="openai",
-                tool_node=ToolNode([google_web_search]),
+                tool_node=ToolNode([search_web]),
             ),
             description="Searches the web for facts.",
         ),
@@ -296,7 +313,7 @@ agent = SupervisorTeamAgent(
             agent=Agent(
                 model="gpt-4o-mini",
                 provider="openai",
-                tool_node=ToolNode([safe_calculator]),
+                tool_node=ToolNode([multiply]),
             ),
             description="Performs arithmetic and numeric calculations.",
         ),
@@ -343,7 +360,11 @@ The supervisor and workers are independent Agents, so they can use different pro
 from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.prebuilt.agent import SupervisorTeamAgent
 from tenxgraph.prebuilt.agent.supervisor_team import WorkerConfig
-from tenxgraph.prebuilt.tools import google_web_search
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
 
 # Supervisor uses Google Gemini
 agent = SupervisorTeamAgent(
@@ -354,7 +375,7 @@ agent = SupervisorTeamAgent(
             agent=Agent(
                 model="gpt-4o-mini",
                 provider="openai",  # workers use OpenAI
-                tool_node=ToolNode([google_web_search]),
+                tool_node=ToolNode([search_web]),
             ),
             description="Researches topics on the web.",
         ),
@@ -375,7 +396,16 @@ To serve a SupervisorTeamAgent over HTTP, create a graph module and configuratio
 from tenxgraph.core.graph import Agent, ToolNode
 from tenxgraph.prebuilt.agent import SupervisorTeamAgent
 from tenxgraph.prebuilt.agent.supervisor_team import WorkerConfig
-from tenxgraph.prebuilt.tools import google_web_search, safe_calculator
+
+def search_web(query: str) -> str:
+    """Search the web. Replace with your search API or an MCP server."""
+    return f"Results for: {query}"
+
+
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
 
 app = SupervisorTeamAgent(
     supervisor_model="gpt-4o-mini",
@@ -385,7 +415,7 @@ app = SupervisorTeamAgent(
             agent=Agent(
                 model="gpt-4o-mini",
                 provider="openai",
-                tool_node=ToolNode([google_web_search]),
+                tool_node=ToolNode([search_web]),
             ),
             description="Searches the web for facts.",
         ),
@@ -393,7 +423,7 @@ app = SupervisorTeamAgent(
             agent=Agent(
                 model="gpt-4o-mini",
                 provider="openai",
-                tool_node=ToolNode([safe_calculator]),
+                tool_node=ToolNode([multiply]),
             ),
             description="Performs arithmetic and numeric calculations.",
         ),

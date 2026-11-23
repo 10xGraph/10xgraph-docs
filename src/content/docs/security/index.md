@@ -14,4 +14,5 @@ This section covers how to control access to a 10xGraph server and its agents: w
 - [Rate limiting](/docs/server/rate-limiting): How to enable and configure the built-in sliding-window rate limiter in the 10xGraph API.
 - [CORS and security headers](/docs/server/cors-and-security-headers): Configure cross-origin requests, security headers, request size limits, and trusted proxies.
 - [Prompt-injection validators](/docs/guides/protect-against-prompt-injection): How to validate and sanitize user input before it reaches your agent's LLM, protecting against prompt injection, jailbreaks, and other OWASP LLM01:2025 attacks.
+- [Zero-trust agents](/docs/security/zero-trust-agents): Check every tool call against the caller with ToolGuard, ask a human before risky tools, fence tool output, use mTLS on each link and see what stays your job.
 - [Audit log](/docs/server/audit-log): Metadata-only JSON audit events for access, authentication failures and changes, how to configure sinks, ship the lines to storage, and what stays yours.

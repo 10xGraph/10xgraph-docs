@@ -61,11 +61,12 @@ Give your agents the ability to take action. Covers writing custom tools, using 
 
 - [Use the @tool decorator](/docs/guides/use-tool-decorator): Write tools that the LLM can call
 - [Prebuilt tools overview](/docs/guides/prebuilt-tools): Built-in tools for common tasks
-- [Web tools](/docs/guides/prebuilt/web-tools): Fetch, search, and parse HTML
-- [File tools](/docs/guides/prebuilt/file-tools): Read, write, and manipulate files
+- [Web tools](/docs/guides/prebuilt/web-tools): Fetch and search (deprecated in 1.1.0)
+- [File tools](/docs/guides/prebuilt/file-tools): Read, write, and search files (deprecated in 1.1.0)
 - [Memory tools](/docs/guides/prebuilt/memory-tools): Store and retrieve long-term facts
 - [Use MCP](/docs/guides/use-mcp): Model Context Protocol servers and clients
 - [Emit tool progress](/docs/guides/emit-tool-progress): Show progress for long-running tools
+- [Harness recipes](/docs/guides/harness-recipes): Tool search, large results in files, todo and notes state, long runs that resume
 
 ### State, memory and context
 
@@ -92,7 +93,6 @@ Handle continuous output and multimodal input. Covers streaming tokens, sending 
 - [Stream a graph](/docs/guides/stream-graph): Emit messages or tokens as they arrive
 - [Send media](/docs/guides/send-media): Images, audio, and documents to models
 - [Use realtime audio](/docs/guides/use-realtime-audio): Bidirectional audio streaming
-- [Batch LLM calls](/docs/guides/batch-llm-calls): Batch processing for cost optimization
 
 ### Safety
 

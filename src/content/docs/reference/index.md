@@ -70,7 +70,7 @@ The graph engine, agents, tools, state, storage, and the evaluation harness. Eve
 | --- | --- |
 | [Exceptions](/docs/reference/python/exceptions) | `GraphError`, `NodeError`, `GraphRecursionError`, `StaleStateError` |
 | [Prebuilt agents](/docs/reference/python/prebuilt-agents) | Constructor options for all agent types |
-| [Prebuilt tools](/docs/reference/python/prebuilt-tools) | Fetch, file, search, calculator and memory tools |
+| [Prebuilt tools](/docs/reference/python/prebuilt-tools) | Fetch, file, search and calculator tools (deprecated in 1.1.0), plus memory and handoff tools |
 | [Background tasks](/docs/reference/python/background-tasks) | Long-running tasks during graph execution |
 | [Adapters](/docs/reference/python/adapters) | Convert OpenAI, Google GenAI and Anthropic responses to `Message` |
 | [Realtime](/docs/reference/python/realtime) | Realtime audio I/O |

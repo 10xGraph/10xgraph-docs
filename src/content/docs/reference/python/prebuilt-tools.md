@@ -7,6 +7,12 @@ section: Reference
 updated: "2026-10-27"
 ---
 
+<aside class="callout callout-warning" role="note"><p class="callout-title">Deprecated in 1.1.0, removed in 2.0</p>
+
+`safe_calculator`, `fetch_url`, `google_web_search`, `vertex_ai_search`, `file_read`, `file_write`, `file_search` and their `create_*` factories are deprecated in 10xGraph 1.1.0 and will be removed in 2.0. `create_handoff_tool`, `is_handoff_tool`, `make_agent_memory_tool` and `make_user_memory_tool` stay. They keep working and emit a `DeprecationWarning` when they run. These are generic tools that you should own: your own `@tool` gives you the validation, auth and limits your app needs, and an MCP server can provide the same capability. Write your own with [Use the tool decorator](/docs/guides/use-tool-decorator), or connect an MCP server with [Use MCP](/docs/guides/use-mcp).
+
+</aside>
+
 10xGraph ships nine ready-made tools in `tenxgraph.prebuilt.tools`: URL fetching, workspace file read, write and search, Google web and Vertex AI search, a safe calculator, and two long-term memory tool factories. Each is a plain function you pass to a `ToolNode`, and each returns a JSON string.
 
 All tools return JSON strings. Failures are returned as `{"error": "..."}` instead of raised, so the model can read the message and retry. For task-oriented walkthroughs, see [Prebuilt tools](/docs/guides/prebuilt-tools).

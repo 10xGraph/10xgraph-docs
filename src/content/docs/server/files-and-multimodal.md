@@ -66,7 +66,7 @@ The server responds with metadata and a unique `file_id`:
 
 ### Filenames
 
-The server cleans the filename once, at upload. It keeps only the base name (a path in either style is dropped), removes control characters and Unicode bidi controls, caps the length at 255 characters, and falls back to `file` if nothing is left. Ordinary names such as accents, CJK and spaces are unchanged. A client UI should still escape the filename when it renders it. A request with more than one `file` part is refused with `422`.
+The server cleans the filename once, at upload. It keeps only the base name (a path in either style is dropped), removes control, zero-width and Unicode bidi control characters and `<>:"/\|?*`, removes `..`, strips leading and trailing spaces and dots, caps the length at 255 characters (keeping the extension), and falls back to `unnamed` if nothing is left. Ordinary names such as accents, CJK and spaces are unchanged. A client UI should still escape the filename when it renders it. A request with more than one `file` part is refused with `422`.
 
 ### Permissions and ownership
 

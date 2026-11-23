@@ -92,7 +92,7 @@ export const GET: APIRoute = () => {
     '',
     '- The graph itself must be Python 3.12 or newer. Other runtimes can call a served agent over REST or the TypeScript client.',
     '- Custom routes on the generated server, or mounting it in your own FastAPI app, are not a supported API.',
-    '- Secrets management and TLS termination are upcoming. Today, inject secrets from your secret manager and terminate TLS at your load balancer or ingress.',
+    '- Secrets management is upcoming. Today, inject secrets from your secret manager. TLS and mTLS end at your proxy or mesh.',
     '- The community is smaller than the older frameworks.',
     '',
     `Full list: [Current limits](${doc('production/limits')}).`,

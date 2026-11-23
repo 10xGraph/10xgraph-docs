@@ -46,14 +46,15 @@ from tenxgraph.utils import START, END
 Tools are plain Python functions. The LLM sees the function name, docstring, and type-annotated parameters. This schema determines what tools the LLM can call.
 
 ```python
-from tenxgraph.prebuilt.tools import safe_calculator
-
 def get_weather(city: str) -> str:
     """Return current weather for a city."""
     return f"Weather in {city}: 22°C, partly cloudy."
 
-# Arithmetic: use the prebuilt safe_calculator. Never pass model output to eval(),
-# even with empty builtins: it can be escaped, and 9**9**9 hangs the process.
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
+# Never pass model output to eval(): do the arithmetic in a typed function like this one.
 ```
 
 ## Create a ToolNode
@@ -61,7 +62,7 @@ def get_weather(city: str) -> str:
 Group tools in a `ToolNode`. Each function's `__name__` becomes the tool name the LLM uses. The node runs all tools in parallel when the LLM requests several at once.
 
 ```python
-tool_node = ToolNode([get_weather, safe_calculator])
+tool_node = ToolNode([get_weather, multiply])
 ```
 
 ## Create an Agent node
@@ -269,16 +270,17 @@ Here is a working agent that can check weather and do math:
 ```python
 from tenxgraph.core.graph import StateGraph, Agent, ToolNode
 from tenxgraph.core.state import AgentState, Message
-from tenxgraph.prebuilt.tools import safe_calculator
 from tenxgraph.utils import END
 
 def get_weather(city: str) -> str:
     """Get the weather for a city."""
     return f"Weather in {city}: 22°C, sunny."
 
-# Arithmetic: use the prebuilt safe_calculator. Never pass model output to eval(),
-# even with empty builtins: it can be escaped, and 9**9**9 hangs the process.
-tool_node = ToolNode([get_weather, safe_calculator])
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers."""
+    return a * b
+
+tool_node = ToolNode([get_weather, multiply])
 
 agent = Agent(
     model="gemini-2.5-flash",

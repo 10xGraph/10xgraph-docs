@@ -80,7 +80,7 @@ The short version: you write the agents, tools and tasks, and the server owns th
 
 **Default:** external media URLs in client input are checked against the graph's `MediaFetchPolicy` before the run, and a blocked URL is a 400. Downloads and the prebuilt `fetch_url` tool resolve the host once, require public addresses, pin the connection, re-check each redirect and cap the body. The prebuilt file tools are confined to a root you set in code.
 
-**Config:** `media_policy` on `compile()`, `create_file_tools(root=...)`.
+**Config:** `media_policy` on `compile()`, `create_file_tools(root=...)`. Note: the prebuilt `fetch_url` and file tools are deprecated in 1.1.0 and removed in 2.0.
 
 **You still must:** use those prebuilt tools, or apply the same discipline in your own. A hand-written tool that fetches arbitrary URLs is outside the policy.
 
@@ -116,7 +116,7 @@ Regardless of how many boxes above are ticked:
 - **Auth is not forced.** `auth: null` serves everyone, including in production. The production template turns it on; the bare server does not.
 - **Prompt injection is not solved.** Validators and approval steps bound what a model can be talked into. They do not remove it.
 - **Your tools are your code.** The server cannot know what a tool should be allowed to read.
-- **Secrets and TLS** have built-in support upcoming; today, inject secrets from your secret manager and terminate TLS at your load balancer or ingress. **Backups and retention** are infrastructure you run.
+- **Secrets** have built-in support upcoming; today, inject them from your secret manager. **TLS and mTLS** end at your proxy or mesh, so terminate them at your load balancer or ingress. **Backups and retention** are infrastructure you run.
 - 10xGraph needs Python 3.12 or newer and has a smaller community than LangGraph or CrewAI. Pin versions and read the [changelog](/changelog).
 - **Exactly-once is not on offer.** Replayed tools and jobs are at-least-once. Send idempotency keys to anything that moves money.
 

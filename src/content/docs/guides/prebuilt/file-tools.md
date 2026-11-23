@@ -9,6 +9,12 @@ label: File Tools
 updated: "2026-10-27"
 ---
 
+<aside class="callout callout-warning" role="note"><p class="callout-title">Deprecated in 1.1.0, removed in 2.0</p>
+
+`file_read`, `file_write`, `file_search` and `create_file_tools` are deprecated in 10xGraph 1.1.0 and will be removed in 2.0. They keep working and emit a `DeprecationWarning` when they run. These are generic tools that you should own: your own `@tool` gives you the validation, auth and limits your app needs, and an MCP server can provide the same capability. Write your own with [Use the tool decorator](/docs/guides/use-tool-decorator), or connect an MCP server with [Use MCP](/docs/guides/use-mcp).
+
+</aside>
+
 File tools give your agent filesystem access in a secure, controlled way. Three complementary tools handle reading text files, writing output, and searching by filename or content. All three are workspace-scoped: paths are resolved under a configured root directory, and paths that escape the root are rejected. This prevents agents from accessing sensitive files outside the intended workspace.
 
 **Import path:** `tenxgraph.prebuilt.tools`
