@@ -6,7 +6,7 @@ section: "Security and access"
 group: "Audit"
 order: 70
 label: Audit log
-updated: "2026-11-10"
+updated: "2026-11-23"
 ---
 
 The audit log records who accessed or changed which resource, when, and whether it was allowed. It is a stream of JSON lines. 10xGraph produces the stream; it does not store it. Your log pipeline collects it and your storage keeps it. The audit log and JSON application logs ship in 1.0.
@@ -19,10 +19,11 @@ One event per decision or change, with ids and outcomes only:
 - Authentication failures: a missing, invalid or expired token, rejected claims, a reserved identity, a revoked token.
 - Refusals before a handler runs: an input validator rejection, a request body over the size limit, a rate-limit refusal, and a rate limiter whose backend is unreachable.
 - Successful changes: writing or clearing thread state, message feedback, deleting a thread or message, writing or deleting a memory, uploading or deleting a file, stopping or fixing a run, starting, cancelling or rescheduling a task, and revoking a token or user (through the API and `10xgraph revoke`).
+- Tool calls: every server tool (local or MCP) a run calls, with its outcome, including a `ToolGuard` denial, and every approval or rejection of a tool that waits for approval, with who answered.
 
 ## What it never records
 
-Prompts, answers, message text, file contents, tokens, and claims other than ids. An event identifies the caller and the resource by id. It is not a copy of the data, so deleting a user's data does not leave that data in the audit stream.
+Prompts, answers, message text, tool arguments and results, file contents, tokens, and claims other than ids. An event identifies the caller and the resource by id. It is not a copy of the data, so deleting a user's data does not leave that data in the audit stream.
 
 ## Event format
 
@@ -38,7 +39,7 @@ Prompts, answers, message text, file contents, tokens, and claims other than ids
 |---|---|
 | `v` | Event schema version. |
 | `ts` | UTC timestamp. |
-| `event` | `access`, `auth`, `change`, `input` or `rate_limit`. |
+| `event` | `access`, `auth`, `change`, `input`, `rate_limit` or `tool`. |
 | `request_id` | The request id, also returned on the response. |
 | `transport` | `http` or `ws` (WebSocket). |
 | `user_id` | The verified caller. `null` when the caller is unknown, for example a failed authentication, or when auth is off. |
@@ -47,9 +48,10 @@ Prompts, answers, message text, file contents, tokens, and claims other than ids
 | `action` | The permission checked, as `resource:action`. |
 | `resource` | The resource named by the request, such as `thread/<id>`. |
 | `result` | See the event types below. |
-| `reason` | Why an authentication failed, an input was refused or a request was rate limited. `null` otherwise. |
+| `reason` | Why an authentication failed, an input was refused, a request was rate limited or a tool call was denied. `null` otherwise. |
 | `client_ip` | The client address the [rate limiter](/docs/server/rate-limiting) uses, with its trusted-proxy settings. Without a rate limit, the socket peer address. |
 | `count` | On `change` events, how many items the service reports it changed, when it returns a count. |
+| `thread_id`, `run_id`, `tool_call_id` | On `tool` events, the run and the tool call. `null` on other events. |
 
 ## Event types
 
@@ -60,6 +62,9 @@ Prompts, answers, message text, file contents, tokens, and claims other than ids
 | `change` | After a successful delete or write, file upload, task change, or revocation. | `success` |
 | `input` | A validator rejects the request (`reason` `validation`), or the body is over the size limit (`reason` `request_too_large`). | `denied`, with `reason` |
 | `rate_limit` | A request is refused with 429 (`reason` `limit_exceeded`, `denied`), or the limiter's backend is down and `fail_open` is off, answered 503 (`reason` `unavailable`, `failed`). | `denied` or `failed`, with `reason` |
+| `tool` | Action `tool:call`: a server tool call finished in a run, `resource` `tool/<name>`. `denied` is a `ToolGuard` denial, with the policy's reason (cut to 200 characters). Action `tool:approve`: a resume answered a `ToolGuard` approval; `user_id` is the caller who answered (`reason` `rejected`, or `cancelled` for a `null` answer). | `tool:call`: `success`, `failed` or `denied`. `tool:approve`: `allowed` or `denied` |
+
+Tool events are kept with `include_reads: false`. Client tools run in the browser, so they are not recorded. On a streamed run that resumes a pause, a call that finished in the same tool turn before the pause is sent again from the tool ledger and recorded again with the resuming run's `run_id`; the `tool_call_id` and `thread_id` are the same.
 
 ## Configure
 
