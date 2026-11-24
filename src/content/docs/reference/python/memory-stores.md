@@ -24,7 +24,8 @@ from tenxgraph.storage.store import (
 from tenxgraph.storage.store.store_schema import (
     MemoryType, RetrievalStrategy, DistanceMetric,
     MemorySearchResult, MemoryRecord,
-)  # MemoryType, DistanceMetric and MemorySearchResult are also exported from tenxgraph.storage.store
+    MemoryOrigin, TRUSTED_ORIGINS,
+)  # MemoryType, DistanceMetric, MemorySearchResult, MemoryOrigin and TRUSTED_ORIGINS are also exported from tenxgraph.storage.store
 from tenxgraph.storage.store.embedding import (
     BaseEmbedding, OpenAIEmbedding, GoogleEmbedding,
 )
@@ -210,6 +211,10 @@ Primary configuration object for `Agent(..., memory=...)`. A `str` retrieval mod
 | `config` | `dict[str, Any]` | {} | Application-defined config passed to store methods. |
 | `user_memory` | `UserMemoryConfig \| None` | UserMemoryConfig() | Config for user-scoped memory (searchable and writable by model). |
 | `agent_memory` | `AgentMemoryConfig \| None` | AgentMemoryConfig() | Config for agent/app-scoped memory (searchable but not writable by model). |
+| `origins` | `list[MemoryOrigin \| None] \| None` | None | Opt-in trusted-only retrieval for the preload search and the memory tools' searches. `None` means no filter; `None` inside the list keeps unknown origin. With it set, memories the model wrote (`agent`) are not read back unless `MemoryOrigin.AGENT` is listed. Never applied to the duplicate check of a write. |
+| `ttl` | `timedelta \| None` | None | Opt-in expiry for what the model remembers: `expires_at = now + ttl`. Must be positive. |
+
+`origins` and `ttl` need a store with `supports_provenance`; otherwise the Agent refuses them. See [Memory origin and expiry](/docs/concepts/memory-and-store#memory-origin-and-expiry).
 
 ```python title="memory_config.py"
 from tenxgraph.core import Agent
@@ -247,6 +252,8 @@ Configuration for user-scoped long-term memory. The model can both search and wr
 | `limit` | `int \| None` | None | Max memories to retrieve. If None, uses the parent config limit. |
 | `score_threshold` | `float \| None` | None | Min similarity score, must not be negative. If None, uses the parent config threshold. |
 | `retrieval_strategy` | `RetrievalStrategy \| str \| None` | None | Search strategy for this scope. If None, uses the parent config's, then the store's. |
+| `origins` | `list[MemoryOrigin \| None] \| None` | None | Overrides `MemoryConfig.origins` for this scope. |
+| `ttl` | `timedelta \| None` | None | Overrides `MemoryConfig.ttl` for this scope. Must be positive. |
 | `config` | `dict[str, Any]` | {} | Optional config dict passed to store calls. |
 | `collection` | `str \| Callable[[dict], str] \| None` | None | Collection for this scope: a name, or a function of the run config. Always wins over any other collection. See [Collections](#collections). |
 | `user_id` | `str \| None` | None | Memory owner for runs without an identity; it replaces `config["user_id"]`. With an identity in `config["user"]` the identity's `user_id` wins and this value is ignored. Blank strings are rejected. |
@@ -264,6 +271,8 @@ Configuration for agent/app-scoped long-term memory. The model can search but no
 | `limit` | `int \| None` | None | Max memories to retrieve. |
 | `score_threshold` | `float \| None` | None | Min similarity score. |
 | `retrieval_strategy` | `RetrievalStrategy \| str \| None` | None | Search strategy for this scope. If None, uses the parent config's, then the store's. |
+| `origins` | `list[MemoryOrigin \| None] \| None` | None | Overrides `MemoryConfig.origins` for this scope. |
+| `ttl` | `timedelta \| None` | None | Overrides `MemoryConfig.ttl` for this scope. Must be positive. |
 | `collection` | `str \| Callable[[dict], str] \| None` | None | Collection for this scope: a name, or a function of the run config. Always wins. See [Collections](#collections). |
 | `config` | `dict[str, Any]` | {} | Optional config dict. |
 | `agent_id` | `str \| None` | None | Agent identifier for scoping. |
@@ -377,10 +386,15 @@ Abstract base class that every store backend implements. Every method takes a `c
 | `aget_all` | `async (config, limit=100, **kwargs) -> list[MemorySearchResult]` | List memories in the config's scope. |
 | `aupdate` | `async (config, memory_id, content, metadata=None, **kwargs) -> Any` | Update a memory's content. |
 | `adelete` | `async (config, memory_id, **kwargs) -> Any` | Delete a memory by ID. |
+| `adelete_expired` | `async (batch_size=1000, collection=None) -> int` | Delete every record whose `expires_at` has passed, over all owners, and return the count. Maintenance, not scoped by owner or tenant. `PgVectorStore` deletes in short batches, `QdrantStore` by filter per collection (pass `collection` when the default is a function). The base class raises `NotImplementedError`. |
 | `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. `QdrantStore` and `PgVectorStore` also narrow by the keyword arguments `memory_type`, `category` and `filters` (combined with AND). On `QdrantStore` a `filters` key that is `user_id` or a tenant column, or a value that is not a string, integer or boolean, raises `FilterError` (a `ValueError`), and `InMemoryStore` refuses a `user_id` key the same way; on `PgVectorStore` see [filters](/docs/guides/multi-tenant-data#filters). |
 | `asetup` | `async () -> Any` | Create the collection or other backing resources. Implemented by `QdrantStore` and `PgVectorStore`; the base class raises `NotImplementedError`. |
 | `aping` | `async () -> None` | Abstract. Return when the store's backend is reachable, raise when it is not. Must be read-only and cheap, because a server may call it on every readiness probe. An in-process store just returns. `10xgraph-api` calls it for `/health/ready` and at startup. A custom store that does not implement it raises `TypeError` when created. |
 | `arelease` | `async () -> None` | Release connections. Not abstract, but the base implementation raises `NotImplementedError`; `PgVectorStore` overrides it. |
+
+Provenance keywords. `astore` and `aupdate` take `origin` (a `MemoryOrigin`) and `expires_at` (timezone-aware `datetime`; naive raises `ValueError`). `aupdate` keeps the stored value when you leave one out. `asearch` and `aget_all` take `origins` (a non-empty list of `MemoryOrigin`; `None` in the list also keeps unknown origin). Expired records are hidden from `asearch`, `aget` and `aget_all`. A caller `metadata` key named `origin` or `expires_at` is dropped on write.
+
+`BaseStore.supports_provenance` is `False` by default and `True` on `PgVectorStore`, `QdrantStore` and `InMemoryStore`. A store that sets it must keep both fields, hide expired records, filter by `origins` and implement `adelete_expired`. A sync `delete_expired` wraps it.
 
 There is no bulk `abatch_store`; call `astore` in a loop or with `asyncio.gather`.
 
@@ -455,6 +469,10 @@ Returned by `asearch`, `aget` and `aget_all`. Each result represents a matching 
 | `user_id` | `str \| None` | User scope. |
 | `thread_id` | `str \| None` | Thread where this memory was created. |
 | `timestamp` | `datetime \| None` | Creation time. |
+| `origin` | `MemoryOrigin \| None` | Who wrote it: `user`, `agent`, `tool` or `system`. `None` is unknown (written before 1.1 or without `origin`). |
+| `expires_at` | `datetime \| None` | Expiry, timezone-aware. `None` never expires. |
+
+`MemoryRecord`, the object a store writes, has the same two fields. `TRUSTED_ORIGINS` is `(MemoryOrigin.USER, MemoryOrigin.SYSTEM)`.
 
 ---
 

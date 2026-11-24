@@ -448,7 +448,7 @@ The table maps the controls of a typical zero-trust guide for AI agents to 10xGr
 | Container hardening | `10xgraph build` image: non-root user, read-only root filesystem. [Deploy](/docs/server/deploy) | Image scanning, runtime policy |
 | PII detection and redaction | The `after_invoke` hook | All of it: rules, detection, retention |
 | Sandboxed code execution | Connects to your sandbox through MCP or a provider tool | Run and isolate the sandbox |
-| Memory provenance and expiry | Not built in. Records carry `metadata` and a timestamp | Tag the source, expire and review records |
+| Memory poisoning (provenance and expiry) | Each memory records its `origin`, optional `expires_at`, opt-in trusted-only retrieval and `adelete_expired()`. [Memory origin and expiry](/docs/concepts/memory-and-store#memory-origin-and-expiry) | Turn on trusted-only retrieval and a TTL, schedule the cleanup, review what the model wrote |
 
 For the SOC 2 and ISO 27001 view, see [Control mapping](/docs/production/control-mapping). For what the framework leaves out, see [What 10xGraph does not protect](/docs/production/limits).
 

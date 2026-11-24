@@ -49,6 +49,9 @@ Store a memory record. Requires `store:write` permission.
 | `memory_type` | string | no | `episodic` | One of `episodic`, `semantic`, `procedural`, `entity`, `relationship`, `custom`, `declarative` |
 | `category` | string | no | `general` | Category label for organizing memories |
 | `metadata` | object | no | `null` | Arbitrary metadata stored alongside the memory |
+| `expires_at` | string | no | `null` | Expiry as an ISO 8601 timestamp with a time zone. Omit for no expiry. Expired memories are hidden from every read |
+
+The server sets the memory's `origin` to `user`. A client cannot choose it.
 
 **Response (200 OK):**
 
@@ -107,6 +110,7 @@ Search memories by semantic similarity. Requires `store:read` permission.
 | `category` | string | no | `null` | Filter results by category |
 | `limit` | integer | no | `10` | Maximum results to return; must be between 1 and 100 |
 | `score_threshold` | float | no | `null` | Minimum similarity score (between 0 and 1) for a result to be included |
+| `origins` | array | no | `null` | Only memories written by these origins: `user`, `agent`, `tool`, `system`. `null` inside the array also matches memories of unknown origin |
 | `filters` | object | no | `null` | Additional store-specific filters. With `PgVectorStore`, column conditions as in [Filters](/docs/guides/multi-tenant-data#filters); a bad filter answers 422 |
 | `retrieval_strategy` | string | no | `null` (the store's own setting) | One of `similarity`, `temporal`, `relevance`, `hybrid`, `graph_traversal`; support depends on the backend |
 | `distance_metric` | string | no | `null` (the store's own setting) | One of `cosine`, `euclidean`, `dot_product`, `manhattan` |
@@ -179,6 +183,7 @@ This is a `POST` endpoint (not `GET`) because the request carries a `config` obj
 | --- | --- | --- | --- | --- |
 | `limit` | integer | no | `100` | Maximum memories to return; must be between 1 and 1000 |
 | `offset` | integer | no | `0` | Memories to skip, for paging. Send `next_offset` from the previous response. |
+| `origins` | array | no | `null` | Only memories written by these origins: `user`, `agent`, `tool`, `system`. `null` inside the array also matches memories of unknown origin |
 | `filters` | object | no | `null` | Narrows the list. With `PgVectorStore`, column conditions as in [Filters](/docs/guides/multi-tenant-data#filters); a bad filter answers 422. The list stays scoped to the caller, so filters can only reduce it |
 
 **Response (200 OK):**
@@ -312,6 +317,7 @@ Update the content or metadata of a stored memory. Requires `store:write` permis
 | --- | --- | --- | --- |
 | `content` | string or `Message` | yes | Replacement memory content (string at most 100,000 characters) or structured message |
 | `metadata` | object | no | Replacement metadata (merged or replaced per backend) |
+| `expires_at` | string | no | New expiry, ISO 8601 with a time zone. Omit to leave it unchanged |
 
 **Response (200 OK):**
 
@@ -458,8 +464,12 @@ Search, list and get return memory objects with these fields. `score` is a relev
 | `user_id` | string or null | Owning user |
 | `thread_id` | string or null | Thread the memory came from, if any |
 | `timestamp` | string or null | Creation time |
+| `origin` | string or null | Who wrote it: `user`, `agent`, `tool` or `system`. `null` is unknown. Memories written through this API are always `user` |
+| `expires_at` | string or null | Expiry time, or `null` when the memory never expires |
 
-Client `metadata` keys that the store owns (`content`, `user_id`, `thread_id`, `memory_type`, `category`, `timestamp`, `memory_id`) are dropped on store and update.
+Client `metadata` keys that the store owns (`content`, `user_id`, `thread_id`, `memory_type`, `category`, `timestamp`, `memory_id`, `origin`, `expires_at`) are dropped on store and update.
+
+Expired memories are hidden from search, list and get. They are deleted only by the store's `adelete_expired()`, or by the [`memory_cleanup`](/docs/reference/api-cli/configuration#memory_cleanup) task. See [Memory origin and expiry](/docs/concepts/memory-and-store#memory-origin-and-expiry).
 
 The `data` of update, delete and forget responses is `{"success": true, "data": <backend result>}`, where the inner `data` depends on the store backend and is often `null`.
 

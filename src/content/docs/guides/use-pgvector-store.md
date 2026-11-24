@@ -165,8 +165,18 @@ One table (default `tenxgraph_memories`) holds all collections.
 | `embedding` | `vector(dim)`, null (absent when `embedding=None`) | HNSW, operator class from the store's distance metric |
 | `metadata` | `jsonb` | None |
 | `created_at`, `updated_at` | `timestamptz` | None |
+| `origin` | `text`, null | None |
+| `expires_at` | `timestamptz`, null | Partial B-tree `<table>_exp_idx` where not null |
 | your tenant columns | declared type | B-tree each |
 | your extra columns | declared type | B-tree each |
+
+`origin` and `expires_at` are real columns, not metadata. See [Memory origin and expiry](/docs/concepts/memory-and-store#memory-origin-and-expiry).
+
+### Schema version 3
+
+1.1 adds schema version 3: the two nullable columns `origin` and `expires_at`, plus the partial index `<table>_exp_idx`. `asetup()` applies it on its own, like earlier versions, under the same Postgres advisory lock, so several processes starting together are safe. The columns use `ADD COLUMN IF NOT EXISTS` with no default, so Postgres does not rewrite the table. On an existing table the index is built concurrently. Old rows read as unknown origin and never expire.
+
+During a rolling deploy, 1.0 processes keep working on the v3 table, but they do not hide expired rows and do not write `origin`. A column you declare in `extra_columns` or `tenant_columns` named `origin` or `expires_at` is refused at setup; rename it first.
 
 Details that matter in production:
 
@@ -176,6 +186,7 @@ Details that matter in production:
 - Adding tenant columns to a table that already has data keeps the old key index until you call `adrop_legacy_key_index()`. That handling is deprecated; see [Add tenant columns to a table that has data](/docs/guides/multi-tenant-data#add-tenant-columns-to-a-pgvectorstore-table-that-has-data).
 - A write whose `memory_id` belongs to another user raises `ValueError` ("not found", the same answer `aupdate` and `adelete` give), in the same statement as the write.
 - A cancelled call leaves no partial row, and a lost connection is retried the way `PgCheckpointer` retries.
+- `await store.adelete_expired()` removes expired rows for good, in short batches. It covers every tenant, so run it from a maintenance job.
 - `aping()` runs `SELECT 1`. `arelease()` closes the pool only when the store created it from `dsn`.
 
 ## Next steps

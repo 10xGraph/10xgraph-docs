@@ -122,6 +122,16 @@ These work differently after the upgrade, with no code change. Check each one ag
   `TestContext` restores the previous container on exit.
 - **Upload names.** `sanitize_filename` removes control, zero-width and bidirectional characters
   and path parts. An empty or `..` name becomes `unnamed`, and leading dots are removed.
+- **Memory fields can collide with yours.** `origin` and `expires_at` are now fields of every
+  memory. `PgVectorStore` and `QdrantStore` setup refuses an `extra_columns` or `tenant_columns`
+  entry with either name, so rename the column first. Caller `metadata` keys named `origin` or
+  `expires_at` are dropped on new writes on every built-in store. On `PgVectorStore`,
+  `filters={"origin": ...}` now matches the column, not a metadata key. On `QdrantStore`, an
+  existing point whose metadata held `origin` (for example `"user"`) now reads that value as its
+  provenance; an unrecognized value reads as unknown. Rename such keys before you upgrade.
+- **`PgVectorStore` schema version 3.** `asetup()` adds two nullable columns and a partial index
+  on its own. During a rolling deploy, 1.0 processes keep working but do not hide expired rows
+  and do not write `origin`. See [Schema version 3](/docs/guides/use-pgvector-store#schema-version-3).
 
 ### API
 
@@ -226,6 +236,12 @@ cache store (`InjectQ.get_instance().get(BaseCacheStore)`) from your own code.
 - **Partial state updates.** A node can return a `dict` or `Command(update={...})`: each key
   sets a state field, and `"messages"` appends.
 - **Tool event fields** `status` and `duration_ms` (see behavior changes).
+- **Memory origin and expiry.** Every memory has an `origin` (`user`, `agent`, `tool`, `system`,
+  or unknown) and an optional `expires_at`. `MemoryConfig(ttl=...)` expires what the model
+  remembers; `MemoryConfig(origins=list(TRUSTED_ORIGINS))` turns on trusted-only retrieval, which
+  also hides the model's own memories. Both are off by default. Expired memories are hidden from
+  every read, and `adelete_expired()` removes them. See
+  [Memory origin and expiry](/docs/concepts/memory-and-store#memory-origin-and-expiry).
 
 ### API
 
@@ -242,6 +258,12 @@ cache store (`InjectQ.get_instance().get(BaseCacheStore)`) from your own code.
   approval resume records `tool:approve`. `AuditEvent` gains `thread_id`, `run_id` and
   `tool_call_id`. Tool arguments and results are never recorded.
 - **Live tool audit** uses the result event's `status` and needs a core that sets it.
+- **Memory provenance in the store endpoints.** The server sets `origin: "user"` on every memory
+  it stores. Create and update take `expires_at`, search and list take `origins`, and responses
+  carry `origin` and `expires_at`.
+- **`memory_cleanup`** in `10xgraph.json` (off by default) makes `10xgraph scheduler` delete
+  expired memories on a schedule. It needs a `worker` key and a store that supports expiry.
+  See [memory_cleanup](/docs/reference/api-cli/configuration#memory_cleanup).
 
 ---
 

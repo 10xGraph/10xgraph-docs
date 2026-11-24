@@ -109,13 +109,76 @@ class MySink(BaseAuditSink):
 
 Reference it in config as `"sinks": ["log", "my_project.audit:MySink"]`. `event.model_dump()` gives the JSON fields from the event table above. The server loads a custom sink once at boot. The path can name an instance, a subclass or a zero-argument factory.
 
+## Tamper protection
+
+10xGraph sends each audit event to your sinks. It does not store the events and it does not protect them from change. Tamper protection is a property of the storage you choose. There are two ways to get it.
+
+### Option 1: storage that cannot be changed
+
+- **Write-once object storage.** S3 Object Lock in compliance mode stops anyone, including the account root, from deleting or overwriting an object until its retention date. Ship the log lines there with your collector.
+- **A log service with immutability.** Pick a log or SIEM product that offers immutable retention, and turn that setting on.
+- **A Postgres table with an insert-only role.** The role your app uses gets `INSERT` on the audit table and no `UPDATE` or `DELETE`. Keep the owner and admin credentials away from the app.
+
+### Option 2: a hash chain in your own sink
+
+A hash chain makes changes visible. Each record stores the SHA-256 of the previous record plus its own canonical JSON. A verifier walks the chain and reports the first broken link.
+
+```python
+import asyncio
+import hashlib
+import json
+from pathlib import Path
+
+from tenxgraph_api import AuditEvent, BaseAuditSink
+
+PATH = Path("audit-chain.jsonl")
+GENESIS = "0" * 64
+
+
+def _hash(prev: str, body: str) -> str:
+    return hashlib.sha256((prev + body).encode()).hexdigest()
+
+
+class ChainSink(BaseAuditSink):
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        lines = PATH.read_text().splitlines() if PATH.exists() else []
+        self._prev = json.loads(lines[-1])["hash"] if lines else GENESIS
+
+    async def emit(self, event: AuditEvent) -> None:
+        body = json.dumps(event.model_dump(), sort_keys=True, separators=(",", ":"))
+        async with self._lock:
+            h = _hash(self._prev, body)
+            with PATH.open("a") as f:
+                f.write(json.dumps({"prev": self._prev, "body": body, "hash": h}) + "\n")
+            self._prev = h
+
+
+def verify(path: Path = PATH) -> int | None:
+    """Return the line number of the first broken link, or None if the chain is intact."""
+    prev = GENESIS
+    for n, line in enumerate(path.read_text().splitlines(), 1):
+        rec = json.loads(line)
+        if rec["prev"] != prev or rec["hash"] != _hash(prev, rec["body"]):
+            return n
+        prev = rec["hash"]
+    return None
+```
+
+Reference it as `"sinks": ["log", "my_project.audit:ChainSink"]`. Run one server process per chain, or give each process its own file, because two writers would fork the chain.
+
+Limits:
+
+- A chain shows that a record was changed or removed in the middle. It cannot show that the last records were cut off, and someone who can rewrite the whole file can rebuild every hash.
+- Anchor the latest hash somewhere else, for example write it every few minutes to write-once storage. Then a rewrite or a cut tail no longer matches the anchor.
+
 ## Ship the lines to storage
 
 The server writes to stdout. From there:
 
 - **Docker or Kubernetes logging**: the container runtime captures stdout. Filter on the logger name `tenxgraph_api.audit` to separate audit lines from application logs.
 - **A collector**: Fluent Bit, Vector or an OpenTelemetry collector reads the container logs and forwards them.
-- **Object-lock storage or a SIEM**: send the stream to write-once storage or your SIEM when you need tamper resistance. An append-only record is a property of where you store the lines, not of the server.
+- **Object-lock storage or a SIEM**: send the stream to write-once storage or your SIEM when you need tamper resistance. See [Tamper protection](#tamper-protection).
 
 Retention is yours. 10xGraph keeps no audit data, so choose a retention period that fits your policy and set it in the store you ship to.
 

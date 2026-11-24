@@ -41,6 +41,7 @@ Projects created before the rename to 10xGraph use `agentflow.json`. It still wo
 | `observability` | object | absent | Logfire, LangSmith, Arize Phoenix and OTLP tracing |
 | `metrics` | object | absent | Request, task and LLM metrics for Prometheus or Grafana |
 | `audit` | object | absent (off) | Audit log of who accessed or changed what. See [audit](#audit) |
+| `memory_cleanup` | object | absent (off) | Scheduled delete of expired memories. See [memory_cleanup](#memory_cleanup) |
 | `test` | object | absent | Defaults for `10xgraph test` |
 | `evaluation` | object | absent | Defaults for `10xgraph eval` |
 
@@ -249,6 +250,22 @@ Off unless set. One JSON line per event with ids and results only: no prompts, a
 | `audit.include_reads` | boolean | `true` | `false` keeps denials, auth failures and changes, and drops allowed reads and invokes to cut volume |
 
 Unknown keys inside `audit` are config errors. With auth off, events carry `user_id: null` and the server warns at boot.
+
+## memory_cleanup
+
+Off unless set. Expired memories are always hidden from reads; nothing is deleted unless this is on. When on, `10xgraph scheduler` runs a task every `interval_seconds` that calls the store's `adelete_expired(batch_size)` and logs the count. See [Memory origin and expiry](/docs/concepts/memory-and-store#memory-origin-and-expiry).
+
+```json
+"memory_cleanup": {"enabled": true, "interval_seconds": 3600, "batch_size": 1000}
+```
+
+| Key | Type | Default | Purpose |
+|---|---|---|---|
+| `memory_cleanup.enabled` | boolean | `false` | Turn the cleanup task on |
+| `memory_cleanup.interval_seconds` | integer | `3600` | Seconds between runs. At least 1 |
+| `memory_cleanup.batch_size` | integer | `1000` | Rows deleted per statement. At least 1 |
+
+It needs a `worker` key, a running `10xgraph worker` and one `10xgraph scheduler` (see [Run background tasks with a worker](/docs/server/background-tasks)), and a `store` that supports expiry (`PgVectorStore`, `QdrantStore` or `InMemoryStore`). Without them the server and worker refuse to boot with a message. Unknown keys inside `memory_cleanup` are config errors. The setting is also in `10xgraph config`.
 
 ## media
 
