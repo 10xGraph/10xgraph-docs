@@ -111,7 +111,7 @@ A stop request belongs to the run it targets. The base class tracks which run is
 | `arequest_stop(config)` | Records a stop request that names the run active on the thread (`None` when none is known). |
 | `ais_stop_requested(config)` | `True` only for a request that targets `config["run_id"]`. A config with no `run_id`, or an old untargeted request, still matches. |
 
-`ainvoke` and `astream` call `abegin_run` when a run starts and `aend_run` when it ends, so a stop request for a finished run does not linger until its TTL. A custom checkpointer that implements the cache methods gets all of this without changes. One that leaves them as the base class no-ops degrades to doing nothing, as stop requests did before. The existing method signatures are unchanged.
+`ainvoke` and `astream` call `abegin_run` when a run starts and `aend_run` when it ends, so a stop request for a finished run does not linger until its TTL. A custom checkpointer that implements the cache methods gets all of this without changes. One that leaves them as the base class no-ops cannot receive a stop from another process (another API worker or pod): `astop` there has nowhere to record it. A stop in the same process still works, through the run's in-process flag. The existing method signatures are unchanged.
 
 ### Wiring into a graph
 

@@ -114,7 +114,7 @@ Beyond model providers, optional extras unlock advanced features:
 
 The `all` extra installs every other extra at once and is useful for local development and CI, but pin specific versions before shipping to production.
 
-Version pinning still matters. From 1.0 the public API is stable under a deprecation policy: breaking changes arrive only in a major release, after at least one minor release of deprecation. The three packages share major.minor, and patch versions are independent. Read the [changelog](/changelog) before upgrading, and see the [upgrade guide](/docs/project/upgrade-to-1.0) if you come from 0.x.
+Version pinning still matters. From 1.0 the public API is stable under a deprecation policy: breaking changes arrive only in a major release, after at least one minor release of deprecation. The three packages share major.minor, and patch versions are independent. Read the [changelog](/changelog) before upgrading, and see the [1.1 upgrade guide](/docs/project/upgrade-to-1.1) if you come from 1.0, or the [1.0 upgrade guide](/docs/project/upgrade-to-1.0) if you come from 0.x.
 
 ## How do I verify the installation?
 

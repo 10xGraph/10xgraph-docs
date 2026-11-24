@@ -14,12 +14,13 @@ This section covers 10xGraph as a project: who maintains it, how releases are an
 
 Read the [Changelog](/changelog) first to see what has shipped and which versions are current, then the [Roadmap](/docs/project/roadmap) for what is missing, partial or deliberately out of scope. The roadmap is where the honest gaps are listed, so it is worth reading before you commit to the project.
 
-If you plan to upgrade across a breaking change, [Upgrade to 1.0](/docs/project/upgrade-to-1.0) explains what to migrate from 0.10 (core), 0.9 (API) and 0.6 (client), and [Upgrade to 0.9](/docs/project/upgrade-to-0.9) covers 0.8. For the package rename (new PyPI and npm names, CLI and GitHub org), see [Coming from Agentflow](/docs/get-started/coming-from-agentflow). If something breaks, [Support](/docs/project/support) explains what to collect for a bug report that gets fixed, and [Security](/docs/project/security) describes private vulnerability reporting. To send a fix or a doc improvement, start with [Contributing](/docs/project/contributing); the people involved are listed on [Maintainers](/maintainers).
+If you plan to upgrade, [Upgrade to 1.1](/docs/project/upgrade-to-1.1) lists the behavior changes and deprecations from 1.0 (core and API). [Upgrade to 1.0](/docs/project/upgrade-to-1.0) explains what to migrate from 0.10 (core), 0.9 (API) and 0.6 (client), and [Upgrade to 0.9](/docs/project/upgrade-to-0.9) covers 0.8. For the package rename (new PyPI and npm names, CLI and GitHub org), see [Coming from Agentflow](/docs/get-started/coming-from-agentflow). If something breaks, [Support](/docs/project/support) explains what to collect for a bug report that gets fixed, and [Security](/docs/project/security) describes private vulnerability reporting. To send a fix or a doc improvement, start with [Contributing](/docs/project/contributing); the people involved are listed on [Maintainers](/maintainers).
 
 | Page | Answers |
 | --- | --- |
 | [Changelog](/changelog) | What shipped, and which versions are current |
 | [Stability](/docs/project/stability) | What 1.0 commits to, and how a deprecation works |
+| [Upgrade to 1.1](/docs/project/upgrade-to-1.1) | What changes from 1.0: behavior changes, deprecations and new features |
 | [Upgrade to 1.0](/docs/project/upgrade-to-1.0) | What breaks from 0.10, 0.9 and 0.6, and how to migrate |
 | [Upgrade to 0.9](/docs/project/upgrade-to-0.9) | What broke from 0.8 to 0.9, and how to migrate |
 | [Roadmap](/docs/project/roadmap) | What is missing, partial, or deliberately out of scope |

@@ -303,7 +303,7 @@ async def on_state_update(
 |---|---|---|
 | `context` | `GraphLifecycleContext` | Execution context. |
 | `node_name` | `str` | The node that just executed. |
-| `old_state` | `AgentState` | Deep copy of state **before** node ran. |
+| `old_state` | `AgentState` | Copy of state **before** node ran. Fields are copied, messages are shared: do not edit a message in place. |
 | `new_state` | `AgentState` | State after node result merged. |
 | `step` | `int` | Current step number. |
 

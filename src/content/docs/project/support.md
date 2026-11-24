@@ -19,6 +19,7 @@ Most problems have a page already:
 | Streaming stalls, types missing, upload fails | [Client troubleshooting](/docs/troubleshooting/client) |
 | Playground shows nothing, or a page is empty | [Playground troubleshooting](/docs/troubleshooting/playground) |
 | You have an error code like `GRAPH_ROUTING_001` | [Error codes](/docs/reference/error-codes) |
+| Something worked on 1.0 and broke on 1.1 | [Upgrade to 1.1](/docs/project/upgrade-to-1.1) |
 | Something worked in 0.10 (core), 0.9 (API) or 0.6 (client) and broke on 1.0 | [Upgrade to 1.0](/docs/project/upgrade-to-1.0) |
 | Something worked in 0.8 and broke after upgrading to 0.9 | [Upgrade to 0.9](/docs/project/upgrade-to-0.9) |
 

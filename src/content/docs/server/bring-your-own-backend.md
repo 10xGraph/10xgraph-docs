@@ -232,7 +232,7 @@ await run_cache_store_contract(lambda: MyCacheStore("https://cache.internal"))
 
 ## Custom checkpointers and stores
 
-A custom `BaseCheckpointer` implements every abstract async method, including `aping()`, and `aget_thread_owner` when auth is on. A custom `BaseStore` implements its methods and `aping()`. Both are passed to `compile()`. The method lists are in the [checkpointer reference](/docs/reference/python/checkpointers#writing-a-custom-checkpointer) and the [store reference](/docs/reference/python/memory-stores), and [Extension points](/docs/concepts/extensibility) shows where every extension class is wired.
+A custom `BaseCheckpointer` implements every abstract async method, including `aping()`, and `aget_thread_owner` when auth is on. A custom `BaseStore` implements its methods and `aping()`. Both are passed to `compile()`. Implement the cache methods (`aput_cache_value`, `aget_cache_value`, `aclear_cache_value`) too when the server runs more than one worker: a stop sent to another worker reaches the run only through them. The method lists are in the [checkpointer reference](/docs/reference/python/checkpointers#writing-a-custom-checkpointer) and the [store reference](/docs/reference/python/memory-stores), and [Extension points](/docs/concepts/extensibility) shows where every extension class is wired.
 
 Reference: [BaseCheckpointer](/docs/reference/python/checkpointers) · Source: [base_checkpointer.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/checkpointer/base_checkpointer.py)
 
