@@ -62,6 +62,8 @@ interface RealtimeVADConfig {
 }
 ```
 
+Only `enabled` has an effect. The other four keys are deprecated in core 1.1 (no provider reads them) and are removed in 2.0.
+
 ### `options: RealtimeOptions` (optional)
 
 | Field | Type | Default | Description |

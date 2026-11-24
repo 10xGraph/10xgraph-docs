@@ -79,7 +79,7 @@ Both lock and cap are taken before the response starts, so a busy or over-cap re
 
 Reference: [BaseStore](/docs/reference/python/memory-stores) · Source: [base_store.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/store/base_store.py)
 
-Postgres is the source of truth. Redis is a cache and a coordination tool, not a second copy you must back up. The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`; the `checkpointer` key in `10xgraph.json` is not read. For the full model see [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
+Postgres is the source of truth. Redis is a cache and a coordination tool, not a second copy you must back up. The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`; `10xgraph.json` has no `checkpointer` key. For the full model see [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
 
 ## Stateless and stateful parts
 

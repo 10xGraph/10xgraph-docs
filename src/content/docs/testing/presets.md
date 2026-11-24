@@ -409,7 +409,7 @@ Different agents require different evaluation strategies. Use this table to pick
 | `max_concurrency` | int | `4` | Max concurrent evaluations when `parallel=True` |
 | `timeout` | float | `300.0` | Timeout per evaluation case (seconds) |
 | `verbose` | bool | `False` | Print detailed logging |
-| `mock_mode` | bool | `False` | Run without actual execution (testing) |
+| `mock_mode` | bool | `False` | Deprecated, no effect, removed in 2.0. Setting it to `True` emits a `DeprecationWarning`. |
 | `reporter` | `ReporterConfig` | default | Report generation settings (see [Reports](/docs/testing/reports)) |
 
 ### MatchType

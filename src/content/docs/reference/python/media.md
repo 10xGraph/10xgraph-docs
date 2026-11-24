@@ -431,11 +431,9 @@ Per-agent configuration for how media is validated and delivered to the provider
 
 ```python
 from tenxgraph.core.graph import Agent
-from tenxgraph.storage.media import DocumentHandling, ImageHandling, MultimodalConfig
+from tenxgraph.storage.media import MultimodalConfig
 
 config = MultimodalConfig(
-    image_handling=ImageHandling.BASE64,
-    document_handling=DocumentHandling.EXTRACT_TEXT,
     max_image_dimension=2048,
     max_image_size_mb=10.0,
 )
@@ -444,12 +442,12 @@ agent = Agent(model="gpt-4o", multimodal_config=config)
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `image_handling` | `ImageHandling` | `BASE64` | How images are sent to the provider (`BASE64`, `URL`, `FILE_ID`). |
-| `document_handling` | `DocumentHandling` | `EXTRACT_TEXT` | How documents are processed (`EXTRACT_TEXT`, `FORWARD_RAW`, `SKIP`). |
+| `image_handling` | `ImageHandling` | `BASE64` | Deprecated, no effect, removed in 2.0. Setting a non-default value emits a `DeprecationWarning`. |
+| `document_handling` | `DocumentHandling` | `EXTRACT_TEXT` | Deprecated, no effect, removed in 2.0. Setting a non-default value emits a `DeprecationWarning`. |
 | `max_image_size_mb` | `float` | `10.0` | Maximum accepted image size in megabytes. |
 | `max_image_dimension` | `int` | `2048` | Images are resized when either dimension exceeds this. |
 | `supported_image_types` | `set[str]` | `{"image/jpeg", "image/png", "image/webp", "image/gif"}` | Allowed image MIME types. |
-| `supported_doc_types` | `set[str]` | `{"application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}` | Allowed document MIME types. |
+| `supported_doc_types` | `set[str]` | `{"application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}` | Deprecated, no effect, removed in 2.0. Setting a non-default value emits a `DeprecationWarning`. |
 
 Offload behavior is not configured here. It is driven by `MediaOffloadPolicy` and the `media_store` passed to `graph.compile()`.
 

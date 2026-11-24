@@ -210,7 +210,7 @@ flowchart TD
 
 For local development, `10xgraph dev` is sufficient. For shared or production use:
 
-- **Persistence required:** Set a durable checkpointer (for example `PgCheckpointer`), by passing it to `graph.compile(checkpointer=...)` in your graph code (the `checkpointer` key in `10xgraph.json` is not read). In-memory checkpointing loses all threads on restart.
+- **Persistence required:** Set a durable checkpointer (for example `PgCheckpointer`), by passing it to `graph.compile(checkpointer=...)` in your graph code (`10xgraph.json` has no `checkpointer` key). In-memory checkpointing loses all threads on restart.
 - **Multiple instances:** Use a shared durable checkpointer and a shared store (if using long-term memory). Each instance must access the same database backend.
 - **Shared state across instances:** Set `"cache_store": {"type": "redis"}` so the API's cache store is shared. It holds the run locks, caps, idempotency state, token revocation and rate-limit counters. The in-memory store counts per process and is not shared.
 

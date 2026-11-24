@@ -57,10 +57,12 @@ Command(
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `update` | `StateT \| Message \| str \| BaseConverter \| None` | `None` | Applied before navigating. An `AgentState` replaces the current state (its new messages are recorded); a `Message`, `str`, converter or list of these is added as new message(s). |
+| `update` | `StateT \| Message \| str \| BaseConverter \| dict \| None` | `None` | Applied before navigating. An `AgentState` replaces the current state (its new messages are recorded); a `Message`, `str`, converter or list of these is added as new message(s); a `dict` is a partial state update (each key is a state field, validated against its type; the key `"messages"` appends a `Message` or list of messages; an unknown field raises `ValueError`, which fails the node with `NODE_001`). `None` changes nothing. |
 | `goto` | `str \| None` | `None` | Name of the next node to execute, or `END` to terminate. |
 | `graph` | `str \| None` | `None` | Not used. The value is stored on the command, and the runtime never reads it. |
-| `state` | `StateT \| None` | `None` | Optional state to attach. When streaming, its new context messages are emitted. |
+| `state` | `StateT \| None` | `None` | Replaces the state, in `invoke` and in `stream`; its new context messages are recorded and emitted. |
+
+A node that returns `None` (or `Command(update=None)`) changes nothing, in both modes.
 
 ### Example
 

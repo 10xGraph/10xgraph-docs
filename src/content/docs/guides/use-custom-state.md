@@ -78,7 +78,7 @@ Both approaches work. The instance is a prototype: a new thread starts from a de
 
 ## Step 3: Read and update custom fields in nodes
 
-Node functions receive the current state (declare a `state` parameter). Change the fields you need on the state object and return it. A node can also return a `str`, a `Message`, a list of messages, or a `Command`; a plain `dict` is not a valid return value. See [use custom nodes](/docs/guides/use-custom-nodes).
+Node functions receive the current state (declare a `state` parameter). Change the fields you need on the state object and return it. A node can also return a `str`, a `Message`, a list of messages, or a `Command`; a `dict` such as `{"field": value}` sets those state fields (unknown names raise an error), and `None` means no change. See [use custom nodes](/docs/guides/use-custom-nodes).
 
 ```python
 from tenxgraph.core.state import Message

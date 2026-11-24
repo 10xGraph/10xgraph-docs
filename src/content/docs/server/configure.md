@@ -50,7 +50,7 @@ from graph.dependencies import my_checkpointer
 app = state_graph.compile(checkpointer=my_checkpointer)
 ```
 
-The server uses the compiled graph's checkpointer; the `checkpointer` key in `10xgraph.json` is recognized but not applied, so you can remove it if it is present.
+The server uses the compiled graph's checkpointer. A `checkpointer` key in `10xgraph.json` was removed and is refused at startup, so delete it if it is present.
 
 Without an explicit checkpointer, `compile()` falls back to `InMemoryCheckpointer`, which keeps threads in memory while the process runs. This is fine for local development and testing, but in production it means:
 
@@ -110,7 +110,7 @@ container.bind_instance(MyDatabase, MyDatabase(dsn=os.environ["DATABASE_URL"]))
 }
 ```
 
-The server loads your container at startup and makes it the global instance. Your services land in the same container as the server's internal bindings, so they integrate seamlessly. 
+The server loads your container at startup and uses it as its own. Build the graph with the same container, `StateGraph(container=container)`, or leave both `injectq` and `container=` unset to use the global container: the server refuses to start when the graph's container is a different one. Your services land in the same container as the server's internal bindings.
 
 ## Generate readable thread names
 

@@ -407,7 +407,7 @@ Use this to bulk-delete memories by type, category, or custom filters without li
 | --- | --- | --- | --- |
 | `memory_type` | string | no | Restrict deletion to this memory type (same values as when storing) |
 | `category` | string | no | Restrict deletion to this category |
-| `filters` | object | no | Additional filters. With `QdrantStore` each value must be a string, integer or boolean (otherwise the request fails). With `PgVectorStore` a key that is a column takes an equality value or operators such as `{"gte": 5}` (see [Filters](/docs/guides/multi-tenant-data#filters)); tenant columns and `user_id` answer 422; any other key matches a top-level `metadata` key exactly |
+| `filters` | object | no | Additional filters. With `QdrantStore` each value must be a string, integer or boolean, and a key that is `user_id` or a tenant column is refused (otherwise the request fails). With `PgVectorStore` a key that is a column takes an equality value or operators such as `{"gte": 5}` (see [Filters](/docs/guides/multi-tenant-data#filters)); tenant columns and `user_id` answer 422; any other key matches a top-level `metadata` key exactly |
 
 **Response (200 OK):**
 

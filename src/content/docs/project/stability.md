@@ -65,6 +65,11 @@ A module that moves keeps working at its old import path until 2.0.
   `file_read`, `file_write`, `file_search` and the `create_*` factories for them, including
   `create_file_tools`. They are deprecated in 1.1.0, emit a `DeprecationWarning` and are removed
   in 2.0. Write your own `@tool` or use an MCP server.
+- Config fields that nothing reads: `MultimodalConfig.image_handling`, `document_handling` and
+  `supported_doc_types`; `VADConfig.start_sensitivity`, `end_sensitivity`, `prefix_padding_ms` and
+  `silence_duration_ms`; `EvalConfig.mock_mode`; `UserSimulatorConfig.thinking_enabled`. They are
+  deprecated in 1.1.0 and still accepted. Setting one to a non-default value emits a
+  `DeprecationWarning`.
 
 One exception: `AnthropicBatch`, `OpenAIBatch` and `BatchResult` were removed in 1.1.0 without a
 deprecation period. They were unfinished and no part of the graph runtime used them. Call the

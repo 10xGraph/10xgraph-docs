@@ -279,7 +279,7 @@ On the store, a key that is not a column matches a top-level key of the JSONB `m
 - **NULL.** `eq`, `gt`, `gte`, `lt` and `lte` never match a row whose column is `NULL`. `ne` and `nin` treat `NULL` as a value of its own, so a row with no value does match "not equal to x". Add `{"is_null": false}` on the same column to leave those rows out.
 - **`like` and `ilike`** (text only). The value is the pattern; `%` and `_` are wildcards and a backslash escapes them. A pattern with a leading `%` scans every row the caller can see. See [Contains search with `pg_trgm`](#contains-search-with-pg_trgm).
 - **Limits.** At most 10 conditions per request (a column with two operators counts as two, and metadata keys count), at most 100 items in an `in` or `nin` list (never empty), at most 256 characters per string value. Conditions are joined with AND only.
-- **Rejected.** Tenant columns and `user_id` are isolation columns, so a filter that names one is rejected. So is an unknown column, an operator the column's type does not support, and a malformed value. The error names the column and operator but never repeats a value and never contains SQL. In core these raise `FilterError`, a `ValueError`.
+- **Rejected.** Tenant columns and `user_id` are isolation columns, so a filter that names one is rejected, on `QdrantStore` and `InMemoryStore` as well as `PgVectorStore`. So is an unknown column, an operator the column's type does not support, and a malformed value. The error names the column and operator but never repeats a value and never contains SQL. In core these raise `FilterError`, a `ValueError`.
 
 ### Filtering threads over the API
 

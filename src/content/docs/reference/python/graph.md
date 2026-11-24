@@ -184,23 +184,11 @@ app = graph.compile(
 | `callback_manager` | `CallbackManager` | `CallbackManager()` | Hooks for evaluation collectors and monitoring. |
 | `shutdown_timeout` | `float` | `30.0` | Total seconds `aclose()` splits between the grace, stop and cancel phases (50%, 25%, 25%). |
 | `node_aliases` | `dict[str, str] \| None` | `None` | Opt-in map `{old_name: new_name}` for threads stored at a node that a deploy renamed or removed. A thread stored at `old_name` resumes at `new_name`, in `invoke` and `stream`. Without an alias such a thread fails with `StoredNodeMissingError` (`GRAPH_NODE_MISSING_001`). A stored state newer than the code raises `StateFormatVersionError` (`STATE_FORMAT_001`). |
-| `owns_resources` | `bool` | `True` | Whether `aclose()` may close the checkpointer, store and publisher. A resource shared by several live graphs is closed only when the last of them closes. Pass `False` when you manage the resource yourself, for example your own connection pool. |
+| `owns_resources` | `bool` | `True` | Whether `aclose()` may close the checkpointer, store and publisher. Pass `False` when you manage the resource yourself, for example your own connection pool. |
 
 **Raises:** `GraphError` with `GRAPH_002` if no entry point is set, `GRAPH_003` if a node is orphaned (no edge touches it), or `GRAPH_004` if an edge target or an interrupt node does not exist.
 
-**Several graphs in one process.** Since 1.1.0 each `StateGraph` keeps its own checkpointer, store, callback manager and publisher in its own container (`GraphContainer`). Its parent is the global `InjectQ` container, or the `container=` you pass. Two graphs in one process do not share these, and a run resolves them from its own graph. Bindings you make in the global or your own container, such as a `db`, still resolve in nodes and tools.
-
-```python
-graph_a = StateGraph()
-# ... add nodes and edges to graph_a ...
-app_a = graph_a.compile(checkpointer=InMemoryCheckpointer())
-
-graph_b = StateGraph()
-# ... add nodes and edges to graph_b ...
-app_b = graph_b.compile(checkpointer=InMemoryCheckpointer())
-```
-
-`compile()` without `callback_manager` gives each graph a new `CallbackManager`. If you pass the same checkpointer instance to two graphs, they still share its threads, and `compile()` logs a WARNING. With `PgCheckpointer`, use one instance per graph, each with its own DSN or `schema=`, when the graphs must not share threads.
+One graph per container: two graphs in one process each need their own `container=InjectQ()`.
 
 ---
 

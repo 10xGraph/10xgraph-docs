@@ -151,6 +151,7 @@ embedding = OpenAIEmbedding(
 |---|---|---|---|
 | `model` | `str` | `"text-embedding-3-small"` | OpenAI embedding model to use. |
 | `api_key` | `str \| None` | None | OpenAI API key. If not provided, reads from `OPENAI_API_KEY` env var. |
+| `base_url` | `str \| None` | None | Custom endpoint for an OpenAI-compatible service. `None` uses OpenAI. |
 
 **Raises:** `ImportError` if `openai` is not installed. `ValueError` if no key is found. The `dimension` property raises `ValueError` for a model name it does not know (known: `text-embedding-3-small`, `text-embedding-3-large`, `text-embedding-3-xl`, `text-embedding-4-base`, `text-embedding-4-large`), so wrap an unknown model in a custom `BaseEmbedding` subclass.
 
@@ -178,6 +179,7 @@ embedding = GoogleEmbedding(
 |---|---|---|---|
 | `model` | `str` | `"gemini-embedding-001"` | Google embedding model to use. |
 | `api_key` | `str \| None` | None | Google API key. Reads from `GOOGLE_API_KEY` or `GEMINI_API_KEY` env vars if not provided. |
+| `base_url` | `str \| None` | None | Custom endpoint (a proxy or gateway) sent as `HttpOptions(base_url=...)`. `None` uses Google. |
 | `output_dimensionality` | `int \| None` | None | Optional: reduce output dimension. Some models support this. |
 | `document_task_type` | `str \| None` | `"RETRIEVAL_DOCUMENT"` | Gemini task type sent when embedding text to store. `None` sends none. |
 | `query_task_type` | `str \| None` | `"RETRIEVAL_QUERY"` | Gemini task type sent when embedding a search query (`aembed_query`). `None` sends none. |
@@ -375,7 +377,7 @@ Abstract base class that every store backend implements. Every method takes a `c
 | `aget_all` | `async (config, limit=100, **kwargs) -> list[MemorySearchResult]` | List memories in the config's scope. |
 | `aupdate` | `async (config, memory_id, content, metadata=None, **kwargs) -> Any` | Update a memory's content. |
 | `adelete` | `async (config, memory_id, **kwargs) -> Any` | Delete a memory by ID. |
-| `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. `QdrantStore` and `PgVectorStore` also narrow by the keyword arguments `memory_type`, `category` and `filters` (combined with AND). On `QdrantStore` a `filters` value that is not a string, integer or boolean raises `ValueError`; on `PgVectorStore` see [filters](/docs/guides/multi-tenant-data#filters). |
+| `aforget_memory` | `async (config, **kwargs) -> Any` | Delete memories for the `user_id` in `config`. `thread_id` is an optional extra filter. `QdrantStore` and `PgVectorStore` also narrow by the keyword arguments `memory_type`, `category` and `filters` (combined with AND). On `QdrantStore` a `filters` key that is `user_id` or a tenant column, or a value that is not a string, integer or boolean, raises `FilterError` (a `ValueError`), and `InMemoryStore` refuses a `user_id` key the same way; on `PgVectorStore` see [filters](/docs/guides/multi-tenant-data#filters). |
 | `asetup` | `async () -> Any` | Create the collection or other backing resources. Implemented by `QdrantStore` and `PgVectorStore`; the base class raises `NotImplementedError`. |
 | `aping` | `async () -> None` | Abstract. Return when the store's backend is reachable, raise when it is not. Must be read-only and cheap, because a server may call it on every readiness probe. An in-process store just returns. `10xgraph-api` calls it for `/health/ready` and at startup. A custom store that does not implement it raises `TypeError` when created. |
 | `arelease` | `async () -> None` | Release connections. Not abstract, but the base implementation raises `NotImplementedError`; `PgVectorStore` overrides it. |

@@ -133,7 +133,7 @@ agent = Agent(
 )
 ```
 
-`MultimodalConfig` is a Pydantic model with these fields and defaults: `image_handling` (`ImageHandling.BASE64`), `document_handling` (`DocumentHandling.EXTRACT_TEXT`), `max_image_size_mb` (10.0), `max_image_dimension` (2048), `supported_image_types` (JPEG, PNG, WebP, GIF) and `supported_doc_types` (PDF, DOCX). The enums are `ImageHandling` (`BASE64`, `URL`, `FILE_ID`) and `DocumentHandling` (`EXTRACT_TEXT`, `FORWARD_RAW`, `SKIP`). In the core agent path, the presence of the config is what enables media; transport is chosen by the capability matrix below.
+`MultimodalConfig` is a Pydantic model with these fields and defaults: `max_image_size_mb` (10.0), `max_image_dimension` (2048) and `supported_image_types` (JPEG, PNG, WebP, GIF). `image_handling`, `document_handling` and `supported_doc_types` are deprecated: nothing reads them, setting one to a non-default value emits a `DeprecationWarning`, and they are removed in 2.0. In the core agent path, the presence of the config is what enables media; transport is chosen by the capability matrix below.
 
 ## Provider capability matrix and fallback
 

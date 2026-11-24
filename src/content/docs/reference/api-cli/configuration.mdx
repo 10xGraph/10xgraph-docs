@@ -26,10 +26,10 @@ Projects created before the rename to 10xGraph use `agentflow.json`. It still wo
 | `env` | string | none | Dotenv file to load before the graph starts, for example `.env` |
 | `auth` | string, object or null | `null` | Authentication: `"jwt"`, or `{"method": "custom", "path": "module:Class"}` |
 | `authorization` | removed | none | Refused at startup. Use `auth.roles` and `auth.method: custom`. See [auth](#auth) |
-| `injectq` | string or null | none | Import path of an InjectQ container |
+| `injectq` | string or null | none | Import path of an InjectQ container. It must be the container passed to `StateGraph(container=...)`: set both to the same container, or neither. The server refuses to start when the graph's container is another one |
 | `store` | string or null | none | Import path of a `BaseStore` for long-term memory |
 | `store_allow_tenant_mismatch` | boolean | `false` | Boot even when the `store` declares different tenant columns than the checkpointer (production refuses otherwise). Use for a store that holds only shared data. See [Multi-tenant data](/docs/guides/multi-tenant-data) |
-| `checkpointer` | string or null | none | Not applied by the API server. If set, the server logs a warning and ignores it. Pass the checkpointer to `compile()` |
+| `checkpointer` | removed | none | Refused at startup. Pass the checkpointer to `graph.compile(checkpointer=...)` in your agent module |
 | `thread_name_generator` | string or null | none | `random`, `first_message`, `none` or a `module:attr` path. See [thread_name_generator](#thread_name_generator) |
 | `id_generator` | string or null | graph's own | `uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or a `module:attr` path. See [id_generator](#id_generator) |
 | `cache_store` | object or null | in-memory | One object that holds the cache store and what it backs: `type`, `url`, `path`, `rate_limit`, `token_revocation`. See [cache_store](#cache_store) |
@@ -68,7 +68,7 @@ The server saves every generated name in the background after the run.
 | `"snowflake"` | `SnowFlakeIdGenerator`. Needs the `snowflakekit` extra and reads the `SNOWFLAKE_*` environment variables |
 | `"module:attr"` | A `BaseIDGenerator` instance, subclass or zero-argument factory |
 
-The server binds the generator for the loaded graph, so new thread ids, message ids and memory ids all come from it. It refuses to boot when the graph code also sets a generator (`StateGraph(id_generator=...)`), and when a `PgCheckpointer`'s `id_type` cannot hold the ids the generator makes. Pick one place to set it. See [Configure the ID generator](/docs/guides/configure-id-generator).
+The server binds the generator for the loaded graph, so new thread ids, message ids and memory ids all come from it. It refuses to boot when the graph code also sets a generator (`StateGraph(id_generator=...)`), and when the id columns of an existing `PgCheckpointer` table cannot hold the ids the generator makes. The checkpointer's id type follows the generator (default string, Snowflake gives bigint); its `id_type` argument is deprecated. Pick one place to set it. See [Configure the ID generator](/docs/guides/configure-id-generator).
 
 ### cache_store
 

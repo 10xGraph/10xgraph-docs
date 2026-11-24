@@ -398,7 +398,7 @@ With `MODE=production` the server replaces the message of every 5xx error with a
 
 **Fix**
 
-- pass a checkpointer to `graph.compile(checkpointer=...)`. The server uses that one; a `checkpointer` key in `10xgraph.json` is not read
+- pass a checkpointer to `graph.compile(checkpointer=...)`. The server uses that one; a `checkpointer` key in `10xgraph.json` is refused at startup
 - verify backend connectivity and health
 - use the `thread_id` the server returned on the first call (do not generate a new one per request, and do not make one up: the server refuses ids it did not create)
 

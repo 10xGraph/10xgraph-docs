@@ -40,7 +40,7 @@ flowchart LR
 | `END` | Virtual node that finishes the run | `add_edge("last", END)` |
 | State | An `AgentState` (or subclass) shared by all nodes | `StateGraph(MyState())` |
 
-`START` and `END` live in `tenxgraph.utils.constants`. Nodes you register may return a `Message`, a list of messages, a plain string (stored as an assistant message), an `AgentState`, a dict or a `Command`.
+`START` and `END` live in `tenxgraph.utils.constants`. Nodes you register may return a `Message`, a list of messages, a plain string (stored as an assistant message), an `AgentState`, a dict of state field updates, `None` (no change) or a `Command`.
 
 ### Nested graphs are not supported
 

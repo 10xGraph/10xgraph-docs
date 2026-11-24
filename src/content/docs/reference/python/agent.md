@@ -411,7 +411,7 @@ agent = Agent(
 )
 ```
 
-`MultimodalConfig` fields: `image_handling` (`"base64"`, `"url"`, or `"file_id"`; default `"base64"`), `document_handling` (`"extract_text"`, `"pass_raw"`, or `"skip"`; default `"extract_text"`), `max_image_size_mb` (default 10.0), `max_image_dimension` (default 2048), `supported_image_types`, and `supported_doc_types`.
+`MultimodalConfig` fields: `max_image_size_mb` (default 10.0), `max_image_dimension` (default 2048) and `supported_image_types`. `image_handling`, `document_handling` and `supported_doc_types` are deprecated and removed in 2.0: nothing reads them.
 
 ---
 

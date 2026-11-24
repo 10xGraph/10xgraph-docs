@@ -80,9 +80,11 @@ A node function can return any of the following:
 | `list[Message \| str]` | Each item is processed individually and appended. An empty list means no output. |
 | `ModelResponseConverter` | Converted to a `Message` and appended (see "Calling an LLM yourself"). |
 | `AgentState` | Replaces the current state; new context entries are extracted and recorded as new messages. |
+| `dict` | A partial state update: `{"field": value}` sets state fields (validated against their types), `"messages"` appends messages. An unknown field raises an error. |
+| `None` | No change. |
 | `Command` | Updates state **and** overrides the next node at runtime (see below). |
 
-A plain `dict` is not a valid return value and raises an error. To change state fields, change them on `state` and return it.
+Any other return type (for example an `int`) raises an error. To change state fields, return a `dict` of the fields or change them on `state` and return it.
 
 ```python
 from tenxgraph.core.state import AgentState, Message
@@ -266,7 +268,7 @@ async def fetch_context(
 
 ## Dynamic routing with Command
 
-Return `Command` when a node must both update state and choose the next node at runtime. `update` accepts a `str`, `Message`, list of messages, or `AgentState`; `goto` is a node name or `END`:
+Return `Command` when a node must both update state and choose the next node at runtime. `update` accepts a `str`, `Message`, list of messages, `AgentState` or a `dict` of field updates; `goto` is a node name or `END`:
 
 ```python
 from tenxgraph.utils import Command, END

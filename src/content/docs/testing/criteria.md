@@ -346,7 +346,7 @@ The available `CriteriaConfig` fields are `tool_name_match`, `trajectory`, `node
 | `max_concurrency` | `4` | Max parallel cases when `parallel=True` |
 | `timeout` | `300.0` | Seconds per case before timeout |
 | `verbose` | `False` | Extra logging during evaluation |
-| `mock_mode` | `False` | Skip actual execution (for config testing) |
+| `mock_mode` | `False` | Deprecated, no effect, removed in 2.0 |
 | `user_simulator_config` | `None` | Settings for user simulation |
 | `reporter` | default `ReporterConfig()` | Automatic report generation |
 

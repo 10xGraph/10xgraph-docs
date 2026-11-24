@@ -222,13 +222,13 @@ See [Multi-tenant data](/docs/guides/multi-tenant-data) for how the columns, iso
 
 `PgCheckpointer` adapts its schema to the thread and message ID type:
 
-| `id_type` | SQL column type |
+| Id generator `id_type` | SQL column type |
 |---|---|
-| `string` | `VARCHAR(255)` |
+| `string` (the default, uuid strings) | `VARCHAR(255)` |
 | `int` | `SERIAL` |
-| `bigint` | `BIGSERIAL` |
+| `bigint` (for example Snowflake) | `BIGSERIAL` |
 
-The value comes from the `generated_id_type` registered with InjectQ by the compiled graph, defaulting to `string`. You can override it with the `id_type` keyword argument. The `user_id` column type follows the `user_id_type` keyword argument (default `string`).
+The type follows the `BaseIDGenerator` bound in InjectQ when the schema is created on first use, so a generator the API binds after the checkpointer is built still counts. With no generator it is `string`. If the tables already exist with another type, setup raises `ValueError`: keep the generator the tables were created with, or migrate the `thread_id` and `message_id` columns. The `id_type` keyword argument is deprecated and removed in 2.0; passing it emits a `DeprecationWarning`. The `user_id` column type follows the `user_id_type` keyword argument (default `string`).
 
 ### Message ids and `thread_id`
 

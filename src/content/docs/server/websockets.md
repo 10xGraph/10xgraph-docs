@@ -166,9 +166,7 @@ Client → Server:
   "voice": "Puck",
   "modalities": ["AUDIO"],
   "vad": {
-    "enabled": true,
-    "prefix_padding_ms": 300,
-    "silence_duration_ms": 1000
+    "enabled": true
   },
   "thread_id": "optional-thread-id"
 }
@@ -359,8 +357,7 @@ socket.onclose = (event) => {
 - Increase proxy timeouts: WebSocket connections can be long-lived, so set read/write timeouts to several minutes or higher.
 
 **Audio glitches or delays on `/v1/graph/live`**
-- Increase `vad.prefix_padding_ms` to keep more audio from before speech is detected.
-- Tune `start_sensitivity` and `end_sensitivity` in the `vad` object if speech is missed or background noise triggers it.
+- Set `vad.enabled` to `false` and drive turns yourself if automatic detection cuts speech or reacts to background noise. The other `vad` keys (`start_sensitivity`, `end_sensitivity`, `prefix_padding_ms`, `silence_duration_ms`) are deprecated, have no effect and are removed in 2.0.
 - Check network latency; realtime is sensitive to round-trip time.
 
 ## Related pages

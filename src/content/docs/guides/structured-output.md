@@ -397,12 +397,12 @@ See [Use context manager](/docs/guides/use-context-manager) for details.
 Control how message and run IDs are generated:
 
 ```python
-from tenxgraph.utils import UUIDGenerator
+from tenxgraph.utils import DefaultIDGenerator
 
 agent = StructuredOutputAgent(
     model="gpt-4o-mini",
     output_schema=MySchema,
-    id_generator=UUIDGenerator(),
+    id_generator=DefaultIDGenerator(),
 )
 ```
 

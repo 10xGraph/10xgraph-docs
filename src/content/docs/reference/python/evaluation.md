@@ -273,7 +273,7 @@ Holds the criteria to apply during evaluation, plus run-level settings.
 | `max_concurrency` | `int` | `4` | Concurrency cap. |
 | `timeout` | `float` | `300.0` | Seconds per case. |
 | `verbose` | `bool` | `False` | Verbose logging. |
-| `mock_mode` | `bool` | `False` | Skip actual execution. |
+| `mock_mode` | `bool` | `False` | Deprecated, no effect, removed in 2.0. Setting it to `True` emits a `DeprecationWarning`. |
 | `reporter` | `ReporterConfig` | default instance | Automatic report generation. |
 
 `criteria` is a **typed model**, not a free-form dict. `CriteriaConfig` forbids
@@ -498,7 +498,7 @@ A scenario describes who the simulated user is and what they want.
 | `simulator_token_usage` | `TokenUsage` | Tokens used by the simulator's own LLM calls. |
 | `criterion_results` | `list[CriterionResult]` | Full results with per-criterion token usage. |
 
-`UserSimulatorConfig` (`model`, `max_invocations`, `temperature`, `thinking_enabled`, `thinking_budget`, `api_style`) is also the type of `EvalConfig.user_simulator_config`.
+`UserSimulatorConfig` (`model`, `max_invocations`, `temperature`, `thinking_enabled` (deprecated, no effect, removed in 2.0), `thinking_budget`, `api_style`) is also the type of `EvalConfig.user_simulator_config`.
 
 ---
 

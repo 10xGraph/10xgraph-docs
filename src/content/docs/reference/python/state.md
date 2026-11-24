@@ -119,9 +119,11 @@ A node changes state by returning a value, or by mutating the `state` object it 
 | `Message` | Appended to `context` unless its `message_id` already exists. |
 | `list` of `Message` or `str` | Each item is converted as above and appended. |
 | `AgentState` (or subclass) | Becomes the new state; messages not seen before are reported as new. Use this to change custom fields. |
+| `dict` | A partial state update: each key is a state field set to the value (validated against the field's type); `"messages"` appends a `Message` or list of messages. An unknown field raises `ValueError`. |
+| `None` | No change. |
 | `Command` | `Command(update=..., goto=...)`: the `update` is processed as above and `goto` picks the next node. |
 
-Any other return type, including a plain `dict` of field names, is not a partial state update and raises `ValueError`. To change a custom field, set it on `state` and return `state`.
+Any other return type raises `ValueError` (the node fails with `NODE_001`). To change a custom field, return `{"field": value}` or set it on `state` and return `state`.
 
 ```python
 from tenxgraph.core.state import AgentState, Message

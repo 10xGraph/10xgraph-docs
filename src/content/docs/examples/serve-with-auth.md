@@ -85,7 +85,7 @@ checkpointer = PgCheckpointer(
 )
 ```
 
-The server uses the checkpointer carried by the compiled graph. The `checkpointer` key in `10xgraph.json` is not read. See [Set up checkpointing](/docs/guides/set-up-checkpointing).
+The server uses the checkpointer carried by the compiled graph. `10xgraph.json` has no `checkpointer` key. See [Set up checkpointing](/docs/guides/set-up-checkpointing).
 
 ## 4. Start the server and mint tokens
 

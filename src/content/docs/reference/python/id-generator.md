@@ -34,9 +34,9 @@ from tenxgraph.utils.id_generator import (
 
 | Generator | `id_type` | Output | Use it when |
 |---|---|---|---|
-| `DefaultIDGenerator` | `STRING` | `""` (framework substitutes a UUID) | You want the framework default. |
-| `UUIDGenerator` | `STRING` | UUID v4, 36 characters | You want globally unique IDs with no coordination. |
-| `AsyncIDGenerator` | `STRING` | UUID v4, produced by an `async` method | You need a reference for an async generator. |
+| `DefaultIDGenerator` | `STRING` | UUID v4, 36 characters | You want globally unique IDs with no coordination (the default). |
+| `UUIDGenerator` | `STRING` | UUID v4 | Deprecated alias of `DefaultIDGenerator`, removed in 2.0. |
+| `AsyncIDGenerator` | `STRING` | UUID v4, produced by an `async` method | Deprecated, removed in 2.0. Subclass `BaseIDGenerator` with an `async def generate()` instead. |
 | `HexIDGenerator` | `STRING` | 32 hex characters | You want UUID-like randomness without hyphens. |
 | `ShortIDGenerator` | `STRING` | 8 alphanumeric characters | You want readable IDs for low volumes. |
 | `BigIntIDGenerator` | `BIGINT` | Nanosecond Unix time as an integer | You need time-ordered integers for a `bigint` column. |
@@ -70,30 +70,29 @@ Every built-in generator takes no constructor arguments. Each section shows the 
 
 ### `DefaultIDGenerator`
 
-`DefaultIDGenerator` returns an empty string, which tells the framework to create the ID itself. This is the generator `StateGraph` uses when you pass none.
+`DefaultIDGenerator` returns `str(uuid.uuid4())`, a 36-character string such as `"550e8400-e29b-41d4-a716-446655440000"`. This is the generator `StateGraph` uses when you pass none.
 
 ```python
 from tenxgraph import StateGraph
 from tenxgraph.utils.id_generator import DefaultIDGenerator
 
-# An empty ID makes the framework fall back to a UUID v4 string.
 graph = StateGraph(id_generator=DefaultIDGenerator())
 ```
 
 | Property | Value |
 |---|---|
 | `id_type` | `IDType.STRING` |
-| `generate()` returns | `""` |
+| `generate()` returns | `str` (UUID v4) |
 
 ### `UUIDGenerator`
 
-`UUIDGenerator` returns `str(uuid.uuid4())`, a 36-character string such as `"550e8400-e29b-41d4-a716-446655440000"`. Use it when you want an explicit, always-unique string ID.
+`UUIDGenerator` is a deprecated alias of `DefaultIDGenerator`. It warns with a `DeprecationWarning` when constructed and is removed in 2.0. Use `DefaultIDGenerator`.
 
 ```python
 from tenxgraph import StateGraph
-from tenxgraph.utils.id_generator import UUIDGenerator
+from tenxgraph.utils.id_generator import DefaultIDGenerator
 
-graph = StateGraph(id_generator=UUIDGenerator())
+graph = StateGraph(id_generator=DefaultIDGenerator())
 ```
 
 | Property | Value |
@@ -103,7 +102,7 @@ graph = StateGraph(id_generator=UUIDGenerator())
 
 ### `AsyncIDGenerator`
 
-`AsyncIDGenerator` is a concrete generator whose `generate()` is a coroutine that returns a UUID v4 string. It is a reference for the async shape; it performs no real I/O. See [Write an async generator](#write-an-async-generator) for a real one, and read the caveat there first.
+`AsyncIDGenerator` is deprecated and removed in 2.0. It still works and warns with a `DeprecationWarning` when constructed. Its `generate()` is a coroutine that returns a UUID v4 string and performs no real I/O. For an external or async id source, see [Write an async generator](#write-an-async-generator).
 
 | Property | Value |
 |---|---|
@@ -144,7 +143,7 @@ graph = StateGraph(id_generator=ShortIDGenerator())
 
 <aside class="callout callout-warning" role="note"><p class="callout-title">Not for high-volume primary keys</p>
 
-Eight characters is enough for human-readable IDs in URLs and logs, but the chance of a collision grows with volume. Use `UUIDGenerator` or `HexIDGenerator` for database primary keys.
+Eight characters is enough for human-readable IDs in URLs and logs, but the chance of a collision grows with volume. Use `DefaultIDGenerator` or `HexIDGenerator` for database primary keys.
 
 </aside>
 
@@ -239,7 +238,7 @@ graph = StateGraph(id_generator=PrefixedIDGenerator("session"))
 
 ### Write an async generator
 
-An async generator defines `async def generate()`, for example to read from a database sequence. The factory that provides IDs to your nodes accepts async methods, and message creation awaits an awaitable ID.
+An async generator subclasses `BaseIDGenerator` and defines `async def generate()`, for example to read from a database sequence or an external id service. The framework awaits the result when it creates message, thread and run IDs.
 
 ```python
 # sequence_ids.py
@@ -266,15 +265,9 @@ class DatabaseSequenceGenerator(BaseIDGenerator):
 # graph = StateGraph(id_generator=DatabaseSequenceGenerator(pool))
 ```
 
-<aside class="callout callout-warning" role="warning"><p class="callout-title">Pass an explicit thread_id with async generators</p>
-
-When a run config has no `thread_id` or `run_id`, `CompiledGraph` fills it from the injected `generated_id` without awaiting it. With an async generator that value is a coroutine, not an ID. Always pass `thread_id` in the config, and treat async generators as an advanced option.
-
-</aside>
-
 ## Read the generated ID in a node
 
-`StateGraph` binds two keys in its InjectQ container: `"generated_id"` (a factory that calls your generator each time it is resolved) and `"generated_id_type"` (the generator's `IDType`). A node can request them with `Inject`.
+`StateGraph` binds the `BaseIDGenerator` in its InjectQ container, and also the keys `"generated_id"` (a factory that calls your generator each time it is resolved) and `"generated_id_type"` (the generator's `IDType`) for nodes that inject them. The framework itself reads only the `BaseIDGenerator` binding. A node can request the keys with `Inject`.
 
 ```python
 # nodes.py
@@ -303,7 +296,7 @@ Its constructor takes seven optional integers: `snowflake_epoch`, `total_bits`, 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `TypeError: Can't instantiate abstract class` | A subclass of `BaseIDGenerator` is missing `id_type` or `generate`. | Implement both members. |
-| Unique constraint violation on IDs | `IntIDGenerator`, `ShortIDGenerator` or a time-based generator produced a duplicate. | Switch to `UUIDGenerator`, `HexIDGenerator` or a Snowflake generator. |
+| Unique constraint violation on IDs | `IntIDGenerator`, `ShortIDGenerator` or a time-based generator produced a duplicate. | Switch to `DefaultIDGenerator`, `HexIDGenerator` or a Snowflake generator. |
 | Column type mismatch | The generator returns `int` but the column is `varchar`, or the reverse. | Match the generator's `IDType` to your schema. |
 | Integer overflow on insert | `TimestampIDGenerator` or `BigIntIDGenerator` value exceeds a 32-bit column. | Use a `bigint` column. |
 | `thread_id` is a coroutine object | An async generator was used without an explicit `thread_id`. | Pass `thread_id` in the run config. |

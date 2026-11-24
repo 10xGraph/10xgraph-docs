@@ -28,7 +28,7 @@ The samples are generated in `sample_media.py` (a small PNG and a one second WAV
 
 - `MediaRef(kind="url" | "data" | "file_id")`: where the bytes live.
 - `ImageBlock`, `DocumentBlock`, `AudioBlock`, `VideoBlock`: content blocks inside a `Message`, next to `TextBlock`.
-- `MultimodalConfig`: per-agent limits such as `max_image_size_mb`, `max_image_dimension` and `ImageHandling`.
+- `MultimodalConfig`: per-agent limits such as `max_image_size_mb` and `max_image_dimension`.
 - `InMemoryMediaStore` and `LocalFileMediaStore`: store bytes and return a key. Reference it as `graph://media/<key>`.
 - `compile(media_store=..., media_policy=...)`: wires the store in, and sets which external URLs the server may download.
 - `MediaFetchPolicy`: allowed hosts, content types, size cap and timeout for downloads.
@@ -80,13 +80,12 @@ def b64(data: bytes) -> str:
 
 ```python
 multimodal = MultimodalConfig(
-    image_handling=ImageHandling.BASE64,
     max_image_size_mb=5,
     max_image_dimension=1024,
 )
 ```
 
-It caps size, resizes large images and decides how images are passed on. Oversized input is handled here instead of failing at the provider.
+It caps size and resizes large images. Oversized input is handled here instead of failing at the provider.
 
 Chat Completions has no PDF input, so the document agent switches to the Responses API:
 
@@ -242,7 +241,7 @@ from sample_media import b64, make_png
 
 from tenxgraph.core.state import DocumentBlock, ImageBlock, MediaRef, Message, TextBlock
 from tenxgraph.prebuilt.agent import ReactAgent
-from tenxgraph.storage.media import ImageHandling, MultimodalConfig
+from tenxgraph.storage.media import MultimodalConfig
 
 
 load_dotenv()
@@ -254,7 +253,6 @@ PDF_URL = "https://arxiv.org/pdf/1706.03762"
 
 # Applies to images before they reach the provider: size cap, resize, accepted types.
 multimodal = MultimodalConfig(
-    image_handling=ImageHandling.BASE64,
     max_image_size_mb=5,
     max_image_dimension=1024,
 )

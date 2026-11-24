@@ -221,7 +221,6 @@ config = UserSimulatorConfig(
     model="gemini/gemini-2.5-flash",
     max_invocations=12,
     temperature=0.5,
-    thinking_enabled=False,
 )
 
 simulator = UserSimulator(config=config)
@@ -232,8 +231,8 @@ simulator = UserSimulator(config=config)
 | `model` | `gemini-2.5-flash` | Simulator LLM |
 | `max_invocations` | `10` | Maximum conversation turns |
 | `temperature` | `0.7` | Generation temperature |
-| `thinking_enabled` | `False` | Enable reasoning/thinking mode if the model supports it |
-| `thinking_budget` | `10240` | Token budget for thinking when enabled |
+| `thinking_enabled` | `False` | Deprecated, no effect, removed in 2.0. Setting it to `True` emits a `DeprecationWarning`. |
+| `thinking_budget` | `10240` | Token budget for thinking |
 | `api_style` | `"responses"` | OpenAI API style; use `"chat"` for legacy Chat Completions |
 
 ---

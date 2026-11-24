@@ -64,7 +64,7 @@ Prompts, answers, message text, tool arguments and results, file contents, token
 | `rate_limit` | A request is refused with 429 (`reason` `limit_exceeded`, `denied`), or the limiter's backend is down and `fail_open` is off, answered 503 (`reason` `unavailable`, `failed`). | `denied` or `failed`, with `reason` |
 | `tool` | Action `tool:call`: a server tool call finished in a run, `resource` `tool/<name>`. `denied` is a `ToolGuard` denial, with the policy's reason (cut to 200 characters). Action `tool:approve`: a resume answered a `ToolGuard` approval; `user_id` is the caller who answered (`reason` `rejected`, or `cancelled` for a `null` answer). | `tool:call`: `success`, `failed` or `denied`. `tool:approve`: `allowed` or `denied` |
 
-Tool events are kept with `include_reads: false`. Client tools run in the browser, so they are not recorded. On a streamed run that resumes a pause, a call that finished in the same tool turn before the pause is sent again from the tool ledger and recorded again with the resuming run's `run_id`; the `tool_call_id` and `thread_id` are the same.
+Tool events are kept with `include_reads: false`. Each tool call is recorded once, also when a run pauses for an approval and a later run resumes it. Runs over invoke, stream, WebSocket, AG-UI and `/v1/graph/live` are covered. A live session cannot pause, so a tool that needs approval is recorded as `denied` there, and its `run_id` is `null`. Client tools run in the browser, so they are not recorded.
 
 ## Configure
 

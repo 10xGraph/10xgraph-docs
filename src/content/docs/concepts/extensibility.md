@@ -272,14 +272,14 @@ Several built-in generators cover most needs. Swap them globally or per-graph.
 
 | Class | Output |
 |---|---|
-| `DefaultIDGenerator` | Empty string, so the framework substitutes its UUID-based default (used when none is set) |
-| `UUIDGenerator` | UUID string |
+| `DefaultIDGenerator` | UUID v4 string (used when none is set) |
+| `UUIDGenerator` | Deprecated alias of `DefaultIDGenerator`, removed in 2.0 |
 | `BigIntIDGenerator` | Big integer |
 | `IntIDGenerator` | 32-bit random integer |
 | `TimestampIDGenerator` | Integer of microseconds since the Unix epoch |
 | `HexIDGenerator` | Hex string |
 | `ShortIDGenerator` | 8-character alphanumeric string |
-| `AsyncIDGenerator` | Async `generate()` returning a string |
+| `AsyncIDGenerator` | Deprecated, removed in 2.0. Subclass `BaseIDGenerator` with an `async def generate()` instead |
 
 You extend `BaseIDGenerator` when you need IDs in a specific format: employee IDs matching your company's naming scheme, snowflake IDs for distributed systems, or UUIDs with a custom prefix.
 

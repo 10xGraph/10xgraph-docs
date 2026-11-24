@@ -174,7 +174,7 @@ Details that matter in production:
 - With a `memory_key`, `astore` is one atomic upsert, so two writers cannot create duplicate memories for the same key. On PostgreSQL 15 and newer, optional tenant columns hold `NULL` and still dedupe (`NULLS NOT DISTINCT`); on 14 they do not.
 - `metadata` is for free-form extras you never filter on. Anything you filter or index should be a real column: declare it as an extra column.
 - Adding tenant columns to a table that already has data keeps the old key index until you call `adrop_legacy_key_index()`. That handling is deprecated; see [Add tenant columns to a table that has data](/docs/guides/multi-tenant-data#add-tenant-columns-to-a-pgvectorstore-table-that-has-data).
-- A write whose `memory_id` belongs to another user raises `PermissionError`, in the same statement as the write.
+- A write whose `memory_id` belongs to another user raises `ValueError` ("not found", the same answer `aupdate` and `adelete` give), in the same statement as the write.
 - A cancelled call leaves no partial row, and a lost connection is retried the way `PgCheckpointer` retries.
 - `aping()` runs `SELECT 1`. `arelease()` closes the pool only when the store created it from `dsn`.
 

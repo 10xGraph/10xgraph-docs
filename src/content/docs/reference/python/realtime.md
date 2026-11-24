@@ -308,14 +308,13 @@ RealtimeConfig(
 
 ## VADConfig
 
-`VADConfig` holds voice-activity detection settings. Disable it for push-to-talk workflows and drive turns with `send_activity_start` and `send_activity_end`.
+`VADConfig` holds voice-activity detection settings. Disable it for push-to-talk workflows and drive turns with `send_activity_start` and `send_activity_end`. Only `enabled` is used. `start_sensitivity`, `end_sensitivity`, `prefix_padding_ms` and `silence_duration_ms` are deprecated and removed in 2.0: no provider reads them, and setting one to a non-default value emits a `DeprecationWarning`.
 
 ```python title="vad_config.py"
 from tenxgraph.core.realtime import VADConfig
 
 vad = VADConfig(
     enabled=False,  # Manual VAD
-    start_sensitivity="HIGH",
 )
 ```
 
@@ -334,10 +333,10 @@ VADConfig(
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | True | Automatic VAD. Set False for manual push-to-talk via `send_activity_start`/`end`. |
-| `start_sensitivity` | `str \| None` | None | Provider-neutral hint (mapped per provider). None = provider default. |
-| `end_sensitivity` | `str \| None` | None | Provider-neutral hint. None = provider default. |
-| `prefix_padding_ms` | `int \| None` | None | Audio prepended before detected speech onset. |
-| `silence_duration_ms` | `int \| None` | None | Silence duration triggering end-of-speech detection. |
+| `start_sensitivity` | `str \| None` | None | Deprecated, no effect, removed in 2.0. |
+| `end_sensitivity` | `str \| None` | None | Deprecated, no effect, removed in 2.0. |
+| `prefix_padding_ms` | `int \| None` | None | Deprecated, no effect, removed in 2.0. |
+| `silence_duration_ms` | `int \| None` | None | Deprecated, no effect, removed in 2.0. |
 
 
 ## ReconnectConfig

@@ -86,7 +86,7 @@ def billing_handler(state: BillingState, config: dict) -> Command:
 
 Here `BillingState` is an `AgentState` subclass with an `account_status` field, and `fetch_account_status` is your own function.
 
-`Command` is returned from a node, not attached to an edge. No edge from this node appears in the graph diagram because the next node is chosen at runtime by the code. The `update` argument accepts an `AgentState`, a `Message`, a `str` (stored as an assistant message), or a list of messages. A plain `dict` is not supported, so change custom fields on the state object and pass it as `update`.
+`Command` is returned from a node, not attached to an edge. No edge from this node appears in the graph diagram because the next node is chosen at runtime by the code. The `update` argument accepts an `AgentState`, a `Message`, a `str` (stored as an assistant message), a list of messages, or a `dict` of state field updates (`"messages"` appends messages; an unknown field raises an error).
 
 Use Command when:
 - The routing decision depends on a side effect (API call, database query, file read).

@@ -90,8 +90,7 @@ The first frame from the client must be a JSON text frame. It configures the ses
   "system_prompt": "You are a terse voice assistant.",
   "tools_tags": ["weather"],
   "vad": {
-    "enabled": true,
-    "silence_duration_ms": 800
+    "enabled": true
   }
 }
 ```

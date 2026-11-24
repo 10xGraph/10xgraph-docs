@@ -159,7 +159,7 @@ PgCheckpointer(
     # Tuning (passed as **kwargs)
     cache_ttl: int = 86400,                 # Redis cache TTL in seconds (default: 24h)
     user_id_type: str = "string",           # Type for user_id column: "string" | "int" | "bigint"
-    id_type: str = "string",                # Type for thread_id / message_id: "string" | "int" | "bigint"
+    id_type: str = "string",                # Deprecated: the thread_id / message_id type follows the id generator
     state_history_limit: int = 20,          # How many prior state snapshots to keep per thread
     enforce_user_isolation: bool = True,    # Scope state by user_id (multi-tenant safety)
     release_resources: bool = False,        # Close pools/clients on release()
@@ -403,7 +403,7 @@ assert "Alice" in result2["messages"][-1].content
 
 ## Run it in production
 
-The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The `checkpointer` key in `10xgraph.json` is not read. Use `PgCheckpointer` when you run more than one worker, since workers share state only through it. Two graphs in one process keep separate checkpointers, but graphs you compile with the same checkpointer instance share its threads; see [`compile`](/docs/reference/python/graph#compile). See [Scaling and reliability](/docs/production/scaling) and [Backup and restore](/docs/server/backup-and-restore).
+The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. `10xgraph.json` has no `checkpointer` key; the server refuses to start when one is set. Use `PgCheckpointer` when you run more than one worker, since workers share state only through it. Run one graph per process or container; two graphs in one process each need their own `container=InjectQ()` and their own checkpointer instance; see [`compile`](/docs/reference/python/graph#compile). See [Scaling and reliability](/docs/production/scaling) and [Backup and restore](/docs/server/backup-and-restore).
 
 ## Next steps
 

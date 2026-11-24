@@ -292,22 +292,15 @@ Pass `MultimodalConfig` to `Agent` to enable media for that agent. Agents withou
 
 ```python
 from tenxgraph.core.graph import Agent
-from tenxgraph.storage.media import (
-    ImageHandling,
-    DocumentHandling,
-    MultimodalConfig,
-)
+from tenxgraph.storage.media import MultimodalConfig
 
 agent = Agent(
     model="gpt-4o",
     provider="openai",
     multimodal_config=MultimodalConfig(
-        image_handling=ImageHandling.BASE64,
-        document_handling=DocumentHandling.EXTRACT_TEXT,
         max_image_size_mb=10.0,
         max_image_dimension=2048,
         supported_image_types={"image/jpeg", "image/png", "image/webp"},
-        supported_doc_types={"application/pdf"},
     ),
 )
 ```
@@ -316,12 +309,12 @@ The fields and defaults are:
 
 | Field | Default |
 |---|---|
-| `image_handling` | `ImageHandling.BASE64` (also `URL`, `FILE_ID`) |
-| `document_handling` | `DocumentHandling.EXTRACT_TEXT` (also `FORWARD_RAW`, `SKIP`) |
+| `image_handling` | Deprecated, no effect, removed in 2.0 |
+| `document_handling` | Deprecated, no effect, removed in 2.0 |
 | `max_image_size_mb` | `10.0` |
 | `max_image_dimension` | `2048` |
 | `supported_image_types` | JPEG, PNG, WebP, GIF |
-| `supported_doc_types` | PDF, DOCX |
+| `supported_doc_types` | Deprecated, no effect, removed in 2.0 |
 
 The size, dimension and type limits are enforced by `MediaProcessor` (`tenxgraph.storage.media`), which you call yourself to validate or resize images before sending. The `Agent` does not apply them automatically. Document text extraction is not part of the core library; it lives in the API server, so pass pre-extracted text in `DocumentBlock(text=...)` when you need it.
 
@@ -340,11 +333,7 @@ from tenxgraph.core.state import (
     TextBlock,
 )
 from tenxgraph.storage.checkpointer import InMemoryCheckpointer
-from tenxgraph.storage.media import (
-    ImageHandling,
-    InMemoryMediaStore,
-    MultimodalConfig,
-)
+from tenxgraph.storage.media import InMemoryMediaStore, MultimodalConfig
 from tenxgraph.utils import END
 
 async def main():
@@ -355,9 +344,7 @@ async def main():
         model="gemini-2.5-flash",
         provider="google",
         system_prompt=[{"role": "system", "content": "You are a helpful image analyst."}],
-        multimodal_config=MultimodalConfig(
-            image_handling=ImageHandling.BASE64,
-        ),
+        multimodal_config=MultimodalConfig(),
     )
 
     graph = StateGraph()

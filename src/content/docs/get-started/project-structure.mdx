@@ -462,7 +462,7 @@ Init builds `10xgraph.json` from your answers and writes it after the template f
 | `test` | Full, unless tests are turned off | Path `tests`, coverage on, threshold 70 |
 | `evaluation` | Full, unless evals are turned off | Directory `evals`, output `eval_reports`, threshold 0.75 |
 
-There is no `checkpointer` key to set: the server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The Quick setup adds no `cache_store` or `id_generator`. Run `10xgraph config` to change any of these. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), for what is on by default see [Configure 10xgraph.json](/docs/server/configure#what-is-on-by-default), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
+There is no `checkpointer` key (it is refused at startup): the server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. The Quick setup adds no `cache_store` or `id_generator`. Run `10xgraph config` to change any of these. For every key and default, see the [configuration reference](/docs/reference/api-cli/configuration), for what is on by default see [Configure 10xgraph.json](/docs/server/configure#what-is-on-by-default), and for rate-limit options see [Rate limiting](/docs/server/rate-limiting).
 
 ## Fix these before you deploy
 
