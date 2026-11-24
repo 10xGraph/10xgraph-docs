@@ -44,7 +44,7 @@ redis-cli -u "$REDIS_URL" --scan --pattern 'generic_cache:*' | xargs -r redis-cl
 
 If you set `redis_key_prefix`, put it in front of each pattern.
 
-`FLUSHDB` also works, but it clears the whole Redis database selected by the URL. When the API server uses the same Redis as its cache store, that database also holds token revocations, rate-limit counters, run locks and idempotency state. A flush therefore un-revokes every revoked token and user (a revoked token is accepted again until it expires) and resets rate limits. Only run `FLUSHDB` on a database dedicated to the checkpointer cache. If you did flush a shared one, revoke the affected tokens and users again with `10xgraph revoke`, or restore the cache store data from your own Redis snapshot.
+`FLUSHDB` also works, but it clears the whole Redis database selected by the URL. When the API server uses the same Redis as its cache store, that database also holds token revocations, rate-limit counters, run locks and idempotency state. A flush therefore un-revokes every revoked token and user (a revoked token is accepted again until it expires) and resets rate limits. Only run `FLUSHDB` on a database dedicated to the checkpointer cache. If you did flush a shared one, revoke the affected tokens and users again with `revoke_user` / `revoke_token`, or restore the cache store data from your own Redis snapshot.
 
 ## Tables and schema
 

@@ -10,7 +10,7 @@ label: Upgrade to 1.1
 
 1.1 keeps the 1.0 public API (see [Stability](/docs/project/stability)). Nothing you call is
 removed in this release: things are deprecated, and they keep working until 2.0. One unfinished
-batch feature is the only exception, listed under Removed. Some behavior does change without a
+batch feature and the `10xgraph revoke` command are the only exceptions, listed under Removed. Some behavior does change without a
 code change on your side. Read the behavior changes first.
 
 This page covers `10xgraph` 1.0 and `10xgraph-api` 1.0. The 1.1 entries below come from the
@@ -196,6 +196,11 @@ Setting a config field above to a non-default value warns. The `ImageHandling` a
 deprecation period. They were standalone wrappers that no part of the graph runtime used, and
 batch support will not continue. Call the provider SDK's batch API instead:
 `client.messages.batches` for Anthropic, `client.batches` for OpenAI.
+
+`10xgraph revoke` is removed without a deprecation period. Revocation runs in the server, and the CLI
+is not in the server's Docker image, so the command could not reach its cache store. Token revocation
+itself is unchanged. Call `revoke_user` or `revoke_token` (importable from `tenxgraph_api`) with the
+cache store (`InjectQ.get_instance().get(BaseCacheStore)`) from your own code.
 
 ---
 

@@ -18,7 +18,7 @@ One event per decision or change, with ids and outcomes only:
 - Every permission check and thread, file or task access check: allowed, denied or not found.
 - Authentication failures: a missing, invalid or expired token, rejected claims, a reserved identity, a revoked token.
 - Refusals before a handler runs: an input validator rejection, a request body over the size limit, a rate-limit refusal, and a rate limiter whose backend is unreachable.
-- Successful changes: writing or clearing thread state, message feedback, deleting a thread or message, writing or deleting a memory, uploading or deleting a file, stopping or fixing a run, starting, cancelling or rescheduling a task, and revoking a token or user (through the API and `10xgraph revoke`).
+- Successful changes: writing or clearing thread state, message feedback, deleting a thread or message, writing or deleting a memory, uploading or deleting a file, stopping or fixing a run, starting, cancelling or rescheduling a task, and revoking a token or user (through `revoke_user` and `revoke_token`).
 - Tool calls: every server tool (local or MCP) a run calls, with its outcome, including a `ToolGuard` denial, and every approval or rejection of a tool that waits for approval, with who answered.
 
 ## What it never records

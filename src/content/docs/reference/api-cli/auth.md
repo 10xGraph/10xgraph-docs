@@ -318,7 +318,7 @@ An identity with no permission restriction reports `["*"]`. With auth off the an
 
 ### Token revocation
 
-Revoke a token (by `jti`) or all of a user's tokens with `10xgraph revoke`. The revocations live in the API's cache store, so with Redis they reach every worker at once and the server needs no restart. Turn the check on inside `cache_store` in `10xgraph.json`. It needs `auth` and a cache store the server can reach; with `token_revocation` on, an unreachable cache store stops the boot:
+Revoke a token (by `jti`) or all of a user's tokens by calling `revoke_token` or `revoke_user` from your own code in the server process (a tool, a custom `BaseAuth` class or a hook). There is no CLI command. The revocations live in the API's cache store, so with Redis they reach every worker at once and the server needs no restart. Turn the check on inside `cache_store` in `10xgraph.json`. It needs `auth` and a cache store the server can reach; with `token_revocation` on, an unreachable cache store stops the boot:
 
 ```json
 {
@@ -328,6 +328,17 @@ Revoke a token (by `jti`) or all of a user's tokens with `10xgraph revoke`. The 
 ```
 
 With `token_revocation` on, every token must carry a `jti` claim (a non-empty string or an integer). A token without it answers 401 `INVALID_TOKEN` ("Invalid token, jti missing"), because one token is revoked by its `jti`. A custom `BaseAuth` class must return `jti` in its claims too. With revocation off, `jti` stays optional. A revoked token answers 401 `REVOKED_TOKEN`, or a 1008 close on a WebSocket.
+
+```python
+from injectq import InjectQ
+from tenxgraph_api import BaseCacheStore, revoke_token, revoke_user
+
+async def log_out_everywhere(user_id: str) -> None:
+    cache = InjectQ.get_instance().get(BaseCacheStore)  # the server's cache store
+    await revoke_user(cache, user_id)  # every token issued so far
+
+# one token: await revoke_token(cache, jti, expires_at=exp)
+```
 
 `cache_store.token_revocation` is `true`, `false`, or an object: `{"enabled": true, "token_lifetime": <seconds>, "user_ttl": <seconds>}`. `user_ttl` is how long a per-user cutoff is kept and defaults to 30 days; `null` keeps entries forever. A string value is a config error.
 

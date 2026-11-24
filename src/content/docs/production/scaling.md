@@ -29,7 +29,7 @@ The API keeps its shared state in one `BaseCacheStore`. Set `cache_store.type` t
 | Per-user run cap (`runs.max_concurrent_per_user`) | Leases shared by all workers. | Counted per process: up to `limit x workers`. |
 | WebSocket caps (`websocket.max_connections`, `max_connections_per_user`) | Shared through the same lease limiter. | Counted per process. |
 | Idempotency (running lease and stored records) | Shared, so a retry on another worker sees the first request. | Seen only by the worker that handled the first request. |
-| Token revocation | `cache_store.token_revocation: true`: a revoked token is refused on every worker. | A revocation reaches only the process that holds it, and the server warns about it in production or when `WEB_CONCURRENCY` is above 1. `10xgraph revoke` refuses to run against an in-memory store. |
+| Token revocation | `cache_store.token_revocation: true`: a revoked token is refused on every worker. | A revocation reaches only the process that holds it, and the server warns about it in production or when `WEB_CONCURRENCY` is above 1. |
 
 The leases expire on their own, so a crashed worker cannot hold a thread or a user's slots forever.
 

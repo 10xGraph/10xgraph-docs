@@ -315,7 +315,18 @@ A custom `authorize` decides permissions only. Reach still comes from the identi
 
 ## Revoke tokens
 
-With auth on, set `cache_store.token_revocation` to `true` and the server refuses revoked tokens (401, code `REVOKED_TOKEN`). Revocations live in the cache store, so use `"type": "redis"` for them to reach every worker. Revoke from the command line with `10xgraph revoke --user USER_ID` or `--jti JTI`; the command writes to the cache store the server uses and refuses when that store is in-memory.
+With auth on, set `cache_store.token_revocation` to `true` and the server refuses revoked tokens (401, code `REVOKED_TOKEN`). Revocations live in the cache store, so use `"type": "redis"` for them to reach every worker. Revoke from your own code with `revoke_user` or `revoke_token`, which write to the cache store the server uses:
+
+```python
+from injectq import InjectQ
+from tenxgraph_api import BaseCacheStore, revoke_token, revoke_user
+
+async def log_out_everywhere(user_id: str) -> None:
+    cache = InjectQ.get_instance().get(BaseCacheStore)  # the server's cache store
+    await revoke_user(cache, user_id)  # every token issued so far
+
+# one token: await revoke_token(cache, jti, expires_at=exp)
+```
 
 ```json title="10xgraph.json"
 {
