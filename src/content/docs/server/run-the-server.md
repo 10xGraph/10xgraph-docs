@@ -125,7 +125,7 @@ Both show the full endpoint list, parameters, request/response shapes, and authe
 }
 ```
 
-Leave `config` out. The server starts a new thread and returns its id in `data.meta.thread_id`. By default it refuses a `thread_id` that does not exist yet.
+Leave `config` out. The server starts a new thread and returns its id in `data.thread_id`. By default it refuses a `thread_id` that does not exist yet.
 
 5. Click "Execute"
 

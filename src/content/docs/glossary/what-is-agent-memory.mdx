@@ -136,7 +136,7 @@ app = agent.compile(checkpointer=checkpointer)
 }
 ```
 
-Leave the thread ID out of the first API request. The server starts a thread and returns its id in `data.meta.thread_id`. Pass that id in later requests to continue the conversation:
+Leave the thread ID out of the first API request. The server starts a thread and returns its id in `data.thread_id`. Pass that id in later requests to continue the conversation:
 
 ```bash
 curl -X POST http://localhost:8000/v1/graph/invoke \

@@ -11,7 +11,7 @@ faq:
   - q: "When should I use invoke() instead of stream()?"
     a: "Use invoke() when you need the complete answer before updating your UI or returning from a function. Use stream() when you want tokens or messages as they are produced."
   - q: "How do I continue a conversation across invoke() calls?"
-    a: "Omit thread_id on the first call. The server starts a thread and returns its id in result.meta.thread_id. Pass that id at the top level of the config option on later calls."
+    a: "Omit thread_id on the first call. The server starts a thread and returns its id in result.thread_id. Pass that id at the top level of the config option on later calls."
   - q: "Why does invoke() make more than one HTTP request?"
     a: "When the agent asks for a remote tool, the client runs your registered handler locally and sends the result back in a new request. This repeats until no remote tool calls remain or recursion_limit is reached."
 ---
@@ -84,14 +84,16 @@ All options are optional. The defaults below are the values the client applies w
 | `state` | `AgentState` (optional) | Graph state, when the granularity includes it. |
 | `context` | `Message[]` (optional) | Context messages, when the granularity includes them. |
 | `summary` | `string \| null` (optional) | Conversation summary, when the granularity includes it. |
-| `meta` | `InvokeMetadata` | `thread_id` (string) and `is_new_thread` (boolean). |
+| `thread_id` | `string` | Thread the run used. The server picks it when you send none. Falls back to `meta.thread_id` on a server older than 1.1. |
+| `run_id` | `string` (optional) | Run id of the last response. Absent on a server older than 1.1. |
+| `meta` | `InvokeMetadata` | `thread_id` (string) and `is_new_thread` (boolean). Unchanged. |
 | `all_messages` | `Message[]` | Every message from every iteration, including your tool results. |
 | `iterations` | `number` | How many requests were made. |
 | `recursion_limit_reached` | `boolean` | `true` when `iterations` reached `recursion_limit`. |
 
 `recursion_limit_reached` is computed from the iteration count, so it is also `true` when the final answer arrived exactly on the last allowed iteration. Check the last message for pending remote tool calls if you need to tell the two cases apart.
 
-Use `meta.thread_id` to continue a conversation in a later call:
+Use `thread_id` to continue a conversation in a later call:
 
 ```ts
 // First turn: no thread_id, so the server starts a thread and picks its id
@@ -99,7 +101,7 @@ const first = await client.invoke([Message.text_message('Hi')]);
 
 // Second turn: reuse the id reported by the server
 const followUp = await client.invoke([Message.text_message('Tell me more')], {
-  config: { thread_id: first.meta.thread_id },
+  config: { thread_id: first.thread_id },
 });
 ```
 
@@ -225,7 +227,7 @@ async function chat(userInput: string): Promise<string> {
     config: threadId ? { thread_id: threadId } : undefined,
     response_granularity: 'low', // messages only
   });
-  threadId = result.meta.thread_id;
+  threadId = result.thread_id;
 
   // Pick the assistant's text block out of the returned messages
   const assistantMsg = result.messages.find((m) => m.role === 'assistant');

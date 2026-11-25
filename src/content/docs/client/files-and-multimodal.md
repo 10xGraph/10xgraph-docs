@@ -196,9 +196,9 @@ The message works unchanged across all three call methods:
 ### With `invoke()`
 
 ```ts
-// No thread_id: the server starts a thread. Keep result.meta.thread_id to continue it.
+// No thread_id: the server starts a thread. Keep result.thread_id to continue it.
 const result = await client.invoke([msg]);
-const threadId = result.meta.thread_id;
+const threadId = result.thread_id;
 
 const last = result.messages.at(-1);
 const text = (last?.content ?? [])

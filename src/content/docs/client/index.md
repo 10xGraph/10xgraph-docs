@@ -79,7 +79,7 @@ All modes restore your conversation history from the thread automatically, so yo
 
 ## Core concepts
 
-**Threads**: Omit `thread_id` to start a thread. The server picks the id and returns it in `result.meta.thread_id` (or on each stream chunk). Pass it back to maintain a conversation across multiple API calls. The checkpointer on the server persists the full agent state, so each new request picks up where the last one stopped.
+**Threads**: Omit `thread_id` to start a thread. The server picks the id and returns it in `result.thread_id` (or on each stream chunk). Pass it back to maintain a conversation across multiple API calls. The checkpointer on the server persists the full agent state, so each new request picks up where the last one stopped.
 
 **Remote tools**: Tool schemas live on the server (in `10xgraph.json`), but implementation runs in your client. This lets you call browser APIs (clipboard, geolocation), keep secrets local, or run integrations the server cannot access.
 

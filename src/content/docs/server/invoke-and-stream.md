@@ -41,6 +41,8 @@ Message `content` is a list of content blocks, not a plain string. The response 
     "state": null,
     "context": null,
     "summary": null,
+    "thread_id": "conv-xyz",
+    "run_id": "...",
     "meta": {
       "thread_id": "conv-xyz",
       "is_new_thread": true
@@ -95,7 +97,9 @@ The `data` object has these fields:
 | `state` | object or null | The graph's final state. Returned only with `response_granularity: "full"`. |
 | `context` | array or null | Context messages, when the graph produces them. |
 | `summary` | string or null | A summary, when the graph produces one. |
-| `meta` | object | Metadata such as `thread_id` and `is_new_thread`. |
+| `thread_id` | string | Thread of the run. The same name every stream event carries. |
+| `run_id` | string | Run id. The same name every stream event carries. |
+| `meta` | object | Metadata: `is_new_thread` and `thread_id` (the same id as the top-level field). |
 
 ## Stream results in real time
 
@@ -186,12 +190,14 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
   }'
 ```
 
-The response includes `data.meta.thread_id`:
+The response includes `data.thread_id`:
 
 ```json
 {
   "data": {
     "messages": [...],
+    "thread_id": "thread-abc123",
+    "run_id": "...",
     "meta": {
       "thread_id": "thread-abc123"
     }

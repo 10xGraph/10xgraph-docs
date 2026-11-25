@@ -448,7 +448,7 @@ curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
 
 ```bash
 # First invoke. Omit thread_id: the server starts a new thread and returns its id
-# in data.meta.thread_id. Use that id below.
+# in data.thread_id. Use that id below.
 curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "Remember: my name is Alice"}]}]}'

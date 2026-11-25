@@ -124,7 +124,7 @@ curl -s http://127.0.0.1:8000/v1/graph/invoke \
   -d '{"messages":[{"role":"user","content":[{"type":"text","text":"Where is order 1042?"}]}]}'
 ```
 
-The response carries `data.meta.thread_id`. The server makes thread ids; to continue the conversation send `"config": {"thread_id": "<that id>"}` in the next request. Another user's token on that id gets `404`, the same answer as for an id that does not exist. Call `GET /v1/me` with a token to see the roles, permissions and reach the server resolved for it.
+The response carries `data.thread_id`. The server makes thread ids; to continue the conversation send `"config": {"thread_id": "<that id>"}` in the next request. Another user's token on that id gets `404`, the same answer as for an id that does not exist. Call `GET /v1/me` with a token to see the roles, permissions and reach the server resolved for it.
 
 The same call with the TypeScript client (`npm install 10xgraph-client`):
 
@@ -137,7 +137,7 @@ const client = new TenxGraphClient({
 });
 
 const first = await client.invoke([Message.text_message('Where is order 1042?')]);
-const threadId = first.meta.thread_id;
+const threadId = first.thread_id;
 
 const next = await client.invoke([Message.text_message('Can I return it?')], {
   config: { thread_id: threadId },

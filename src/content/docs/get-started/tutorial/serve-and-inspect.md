@@ -131,13 +131,15 @@ The request body takes `messages` and optional `config`, `initial_state`, `recur
     "messages": [
       {"role": "assistant", "content": [{"type": "text", "text": "The weather in Paris is sunny and 22°C."}]}
     ],
+    "thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f",
+    "run_id": "...",
     "meta": {"thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f", "is_new_thread": true}
   },
   "metadata": {"request_id": "...", "timestamp": "...", "message": "OK"}
 }
 ```
 
-The request had no `thread_id`, so the server started a new thread, picked its id and returned it in `data.meta.thread_id`. Send that id back as `config.thread_id` to continue the thread and test memory. By default the server refuses an id that does not exist (`404`), so use the id it returned instead of making one up. Replace `THREAD_ID` with the id from your response:
+The request had no `thread_id`, so the server started a new thread, picked its id and returned it in `data.thread_id`. Send that id back as `config.thread_id` to continue the thread and test memory. By default the server refuses an id that does not exist (`404`), so use the id it returned instead of making one up. Replace `THREAD_ID` with the id from your response:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/graph/invoke \

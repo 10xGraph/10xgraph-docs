@@ -372,7 +372,7 @@ export async function askAgent(
   // Extract the last message's text and the thread id the server used
   return {
     text: result.messages.at(-1)?.text() ?? "",
-    threadId: result.meta.thread_id,
+    threadId: result.thread_id,
   };
 }
 ```

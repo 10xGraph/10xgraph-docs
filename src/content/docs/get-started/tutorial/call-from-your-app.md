@@ -10,7 +10,7 @@ faq:
   - q: "Which package do I install to call a 10xGraph server from TypeScript?"
     a: "Install 10xgraph-client and import TenxGraphClient and Message from it."
   - q: "How does the agent remember earlier messages?"
-    a: "Omit thread_id on the first call. The server starts a thread and returns its id in result.meta.thread_id. Pass that id in the config option of later invoke or stream calls. The server checkpointer stores the conversation under that id and restores it on the next call."
+    a: "Omit thread_id on the first call. The server starts a thread and returns its id in result.thread_id. Pass that id in the config option of later invoke or stream calls. The server checkpointer stores the conversation under that id and restores it on the next call."
   - q: "Is the stream Server-Sent Events?"
     a: "No. client.stream() reads newline-delimited JSON (NDJSON) over a normal HTTP response from POST /v1/graph/stream."
 ---
@@ -81,7 +81,7 @@ async function main() {
   // The last message is the agent's final answer
   const reply = result.messages.at(-1);
   console.log("Agent replied:", reply?.text());
-  console.log("Thread:", result.meta.thread_id, "new:", result.meta.is_new_thread);
+  console.log("Thread:", result.thread_id, "new:", result.meta.is_new_thread);
 }
 
 main().catch(console.error);
@@ -105,7 +105,7 @@ What the call does:
 1. `Message.text_message(text)` builds a user message. Its second argument is the role, which defaults to `"user"`.
 2. `invoke()` posts the messages, your `config` and the run options to the server. The default `recursion_limit` is 25 and the default `response_granularity` is `"full"`.
 3. The server loads the thread from the checkpointer, runs the graph (including any server-side tools) and returns the messages.
-4. `result.messages` holds the messages from the run. `result.meta` holds `thread_id` and `is_new_thread`.
+4. `result.messages` holds the messages from the run. `result.thread_id` holds the thread id, `result.run_id` the run id, and `result.meta.is_new_thread` says whether the thread is new.
 5. `reply.text()` joins the text blocks of a message into one string.
 
 If the graph asks the client to run a tool in your app (a remote tool), `invoke()` runs it and calls the server again until the run finishes. Remote tools are covered in [Remote tools](/docs/client/remote-tools).
@@ -123,7 +123,7 @@ async function main() {
   // First turn: no thread_id, so the server starts a thread. Keep its id.
   const first = await client.invoke([Message.text_message("My name is Alex.")]);
   console.log(first.messages.at(-1)?.text());
-  const config = { thread_id: first.meta.thread_id };
+  const config = { thread_id: first.thread_id };
 
   // Second turn: same thread_id, so the server restores the history
   const second = await client.invoke([Message.text_message("What is my name?")], { config });
@@ -274,7 +274,7 @@ async function testInvoke() {
     [Message.text_message("Hello, what tools do you have?")],
   );
   console.log("Reply:", result.messages.at(-1)?.text());
-  console.log("Thread ID:", result.meta.thread_id);
+  console.log("Thread ID:", result.thread_id);
 }
 
 async function testStream() {
@@ -318,7 +318,7 @@ More fixes are in [Client troubleshooting](/docs/troubleshooting/client).
 - `TenxGraphClient` talks to your running server; only `baseUrl` is required.
 - `client.invoke()` returns the full reply in one call, with `messages` and `meta`.
 - `client.stream()` yields NDJSON chunks; `message`, `updates`, `state` and `error` are the event types.
-- Leave `thread_id` out to start a thread, then pass the returned `meta.thread_id` to make the server restore the conversation.
+- Leave `thread_id` out to start a thread, then pass the returned `thread_id` to make the server restore the conversation.
 - `authToken` or `headers` carry credentials, and tokens stay on the server side in browser apps.
 
 ## Next steps

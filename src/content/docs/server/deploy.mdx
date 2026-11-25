@@ -268,7 +268,7 @@ Before deploying to production, run these checks to catch configuration issues e
    - Check that neither variable is set in your deployment
 
 6. **Persistence survives restart**
-   - Invoke an agent without a `thread_id` and save the one the server returns in `data.meta.thread_id`
+   - Invoke an agent without a `thread_id` and save the one the server returns in `data.thread_id`
    - Restart the server or container
    - Fetch the same thread: messages and state should be intact
 

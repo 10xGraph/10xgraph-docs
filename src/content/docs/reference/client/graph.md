@@ -396,7 +396,7 @@ async function askUser(reason: string, data?: Record<string, any>): Promise<bool
 
 const userMessage = Message.text_message('Delete the old reports', 'user');
 
-// No thread_id: the server starts a thread and returns its id in result.meta.thread_id.
+// No thread_id: the server starts a thread and returns its id in result.thread_id.
 const result = await client.invoke([userMessage], {
   response_granularity: 'full',
 });
@@ -410,7 +410,7 @@ if (meta?.status?.startsWith('interrupted')) {
 
   // Resume by invoking the same thread again.
   await client.invoke([Message.text_message(approved ? 'approved' : 'rejected', 'user')], {
-    config: { thread_id: result.meta.thread_id },
+    config: { thread_id: result.thread_id },
   });
 }
 ```

@@ -49,7 +49,7 @@ Run the graph and return the complete result when all nodes finish.
 }
 ```
 
-`content` is a list of content blocks, not a plain string. A string gets `422`. The example sends no `config.thread_id`, so the server starts a new thread and returns its id in `data.meta.thread_id`. Send that id as `config.thread_id` in the next request to continue the thread. With the default `runs.thread_ids` of `server`, naming an id that does not exist answers `404`.
+`content` is a list of content blocks, not a plain string. A string gets `422`. The example sends no `config.thread_id`, so the server starts a new thread and returns its id in `data.thread_id`. Send that id as `config.thread_id` in the next request to continue the thread. With the default `runs.thread_ids` of `server`, naming an id that does not exist answers `404`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -59,7 +59,7 @@ Run the graph and return the complete result when all nodes finish.
 | `on_busy` | string | no | `wait` (default) or `cancel`. What to do when another run is active on the thread (see [One run per thread](#one-run-per-thread)). |
 | `initial_state` | object | no | Initial state for the run. Only keys listed in `runs.state_keys` are accepted, none by default; built-in fields never are (see input rules below). Nested no deeper than 64 levels by default (`MAX_NESTING_DEPTH`). |
 | `config` | object | no | Run configuration. Nested no deeper than 64 levels by default (`MAX_NESTING_DEPTH`). |
-| `config.thread_id` | string | no | Id of an existing thread to continue. Must match `^[A-Za-z0-9._:@-]{1,128}$`, else `422`. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.meta.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `404`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
+| `config.thread_id` | string | no | Id of an existing thread to continue. Must match `^[A-Za-z0-9._:@-]{1,128}$`, else `422`. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `404`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
 | `config.model` | string | no | Name of a model the graph's Agent registers in its `model_registry`. Take the names from [`info.models`](#infomodels) of `GET /v1/graph`. No name means the default model. A name that is not registered answers `422` before the run starts, with the registered names in the message, in production too. A node can read another key (`config_key` in `info.models`). |
 | `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `collection` and `_`-prefixed keys. A client cannot choose a memory collection; it is ignored, not refused. See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). |
 | `recursion_limit` | integer | no | Maximum graph iterations. Default `25`, range `1`-`100`. |
@@ -101,7 +101,9 @@ Messages may carry image and document content blocks referencing an uploaded `fi
 | `state` | State from the run, or `null`. |
 | `context` | Context messages, or `null`. |
 | `summary` | Summary text, or `null`. |
-| `meta` | Run metadata such as `thread_id`, or `null`. How much is filled in depends on `response_granularity`. |
+| `thread_id` | Thread of the run, the same name every stream event carries. Present since 1.1. |
+| `run_id` | Run id, the same name every stream event carries. Present since 1.1. |
+| `meta` | Run metadata (`is_new_thread`, `thread_id`), or `null`. How much is filled in depends on `response_granularity`. |
 
 ### One run per thread
 

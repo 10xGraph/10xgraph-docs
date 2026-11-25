@@ -71,7 +71,7 @@ curl -s http://127.0.0.1:8000/v1/graph/invoke \
        "response_granularity":"full"}'
 ```
 
-The run ends without a final answer. In the response, `data.meta.thread_id` names the thread and `data.state.execution_meta` holds the pause:
+The run ends without a final answer. In the response, `data.thread_id` names the thread and `data.state.execution_meta` holds the pause:
 
 ```json
 {
@@ -122,7 +122,7 @@ const first = await client.invoke([Message.text_message('Refund order 1042, 59.0
 // The client's AgentState type does not declare interrupt_data yet, so read it loosely.
 const meta = (first.state as any)?.execution_meta;
 const pending = meta?.interrupt_data?.interrupt;
-const threadId = first.meta.thread_id;
+const threadId = first.thread_id;
 
 if (pending) {
   try {

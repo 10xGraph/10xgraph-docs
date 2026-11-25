@@ -75,7 +75,7 @@ Export `ALICE_TOKEN` and `BOB_TOKEN`. Alice starts a thread by sending a message
 curl -s http://127.0.0.1:8000/v1/graph/invoke \
   -H "Authorization: Bearer $ALICE_TOKEN" -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":[{"type":"text","text":"my card ends 4242"}]}]}'
-# data.meta: {"is_new_thread": true, "thread_id": "<T>"}
+# data.thread_id: "<T>", data.meta.is_new_thread: true
 ```
 
 Alice owns `<T>`. The thread's `user_id` is `alice`, taken from her token.
@@ -106,7 +106,7 @@ const alice = new TenxGraphClient({ baseUrl: 'http://127.0.0.1:8000', authToken:
 const bob = new TenxGraphClient({ baseUrl: 'http://127.0.0.1:8000', authToken: bobToken });
 
 const first = await alice.invoke([Message.text_message('my card ends 4242')]);
-const threadId = first.meta.thread_id;
+const threadId = first.thread_id;
 
 try {
   await bob.invoke([Message.text_message('hi')], { config: { thread_id: threadId } });

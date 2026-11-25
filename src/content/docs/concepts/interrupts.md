@@ -255,7 +255,7 @@ It derives from `BaseException` (not `Exception`) so tool and node error handler
 
 ## How the API server exposes interrupts
 
-The REST API exposes interrupts through the same checkpoint/resume flow. Send `resume` instead of `messages` to `/v1/graph/invoke` or `/v1/graph/stream`; `thread_id` goes in `config`. The first request leaves `thread_id` out, so the server starts a thread and returns its id in `data.meta.thread_id`. The resume sends that id back (shown as `THREAD_ID` below).
+The REST API exposes interrupts through the same checkpoint/resume flow. Send `resume` instead of `messages` to `/v1/graph/invoke` or `/v1/graph/stream`; `thread_id` goes in `config`. The first request leaves `thread_id` out, so the server starts a thread and returns its id in `data.thread_id`. The resume sends that id back (shown as `THREAD_ID` below).
 
 **At `/v1/graph/invoke` (REST):**
 

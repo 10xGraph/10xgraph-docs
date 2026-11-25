@@ -19,7 +19,7 @@ const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
 
 <aside class="callout callout-note" role="note"><p class="callout-title">A checkpointer is required</p>
 
-If the server was started without a checkpointer, every thread route returns HTTP 503 ("Checkpointer is not configured"). To create a thread from the client, call invoke or stream without a `thread_id`. The server picks the id and returns it as `meta.thread_id` (invoke) or `chunk.thread_id` (stream). See [Invoke](/docs/reference/client/invoke) and [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
+If the server was started without a checkpointer, every thread route returns HTTP 503 ("Checkpointer is not configured"). To create a thread from the client, call invoke or stream without a `thread_id`. The server picks the id and returns it as `thread_id` (invoke) or `chunk.thread_id` (stream). See [Invoke](/docs/reference/client/invoke) and [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
 
 </aside>
 

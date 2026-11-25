@@ -118,7 +118,7 @@ async function respondWithMemory(userQuestion: string) {
     initial_state: { memory_context: marked },
     response_granularity: 'low',
   });
-  threadId = response.meta.thread_id;
+  threadId = response.thread_id;
 
   // 4. Store this interaction for future reference
   const last = response.messages[response.messages.length - 1];

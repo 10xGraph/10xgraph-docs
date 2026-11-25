@@ -97,7 +97,7 @@ curl -s -X POST http://127.0.0.1:8000/v1/graph/invoke \
   -d '{"messages":[{"role":"user","content":[{"type":"text","text":"Where is order 1042?"}]}]}'
 ```
 
-This returns `200`. Copy `data.meta.thread_id` from the response and export it as `THREAD_ID`. Alice now owns that thread.
+This returns `200`. Copy `data.thread_id` from the response and export it as `THREAD_ID`. Alice now owns that thread.
 
 ## 5. Read Alice's thread as Bob
 

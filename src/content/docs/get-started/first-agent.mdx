@@ -210,6 +210,8 @@ The response holds `data` (the result) and `metadata` (request id and timestamp)
     "state": null,
     "context": null,
     "summary": null,
+    "thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f",
+    "run_id": "...",
     "meta": {"is_new_thread": true, "thread_id": "7f3c2a10-5b1e-4c9a-9d2e-1a2b3c4d5e6f"}
   },
   "metadata": {
@@ -248,7 +250,7 @@ Tool activity arrives as ordinary `message` chunks, and a stream that finishes w
 
 ## Continue the thread and read it back
 
-Copy `data.meta.thread_id` from the invoke response and send it as `config.thread_id` on the next request. The agent still has the order it looked up, so it can refund it:
+Copy `data.thread_id` from the invoke response and send it as `config.thread_id` on the next request. The agent still has the order it looked up, so it can refund it:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
@@ -281,7 +283,7 @@ Each entry in `data.threads` is a thread record:
 
 <Callout type="tip" title="Let the server pick the thread id">
 
-Omit `thread_id` from `config` to start a new thread. The server picks the id and returns it in `data.meta.thread_id`, and on every chunk of a stream. Send that id on later requests to continue, resume or stop the conversation. By default the server refuses an id it did not create (`404`), so do not make one up. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
+Omit `thread_id` from `config` to start a new thread. The server picks the id and returns it in `data.thread_id`, and on every chunk of a stream. Send that id on later requests to continue, resume or stop the conversation. By default the server refuses an id it did not create (`404`), so do not make one up. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
 
 </Callout>
 
@@ -339,7 +341,7 @@ THREAD_ID=$(curl -s -X POST http://127.0.0.1:8000/v1/graph/invoke \
   -H "Authorization: Bearer $ALICE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":[{"type":"text","text":"Where is order 1042?"}]}]}' \
-  | python -c "import json,sys; print(json.load(sys.stdin)['data']['meta']['thread_id'])")
+  | python -c "import json,sys; print(json.load(sys.stdin)['data']['thread_id'])")
 ```
 
 Read Alice's thread as Bob, and the server answers `404`, as it does for a thread id that does not exist. Bob's own thread list is empty:
@@ -391,7 +393,7 @@ Run it in the shell where `ALICE_TOKEN` is exported, with a TypeScript runner su
 npx tsx client.ts
 ```
 
-Use `client.invoke(messages, options)` to get the whole result at once; `result.meta.thread_id` holds the thread id, and `result.messages.at(-1)?.text()` is the final reply. The client also exports `basicAuth(username, password)` and `headerAuth(name, value)` for other auth schemes. See [Create a client](/docs/client/create-client).
+Use `client.invoke(messages, options)` to get the whole result at once; `result.thread_id` holds the thread id, and `result.messages.at(-1)?.text()` is the final reply. The client also exports `basicAuth(username, password)` and `headerAuth(name, value)` for other auth schemes. See [Create a client](/docs/client/create-client).
 
 ## Write the deploy files
 
@@ -412,7 +414,7 @@ It writes a `Dockerfile` and a `.dockerignore`. Add `--docker-compose` or `--k8s
 
 ## Understanding the request and response
 
-The fields you can send to `/v1/graph/invoke` and `/v1/graph/stream`, the fields in `data`, and the message format are listed in the [graph endpoints reference](/docs/reference/rest-api/graph). `data.meta` carries `thread_id` and `is_new_thread`.
+The fields you can send to `/v1/graph/invoke` and `/v1/graph/stream`, the fields in `data`, and the message format are listed in the [graph endpoints reference](/docs/reference/rest-api/graph). `data` carries `thread_id` and `run_id`, and `data.meta` carries `is_new_thread`.
 
 <Callout type="note" title="InMemoryCheckpointer restarts with the server">
 

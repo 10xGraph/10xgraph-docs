@@ -74,7 +74,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:8000/v1/graph/
 
 Expected: `401`. A `200` means auth is off.
 
-**Isolation: another user's thread returns 404.** Call as user A, copy `data.meta.thread_id`, then read it as user B.
+**Isolation: another user's thread returns 404.** Call as user A, copy `data.thread_id`, then read it as user B.
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" \

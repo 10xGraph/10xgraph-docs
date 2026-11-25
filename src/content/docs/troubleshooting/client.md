@@ -9,7 +9,7 @@ faq:
   - q: "Why does my browser request fail when curl works?"
     a: "The usual cause is CORS. The server's ORIGINS setting must include the exact origin of your web app, and credentials must be allowed consistently. Check the preflight OPTIONS request in the browser Network tab."
   - q: "Why does my agent forget earlier messages?"
-    a: "Every call after the first must send the thread_id the server returned (result.meta.thread_id, or thread_id on each stream chunk), and the server must have a checkpointer. Without either, each request starts a fresh thread."
+    a: "Every call after the first must send the thread_id the server returned (result.thread_id, or thread_id on each stream chunk), and the server must have a checkpointer. Without either, each request starts a fresh thread."
   - q: "Why does my WebSocket close with code 1008?"
     a: "1008 means the server rejected the connection by policy: the graph type does not match the endpoint, the token is invalid, or the user is not authorized for the thread."
 ---
@@ -133,14 +133,14 @@ const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
 
 // First call has no thread_id, so the server starts a thread and returns its id.
 const first = await client.invoke([Message.text_message('My name is Sam.')]);
-const threadId = first.meta.thread_id;
+const threadId = first.thread_id;
 
 // Second call reuses the same thread, so the agent can recall the name.
 const result = await client.invoke([Message.text_message('What is my name?')], {
   config: { thread_id: threadId }, // top level of config
 });
 console.log(result.messages);
-console.log(result.meta.thread_id, result.meta.is_new_thread); // is_new_thread is false here
+console.log(result.thread_id, result.meta.is_new_thread); // is_new_thread is false here
 ```
 
 Check whether the server has a checkpointer with `graph()`. The response holds `data.info.checkpointer` (a boolean) and `data.info.checkpointer_type`.

@@ -137,7 +137,7 @@ A top-level `authorization` key is refused at startup. Move its rules into `auth
 
 ### thread_ids
 
-With `"server"` (the default), a request may only name a thread that already exists. To start a new thread, omit `thread_id` from `config`, or send `"new"` over `/v1/graph/ws`. The server picks the id and returns it. Read it from `meta.thread_id` on invoke, or from `thread_id` on each stream chunk.
+With `"server"` (the default), a request may only name a thread that already exists. To start a new thread, omit `thread_id` from `config`, or send `"new"` over `/v1/graph/ws`. The server picks the id and returns it. Read it from `thread_id` on invoke, or from `thread_id` on each stream chunk.
 
 Naming an id that does not exist answers `404` on invoke, stream, `/v1/graph/ws` and the checkpointer write routes. It is the same `404` as for an id another user owns, so a caller cannot tell whether an id is taken.
 
