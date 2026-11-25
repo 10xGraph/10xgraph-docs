@@ -6,6 +6,7 @@ description: What a 10xgraph 1.0 and 10xgraph-api 1.0 user must know before movi
 section: Project
 order: 19
 label: Upgrade to 1.1
+updated: "2026-11-26"
 ---
 
 1.1 keeps the 1.0 public API (see [Stability](/docs/project/stability)). Nothing you call is
@@ -294,6 +295,50 @@ These work differently after the upgrade, with no code change. Check each one ag
 - **CLI.** Every command finds `10xgraph.json` (or `agentflow.json`) in the current or nearest
   parent folder. `10xgraph eval` loads the agent as the server does. `10xgraph config` validates
   with the server's rules.
+
+### Jobs
+
+Changes to the worker and the scheduler. See [Run background tasks with a worker](/docs/server/background-tasks) for each.
+
+- **`worker.retries` means retries.** `"retries": 3` now gives 3 retries (4 runs). Before, it gave
+  2, and `"retries": 1` never retried. Cancelled, refused, bad-argument and over-delivered runs
+  are never retried. See [Retries](/docs/server/background-tasks#retries).
+- **The scheduler runs nothing at start.** An `every` schedule first runs one interval after the
+  scheduler starts, so a daily job no longer reruns at each deploy. `10xgraph scheduler` also
+  passes `--send-timeout 30` and refuses the `memory` broker. See
+  [What runs at start](/docs/server/background-tasks#what-runs-at-start).
+- **One scheduler, enforced by a Redis lease.** A second scheduler waits as a standby and takes
+  over when the first stops. There are at most 100 schedules per user (429 above that).
+- **Schedules are strict and UTC only.** Cron must have 5 fields with every value in range, `every`
+  must be 10 seconds to one year, and a bad schedule answers 422 on create and on PATCH. Cron is
+  always UTC, an `at` with an offset is converted to UTC, and an `at` without one is UTC. Other
+  time zones are not supported. See
+  [Time zones](/docs/server/background-tasks#time-zones).
+- **A call that does not fit the task is 422.** An unknown, missing or repeated argument answers
+  422 on `POST /v1/tasks/{name}` (run and schedule). Before, it answered 202 and the worker failed
+  with a `TypeError`.
+- **A result that cannot be saved is a failure.** A return value that is not JSON-serialisable, or
+  a result backend that is down, ends the task as `failure` with an `error`. Before, it showed
+  `success` with `result: null`. The final status is written after the result is saved.
+- **`REDIS_KEY_PREFIX` now applies to jobs keys.** The stream, results, schedules and the
+  scheduler lease get the prefix. If you set one, drain the queue and move your schedules before
+  you deploy. Without a prefix nothing changes. See
+  [Key names](/docs/server/background-tasks#key-names).
+- **The worker waits like the build image.** `10xgraph worker` passes `--wait-tasks-timeout 600`
+  and `--shutdown-timeout 60`. The generated worker's kill grace is 720 seconds (was 660).
+- **The Redis worker takes one message at a time**, survives a Redis restart, and fails a message
+  delivered more than `worker.broker.options.max_deliveries` times (default 5). `xread_count` and
+  `unacknowledged_batch_size` other than 1 refuse to start.
+- **New fields and routes.** `GET /v1/tasks/{schedule_id}` adds `status` (`scheduled` or `sent`)
+  and `runs` (the last 20 run ids, readable and cancellable). PATCH of a sent one-time schedule
+  answers 409.
+- **The worker writes the audit log**, and `authorize` on `/v1/tasks` gets the task name as the
+  resource.
+- **`auth.method: jwt` needs a key at boot.** With neither `JWT_SECRET_KEY` nor `JWT_SECRET_KEYS`
+  set, the server and the worker refuse to start. Before, they started and every request answered
+  500.
+- **A warning for memory state with a remote broker.** The API and the worker log it at boot when
+  `cache_store.type` or `worker.result_backend.type` is `memory` and the broker is not.
 
 ---
 

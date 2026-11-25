@@ -10,6 +10,8 @@ updated: "2026-10-27"
 
 The 10xGraph reference documents four surfaces of one system: the Python library, the REST and WebSocket API that the server generates from your graph, the CLI with its `10xgraph.json` configuration, and the TypeScript client. It is for developers who already know what they want to call and need exact signatures, options and error conditions. Pick the surface you are calling from.
 
+If a signature, default or error here does not match the code, the code is right. Please open a pull request with the fix: use **Edit this page on GitHub** at the bottom of the page, or **Report an issue** if you are not sure.
+
 ## Start here
 
 Python developers should open [Graph](/docs/reference/python/graph) and [Agent](/docs/reference/python/agent) first: they define `StateGraph`, `CompiledGraph`, `invoke`, `stream` and how a model is wired into a node. [Checkpointers](/docs/reference/python/checkpointers) matters for production, because durable threads and replay-safe tool calls depend on one.

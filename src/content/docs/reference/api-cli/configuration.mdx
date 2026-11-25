@@ -3,7 +3,7 @@ title: 10xgraph.json configuration reference
 description: Every key the 10xgraph.json config file accepts, with defaults, types, purposes, and complete examples for rate limiting, auth, and servers.
 section: Reference
 order: 420
-updated: "2026-11-25"
+updated: "2026-11-26"
 group: "CLI and configuration"
 faq:
   - q: Which key is required in 10xgraph.json?
@@ -29,7 +29,7 @@ faq:
 | `thread_name_generator` | string or null | none | `random`, `first_message`, `none` or a `module:attr` path. See [thread_name_generator](#thread_name_generator) |
 | `id_generator` | string or null | graph's own | `uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or a `module:attr` path. See [id_generator](#id_generator) |
 | `cache_store` | object or null | in-memory | One object that holds the cache store and what it backs: `type`, `url`, `path`, `rate_limit`, `token_revocation`. See [cache_store](#cache_store) |
-| `worker` | object | absent | TaskIQ broker and task modules for `10xgraph worker`. See [Run background tasks with a worker](/docs/server/background-tasks) |
+| `worker` | object | absent | TaskIQ broker and task modules for `10xgraph worker`: `broker`, `result_backend`, `tasks`, `result_ttl`, `retries` (retries after the first run, default 3). On Redis Streams, `broker.options.max_deliveries` (default 5) caps redeliveries of one message, and `xread_count` and `unacknowledged_batch_size` other than 1 are refused. See [Run background tasks with a worker](/docs/server/background-tasks) |
 | `remote_tools` | array | `[]` | Schemas of tools that run in the client |
 | `runs` | object | built-in defaults | Who names threads, which client input reaches the graph, and run limits |
 | `websocket` | object | built-in caps | WebSocket connection limits |

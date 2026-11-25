@@ -1,17 +1,19 @@
 ---
 title: Run background tasks with a worker
-description: Durable tasks on TaskIQ with the 10xgraph worker and scheduler, started from Python or over HTTP, with schedules, cancel and progress.
+description: "Durable TaskIQ tasks with the 10xgraph worker and scheduler: start from Python or HTTP, schedule in UTC, cancel, track progress, retry and shut down safely."
 section: "Background jobs"
 order: 20
 label: "Worker and scheduler"
-updated: "2026-11-25"
+updated: "2026-11-26"
 faq:
   - question: How is this different from BackgroundTaskManager?
     answer: "BackgroundTaskManager runs fire-and-forget work inside the graph process and loses it on a crash. Tasks on this page go through a broker to a separate worker, survive a restart and can be scheduled. See [Run work in the background](/docs/guides/run-background-tasks) for the in-process one."
   - question: Why did my task run twice?
-    answer: "On Redis and RabbitMQ delivery is at-least-once: if a worker dies, another worker runs the task again. Write tasks so a rerun is safe."
+    answer: "On Redis and RabbitMQ delivery is at-least-once: if a worker dies, another worker runs the task again. A retry after an error is also a rerun. Write tasks so a rerun is safe. See [Delivery guarantees](#delivery-guarantees)."
   - question: Can I use Inject[...] in a task?
     answer: "No. Plain InjectQ `Inject[...]` passes the marker object instead of the value. Use `InjectTaskiq` from `injectq.integrations.taskiq`."
+  - question: Can I schedule in my time zone?
+    answer: "No. Schedules run in UTC only. A cron expression is always read as UTC, and a one-time `at` without an offset is UTC. Convert your local time to UTC before you send it."
   - question: Why does cancel not stop my running task?
     answer: "Cancel is a signal. A queued task is not run, but a running task stops only when it checks `await ctx.cancelled()` and returns."
 ---
@@ -51,11 +53,13 @@ Add a `worker` key to `10xgraph.json`. Status records, cancel flags and schedule
 | --- | --- | --- |
 | `broker.type` | `redis_stream` | `redis_stream`, `rabbitmq`, `kafka` or `memory` (tests and local runs; it runs tasks inside the API). Other brokers are not supported yet. |
 | `broker.url` | `REDIS_URL` for Redis | Redis URL, AMQP URL (`amqp://user:pass@host:5672/`) or Kafka bootstrap servers (`k1:9092,k2:9092`). `${VAR}` is expanded. Required for RabbitMQ and Kafka. |
-| `broker.options` | `{}` | Extra constructor arguments, for example `{"idle_timeout": 600000}` for Redis or `{"qos": 10}` for RabbitMQ. For Kafka, `consumer` and `producer` hold aiokafka client settings; the consumer group defaults to `10xgraph`. |
+| `broker.options` | `{}` | Extra constructor arguments, for example `{"idle_timeout": 600000}` for Redis or `{"qos": 10}` for RabbitMQ. For Kafka, `consumer` and `producer` hold aiokafka client settings; the consumer group defaults to `10xgraph`. Redis Streams only: `max_deliveries` (default `5`) caps redeliveries of one message, see [Delivery guarantees](#delivery-guarantees). `xread_count` and `unacknowledged_batch_size` are fixed at 1, and any other value refuses to start. |
 | `result_backend` | Redis | `{"type": "redis", "url": ..., "options": {}}` or `{"type": "memory"}`. The URL defaults to the broker URL for a Redis broker, else `REDIS_URL`. |
 | `tasks` | `[]` | Module names (`app.tasks`) or file globs (`app/**/*_tasks.py`) the worker imports. |
 | `result_ttl` | `86400` | Seconds status, progress and results are kept. |
-| `retries` | `3` | Cap for retries. Retries are off per task unless you set `retry_on_error=True`. |
+| `retries` | `3` | Retries after the first run: `3` means up to 4 runs. Retries are off per task unless you set `retry_on_error=True`. See [Retries](#retries). |
+
+With a broker other than `memory`, set `cache_store.type` and `worker.result_backend.type` to `redis` (the result backend is Redis unless you change it). If either one is `memory`, the API and the worker log a warning at boot, because they no longer share task status, results or cancel flags: status stays `queued` and a cancel never reaches a running task. For the Redis layout and what happens when Redis is down, see [Redis keys and outages](#redis-keys-and-outages).
 
 ## Write a task
 
@@ -104,11 +108,21 @@ The task name is the `task_name` you set, here `make_report`. Without it TaskIQ 
 10xgraph scheduler  # sends scheduled tasks
 ```
 
-Both read `10xgraph.json` from the current folder (`--config` to change it), refuse to start without a `worker` key, and import the entries in `worker.tasks`. Every other flag goes to TaskIQ unchanged (`--workers`, `--ack-type`, `--log-level`). `10xgraph worker` refuses `--use-process-pool`. `10xgraph scheduler` adds `--update-interval 10` unless you pass one, which is how soon it sees changed schedules.
+Both read `10xgraph.json` from the current folder (`--config` to change it), refuse to start without a `worker` key, and import the entries in `worker.tasks`. Every other flag goes to TaskIQ unchanged (`--workers`, `--ack-type`, `--log-level`). `10xgraph worker` refuses `--use-process-pool`. `10xgraph scheduler` refuses the `memory` broker, because that broker runs tasks inside the API.
 
-Run exactly one scheduler. Two would send every scheduled task twice. Run as many workers as you need.
+Each command adds these flags unless you pass your own:
 
-`10xgraph build` generates both processes for you. With `--docker-compose` it adds a `worker` service and, if you ask for it, a `scheduler` service built from the same image as the API. With `--k8s` it adds a `<service>-worker` and a `<service>-scheduler` Deployment (the scheduler has one replica and `strategy: Recreate`, so a rollout never runs two). Use `--worker` and `--scheduler` to choose, or answer the questions when `build` asks. With the `memory` broker no worker is generated, because tasks run inside the API. See [Deploy with Docker and Kubernetes](/docs/server/deploy).
+| Command | Flag | Default | Meaning |
+| --- | --- | --- | --- |
+| `10xgraph worker` | `--wait-tasks-timeout` | `600` | Seconds to wait for running tasks after SIGTERM. |
+| `10xgraph worker` | `--shutdown-timeout` | `60` | Seconds for the shutdown hook after that wait: the graph close and the telemetry flush. |
+| `10xgraph scheduler` | `--update-interval` | `10` | Seconds between reads of the schedule sources, so how soon it sees a changed schedule. |
+| `10xgraph scheduler` | `--skip-first-run` | on | Nothing runs at start. See [Schedules](#schedules). |
+| `10xgraph scheduler` | `--send-timeout` | `30` | A send to the broker that takes longer is logged and skipped. |
+
+Run as many workers as you need, and exactly one scheduler. The scheduler holds a lease in Redis (`10xgraph:scheduler:lease`, 30 seconds, renewed every 10, released on shutdown). A second scheduler logs a warning, sends nothing and waits as a standby. It takes over within about 30 seconds when the first one stops or dies, so a restart or a rolling deploy needs no extra step. Without Redis there is no lease and the scheduler logs a warning: two would send every task twice.
+
+`10xgraph build` generates both processes for you. With `--docker-compose` it adds a `worker` service and, if you ask for it, a `scheduler` service built from the same image as the API. With `--k8s` it adds a `<service>-worker` and a `<service>-scheduler` Deployment (the scheduler has one replica and `strategy: Recreate`, so a rollout never runs two). The generated worker uses the same 600 and 60 second waits, and its kill grace (`stop_grace_period` in Compose, `terminationGracePeriodSeconds` in Kubernetes) is 720 seconds: both waits plus a 60 second margin. Use `--worker` and `--scheduler` to choose, or answer the questions when `build` asks. With the `memory` broker no worker is generated, because tasks run inside the API. See [Deploy with Docker and Kubernetes](/docs/server/deploy).
 
 ## Start a task from Python
 
@@ -149,6 +163,29 @@ await make_report.kicker().schedule_by_cron(sources[-1], "0 2 * * *", "sales")
 
 `sources[-1]` is the Redis source. It uses the result backend's Redis, so it exists with every broker except `memory`. The same schedules are available over HTTP, below.
 
+### Time zones
+
+Schedules run in UTC only. Other time zones are not supported.
+
+- A cron expression is always read as UTC. `0 2 * * *` fires at 02:00 UTC, whatever the server's local time zone is.
+- A one-time `at` with an offset (`2026-12-01T09:00:00+02:00`) is converted to UTC. An `at` without an offset is read as UTC.
+- Convert your local time to UTC before you send it. There is no time zone field.
+
+### Rules for schedules over HTTP
+
+The HTTP routes check every schedule when it is created or changed, and answer 422 when it is not valid:
+
+- **Cron** has 5 fields (minute, hour, day of month, month, day of week), each in range. Steps start at 1. A field can use `*`, `*/n`, `a`, `a-b`, `a-b/n` or a comma list of those. Day names (`mon`) work only in the day-of-week field, and not with a step. `61 * * * *`, `*/0 * * * *` and `0 abc * * *` are refused.
+- **`every`** is a whole number of seconds from 10 to 31536000 (one year).
+- **`at`** is an ISO time. Exactly one of `cron`, `at` and `every` is allowed.
+- One user can have at most 100 schedules. The 101st answers 429: cancel one first. A one-time schedule counts until its record expires.
+
+Records saved by an older version still read, change and cancel, even if they would not pass these rules now.
+
+### What runs at start
+
+`10xgraph scheduler` runs nothing at start. An `every` schedule first runs one interval after the scheduler starts, and a cron schedule does not fire twice when the scheduler restarts inside its minute. A daily `every` job therefore does not rerun at each deploy. A schedule that you create while the scheduler is running runs when the scheduler first sees it. To run something at start, call the task once yourself.
+
 ## Start a task over HTTP
 
 Only tasks marked `http=True` can be started over HTTP; any other task answers 404. The routes use the same auth as the graph routes.
@@ -156,7 +193,7 @@ Only tasks marked `http=True` can be started over HTTP; any other task answers 4
 | Route | Does | Scope |
 | --- | --- | --- |
 | `POST /v1/tasks/{name}` | Run now (`{task_id}`), or schedule when the body has `schedule` (`{schedule_id}`). | `tasks:trigger` |
-| `GET /v1/tasks/{id}` | Task: `status`, `progress`, `result`, `error`. Schedule: its task, time and arguments. | `tasks:read` |
+| `GET /v1/tasks/{id}` | Task: `status`, `progress`, `result`, `error`. Schedule: its task, time, arguments, `status` and `runs`. | `tasks:read` |
 | `PATCH /v1/tasks/{schedule_id}` | Change a schedule's time. | `tasks:trigger` |
 | `POST /v1/tasks/{id}/cancel` | Cancel a task, or delete a schedule. | `tasks:cancel` |
 
@@ -169,7 +206,7 @@ curl -X POST http://localhost:8000/v1/tasks/make_report \
 # read it
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/v1/tasks/$TASK_ID
 
-# schedule it: exactly one of cron, at (ISO time, once) or every (seconds)
+# schedule it: exactly one of cron (UTC), at (ISO time, once) or every (seconds, 10 to 31536000)
 curl -X POST http://localhost:8000/v1/tasks/make_report \
   -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
   -d '{"kwargs": {"topic": "sales"}, "schedule": {"cron": "0 2 * * *"}}'
@@ -180,13 +217,18 @@ curl -X PATCH http://localhost:8000/v1/tasks/$SCHEDULE_ID \
   -d '{"schedule": {"every": 3600}}'
 ```
 
-The status is `queued`, `running`, `success`, `failure` or `cancelled`. Rules:
+The status of a task is `queued`, `running`, `success`, `failure` or `cancelled`. The status of a schedule is `scheduled`, or `sent` for a one-time schedule the scheduler has already sent. Rules:
 
 - The body is `{"args": [], "kwargs": {}, "schedule": ...}`.
-- Callers set only the task's plain arguments. `config`, `user`, `user_id`, injected parameters, unknown names and extra positional arguments are refused with 422. The server fills the run config from the caller.
+- Callers set only the task's plain arguments. The call must fit the task's signature, for run and for schedule: `config`, `user`, `user_id`, injected parameters, unknown names, missing arguments, repeated arguments and extra positional arguments are refused with 422 before anything is queued. The server fills the run config from the caller.
+- A schedule that is not valid (see [Rules for schedules over HTTP](#rules-for-schedules-over-http)) is 422.
+- Codes: 202 started or scheduled, 404 unknown task, unknown id or outside your reach, 422 bad arguments or schedule, 429 more than 100 schedules for the user, 409 for PATCH of a one-time schedule that already ran or of a schedule that another PATCH or cancel is changing (try again), 501 no Redis for schedules.
 - Tasks and schedules belong to the user who started them. `GET` and cancel follow the caller's reach (`own`, `tenant` or `all`); starting a task and `PATCH` stay on the caller's own. Anything outside the caller's reach gets 404, the same as for an unknown id.
 - There is no list route. Keep the ids you get back.
 - A schedule runs as the user who created it, with that user's roles as they are when each run starts. It lives until you cancel it; a one-time `at` schedule expires after its run result does.
+- `GET /v1/tasks/{schedule_id}` has a `runs` list: the task ids of the last 20 runs the scheduler sent, newest first. Each id works with `GET /v1/tasks/{id}` and `POST /v1/tasks/{id}/cancel` like a run you started yourself, with the same owner and reach checks. Cancelling the schedule drops the list, not the runs' own records.
+- A task that loses `http=True` can no longer be changed over HTTP (PATCH answers 404), and the scheduler stops sending its HTTP schedules and logs it. Cancel them.
+- `authorize` on your `BaseAuth` class gets the task name as the resource on these routes (from the path on `POST`, from the stored task or schedule on the others). A custom rule can allow or refuse per task. Audit events carry `task/<name>` or `task/<name>/<id>`.
 - Scheduling needs the Redis result backend; with the `memory` broker or result backend the answer is 501.
 - In production the `error` field is the exception class name only.
 - Grant `tasks:trigger`, `tasks:read` and `tasks:cancel` to the roles that need them, in `auth.roles`. There is no `tasks:pause`. See [API authentication](/docs/server/auth).
@@ -200,6 +242,15 @@ With auth on, the worker checks every run again before it executes, because the 
 3. The rebuilt identity goes into `config["user"]` and `TaskContext.config`.
 
 Token expiry and revocation are not checked, because a queued run has no live token. A user whose role loses `tasks:trigger` stops running at the next run, and a revoked user's already queued tasks still run until their role changes. Restart workers after you change `auth.roles`.
+
+### Audit in the worker
+
+With the `audit` block enabled in `10xgraph.json`, the worker writes the audit log like the API does:
+
+- Each run's `tasks:trigger` decision is an `access` event, `allowed` or `denied`. The resource is `task/<name>/<task id>`. A `denied` event has the reason `invalid_identity` (the stored identity cannot be rebuilt) or `error` (`authorize` raised).
+- Tool calls and approvals of a graph run inside a task are recorded as on `/v1/graph/invoke` (`tool:call`, `tool:approve`).
+
+Tasks that run in the API on the `memory` broker are not covered. See [Audit log](/docs/server/audit-log).
 
 ### System identities
 
@@ -252,9 +303,29 @@ With the `metrics` block in `10xgraph.json` enabled, the worker exports these me
 
 ## Cancel and progress
 
-`POST /v1/tasks/{id}/cancel` sets a flag. A queued task is then not run and ends as `cancelled`. A running task is not killed: it stops when it checks `await ctx.cancelled()` and returns, and then ends as `success` with whatever it returned. Check it between steps of long work.
+`POST /v1/tasks/{id}/cancel` sets a flag. A queued task is then not run and ends as `cancelled`. A running task is not killed: it stops when it checks `await ctx.cancelled()` and returns, and then ends as `success` with whatever it returned. Check it between steps of long work. A task that is cancelled before it starts does not set up its dependencies.
 
 Progress is what the task passes to `tracker.set_progress(state, meta)`. `GET /v1/tasks/{id}` shows it under `progress`, for example `{"state": "STARTED", "meta": {"step": 2}}`.
+
+## Status and results
+
+- The final status is written after the result is saved. If the result cannot be saved (a return value that is not JSON-serialisable, or a result backend that is down), the task ends as `failure`, `result` is `null` and `error` says `The result could not be saved (TypeError); see the worker log`. It never shows `success` with an empty result.
+- A status only moves forward. A late `queued` does not replace `running`, and cancel changes only a task that is still `queued`: it does not overwrite `running` or a final status.
+- A task that raises TaskIQ's `NoResultError` ends as `success`.
+
+## Retries
+
+Retries are off unless the task sets `retry_on_error=True`:
+
+```python
+@broker.task(task_name="make_report", http=True, retry_on_error=True)
+async def make_report(topic: str) -> dict: ...
+```
+
+- `worker.retries` is the number of retries after the first run. `"retries": 3` gives up to 4 runs, and `"retries": 1` gives one retry. (In 1.0 it gave one run fewer than that.)
+- A per-task `max_retries` label keeps TaskIQ's meaning: the number of runs minus one.
+- The status stays `running` between attempts and ends when the last attempt ends.
+- These are never retried, because the task body did not run or would fail the same way: a task cancelled before it started, a run the worker refused (no permission, or an identity that cannot be rebuilt), a call whose arguments do not fit the task, and a message over the delivery limit.
 
 ## Delivery guarantees
 
@@ -262,11 +333,78 @@ What happens when a worker dies in the middle of a task depends on the broker:
 
 | Broker | If a worker dies |
 | --- | --- |
-| Redis Streams | At-least-once. The worker acknowledges after the task ends. Another worker takes the message after `idle_timeout` (milliseconds, default 600000), also on an idle queue. A live worker renews its claim, so a long task is not run twice. |
+| Redis Streams | At-least-once. The worker acknowledges after the task ends. A live worker renews its claim every `idle_timeout / 3`, so a running task is not taken by another worker. Another worker takes a dead worker's message after `idle_timeout` (milliseconds, default 600000), also on an idle queue. |
 | RabbitMQ | At-least-once. The worker acknowledges after the task ends. RabbitMQ requeues the message as soon as the dead worker's connection drops, and another worker runs it within a second. RabbitMQ also gives up on a delivery that stays unacknowledged longer than its `consumer_timeout` (30 minutes by default) and requeues it, so raise that for longer tasks. |
 | Kafka | At-most-once in practice. Kafka has no per-message acknowledgement: the consumer commits its read position every 5 seconds. If the worker dies before that commit, the group takes over after about 10 seconds and the task runs again. If it dies later, the task is lost and its status stays `running` until `result_ttl`. |
 
-Write tasks so a rerun is safe. Retries after an error are opt-in: `@broker.task(retry_on_error=True)`, up to `retries`.
+Write tasks so a rerun is safe. A task can also run again when its worker is alive: on Redis Streams, if Redis stays unreachable for longer than `idle_timeout` (the claim is not renewed), or if the acknowledgement cannot be sent after four tries (see [Redis keys and outages](#redis-keys-and-outages)).
+
+### How the Redis Streams worker reads
+
+- It reads and claims one message at a time, and only when it has a free slot. A busy worker does not hold the rest of the queue while other workers sit idle. `xread_count` and `unacknowledged_batch_size` are fixed at 1.
+- A message whose handler ends without an acknowledgement (for example a failing shutdown hook) is logged and released for redelivery. Before, its claim was renewed for ever and the status stayed `running`.
+- On shutdown, messages the worker still holds are released at once, so another worker takes them without waiting for `idle_timeout`.
+
+### Poison messages
+
+A task that kills its worker every time (an out-of-memory crash, for example) would be taken and run again for ever. `worker.broker.options.max_deliveries` (default `5`, Redis Streams only) stops that:
+
+```json
+"broker": {"type": "redis_stream", "options": {"max_deliveries": 5}}
+```
+
+A message delivered more often than that is not run. The task ends as `failure` with a `DeliveryLimitError` as its error, the error is saved as the result, and the message is acknowledged. It is not retried.
+
+## Shutdown
+
+On SIGTERM `10xgraph worker` stops reading, waits up to `--wait-tasks-timeout` (default 600 seconds) for running tasks, then runs the shutdown hook within `--shutdown-timeout` (default 60 seconds). The hook closes the graph, the cache store and the auth class, then flushes the last metrics and traces, in the same order as the API server. A task still running when the first wait ends is cut, and its message is released for another worker. Set your orchestrator's kill timer above both waits: the files from `10xgraph build` use 720 seconds. If you start the worker yourself, give it the same margin. See [Graceful shutdown](/docs/guides/graceful-shutdown).
+
+## Redis keys and outages
+
+### Key names
+
+Everything the jobs layer keeps in Redis uses `REDIS_KEY_PREFIX` when you set it, so two deployments on one Redis do not read each other's queues or schedules. Without a prefix, the names in the left column are used. With `REDIS_KEY_PREFIX=P`, `P:` goes in front of each.
+
+| What | Key |
+| --- | --- |
+| Task stream and consumer group (Redis Streams) | `taskiq` |
+| Task result | `<task id>` |
+| Task progress | `<task id>__progress` |
+| Dynamic schedules | `schedule:cron`, `schedule:interval`, `schedule:time:*`, `schedule:data:<id>` |
+| Scheduler lease | `10xgraph:scheduler:lease` |
+| Task status | `10xgraph:cache:jobs:status:<task id>` |
+| Cancel flag | `10xgraph:cache:jobs:cancel:<task id>` |
+| Schedule record | `10xgraph:cache:jobs:schedule:<schedule id>` |
+| Schedule count per user | `10xgraph:cache:jobs:schedules:<owner>` |
+| Last runs of a schedule | `10xgraph:cache:jobs:schedule-runs:<schedule id>` |
+
+A `queue_name` or `consumer_group_name` you set in `worker.broker.options`, or a `prefix_str` in `worker.result_backend.options`, still wins over the prefix.
+
+If you already set `REDIS_KEY_PREFIX` before this change, the stream, results, schedules and lease used to have no prefix. After the upgrade the new keys are read and the old ones are not. To move over:
+
+1. Stop the API from sending tasks, and wait until the workers are idle so the queue is empty.
+2. Deploy the new version.
+3. Rename each existing HTTP schedule key (`schedule:cron`, `schedule:interval`, `schedule:time:*` and `schedule:data:*`) to `<prefix>:schedule:...` with Redis `RENAME`, or cancel the schedules and create them again.
+
+Results of runs that finished before the upgrade are no longer shown. Without a prefix, nothing changes. The core graph's own cache keys have their own `redis_key_prefix` option (see [Production checklist](/docs/server/production-checklist)).
+
+### When Redis is down
+
+The worker keeps running when the broker Redis drops. It logs the error, reads again with a back-off (1 second, doubling up to 30), recreates the consumer group if Redis restarted without its data, and does not touch running tasks. A finished task's acknowledgement is retried (four tries, 1, 2 and 4 seconds apart). In a live check, a 120 second task survived a Redis restart and ran once. A queue that Redis lost without persistence is gone, so turn on persistence for the broker Redis.
+
+While Redis is down:
+
+- The API cannot send new tasks.
+- A running task cannot save progress or its result. Its status cannot be written either: the write fails and is only logged (`status not saved`). The task is not marked `failure` for that.
+- A task whose acknowledgement could not be sent is delivered again when Redis is back, and runs again.
+
+Run the broker and the cache store on separate Redis instances. The broker Redis holds the queue, results, progress and dynamic schedules; the cache store holds status, cancel flags, schedule records and the other state the API shares (run locks, rate limits, token revocation). When both live on one Redis, one outage stops queueing and also stops status updates, so a failed task cannot report why. With two instances:
+
+| Down | Effect |
+| --- | --- |
+| Broker Redis only | No new tasks and no new results. Status and cancel keep working for what is already stored. |
+| Cache store only | Tasks still run and results are saved. Status, cancel flags and schedule records cannot be read or written: status updates are only logged, so a task can keep an old status until it runs again. The API's own cache-store features fail too. |
+| Both | Nothing works. The worker waits and retries, and queued tasks resume when the broker is back. |
 
 ## Limits
 

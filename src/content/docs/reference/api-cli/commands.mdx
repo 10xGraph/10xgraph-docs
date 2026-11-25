@@ -4,7 +4,7 @@ seoTitle: "10xGraph CLI command reference"
 description: "Every 10xGraph CLI command with its purpose, usage line, options and defaults: init, dev, build, worker, scheduler, eval, test, skills, audit, config, demo and version."
 section: Reference
 order: 410
-updated: "2026-11-25"
+updated: "2026-11-26"
 group: "CLI and configuration"
 ---
 
@@ -141,7 +141,7 @@ At an interactive terminal, `build` asks where you will deploy, whether to run a
 
 ## worker and scheduler
 
-Run the TaskIQ worker and scheduler for the `worker` key of `10xgraph.json`. Run exactly one scheduler.
+Run the TaskIQ worker and scheduler for the `worker` key of `10xgraph.json`. Run exactly one scheduler: a second one waits as a standby (Redis lease) and sends nothing until the first stops. The scheduler refuses the `memory` broker.
 
 ```bash
 10xgraph worker [--config FILE] [TASKIQ_ARGS]
@@ -152,7 +152,17 @@ Run the TaskIQ worker and scheduler for the `worker` key of `10xgraph.json`. Run
 |---|---|---|
 | `--config`, `-c` | `10xgraph.json` | Config file with a `worker` key |
 
-Other options are passed to TaskIQ unchanged. See [Run background tasks with a worker](/docs/server/background-tasks).
+Other options are passed to TaskIQ unchanged. These defaults are added unless you pass the flag:
+
+| Command | Flag | Default | Purpose |
+|---|---|---|---|
+| `worker` | `--wait-tasks-timeout` | `600` | Seconds to wait for running tasks after SIGTERM |
+| `worker` | `--shutdown-timeout` | `60` | Seconds for the shutdown hook (graph close, telemetry flush) |
+| `scheduler` | `--update-interval` | `10` | Seconds between reads of the schedule sources |
+| `scheduler` | `--skip-first-run` | on | Nothing runs at start; an `every` schedule first runs one interval later |
+| `scheduler` | `--send-timeout` | `30` | A send that takes longer is logged and skipped |
+
+`worker` refuses `--use-process-pool`. Build files give the worker a 720 second kill grace (both waits plus 60 seconds). See [Run background tasks with a worker](/docs/server/background-tasks).
 
 ## eval
 
