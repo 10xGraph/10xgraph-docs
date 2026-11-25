@@ -4,7 +4,7 @@ description: Durable tasks on TaskIQ with the 10xgraph worker and scheduler, sta
 section: "Background jobs"
 order: 20
 label: "Worker and scheduler"
-updated: "2026-11-07"
+updated: "2026-11-25"
 faq:
   - question: How is this different from BackgroundTaskManager?
     answer: "BackgroundTaskManager runs fire-and-forget work inside the graph process and loses it on a crash. Tasks on this page go through a broker to a separate worker, survive a restart and can be scheduled. See [Run work in the background](/docs/guides/run-background-tasks) for the in-process one."
@@ -239,7 +239,7 @@ The worker logs every task and sends the same steps as events to the event publi
 | `post_execute` | `end` | `finished` | Success only, with `duration`. |
 | `post_save` | `result` | `saved` | No return value in the event. |
 
-A failed task sends no event. `on_error` logs it at ERROR level with the traceback and counts it in `tenxgraph.task.runs` with `status="failure"`. See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability).
+`on_error` logs it at ERROR level with the traceback and counts it in `tenxgraph.task.runs` with `status="failure"`. See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability).
 
 Metrics and traces come through OpenTelemetry, set up like the API (one setup shared by the API and the worker): `OTEL_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_LEVEL`. Each task becomes a span, and two metrics are exported:
 
@@ -270,8 +270,5 @@ Write tasks so a rerun is safe. Retries after an error are opt-in: `@broker.task
 
 ## Limits
 
-- Brokers: Redis Streams, RabbitMQ and Kafka. Results and schedules: Redis. Nothing else for now.
 - Kafka: a task lost when its worker dies (see above). The default topic `taskiq_topic` has one partition, so only one worker in the group reads it; create the topic with more partitions to spread work. A new consumer group starts at the latest offset, so tasks sent before the first worker ever joined are skipped. Building the Kafka broker connects to Kafka at once, so the API and worker need it reachable at startup.
 - The cancel check and the argument guard do not reach process-pool workers, so the worker refuses that mode.
-- One scheduler.
-- No list route and no way to kill a running task.

@@ -5,17 +5,17 @@ section: API server
 group: Interfaces
 order: 90
 label: Files and multimodal
-updated: "2026-10-27"
+updated: "2026-11-25"
 faq:
   - q: How do I restrict which file types my agent accepts?
     a: Set MEDIA_ALLOWED_CONTENT_TYPES to a comma-separated list of MIME types or wildcards (e.g., image/*,application/pdf). Empty (the default) accepts all types.
   - q: What happens to documents when they are uploaded?
     a: If DOCUMENT_HANDLING=extract_text (the default), the server extracts plain text at upload time and caches it. When the client later references that file, the document block is replaced with the cached text before your graph runs.
   - q: Should I use local or cloud storage?
-    a: Use cloud storage (S3 or GCS) for any multi-worker deployment. Local storage assumes a shared filesystem and loses data on restart; memory storage loses everything on every restart.
+    a: Use cloud storage (S3 or GCS) for any multi-worker deployment. Local storage needs a filesystem every worker shares; memory storage loses everything on restart.
 ---
 
-The API server stores uploads with an owner recorded for each file and resolves file references before model calls, so clients never send raw base64 or public URLs. Upload once, reference by ID, and rely on the server to resolve the reference before model calls. This works the same way across REST (`/v1/graph/invoke`, `POST /v1/graph/stream`) and WebSocket (`WS /v1/graph/ws`), with built-in ownership enforcement so users cannot reference each other's files.
+The API server stores uploads with an owner recorded for each file and resolves file references before model calls, so clients send a `file_id` instead of raw bytes. Upload once, reference by ID, and rely on the server to resolve the reference before model calls. This works the same way across REST (`/v1/graph/invoke`, `POST /v1/graph/stream`) and WebSocket (`WS /v1/graph/ws`), with built-in ownership enforcement so users cannot reference each other's files.
 
 Upload ownership and size limits are part of the [security model](/docs/production/security-model).
 
@@ -207,11 +207,9 @@ If you run multiple workers without a checkpointer, each worker maintains its ow
 
 ## External media URLs
 
-A client can send a media block with a URL instead of a `file_id`. Before the run starts, the server checks every external URL (`http(s)://`, `gs://` and so on) in client input against the graph's media fetch policy. This covers invoke, stream, WebSocket, AG-UI, `POST /v1/threads/{thread_id}/messages` and `PUT /v1/threads/{thread_id}/state`. A blocked URL returns `400` with the policy's message. On the WebSocket it comes back as an error chunk. The check touches no network.
+A client can send a media block with a URL instead of a `file_id`. Before the run starts, the server checks every external URL (`http(s)://`, `gs://` and so on) in client input against the graph's media fetch policy. This covers invoke, stream, WebSocket, AG-UI and `PUT /v1/threads/{thread_id}/state`. A blocked URL returns `400` with the policy's message. On the WebSocket it comes back as an error chunk. The check touches no network.
 
 The policy is `MediaFetchPolicy` from core. You set it in code with `graph.compile(media_policy=...)`, and the API has no setting for it. Without one, the default policy applies: `http` and `https` to public hosts only. A client `gs://` URL is refused unless its bucket is listed in `allowed_gcs_buckets`, because on Vertex AI the server reads `gs://` with its own credentials. Your own graph code may still pass any `gs://` URL. All fields, the rules that cannot be disabled and an example are in [Sending media from Python](/docs/guides/send-media#control-which-urls-the-server-downloads).
-
-The check needs a core release that ships `MediaFetchPolicy`. On older cores it is skipped.
 
 ## Delete a file and file lifecycle
 
@@ -238,8 +236,6 @@ You rarely need it, because uploaded files are cleaned up with the conversations
 - Files uploaded before this tracking existed have no `threads` record and are never deleted automatically.
 - With auth off, uploads have no owner and nothing is tracked, so nothing is deleted automatically.
 - A cleanup failure is logged. It never fails the delete of the message or thread.
-
-Tracking needs a core release with `BaseMediaStore.update_metadata`. On older cores, nothing is tracked or deleted automatically.
 
 To keep files after their messages and threads are gone, set `media.delete_with_thread` to `false` in `10xgraph.json`. The server still records the links but never deletes a file automatically. The default is `true`. You can also edit it in `10xgraph config`.
 
@@ -306,7 +302,7 @@ MEDIA_CLOUD_REGION=us-east-1
 MEDIA_CLOUD_PREFIX=10xgraph-media
 ```
 
-Files are uploaded to S3 or GCS, accessible to all workers instantly. This is the recommended setup for multi-worker deployments. The cloud backend is stateless and horizontally scalable.
+Files are uploaded to S3 or GCS, accessible to all workers instantly. This is the recommended setup for multi-worker deployments.
 
 #### AWS S3 credentials
 

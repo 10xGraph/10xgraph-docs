@@ -6,19 +6,19 @@ section: "Data and state"
 group: "Your databases"
 order: 80
 label: Backup and restore
-updated: "2026-10-27"
+updated: "2026-11-25"
 faq:
   - question: "What happens if I restore an old Postgres backup with Redis still running?"
     answer: "The Redis cache can hold state newer than the restored database. Postgres is the source of truth and a failed version check invalidates the cache entry, but clear the checkpointer cache keys before restoring so no stale entries survive."
   - question: "Can I restore a single thread without a full restore?"
     answer: "Yes. Restore the dump into a scratch database, then copy that thread's rows from the thread tables into production using SQL."
   - question: "How often should I test my restore process?"
-    answer: "At least quarterly, or before any schema-changing release. A backup you have never restored is a hypothesis, not a recovery plan."
+    answer: "At least quarterly, or before any schema-changing release."
 ---
 
 ## What is durable and what is not
 
-10xGraph persists agent conversations and execution state across two storage layers, each serving a different purpose. Understanding what each holds and which backups to keep is essential for disaster recovery.
+10xGraph persists agent conversations and execution state across two storage layers, each serving a different purpose.
 
 For how durable state supports restarts and multiple replicas, see [scaling and reliability](/docs/production/scaling).
 
@@ -62,7 +62,7 @@ The `version` column in `states` is the linchpin of optimistic concurrency contr
 
 ### Schema versioning
 
-The current schema version is **5**. If you pass a custom `schema=` to `PgCheckpointer`, the tables are schema-qualified (e.g., `myschema.threads`), and your backup must target that schema:
+The schema version is stored in the `schema_version` table. If you pass a custom `schema=` to `PgCheckpointer`, the tables are schema-qualified (e.g., `myschema.threads`), and your backup must target that schema:
 
 ```bash
 pg_dump "$DATABASE_URL" --format=custom \
@@ -110,8 +110,6 @@ Always verify a backup is readable before you trust it:
 pg_restore --list 10xgraph-tables.dump | head
 ```
 
-A backup you have never restored is a hypothesis, not a recovery plan.
-
 ### Before a release upgrade
 
 Always back up before applying a schema migration. Migrations run automatically on the first startup of a new version:
@@ -125,17 +123,7 @@ pip install --upgrade "10xgraph[pg_checkpoint]"
 10xgraph dev --no-open
 ```
 
-If something goes wrong during migration, you can restore from the pre-upgrade dump. See [Upgrade to 1.0](/docs/project/upgrade-to-1.0#database-migration) for the Postgres schema v4 migration.
-
-### Automate with your platform
-
-Whatever recovery mechanism your platform offers is usually better than cron on a single box:
-
-- **Cloud managed Postgres:** point-in-time recovery, automated backups, cross-region replication
-- **Kubernetes:** a sidecar CronJob that runs `pg_dump`, or rely on your managed database
-- **VPS:** `pg_dump` to object storage (S3, GCS) on a schedule
-
-What matters is knowing your recovery point objective (RPO) and having tested a restore against it.
+If something goes wrong during migration, you can restore from the pre-upgrade dump. See [Upgrade to 1.0](/docs/project/upgrade-to-1.0#database-migration).
 
 ---
 
@@ -249,7 +237,7 @@ Large state_history_limit values trade storage for more history available during
 
 ## Test your restore
 
-A restoration procedure you have never tested is a hope, not a plan. Test at least once per quarter or before any major release.
+Test at least once per quarter or before any major release.
 
 1. Restore the latest backup into a scratch database (not production).
 2. Point a staging server at the scratch database.
@@ -257,27 +245,6 @@ A restoration procedure you have never tested is a hope, not a plan. Test at lea
 4. Verify the response includes context from before the restore (the model references earlier messages).
 
 If step 4 fails, your backup is incomplete. Usually, the `messages` table was excluded from a table-scoped dump.
-
-Example test command:
-
-```bash
-# Restore to scratch
-createdb 10xgraph_test
-pg_restore --no-owner --dbname 10xgraph_test 10xgraph-tables.dump
-
-# Point the staging server's checkpointer DSN at postgresql://localhost/10xgraph_test
-
-# Invoke an existing thread
-curl -X POST http://localhost:8000/v1/graph/invoke \
-  -H "Authorization: Bearer $TEST_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [{"role": "user", "content": [{"type": "text", "text": "Continue the conversation"}]}],
-    "config": {"thread_id": "thr_existing_id"}
-  }'
-
-# Confirm the response includes old context
-```
 
 ---
 

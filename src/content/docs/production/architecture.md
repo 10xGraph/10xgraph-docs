@@ -4,17 +4,17 @@ seoTitle: "10xGraph architecture: how a served agent works"
 description: How a request moves through a served 10xGraph agent, which parts hold state, and which parts are stateless API workers you can scale out.
 section: "Platform"
 order: 20
-updated: "2026-11-10"
+updated: "2026-11-25"
 faq:
   - q: "Which parts of a served 10xGraph agent are stateless?"
     a: "The API workers. Conversation state lives in the checkpointer (Postgres, with an optional Redis hot cache), so any worker can serve any request and you need no sticky sessions. The stores behind the workers are the stateful part."
   - q: "Where does a thread's history live?"
-    a: "In the checkpointer you pass to graph.compile(). With PgCheckpointer, Postgres holds versioned state and Redis holds a cache of the latest state. The checkpointer key in 10xgraph.json is not read by the server."
+    a: "In the checkpointer you pass to graph.compile(). With PgCheckpointer, Postgres holds versioned state and Redis holds a cache of the latest state. A `checkpointer` key in 10xgraph.json is refused at startup."
   - q: "What happens if two requests run on the same thread at once?"
     a: "The server takes a per-thread run lock before the graph starts. A second run waits up to 30 seconds and then gets a 409. Postgres writes are also version-checked, so a stale write is rejected with a 409 instead of overwriting newer state."
 ---
 
-A served 10xGraph agent is a stateless FastAPI worker in front of a graph, with all durable state in the stores you attach: a checkpointer (Postgres, with an optional Redis cache), an optional vector memory store, and a media store. Every request passes the same ordered set of middleware and guards before your graph runs, so you write the graph and the server supplies the rest. This page walks that path and shows where each kind of state lives.
+A served 10xGraph agent is a stateless FastAPI worker in front of a graph, with all durable state in the stores you attach: a checkpointer (Postgres, with an optional Redis cache), an optional vector memory store, and a media store.
 
 ## The shape of a deployment
 
@@ -25,7 +25,7 @@ flowchart LR
   LB --> W2[API worker]
   LB --> W3[API worker]
   W1 & W2 & W3 --> PG[(Postgres: durable state)]
-  W1 & W2 & W3 --> R[(Cache store: Redis by default; locks, caps, revocation)]
+  W1 & W2 & W3 --> R[(Cache store: Redis or per process; locks, caps, revocation)]
   W1 & W2 & W3 --> V[(Vector store: long-term memory)]
   W1 & W2 & W3 --> M[(Media store)]
   W1 & W2 & W3 -- enqueue --> B[(Broker: TaskIQ)]
@@ -39,7 +39,7 @@ flowchart LR
 
 The job worker and the scheduler are separate processes (`10xgraph worker`, `10xgraph scheduler`) that you start only if you use [background jobs](/docs/server/background-tasks). The API enqueues a task on the TaskIQ broker, the worker runs it, and the scheduler enqueues scheduled ones. A job worker loads the same graph, checkpointer, store and cache store as the API.
 
-Workers hold no conversation state between requests. With the in-memory cache store they hold per-process counters, which is why a shared cache store (Redis by default) matters once you run more than one worker. See [Scaling and reliability](/docs/production/scaling) for exactly what it shares, and [Bring your own backend](/docs/server/bring-your-own-backend) for replacing it.
+Workers hold no conversation state between requests. With the in-memory cache store they hold per-process counters, which is why a shared cache store (Redis) matters once you run more than one worker. See [Scaling and reliability](/docs/production/scaling) for exactly what it shares, and [Bring your own backend](/docs/server/bring-your-own-backend) for replacing it.
 
 ## The request path
 
@@ -54,14 +54,12 @@ This is the order a request travels, outermost layer first. The middleware order
 | 5 | Rate limit | Runs only when `cache_store.rate_limit` is set in `10xgraph.json`. Counters live in the API's cache store (in-memory, Redis or your own). |
 | 6 | Request size | Rejects bodies over `MAX_REQUEST_SIZE`. The upload route gets room for `MEDIA_MAX_SIZE_MB`. |
 | 7 | Gzip | Compresses responses over 1000 bytes, except `/v1/graph/stream`, which must send data as it is produced. |
-| 8 | Route guard | `RequirePermission` authenticates the caller (JWT or your `BaseAuth`), checks token revocation if configured (a cache store feature), then calls `BaseAuth.authorize` for the route's permission (403 if missing). Each thread route then reads the thread through the caller's reach (`own`, `tenant` or `all`), so by default a thread is visible only to its owner. A foreign thread is a 404 before the graph is touched. With `audit` enabled, the allowed or denied decision is written as one metadata-only line to the `tenxgraph_api.audit` logger (see [Audit log](/docs/server/audit-log)). |
+| 8 | Route guard | `RequirePermission` authenticates the caller (JWT or your `BaseAuth`), checks token revocation if configured (a cache store feature), then calls `BaseAuth.authorize` for the route's permission (403 if missing). Each thread route then reads the thread through the caller's reach (`own`, `tenant` or `all`), so by default a thread is visible only to its owner. A foreign thread is a 404 before the graph is touched. |
 | 9 | Per-thread run lock | One run at a time on a thread. A busy thread is waited on for up to 30 seconds, then a 409. `on_busy: "cancel"` asks the active run to stop first. |
 | 10 | Per-user run cap | `runs.max_concurrent_per_user` (default 10) bounds runs in flight for a user. Over the cap is a 429. |
 | 11 | Graph run | Your compiled graph runs, bounded by `runs.timeout` if set (invoke returns 504, a stream ends with an error chunk). |
 | 12 | Nodes and tools | Each node and tool call can have its own timeout (`node_timeout` and `tool_timeout`, no default), and tools run in parallel up to a cap (default 10). |
 | 13 | Persistence | The checkpointer saves state at each step. Stores and media are read and written as the graph asks. |
-
-Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
 
 Both lock and cap are taken before the response starts, so a busy or over-cap request gets a real 409 or 429 status, not an error halfway through a stream. See [Security model](/docs/production/security-model) for what steps 3, 4, 8 and 9 protect against.
 
@@ -77,9 +75,7 @@ Both lock and cap are taken before the response starts, so a busy or over-cap re
 | Vector memory store | Long-term memory across threads (PgVectorStore or Qdrant). | The `BaseStore` you pass to the graph, served at `/v1/store` | Until you delete it |
 | Media store | Uploaded and generated files, referenced by `graph://media/` URLs. | The media store you configure | Until deleted; by default a file is deleted with the last thread that references it (`media.delete_with_thread`) |
 
-Reference: [BaseStore](/docs/reference/python/memory-stores) · Source: [base_store.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/store/base_store.py)
-
-Postgres is the source of truth. Redis is a cache and a coordination tool, not a second copy you must back up. The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`; `10xgraph.json` has no `checkpointer` key. For the full model see [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
+Postgres is the source of truth. Redis is a cache and a coordination tool, not a second copy you must back up. The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`; a `checkpointer` key in `10xgraph.json` is refused at startup. For the full model see [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
 
 ## Stateless and stateful parts
 
@@ -95,12 +91,11 @@ Because a thread's state is in the checkpointer, a request can land on any worke
 
 ## Where logs and audit lines go
 
-10xGraph does not store logs. The API and the job worker write to stdout: application logs in text, or one JSON object per line with `LOG_FORMAT=json`, and audit events as JSON lines on the `tenxgraph_api.audit` logger. Your container logging or log pipeline collects, keeps and protects them. The audit `publisher` sink also sends events through the configured publisher (Kafka, Redis, RabbitMQ or OTEL).
+10xGraph does not store logs. The API and the job worker write to stdout: application logs in text, or one JSON object per line with `LOG_FORMAT=json`, and audit events as JSON lines on the `tenxgraph_api.audit` logger. Your container logging or log pipeline collects, keeps and protects them. The audit `publisher` sink also sends events through the configured events publisher (Kafka, Redis or RabbitMQ; tracing publishers are skipped).
 
 ## What this does not give you
 
 - Interactive runs (invoke and stream) execute inside the API worker that received the request, so such a run is tied to its HTTP or WebSocket connection's process. For work that must outlive a request, or run on a schedule, enqueue a [background job](/docs/server/background-tasks) instead. Jobs are delivered at least once, so write them to be safe to rerun.
-- With `auth: null` the server starts open, even with `MODE=production`. Configure auth before you expose it. See [what 10xGraph does not protect](/docs/production/limits).
 
 ## Related
 

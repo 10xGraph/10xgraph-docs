@@ -4,7 +4,7 @@ description: "Generate a Kubernetes Deployment and Service with 10xgraph build -
 section: "Deploy"
 order: 20
 label: Kubernetes
-updated: "2026-10-27"
+updated: "2026-11-25"
 faq:
   - question: "Why does the termination grace period need to be so long?"
     answer: "Agent runs are not typical web requests. An LLM call alone can take minutes, and tools add more time. Kubernetes default 30-second termination grace period kills pods mid-run. The server uses 600 seconds for shutdown, so the termination window must exceed that."
@@ -16,13 +16,11 @@ faq:
 
 ## The problem: long runs and short timeouts
 
-A typical agent invocation chains several operations: the client calls the server, the server awaits an LLM response (up to 10 minutes for some models), the LLM might trigger tool calls, tools execute, results return to the LLM, and the response streams back to the client. The entire request can stay open for 20 minutes or more. In production the server cancels a run after 300 seconds unless you set `runs.timeout` in `10xgraph.json`, so raise it to match your slowest runs.
+Agent runs can last minutes. In production the server cancels a run after 300 seconds unless you set `runs.timeout` in `10xgraph.json`.
 
 Kubernetes' default pod lifecycle is hostile to this. When you trigger a rolling deploy, the kubelet gives a pod 30 seconds to shut down gracefully before sending SIGKILL. If the app is still in an LLM call, the pod dies mid-request, and the client's stream breaks.
 
 On SIGTERM the generated image answers `503` on `/health/ready` (`draining`) so the Service stops routing to the pod, gives open runs up to 540 seconds to finish, and ends open streams with an "interrupted" chunk the client can resume from. Details are in [Graceful shutdown](/docs/guides/graceful-shutdown).
-
-For the scaling model behind these settings, see [scaling and reliability](/docs/production/scaling). Draining runs on shutdown is covered in [Graceful shutdown](/docs/guides/graceful-shutdown).
 
 `10xgraph build --k8s` generates a manifest that fixes this: it sets the termination grace period, pre-termination delay, and probe timeouts so that in-flight runs finish normally, even during deploys.
 
@@ -36,7 +34,7 @@ Create a `Dockerfile` and Kubernetes manifest in one command:
 
 This produces three files:
 
-- `Dockerfile` with a production-ready image that starts Gunicorn with `TenxGraphUvicornWorker` and a 600-second graceful timeout
+- `Dockerfile` with an image that starts Gunicorn with `TenxGraphUvicornWorker` and a 600-second graceful timeout
 - `.dockerignore`
 - `k8s.yaml` containing a Deployment and a Service
 
@@ -48,7 +46,7 @@ If your `10xgraph.json` has a `worker` key with a broker other than `memory`, `b
 
 ### What the generated manifest includes
 
-The manifest is a working skeleton. It sets these values, which are easy to get wrong:
+The manifest sets these values:
 
 | Setting | Value | Purpose |
 | --- | --- | --- |
@@ -60,6 +58,8 @@ The manifest is a working skeleton. It sets these values, which are easy to get 
 The readiness probe is strict (10-second intervals) because false positives only temporarily remove a pod from rotation. The liveness probe is slack (30-second intervals, 5 consecutive failures required) because a false positive kills the pod mid-run. Readiness hits `/health/ready` (checkpointer, store and cache store reachable) and liveness hits `/ping`; neither requires authentication.
 
 Default resource requests and limits are also set (500m CPU and 512 Mi memory requested; 2 CPU and 2 Gi memory as limits), but you should tune these based on your agents and deployment environment.
+
+The manifest holds a Deployment with 2 replicas and a Service on port 80 that targets your container port.
 
 ### Security defaults
 
@@ -76,7 +76,7 @@ The pod is locked down out of the box:
 | `emptyDir` volumes | `/tmp`, `/app/uploads` | The only writable paths: Gunicorn worker heartbeats and local media uploads. |
 | `envFrom.secretRef` | `<service>-secrets` | Every secret comes from a Kubernetes Secret. |
 
-If your graph writes to another path (a SQLite checkpointer file, for example), add a volume for it. A Dockerfile generated before this change runs as a named user without a fixed uid; regenerate it with `10xgraph build --force` so `runAsNonRoot` can verify the user.
+If your graph writes to another path (a SQLite checkpointer file, for example), add a volume for it.
 
 ## Customize before applying
 
@@ -93,11 +93,7 @@ containers:
 
 ### Pin the image
 
-The manifest uses `registry.example.com/<service>:1.0.0` as a placeholder image name. Build your own image from the generated `Dockerfile`, push it to your registry, and reference it immutably. A moving `latest` tag makes rollbacks ambiguous and makes image-related issues hard to debug:
-
-- A digest: `my-registry/my-agent@sha256:abc123...`
-- A version tag: `my-registry/my-agent:1.4.0`
-- A git-based tag: `my-registry/my-agent:git-abc123def`
+The manifest uses `registry.example.com/<service>:1.0.0` as a placeholder image name. Build your own image from the generated `Dockerfile`, push it to your registry, and reference it immutably. A moving `latest` tag makes rollbacks ambiguous and makes image-related issues hard to debug.
 
 ### Set CORS origins explicitly
 
@@ -121,21 +117,20 @@ envFrom:
       name: my-agent-secrets
 ```
 
-Create the secret in your cluster before deploying. The server reads `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `REDIS_URL`, `ORIGINS` and `ALLOWED_HOST` itself; names such as the Postgres DSN variable below are whatever your graph module reads when it builds the checkpointer:
+Create the secret in your cluster before deploying. The server reads `JWT_SECRET_KEY`, `REDIS_URL`, `ORIGINS` and `ALLOWED_HOST` itself; names such as the Postgres DSN variable below are whatever your graph module reads when it builds the checkpointer:
 
 ```bash
 kubectl create secret generic my-agent-secrets \
   --from-literal=GOOGLE_API_KEY="..." \
   --from-literal=OPENAI_API_KEY="..." \
   --from-literal=JWT_SECRET_KEY="..." \
-  --from-literal=JWT_ALGORITHM="HS256" \
   --from-literal=ORIGINS="https://app.example.com" \
   --from-literal=ALLOWED_HOST="app.example.com" \
   --from-literal=POSTGRES_DSN="postgresql://..." \
   --from-literal=REDIS_URL="redis://..."
 ```
 
-Use `--from-literal`, not `--from-env-file=.env`: `kubectl` keeps the quotes from a `.env` file as part of each value. Alternatively, use your favorite secrets management tool (Sealed Secrets, External Secrets, Vault, etc.) to manage these safely.
+Use `--from-literal`, not `--from-env-file=.env`: `kubectl` keeps the quotes from a `.env` file as part of each value.
 
 ## Apply and verify
 
@@ -204,36 +199,6 @@ Before scaling, understand how 10xgraph handles distributed state:
 3. **Streaming connections are long-lived.** If your load balancer (or ingress) has an idle timeout shorter than your longest run, the connection will close mid-stream even though the pod is healthy. Set idle timeouts to at least 15 minutes. For AWS ALB/NLB, increase `deregistration_delay`. For Nginx, increase `proxy_read_timeout`.
 
 4. **Concurrent writes conflict.** With optimistic concurrency, two overlapping writes to the same thread raise a `StaleStateError`, and the API returns 409. Clients that fan out against a single `thread_id` should retry or serialize. Most clients do not do this; it only matters if you deliberately parallelize writes to the same thread.
-
-### Horizontal Pod Autoscaling (HPA)
-
-For autoscaling, create an HPA resource:
-
-```yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: my-agent
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: my-agent
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-  behavior:
-    scaleDown:
-      stabilizationWindowSeconds: 900  # Give long runs time to drain
-```
-
-CPU is the provided metric, but it is a poor signal for agent workloads. Agents are typically latency-bound on the model provider, not compute-bound. Scale on queue depth (requests pending in your ingress) or request concurrency (active requests per pod) instead, which your ingress or load balancer can expose.
 
 ## Troubleshooting deployments
 

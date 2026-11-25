@@ -1,21 +1,18 @@
 ---
 title: CLI reference
 seoTitle: "10xGraph CLI command reference"
-description: "Every 10xGraph CLI command with its purpose, usage line, options and defaults: init, dev, build, eval, test, skills, audit, config, demo and version."
+description: "Every 10xGraph CLI command with its purpose, usage line, options and defaults: init, dev, build, worker, scheduler, eval, test, skills, audit, config, demo and version."
 section: Reference
 order: 410
-updated: "2026-11-10"
-faq:
-  - q: What happened to the api and play commands?
-    a: Both were removed before 1.0. Use dev, which starts the Uvicorn development server and opens the hosted playground by default; add --no-open to serve only. dev is not meant for production, so use build and Gunicorn there.
+updated: "2026-11-25"
 group: "CLI and configuration"
 ---
 
-The `10xgraph` command ships with the `10xgraph-api` package. It has ten subcommands: `init`, `dev`, `build`, `eval`, `test`, `skills`, `audit`, `config`, `demo` and `version`. Global options go before the subcommand, and `-h` or `--help` works everywhere.
+The `10xgraph` command ships with the `10xgraph-api` package. It has twelve subcommands: `init`, `dev`, `build`, `worker`, `scheduler`, `eval`, `test`, `skills`, `audit`, `config`, `demo` and `version`. Global options go before the subcommand.
 
 <Callout type="note" title="Coming from agentflow">
 
-The `agentflow` command still works as a deprecated alias of `10xgraph` and prints a notice when it runs. It is removed in 2.0, so switch scripts and CI to `10xgraph`. The package was `10xscale-agentflow-cli` before the rename to 10xGraph.
+The `agentflow` command still works as a deprecated alias of `10xgraph` and prints a notice when it runs. It is removed in 2.0, so switch scripts and CI to `10xgraph`.
 
 </Callout>
 
@@ -42,9 +39,9 @@ Placed before the subcommand, for example `10xgraph --no-color build`.
 
 `--json` cannot be combined with a different `--format`, and `--no-color` cannot be combined with a different `--color`.
 
-On an interactive terminal each command opens with a short intro, under a second, that shows the CLI, core and Python versions and then leaves a one-line header in your scrollback. Press any key to skip it, or Ctrl+C to quit at once. Nothing waits for Enter unless you opted into `--fullscreen`.
+Press any key to skip the intro.
 
-Wherever a command takes `--config` with the default `10xgraph.json`, it uses `agentflow.json` from the same directory when `10xgraph.json` is missing. `10xgraph dev` flags the old name in its startup output.
+Wherever a command takes `--config` with the default `10xgraph.json`, it uses `agentflow.json` from the same directory when `10xgraph.json` is missing.
 
 ## init
 
@@ -59,8 +56,7 @@ Scaffold a new agent project. Interactive `init` asks three questions: the agent
 **Full** writes the recommended setup without asking:
 
 - `"auth": "jwt"`
-- `"id_generator": "uuid"`
-- `"cache_store"` with `"type": "redis"` (no `url`, so Redis comes from `REDIS_URL`), a `rate_limit` of 100 requests per 60 seconds by user with `fail_open` false, and `token_revocation` on
+- `"cache_store"` with `rate_limit` (100 requests per 60 seconds by user, `fail_open` false) and `token_revocation` on; the type is `redis` (no `url`, so `REDIS_URL`) with Postgres storage or a worker, otherwise `memory`
 - WebSocket and AG-UI off
 
 The summary lists these choices, and the next steps point to `10xgraph config` for full control (WebSocket, AG-UI, ID generator, thread naming and every other setting).
@@ -75,15 +71,22 @@ The flags are overrides for scripts:
 | `--mode` | prompt | `quick` or `full`. `--template quick-start\|production` is an alias |
 | `--provider` | prompt | `google`, `openai` or `anthropic` |
 | `--auth` | `jwt` | Full only: `none`, `jwt` or `custom` |
-| `--cache-store` | `redis` | Full only: `memory` or `redis` |
+| `--cache-store` | follows `--storage` | Full only: `memory` or `redis` |
 | `--rate-limit` / `--no-rate-limit` | on | Full only: add or leave out `cache_store.rate_limit` |
 | `--token-revocation` / `--no-token-revocation` | on with auth | Full only: add or leave out `cache_store.token_revocation`. Ignored with `--auth none` |
 | `--websocket` / `--no-websocket` | off | Write `websocket.enabled` |
+| `--storage` | `memory` | Full only: `memory`, `sqlite`, `postgres` or `postgres-memory` |
+| `--evals` / `--no-evals` | on | Full only: scaffold evals |
+| `--tests` / `--no-tests` | on | Full only: scaffold tests |
+| `--ag-ui` / `--no-ag-ui` | off | Full only: enable AG-UI |
+| `--otel` / `--no-otel` | off | Full only: enable OpenTelemetry |
+| `--worker` | `none` | Full only: `none`, `redis`, `rabbitmq` or `kafka` |
+| `--verbose`, `-v` / `--quiet`, `-q` | off | Logging level |
 | `--yes`, `-y` | off | Accept the defaults without prompting |
 | `--non-interactive` | off | Fail instead of prompting |
 | `--dry-run` | off | Preview without writing files |
 
-Quick ignores `--auth`, `--cache-store`, `--rate-limit` and `--token-revocation`. Example for a script:
+Quick ignores every flag marked Full only. Example for a script:
 
 ```bash
 10xgraph init --yes --mode full --name shop-support --provider openai --cache-store redis
@@ -91,7 +94,7 @@ Quick ignores `--auth`, `--cache-store`, `--rate-limit` and `--token-revocation`
 
 ## dev
 
-Start the local development server (Uvicorn) and open the hosted playground when the API is ready. Use `--no-open` to serve only.
+Start the local development server (Uvicorn) and open the hosted playground when the API is ready.
 
 ```bash
 10xgraph dev [--config FILE] [--host HOST] [--port PORT] [--open | --no-open]
@@ -108,7 +111,7 @@ Start the local development server (Uvicorn) and open the hosted playground when
 
 With `MODE=production` set, `dev` prints a warning if you also use `--reload`, or bind to a host other than loopback (`127.0.0.1`, `localhost`, `::1`): the dev server has no TLS and is not meant for a real deployment.
 
-`dev` is the only server command. `10xgraph api` and `10xgraph play` were removed before 1.0. For production, run Gunicorn in the image that `10xgraph build` generates.
+`dev` is not for production: deploy the image from `10xgraph build`.
 
 ## build
 
@@ -127,13 +130,29 @@ Generate deployment files. See [Deploy with Docker and Kubernetes](/docs/server/
 | `--docker-compose / --no-docker-compose` | off | Also write `docker-compose.yml`, omit `CMD` from the Dockerfile |
 | `--k8s / --no-k8s` | off | Also write `k8s.yaml` |
 | `--service-name` | `10xgraph-api` | Service name in generated files |
-| `--worker / --no-worker` | asked | Include a background worker. Needs a non-`memory` `worker` key in `10xgraph.json` |
-| `--scheduler / --no-scheduler` | off | Include the scheduler. Needs the worker |
+| `--worker / --no-worker` | asked | Include a background worker. Needs a non-`memory` `worker` key in `10xgraph.json` and `--docker-compose` or `--k8s` |
+| `--scheduler / --no-scheduler` | off | Include the scheduler. Needs the worker and `--docker-compose` or `--k8s` |
+| `--yes`, `-y` / `--non-interactive` | off | Accept defaults or never prompt, as for `init` |
 | `--verbose`, `-v` / `--quiet`, `-q` | off | Logging level |
 
 `--docker-compose` and `--k8s` cannot be combined: the compose image has no start command, so the pod would crash-loop. The command refuses and exits with an error. Run `build` once with `--k8s`, or once with `--docker-compose`.
 
 At an interactive terminal, `build` asks where you will deploy, whether to run a worker and the scheduler, and whether to overwrite existing files. See [Questions and background jobs](/docs/server/deploy#questions-and-background-jobs).
+
+## worker and scheduler
+
+Run the TaskIQ worker and scheduler for the `worker` key of `10xgraph.json`. Run exactly one scheduler.
+
+```bash
+10xgraph worker [--config FILE] [TASKIQ_ARGS]
+10xgraph scheduler [--config FILE] [TASKIQ_ARGS]
+```
+
+| Option | Default | Purpose |
+|---|---|---|
+| `--config`, `-c` | `10xgraph.json` | Config file with a `worker` key |
+
+Other options are passed to TaskIQ unchanged. See [Run background tasks with a worker](/docs/server/background-tasks).
 
 ## eval
 
@@ -154,7 +173,7 @@ Run agent evaluations. Discovers `*_eval.py` and `eval_*.py` files in the target
 | `--open` / `--no-open` | open | Open the HTML report in your browser when the run ends. Skipped with `--no-report`, `-q`, `--format json`/`jsonl`, `--non-interactive`, when `CI` is set, or when stdout is not a terminal |
 | `--verbose`, `-v` / `--quiet`, `-q` | off | Output level |
 
-Reports are HTML and JSON unless `--no-report` is set. When an option is left at its default, the `evaluation` block of `10xgraph.json` can supply `directory`, `output_dir`, `threshold`, `parallel` and `max_concurrency`.
+Reports are HTML and JSON unless `--no-report` is set. When an option is left at its default, the `evaluation` block of `10xgraph.json` can supply `directory`, `output_dir`, `threshold`, `parallel`, `max_concurrency` and `open_report`.
 
 ## test
 
@@ -196,7 +215,7 @@ Install locations: `.agents/skills/10xgraph` plus a 10xGraph section in `AGENTS.
 
 ## audit
 
-Read-only environment check: Python version, installed packages, core evaluation API, `10xgraph.json` validity, a security check, an audit log check and whether the default port is free. The security check reads only the JSON file and reports production-readiness gaps (auth, rate limiting, token revocation) as warnings; they never fail the command. With `MODE=production`, the audit log check warns when `audit.enabled` is not `true` (see [Audit log](/docs/server/audit-log)). Exits 1 if any check fails, so it works as a CI gate.
+Read-only environment check: Python version, installed packages, core evaluation API, `10xgraph.json` validity, the `auth` rules, a security check, an audit log check and whether the default port is free. The security check reads only the JSON file and reports production-readiness gaps (auth, rate limiting, token revocation) as warnings; they never fail the command. With `MODE=production`, the audit log check warns when `audit.enabled` is not `true` (see [Audit log](/docs/server/audit-log)). Exits 1 if any check fails, so it works as a CI gate.
 
 ```bash
 10xgraph audit [--config FILE]
@@ -221,17 +240,7 @@ Edit and validate `10xgraph.json` in a browser UI. The file is created on first 
 | `--port`, `-p` | `0` (any free port) | Editor port |
 | `--open / --no-open` | on | Open the default browser |
 
-The editor groups every key in a sidebar:
-
-| Group | Pages |
-|---|---|
-| Get running | Core |
-| Before production | Auth, Cache store (rate limiting, token revocation), Observability |
-| Runs and streaming | Runs, WebSocket, AG-UI, Remote tools, Media |
-| Project wiring | Checkpointer, ID generation, Thread naming, Memory store, Dependency injection |
-| Developer tools | Test, Evaluation |
-
-The Cache store page starts with three type cards (Memory, Redis, Custom). Under them, the Rate limiting and Token revocation tabs each have an on/off switch and the fields for that setting. The editor validates with the same parsers as the server and writes a `.bak` of the previous file on save.
+The editor validates with the same parsers as the server and writes a `.bak` of the previous file on save.
 
 ## demo
 

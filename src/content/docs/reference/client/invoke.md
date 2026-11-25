@@ -67,7 +67,7 @@ All options are optional. The defaults below are the values the client applies w
 |---|---|---|---|
 | `initial_state` | `Record<string, any>` | none | State values to seed the graph. Sent only on the first request of a call, not on the follow-up requests that return tool results. |
 | `config` | `Record<string, any>` | none | Run configuration. Put `thread_id` at the top level of this object to continue an existing thread. Omit it to start a new one. Put `model` there to pick an entry of the Agent's `model_registry`; the names are in `info.models` from [`graph()`](/docs/reference/client/graph#model-choices). An unknown name is a `ValidationError` (422). |
-| `recursion_limit` | `number` | `25` | Maximum number of requests the client makes in one `invoke()` call. The server accepts values from 1 to 100. |
+| `recursion_limit` | `number` | `25` | Maximum number of requests the client makes in one `invoke()` call. The server accepts values up to its `runs.max_recursion_limit` (default 100). |
 | `on_busy` | `'wait' \| 'cancel'` | server default (`'wait'`) | What the server does when another run is active on the same thread. `'wait'` queues behind it for up to 30 seconds, then fails with `ConflictError`. `'cancel'` stops the running run and starts this one. Needs a `10xgraph-api` version that supports it. |
 | `resume` | `unknown` | none | The answer to an `interrupt()` pause on the thread (any JSON value, `null` to cancel). Pass an empty `messages` array with it. |
 | `interrupt_id` | `string` | none | The id of the interrupt `resume` answers. The client does not track ids: pass the one you got from the server (`execution_meta.interrupt_data.interrupt.id` in the thread state, or the `interrupt` object of the `interrupted` update). A mismatch fails with `ConflictError`. |
@@ -260,7 +260,7 @@ A non-2xx response throws a subclass of `TenxGraphError`, chosen by status code.
 | `ConflictError` (409) | The thread is busy with another run (after the server waited 30 seconds), or `interrupt_id` does not match the open interrupt. | Wait and send again, set `on_busy: 'cancel'`, or fetch the current interrupt id. The client never retries it. |
 | `ServerError` (500, 502, 503, 504) | The graph failed or the server is unavailable. | Check the server logs, then retry. |
 | `Error: Request timeout after <n>ms` | One request exceeded the client `timeout` (default 300000 ms). | Raise `timeout` in the client config or shorten the graph. |
-| `recursion_limit_reached: true` | The loop used all allowed iterations. | Raise `recursion_limit` (maximum 100), or check that tools return and do not loop. |
+| `recursion_limit_reached: true` | The loop used all allowed iterations. | Raise `recursion_limit` (the server cap is `runs.max_recursion_limit`, default 100), or check that tools return and do not loop. |
 
 ## Related pages
 

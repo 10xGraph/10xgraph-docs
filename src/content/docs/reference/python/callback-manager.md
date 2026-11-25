@@ -88,7 +88,7 @@ If a before or after callback raises, the manager runs the error callbacks for t
 
 ## CallbackContext
 
-`CallbackContext` is a dataclass passed as the first argument to every callback.
+`CallbackContext` is a pydantic model (keyword arguments only) passed as the first argument to every callback.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -129,6 +129,8 @@ cbm.register_before_invoke(InvocationType.AI, BlockEmptyInput())
 | `input_data` | `Any` | The data about to be sent to the model, tool or MCP server. |
 
 Returns the (possibly modified) input. Raises any exception to abort the invocation; the error callbacks run first.
+
+To block a local or MCP tool call by policy, raise [`ToolDenied`](/docs/reference/python/exceptions#tooldenied) from a `before_invoke` callback for `InvocationType.TOOL` or `InvocationType.MCP`. The tool does not run, `on_error` recovery is skipped, and the model gets a failed result `"Denied by policy: <tool>. <reason>"`. A `before_invoke` callback of a tool or MCP call may also call `interrupt()`. `CallbackContext.node_name` for a tool call is the graph node that runs the tool.
 
 ## AfterInvokeCallback
 

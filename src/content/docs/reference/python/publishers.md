@@ -6,25 +6,25 @@ section: Reference
 group: "Python library"
 order: 190
 label: Publishers
-updated: "2026-10-29"
+updated: "2026-11-25"
 faq:
   - q: "How do I attach a publisher to a graph?"
     a: "Pass the publisher, or a list of publishers, to StateGraph(publisher=...). Pass it when you create the graph; do not assign it later."
   - q: "What is the difference between bus publishers and tracing publishers?"
-    a: "Bus publishers (Console, Redis, Kafka, RabbitMQ) send each EventModel to a logger or message bus. Tracing publishers (OTEL, Phoenix, Logfire, LangSmith) turn events into spans."
+    a: "Event publishers (Redis, Kafka, RabbitMQ, custom) send the domain events (run.started, node.completed, tool.completed, run.completed and so on) to a message bus. Tracing publishers (OTEL, Phoenix, Logfire, LangSmith) also get the model call events and turn events into spans. ConsolePublisher prints everything."
   - q: "Do I need to call publish_event myself?"
     a: "No. The runtime publishes events automatically. Call publish_event only to emit a custom event from a node or tool."
 ---
 
-Publishers receive an `EventModel` for every graph, node, LLM, tool and streaming step, so you can send execution events to a logger, a message bus or a tracing backend. This page lists each publisher class, its configuration, its defaults, and the `publish_event` helper for custom events. For a task-oriented walkthrough, see [Use publishers](/docs/guides/use-publishers); for the concepts, see [Events and observability](/docs/concepts/events-and-observability).
+Publishers receive an `EventModel` for run, node and tool steps (and, for tracing publishers and the console, each model call), so you can send execution events to a logger, a message bus or a tracing backend. Which events a publisher gets depends on its `kind` and on the event tag; see [Event routing](#event-routing). This page lists each publisher class, its configuration, its defaults, and the `publish_event` helper for custom events. For a task-oriented walkthrough, see [Use publishers](/docs/guides/use-publishers); for the concepts, see [Events and observability](/docs/concepts/events-and-observability).
 
 ## Delivery guarantees
 
-Publisher events are best-effort background work. Sync `invoke()` and `stream()` wait up to `shutdown_timeout` (default 30 s) for pending events, memory writes and thread naming before they return. The async `ainvoke()` and `astream()` do not wait: call `await graph.aclose()` before the process exits. At most 1000 background tasks can be pending. Beyond that, new ones are dropped, a WARNING is logged at most every 5 s, and the `background_task_manager.tasks_dropped` counter increases. Delivery is at-most-once, with no retry. A slow or unreachable sink loses events and never blocks a run.
+Publisher events are best-effort background work. Redis, Kafka and RabbitMQ publishers queue events and send them in [batches](#batching); other publishers get a background task per event. Sync `invoke()` and `stream()` wait up to `shutdown_timeout` (default 30 s) for pending events, memory writes and thread naming before they return. The async `ainvoke()` and `astream()` do not wait: call `await graph.aclose()` before the process exits. At most 1000 background tasks can be pending (for publishers other than the batched broker publishers). Beyond that, new ones are dropped, a WARNING is logged at most every 5 s, and the `background_task_manager.tasks_dropped` counter increases. Delivery is at-most-once, with no retry. A slow or unreachable sink loses events and never blocks a run.
 
 ### Large state snapshots
 
-Some events carry the run state in `data["state"]`. Events are queued in the background before the sink sends them, and a queued event must not hold a whole run state while the sink is slow. When the JSON form of `data["state"]` is longer than `state_snapshot_limit` characters, the event carries a summary in its place. Set the limit in the publisher config:
+Event publishers get the run state in `data["state"]` on the run-end events only (`run.completed`, `run.failed`, `run.interrupted`, `run.stopped`). Tracing publishers also get it on node and run starts. Events are queued in the background before the sink sends them, and a queued event must not hold a whole run state while the sink is slow. When the JSON form of `data["state"]` is longer than `state_snapshot_limit` characters, the event carries a summary in its place. Set the limit in the publisher config:
 
 ```python
 publisher = RedisPublisher(config={"url": "redis://localhost:6379", "state_snapshot_limit": 131072})
@@ -49,6 +49,36 @@ A state at or under the limit is sent unchanged. A longer one is replaced by a d
 | `execution_meta` | The state's `execution_meta`, included whole when it is under 8 KiB. |
 
 Only the published event is affected. The state in your checkpointer and the state your nodes see are not changed. If a consumer reads message text from `data["state"]`, raise the limit or set it to `0`.
+
+## Event routing
+
+Each `EventModel` has a `tag`, `"all"` or `"observability"` (type `EventTag`, in `tenxgraph.runtime.publisher.events`). The tag is routing only: it is never serialized. A publisher's `kind` decides which tags it takes.
+
+| Publisher | Gets |
+|---|---|
+| `kind="events"` (Kafka, Redis, RabbitMQ, custom) | Events tagged `all`. `data["state"]` only on run-end events. No `error_message` or `error_traceback`. |
+| `kind="observability"` (OTEL, Phoenix, LangSmith, Logfire) | Every event, with state and error details. |
+| `ConsolePublisher` | Every event, in the event publisher form. |
+
+The runtime tags node starts, LLM_CALL start, end and error events, node errors and the resume span event `observability`. Everything else is `all`. Events you send with `publish_event` are `all` unless you set `tag`. When no bound publisher takes a tag, the event is not built. A `CompositePublisher` is split by kind, so each child gets what its kind takes.
+
+Event publishers receive the domain events, named in `metadata["event_name"]`:
+
+| Name | Fires when |
+|---|---|
+| `run.started` | A run begins or resumes. |
+| `node.completed` | A node finishes (once per node, not `__start__`). |
+| `tool.started`, `tool.completed`, `tool.failed` | A tool call begins, finishes, or fails (raised, denied, not found, cancelled, error result). |
+| `run.completed` | The run ends without a pause or stop. |
+| `run.failed` | The run raised an error. |
+| `run.interrupted` | The run paused (`interrupt_before`, `interrupt_after`, `interrupt()`, a client tool). |
+| `run.stopped` | A stop request or a cancel. |
+| `run.recovered` | A run repaired a thread left by a crashed run. |
+| `input.rejected` | An input validator refused the input. |
+
+Payload fields of each event, the seven events of a three-node run and a consumer example are in [Events and observability](/docs/concepts/events-and-observability#domain-events).
+
+---
 
 ## Import paths
 
@@ -81,7 +111,7 @@ from tenxgraph.runtime.publisher import (
 
 ## `EventModel`
 
-`EventModel` is the pydantic model every publisher receives. The runtime emits one at each significant moment: node start and end, LLM call, tool call, streaming chunk and error. Enum fields are stored as their string values (`use_enum_values`).
+`EventModel` is the pydantic model every publisher receives. The runtime emits one at each significant moment: run start and end, node end, tool call start and end, and (for tracing publishers and the console) node start and LLM call. Enum fields are stored as their string values (`use_enum_values`).
 
 **Signature:**
 
@@ -100,6 +130,7 @@ class EventModel(BaseModel):
     timestamp: float  # default: current time
     is_error: bool = False
     metadata: dict[str, Any] = {}
+    tag: Literal["observability", "all"] = "all"  # routing only, never dumped
 ```
 
 | Parameter | Type | Default | Description |
@@ -116,7 +147,8 @@ class EventModel(BaseModel):
 | `user_id` | `str \| int \| None` | `None` | User ID associated with the execution (from config). |
 | `timestamp` | `float` | current time | UNIX timestamp when the event was created. |
 | `is_error` | `bool` | `False` | True when the event represents an error state. |
-| `metadata` | `dict[str, Any]` | `{}` | Additional context for consumers (run_timestamp, is_stream, etc.). |
+| `metadata` | `dict[str, Any]` | `{}` | Additional context for consumers (run_timestamp, is_stream, etc.). The domain events carry their name in `metadata["event_name"]`. |
+| `tag` | `"observability" \| "all"` | `"all"` | Who the event is for. See [Event routing](#event-routing). Excluded from the dump, so consumers never see it. |
 
 **Example:**
 
@@ -143,11 +175,11 @@ Where the event originated.
 
 | Value | Description |
 |---|---|
-| `GRAPH_EXECUTION` | Emitted by the graph runner (start/end of full invocation). |
-| `NODE_EXECUTION` | Emitted at the start and end of each node run. |
-| `LLM_CALL` | Emitted for individual LLM API calls within a node. |
-| `TOOL_EXECUTION` | Emitted before and after each tool call. |
-| `STREAMING` | Emitted for each incremental streaming chunk from the LLM. |
+| `GRAPH_EXECUTION` | The run: `run.started`, `run.completed`, `run.failed`, `run.interrupted`, `run.stopped`, `run.recovered`, `input.rejected`. |
+| `NODE_EXECUTION` | The start of each node (tracing publishers and console only) and `node.completed`. |
+| `LLM_CALL` | Individual LLM API calls within a node. Tracing publishers and console only. |
+| `TOOL_EXECUTION` | `tool.started` and then `tool.completed` or `tool.failed`, once per tool call. |
+| `STREAMING` | In the enum, but the runtime does not publish streaming chunks to publishers. |
 | `REALTIME` | Emitted by realtime audio-to-audio sessions. |
 
 ---
@@ -159,12 +191,12 @@ What phase of execution this event represents.
 | Value | When emitted |
 |---|---|
 | `START` | Execution begins. |
-| `PROGRESS` | Intermediate update during streaming (incremental chunk). |
-| `RESULT` | A result is ready (tool result, LLM completion). |
-| `END` | Execution ends (success or error). |
-| `UPDATE` | State or data updated. |
-| `ERROR` | An error occurred. |
-| `INTERRUPTED` | Execution paused at an interrupt point. |
+| `PROGRESS` | In the enum. The runtime no longer publishes progress events. |
+| `RESULT` | A result is ready (realtime transcripts, custom events). |
+| `END` | Execution ends: `node.completed`, `tool.completed`, `run.completed`, and the LLM call end. |
+| `UPDATE` | Metadata updated (realtime and custom events). |
+| `ERROR` | An error occurred: `tool.failed`, `run.failed`, `input.rejected`. |
+| `INTERRUPTED` | The run paused or stopped: `run.interrupted`, `run.stopped`, `run.recovered`. |
 
 ---
 
@@ -193,7 +225,7 @@ Semantic label for what is in the event payload.
 
 ## LLM span events
 
-Each model call publishes an `Event.LLM_CALL` span: a `START` event when the request goes out, then one `END` or one `ERROR` event.
+Each model call publishes an `Event.LLM_CALL` span to tracing publishers and the console (event publishers do not get these; their view of a model call is the `node.completed` event): a `START` event when the request goes out, then one `END` or one `ERROR` event.
 
 | Event | When | `data` fields |
 |---|---|---|
@@ -209,13 +241,14 @@ For a streaming call, the span ends when the stream ends, not when the first chu
 
 ## `BasePublisher`
 
-`BasePublisher` is the abstract base class for all publishers. Subclasses implement `publish`, `close` and `sync_close`. It stores the config dict as `self.config`, which may carry an optional `publish_timeout` (seconds, no default) that bounds one send: if a send takes longer, the error is logged and that event is dropped. Without it, a publish waits for the broker. Queued events are snapshots taken when they are emitted, so consumers see the real `START` and `PROGRESS` events rather than later state, and a failed LLM call publishes an `ERROR` event. It also tracks closed state in `self._is_closed`, and works as an async context manager that calls `close()` on exit.
+`BasePublisher` is the abstract base class for all publishers. Subclasses implement `publish`, `close` and `sync_close`. It stores the config dict as `self.config`, which may carry an optional `publish_timeout` (seconds, no default) that bounds one send. For the batched broker publishers it bounds one batch (see [Batching](#batching)). Without it, a publish waits for the broker. Queued events are snapshots taken when they are emitted, so consumers see the state of that moment rather than later state, and a failed LLM call publishes an `ERROR` event. It also tracks closed state in `self._is_closed`, and works as an async context manager that calls `close()` on exit.
 
 **Signature:**
 
 ```python
 class BasePublisher(ABC):
     kind: PublisherKind = "events"
+    inline: bool = False
 
     def __init__(self, config: dict[str, Any])
 
@@ -232,6 +265,7 @@ class BasePublisher(ABC):
 | Attribute | Type | Default | Description |
 |---|---|---|---|
 | `kind` | `PublisherKind` | `"events"` | What the publisher is for. See [`PublisherKind`](#publisherkind). |
+| `inline` | `bool` | `False` | When `True`, `publish_event` calls `publish_inline(event)` on the caller's path instead of a background task. For quick in-process publishers such as OTEL spans. |
 
 | Method | Returns | Raises | Description |
 |---|---|---|---|
@@ -245,8 +279,8 @@ class BasePublisher(ABC):
 
 | Value | Meaning |
 |---|---|
-| `"events"` | An event stream for your consumers: Console, Redis, Kafka, RabbitMQ or a custom publisher. The default. |
-| `"observability"` | A tracing backend that turns events into spans. `OtelPublisher` sets it, so `LogfirePublisher`, `LangsmithPublisher` and `PhoenixPublisher` have it too. |
+| `"events"` | An event stream for your consumers: Redis, Kafka, RabbitMQ or a custom publisher. The default. It gets the `all` events. `ConsolePublisher` has this kind too but gets every event. |
+| `"observability"` | A tracing backend that turns events into spans. It gets every event. `OtelPublisher` sets it, so `LogfirePublisher`, `LangsmithPublisher` and `PhoenixPublisher` have it too. |
 
 Set `kind = "observability"` on a class attribute for a custom tracing backend. See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability#publishers-ai-tracing-and-metrics).
 
@@ -299,7 +333,7 @@ class ConsolePublisher(BasePublisher):
 | `include_timestamp` | `bool` | `True` | Stored on the instance. The timestamp is always part of the line. |
 | `indent` | `int` | `2` | Stored on the instance. Not used by the current output. |
 
-Each line has the form `<timestamp> -> Source: <node_name>.<event_type>:-> Payload: <data> -> <metadata>`. `publish` raises `RuntimeError` after `close()`.
+`ConsolePublisher` gets every event, including the `observability` ones (node starts and model calls). Each line has the form `<timestamp> -> Source: <node_name>.<event_type>:-> Payload: <data> -> <metadata>`. `publish` raises `RuntimeError` after `close()`.
 
 **Example:**
 
@@ -320,7 +354,7 @@ graph = StateGraph(publisher=publisher)
 
 ## `RedisPublisher`
 
-`RedisPublisher` sends each event as JSON to a Redis Pub/Sub channel (default) or appends it to a Redis Stream. It connects lazily on the first publish, using a connection pool and a `ping` check.
+`RedisPublisher` sends each event as JSON to a Redis Pub/Sub channel (default) or appends it to a Redis Stream. It connects lazily on the first publish, using a connection pool and a `ping` check. Graph events are sent in batches, one pipeline without a transaction per batch (see [Batching](#batching)).
 
 **Requires:** `pip install "10xgraph[redis]"`
 
@@ -344,8 +378,9 @@ class RedisPublisher(BasePublisher):
 | `socket_connect_timeout` | `float` | `5.0` | Connect timeout in seconds. |
 | `socket_keepalive` | `bool` | `True` | Enable TCP keepalive. |
 | `health_check_interval` | `int` | `30` | Connection health check interval in seconds. |
+| `batch_size`, `flush_interval_ms`, `queue_size`, `publish_timeout` | | | See [Batching](#batching). |
 
-**Returns:** from `publish`, the subscriber count (pubsub) or the stream entry ID (stream). In stream mode the JSON payload is stored in the entry's `data` field.
+**Returns:** from `publish` (one event, sent at once), the subscriber count (pubsub) or the stream entry ID (stream). In stream mode the JSON payload is stored in the entry's `data` field.
 
 **Raises:** `RuntimeError` if the publisher is closed, the `redis` package is missing, or the connection fails.
 
@@ -368,7 +403,7 @@ graph = StateGraph(publisher=stream)
 
 ## `KafkaPublisher`
 
-`KafkaPublisher` sends each event as a UTF-8 JSON message to a Kafka topic with `aiokafka`, waiting for the broker acknowledgement. The producer starts lazily on the first publish. If the first start fails, the next publish tries again instead of staying closed. `RedisPublisher` does the same.
+`KafkaPublisher` sends each event as a UTF-8 JSON message to a Kafka topic with `aiokafka`, waiting for the broker acknowledgement. The message key is the thread id (no key when the event has none), so a thread's events keep their order on one partition. Graph events are sent in batches: `send()` for each event, then one wait (see [Batching](#batching)). The producer starts lazily on the first publish. If the first start fails, the next publish tries again instead of staying closed. `RedisPublisher` does the same.
 
 **Requires:** `pip install "10xgraph[kafka]"`
 
@@ -393,10 +428,11 @@ class KafkaPublisher(BasePublisher):
 | `ssl_cafile`, `ssl_certfile`, `ssl_keyfile` | `str` | not set | PEM file paths. When any is set and there is no `ssl_context`, an `SSLContext` is built from them. |
 | `sasl_mechanism` | `str` | not set | For example `"PLAIN"`, `"SCRAM-SHA-256"`, `"SCRAM-SHA-512"`. |
 | `sasl_plain_username`, `sasl_plain_password` | `str` | not set | SASL credentials. |
+| `batch_size`, `flush_interval_ms`, `queue_size`, `publish_timeout` | | | Event batching, see [Batching](#batching). Not the same as `max_batch_size` and `linger_ms`, which are `aiokafka` producer settings. |
 
 The TLS and SASL keys are opt-in and passed to `aiokafka` only when set. TLS is never forced. Events carry full message and tool content, so we recommend `"SSL"` or `"SASL_SSL"` in production, and always on networks you do not control; a broker inside a network you secure yourself can run without it. For Redis use a `rediss://` URL, and for RabbitMQ an `amqps://` URL. See [Emit events from your graph](/docs/guides/use-publishers) for a TLS and SASL example.
 
-**Returns:** from `publish`, the result of `send_and_wait`. **Raises:** `RuntimeError` if closed or `aiokafka` is missing.
+**Returns:** from `publish` (one event, sent at once), the result of `send_and_wait`. **Raises:** `RuntimeError` if closed or `aiokafka` is missing.
 
 **Example:**
 
@@ -417,7 +453,7 @@ graph = StateGraph(publisher=publisher)
 
 ## `RabbitMQPublisher`
 
-`RabbitMQPublisher` sends each event as a JSON message to a RabbitMQ exchange with a routing key, using `aio-pika` and a robust (auto-reconnecting) connection. It connects lazily on the first publish.
+`RabbitMQPublisher` sends each event as a JSON message to a RabbitMQ exchange with a routing key, using `aio-pika` and a robust (auto-reconnecting) connection. It connects lazily on the first publish. Graph events are sent in batches: the batch is published together with one wait for the confirms (see [Batching](#batching)).
 
 **Requires:** `pip install "10xgraph[rabbitmq]"`
 
@@ -438,7 +474,8 @@ class RabbitMQPublisher(BasePublisher):
 | `durable` | `bool` | `True` | Declare the exchange as durable. |
 | `connection_timeout` | `int` | `10` | Connect timeout in seconds. It also bounds opening the channel and declaring the exchange after the connection is up. If that step fails or times out, the connection is closed and the next publish starts clean. |
 | `heartbeat` | `int` | `60` | Heartbeat interval in seconds. |
-| `publish_timeout` | `float` | none | Seconds to wait for one send to the exchange. Unset waits for the broker. A send that times out is logged and that event is dropped. |
+| `publish_timeout` | `float` | none | Seconds to wait for one send, or one batch. Unset waits for the broker. A send that times out is logged and dropped. |
+| `batch_size`, `flush_interval_ms`, `queue_size` | | | See [Batching](#batching). |
 
 **Returns:** `True` from `publish`. **Raises:** `RuntimeError` if closed or `aio-pika` is missing.
 
@@ -456,6 +493,38 @@ publisher = RabbitMQPublisher(config={
 
 graph = StateGraph(publisher=publisher)
 ```
+
+---
+
+## Batching
+
+`RedisPublisher`, `KafkaPublisher` and `RabbitMQPublisher` share one batching layer. It is always on. `publish_event` appends the event to a bounded queue (no task per event) and returns. One worker per publisher sends the queue in order, every `batch_size` events or `flush_interval_ms` after the first queued event, whichever comes first. The settings go in the publisher config.
+
+| Key | Default | Description |
+|---|---|---|
+| `batch_size` | `100` | Events sent per batch. |
+| `flush_interval_ms` | `20` | Longest wait, in milliseconds, for a batch to fill. |
+| `queue_size` | `2048` | Events the queue holds before new ones are dropped. |
+| `publish_timeout` | none | Seconds one batch may take. A timed-out batch is dropped and an error is logged. |
+
+A value that is not a positive number is replaced by the default.
+
+| Publisher | How a batch is sent |
+|---|---|
+| `RabbitMQPublisher` | All events are published together, with one wait for the broker confirms. |
+| `KafkaPublisher` | `send()` for every event, then one wait for all deliveries. The key is the thread id. |
+| `RedisPublisher` | One pipeline without a transaction (`PUBLISH` or `XADD` per event). |
+
+**Full queue.** A new event is dropped when the queue holds `queue_size` events, or when there is no running event loop. The counter `tenxgraph.publish.dropped` goes up and a warning is logged at most every 10 seconds. A batch that fails or times out is dropped and counted in the same counter. Delivery is at-most-once.
+
+**Flushing.** `CompiledGraph.aclose()`, sync `invoke` and `stream`, and the publisher's `close()` send what is queued. `ainvoke` and `astream` do not, so call `await graph.aclose()` before the process exits. `publisher.publish(event)` called directly still sends one event at once.
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `tenxgraph.publish.duration` | timer | One batch send. Attribute `publisher` holds the class name. |
+| `tenxgraph.publish.batches` | counter | Batches sent. |
+| `tenxgraph.publish.events` | counter | Events sent. |
+| `tenxgraph.publish.dropped` | counter | Events dropped (queue full, no loop, failed or timed-out batch). |
 
 ---
 
@@ -512,7 +581,7 @@ graph = StateGraph(publisher=publisher)
 
 `OtelPublisher` turns `EventModel` events into OpenTelemetry spans, tracking parent and child spans explicitly. Pass it to `StateGraph(publisher=...)` when you create the graph, because the publisher is bound into the dependency container at that point.
 
-It writes the basic attributes only: the OTEL GenAI `gen_ai.*` keys and the `tenxgraph.*` keys (thread id, run id, user id, node, tool and usage), plus span names, status and errors. It writes no Phoenix, LangSmith or Logfire keys.
+It writes the basic attributes only (the graph span ends on every run-end event and carries `tenxgraph.graph.run_status`: `completed`, `failed`, `interrupted`, `stopped` or `input_rejected`): the OTEL GenAI `gen_ai.*` keys and the `tenxgraph.*` keys (thread id, run id, user id, node, tool and usage), plus span names, status and errors. It writes no Phoenix, LangSmith or Logfire keys.
 
 **Requires:** `pip install "10xgraph[otel]"`
 
@@ -570,7 +639,7 @@ app = graph.compile()
 
 ## `PhoenixPublisher`
 
-`PhoenixPublisher` is an `OtelPublisher` that sets up an OTLP HTTP exporter for Phoenix when you create it, and adds the OpenInference keys Phoenix reads: `session.id` (the thread id), `user.id` and a `metadata` JSON with `thread_id` and `run_id`, among others.
+`PhoenixPublisher` is an `OtelPublisher` that sets up an OTLP HTTP exporter for Phoenix when you create it, and adds the OpenInference keys Phoenix reads: `session.id` (the thread id), `user.id` and a `metadata` JSON with `thread_id` and `run_id`, among others. A plain `OtelPublisher` does not write these keys, so use `PhoenixPublisher` for Phoenix.
 
 **Requires:** `pip install "10xgraph[phoenix]"`
 
@@ -727,7 +796,7 @@ graph = StateGraph(publisher=publisher)
 
 ## `publish_event`
 
-`publish_event` emits a custom `EventModel` from inside a node or tool. It does not block: the event is handed to the background task manager, which calls the bound publisher. If no publisher is bound, it returns immediately. Publish failures are logged, not raised.
+`publish_event` emits a custom `EventModel` from inside a node or tool. It does not block. Broker publishers queue the event for their batch worker, inline publishers (OTEL) handle it at once, and other publishers get a background task. The event goes to the bound publishers that take its `tag` (see [Event routing](#event-routing)); if none does, nothing is built. If no publisher is bound, it returns immediately. Publish failures are logged, not raised.
 
 **Signature:**
 
@@ -745,7 +814,7 @@ def publish_event(
 | `event` | `EventModel` | (required) | The event to publish. |
 | `publisher` | `BasePublisher \| None` | `Inject[BasePublisher]` | Injected. Leave it unset. |
 | `task_manager` | `BackgroundTaskManager` | `Inject[BackgroundTaskManager]` | Injected. Leave it unset. |
-| `only` | `PublisherKind \| None` | `None` | Send the event only to publishers of this kind. It works inside a `CompositePublisher`, also when nested. `None` sends to every publisher. |
+| `only` | `PublisherKind \| None` | `None` | Send the event only to publishers of this kind. It works inside a `CompositePublisher`, also when nested. `None` sends to every publisher that takes the event's tag. |
 
 **Returns:** `None`. With `only="events"`, tracing publishers do not get the event. With `only="observability"`, event publishers do not.
 
@@ -769,6 +838,7 @@ def shout(query: str) -> str:
             content=result,
             content_type=[ContentType.TEXT],
             data={"query": query, "result_length": len(result)},
+            # tag defaults to "all"; use tag="observability" to reach tracing backends only
         ),
         only="events",  # keep this app event out of tracing backends
     )

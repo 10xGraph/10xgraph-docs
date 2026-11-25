@@ -3,20 +3,18 @@ title: 10xgraph.json configuration reference
 description: Every key the 10xgraph.json config file accepts, with defaults, types, purposes, and complete examples for rate limiting, auth, and servers.
 section: Reference
 order: 420
-updated: "2026-11-10"
+updated: "2026-11-25"
 group: "CLI and configuration"
 faq:
   - q: Which key is required in 10xgraph.json?
     a: Only agent, a string in module:attribute form that points at your compiled graph. Every other key is optional.
   - q: Where does the CLI look for the config file?
     a: It searches the working directory and its parents for the path you pass with --config (default 10xgraph.json). With the default name, each directory is checked for 10xgraph.json first and the older agentflow.json second. Without a path, test and eval also try .agentflow.json and agentflow.config.json.
-  - q: Does agentflow.json still work?
-    a: Yes, until 2.0. When 10xgraph.json is missing, the CLI and the server read agentflow.json from the same directory. Rename the file to 10xgraph.json when convenient; the keys are identical.
 ---
 
-`10xgraph.json` is the configuration file for the 10xGraph API server and CLI. It specifies which graph to serve, how to authenticate, where state lives, and server behavior. Only the `agent` key is required; every other key is optional. The file is plain JSON. Edit it by hand or with `10xgraph config` (a browser editor).
+`10xgraph.json` is the configuration file for the 10xGraph API server and CLI. It specifies which graph to serve, how to authenticate, where state lives, and server behavior. Only the `agent` key is required; every other key is optional.
 
-Projects created before the rename to 10xGraph use `agentflow.json`. It still works until 2.0: the CLI and the server read it when `10xgraph.json` is missing from the same directory. The keys are identical, so migration is a rename (`mv agentflow.json 10xgraph.json`) or a save from `10xgraph config`.
+`agentflow.json` is read when `10xgraph.json` is missing (until 2.0).
 
 ## Which keys does it accept?
 
@@ -25,14 +23,13 @@ Projects created before the rename to 10xGraph use `agentflow.json`. It still wo
 | `agent` | string | required | Compiled graph as `module:attribute`, for example `graph.agent:app` |
 | `env` | string | none | Dotenv file to load before the graph starts, for example `.env` |
 | `auth` | string, object or null | `null` | Authentication: `"jwt"`, or `{"method": "custom", "path": "module:Class"}` |
-| `authorization` | removed | none | Refused at startup. Use `auth.roles` and `auth.method: custom`. See [auth](#auth) |
 | `injectq` | string or null | none | Import path of an InjectQ container. It must be the container passed to `StateGraph(container=...)`: set both to the same container, or neither. The server refuses to start when the graph's container is another one |
 | `store` | string or null | none | Import path of a `BaseStore` for long-term memory |
 | `store_allow_tenant_mismatch` | boolean | `false` | Boot even when the `store` declares different tenant columns than the checkpointer (production refuses otherwise). Use for a store that holds only shared data. See [Multi-tenant data](/docs/guides/multi-tenant-data) |
-| `checkpointer` | removed | none | Refused at startup. Pass the checkpointer to `graph.compile(checkpointer=...)` in your agent module |
 | `thread_name_generator` | string or null | none | `random`, `first_message`, `none` or a `module:attr` path. See [thread_name_generator](#thread_name_generator) |
 | `id_generator` | string or null | graph's own | `uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or a `module:attr` path. See [id_generator](#id_generator) |
 | `cache_store` | object or null | in-memory | One object that holds the cache store and what it backs: `type`, `url`, `path`, `rate_limit`, `token_revocation`. See [cache_store](#cache_store) |
+| `worker` | object | absent | TaskIQ broker and task modules for `10xgraph worker`. See [Run background tasks with a worker](/docs/server/background-tasks) |
 | `remote_tools` | array | `[]` | Schemas of tools that run in the client |
 | `runs` | object | built-in defaults | Who names threads, which client input reaches the graph, and run limits |
 | `websocket` | object | built-in caps | WebSocket connection limits |
@@ -45,7 +42,7 @@ Projects created before the rename to 10xGraph use `agentflow.json`. It still wo
 | `test` | object | absent | Defaults for `10xgraph test` |
 | `evaluation` | object | absent | Defaults for `10xgraph eval` |
 
-Import paths use `module:attribute`. Unknown top-level keys are kept in the file but ignored, except `redis`, `rate_limit` and `token_revocation`: those do not exist at the top level and stop the load with an error that says they belong inside `cache_store`.
+Import paths use `module:attribute`. Unknown top-level keys are kept in the file but ignored, except `redis`, `rate_limit` and `token_revocation` (they belong inside `cache_store`), `checkpointer`, `authorization` and `graph_introspection`: those stop the load with an error. Pass the checkpointer to `graph.compile(checkpointer=...)` and use `auth.roles` instead of `authorization`.
 
 For what each key does when it is absent, and what `10xgraph init` writes, see [What is on by default](/docs/server/configure#what-is-on-by-default).
 
@@ -65,11 +62,11 @@ The server saves every generated name in the background after the run.
 | Value | Meaning |
 |---|---|
 | absent | The graph keeps the generator it was compiled with |
-| `"uuid"`, `"hex"`, `"short"`, `"int"`, `"bigint"`, `"timestamp"` | The matching built-in generator |
+| `"uuid"`, `"hex"`, `"short"`, `"int"`, `"bigint"`, `"timestamp"` | The matching built-in generator. `"uuid"` is core's `DefaultIDGenerator` (the default), so it does not warn |
 | `"snowflake"` | `SnowFlakeIdGenerator`. Needs the `snowflakekit` extra and reads the `SNOWFLAKE_*` environment variables |
 | `"module:attr"` | A `BaseIDGenerator` instance, subclass or zero-argument factory |
 
-The server binds the generator for the loaded graph, so new thread ids, message ids and memory ids all come from it. It refuses to boot when the graph code also sets a generator (`StateGraph(id_generator=...)`), and when the id columns of an existing `PgCheckpointer` table cannot hold the ids the generator makes. The checkpointer's id type follows the generator (default string, Snowflake gives bigint); its `id_type` argument is deprecated. Pick one place to set it. See [Configure the ID generator](/docs/guides/configure-id-generator).
+The server binds the generator for the loaded graph, so new thread ids, message ids and memory ids all come from it. It refuses to boot when the graph code also sets a generator (`StateGraph(id_generator=...)`), and when the id columns of an existing `PgCheckpointer` table cannot hold the ids the generator makes. The checkpointer's id type follows the generator (default string, Snowflake gives bigint). Pick one place to set it. See [Configure the ID generator](/docs/guides/configure-id-generator).
 
 ### cache_store
 
@@ -83,32 +80,19 @@ One object. The cache store holds the run locks and caps, idempotency state, tok
 | `rate_limit` | object | absent (off) | Request rate limiting. See [rate_limit](#rate_limit) |
 | `token_revocation` | boolean or object | `false` | Refuse revoked tokens. `true`, or `{"enabled": true, "token_lifetime": <seconds>, "user_ttl": <seconds>}`. `user_ttl` defaults to 30 days; `null` keeps entries forever. Needs auth. A string value is a config error |
 
-`REDIS_URL` alone never selects Redis; only `type: "redis"` does. Type `redis` without the `redis` package refuses to boot (`pip install "10xgraph-api[redis]"`). Unknown keys inside `cache_store` are config errors that list the valid ones.
+Type `redis` without the `redis` package refuses to boot (`pip install "10xgraph-api[redis]"`). Unknown keys inside `cache_store` are config errors that list the valid ones.
 
 ### auth
 
 | Value | Meaning |
 |---|---|
 | `null` or absent | No authentication. Every request runs as `anonymous`, and the server logs a warning |
-| `"jwt"` | Verify bearer JWTs. Needs `JWT_SECRET_KEY` and `JWT_ALGORITHM`, and PyJWT (`pip install "10xgraph-api[jwt]"`). The string must be exactly `jwt`; any other string, such as `JWT`, is refused at startup |
+| `"jwt"` | Verify bearer JWTs. Needs `JWT_SECRET_KEY` (and optionally `JWT_ALGORITHM`, default `HS256`), and PyJWT (`pip install "10xgraph-api[jwt]"`). The string must be exactly `jwt`; any other string, such as `JWT`, is refused at startup |
 | `{"method": "custom", "path": "auth.agent_auth:AgentAuth"}` | Load a `BaseAuth` subclass. Both `method` and `path` are required |
 
 See [Server authentication](/docs/server/auth) for the full guide.
 
-Role-based access keys sit next to `method` and apply to any auth class. They are refused when auth is off.
-
-| Key | Type | Purpose |
-|---|---|---|
-| `roles_claim` | string | Token claim that lists the caller's role names. Use this or `permissions_claim`, not both |
-| `permissions_claim` | string | Token claim that lists permissions directly |
-| `tenant_claims` | array | Token claims that name the caller's tenant, for example `["org_id"]`. They must match the tenant columns of the checkpointer and store |
-| `roles` | object | Role name to `{"permissions": [...], "reach": "own" \| "tenant" \| "all", "inherits": [...]}`. `reach` is required on every role |
-| `default_role` | string | Role for a token with no role claim |
-| `system_identities` | object | Named identities for background jobs, each with `roles` and `tenant` |
-
-With `"auth": "jwt"` and no role keys, every authenticated caller gets the default permission set (everything except `admin:*`) and reach `own`. Permissions are `resource:action` strings from one registry: `graph` (`read`, `invoke`, `stream`, `stop`, `fix`), `threads`, `store` (`read`, `write`, `delete`), `files` (`read`, `upload`, `delete`), `config:read`, `tasks` (`trigger`, `read`, `cancel`) and `admin` (`read`, `write`). `resource:*` and `*` are wildcards. Reach says whose data a caller can read, list, delete and stop: `own`, `tenant` or `all`. Runs and writes to state and messages always stay on the caller's own threads, whatever the reach.
-
-A top-level `authorization` key is refused at startup. Move its rules into `auth.roles`; see [authentication and authorization](/docs/server/auth).
+Role-based access keys (`roles_claim`, `permissions_claim`, `tenant_claims`, `roles`, `default_role`, `system_identities`) sit next to `method` and apply to any auth class. Roles, permissions and reach are listed in [Authentication](/docs/reference/api-cli/auth#authorization-roles-permissions-reach).
 
 ## runs
 
@@ -120,6 +104,7 @@ A top-level `authorization` key is refused at startup. Move its rules into `auth
 | `runs.max_concurrent_per_user` | integer or null | `10` | HTTP graph runs one verified user may have in flight at once |
 | `runs.timeout` | number or null | `300` in production, no limit in development | Longest a single graph run may take, in seconds |
 | `runs.max_parallel_tool_calls` | integer or null | `null` (core decides) | Tool calls one model turn may run at once |
+| `runs.max_recursion_limit` | positive integer or null | `100` | Highest `recursion_limit` (steps per run) a request may ask for. A larger value gets `422` naming the key. A request that sends none gets 25. Raise it for agents that need hundreds of steps |
 
 ```json
 {
@@ -141,12 +126,7 @@ With `"server"` (the default), a request may only name a thread that already exi
 
 Naming an id that does not exist answers `404` on invoke, stream, `/v1/graph/ws` and the checkpointer write routes. It is the same `404` as for an id another user owns, so a caller cannot tell whether an id is taken.
 
-AG-UI (`POST /v1/ag-ui`) and realtime (`/v1/graph/live`) follow the same setting. An AG-UI `threadId` or a live `thread_id` the server never issued is refused (`404` on AG-UI; on live an error event with code `THREAD_NOT_FOUND` and close code `1008`). A blank or `"new"` id, or no id, makes the server create the thread: AG-UI returns it in `RUN_STARTED`, and live sends it in a `session_started` event. Frontends that make their own ids, such as CopilotKit by default, need `"client"`.
-
-With `"client"`, any request may start a thread under an id it picks. With owner-only access the first user to write an id owns it. A user who claims a guessable id such as `default` first locks out its intended owner, and an unknown id answers differently from a taken one. Use `"client"` only if you accept that.
-
-<aside class="callout callout-warning" role="note"><p class="callout-title">What enforces this</p>
-<p>The server checks <code>thread_ids</code> on every thread route, for any auth class, and also with auth off.</p></aside>
+AG-UI and `/v1/graph/live` follow the same setting.
 
 ### config_keys and state_keys
 
@@ -165,45 +145,25 @@ The two lists behave differently.
 
 List only keys a client may be trusted with. A tool or node that trusts a value such as `role` or `plan` from state must not have that key on the list. `current_node` is a state key too: list it only if clients may start a run at a chosen node.
 
-Upgrading from a version where an unset `state_keys` accepted any key: list every key your clients send, or their requests now get `422`.
+### Limits
 
-### max_concurrent_per_user
+`max_concurrent_per_user` counts HTTP graph runs (invoke, stream and AG-UI) and returns `429` over the cap. `0` or `null` means no cap, and requests without a verified user (auth off) are not capped.
 
-Caps the HTTP graph runs (invoke, stream and AG-UI) one verified user may have in flight at once. The count is shared by all workers when a shared cache store is configured (`cache_store.type` `redis` or `custom`) and kept per process otherwise. Over the cap the request gets `429`. `0` or `null` means no cap. Requests without a verified user (auth off) are not capped. The value must be a non-negative integer.
-
-### timeout
-
-A run that passes the limit is cancelled. Invoke answers `504`, and a stream, `/v1/graph/ws` run or AG-UI run ends with an error. The message reads `Graph run passed the runs.timeout limit of 300s and was cancelled. Raise "runs.timeout" in 10xgraph.json to allow longer runs.` An explicit number wins in either mode, and an explicit `null` means no limit. The key must be a positive number or `null`. Realtime sessions have no limit.
-
-### max_parallel_tool_calls
-
-Caps how many tool calls one model turn may run at once. The server puts it into every run's config, and clients cannot set it. When unset, core uses the `TENXGRAPH_MAX_PARALLEL_TOOL_CALLS` environment variable, or 10 if that is not set. The key must be a positive integer or `null`.
+A run that passes `timeout` is cancelled. Invoke answers `504`, and a stream, `/v1/graph/ws` run or AG-UI run ends with an error. The message reads `Graph run passed the runs.timeout limit of 300s and was cancelled. Raise "runs.timeout" in 10xgraph.json to allow longer runs.` An explicit `null` means no limit. Realtime sessions have no limit.
 
 ## rate_limit
 
-`cache_store.rate_limit` turns on rate limiting for REST requests. `/ping` is always excluded. Set `"enabled": false` to keep the block without enforcing it.
-
-| Key | Type | Default | Purpose |
-|---|---|---|---|
-| `enabled` | boolean | `true` | Turn limiting on or off |
-| `requests` | integer | `100` | Requests allowed per window. Must be above 0 |
-| `window` | integer | `60` | Window length in seconds. Must be above 0 |
-| `by` | string | `ip` | Count per `ip`, `user` or `global` |
-| `exclude_paths` | array | `[]` | Extra paths to skip |
-| `fail_open` | boolean | `true` | Allow requests when the cache store errors. `false` denies them with `503` `RATE_LIMIT_UNAVAILABLE` |
-| `trusted_proxy_headers` | boolean | `false` | Honour `X-Forwarded-For`. Only behind a proxy you control |
-| `trusted_proxy_hops` | integer | `1` | Proxies you control, counted from the right of `X-Forwarded-For`. At least 1 |
-| `trusted_proxies` | array | `[]` | IPs or CIDR ranges your proxies connect from. Others cannot spoof the header |
-
-The counters live in the API's cache store. With the in-memory store they count per process, so with N workers the real limit is `requests` times N and it resets on restart. Set `cache_store.type` to `redis` for any multi-worker deployment. Unknown keys inside `rate_limit` are config errors that list the valid ones.
+`cache_store.rate_limit` is documented in [Rate limiting](/docs/reference/api-cli/rate-limiting).
 
 ## websocket, ag_ui and observability
 
 | Key | Type | Default | Purpose |
 |---|---|---|---|
+| `websocket.enabled` | boolean or null | `null` (mounted) | `false` removes `/v1/graph/ws` and `/v1/graph/live`. `true` without a WebSocket library refuses to boot |
 | `websocket.max_connections` | integer or null | `1000` | Concurrent connections. Shared by all workers when a shared cache store is configured, per process otherwise. `0` or `null` means unlimited |
 | `websocket.max_connections_per_user` | integer or null | `10` | Per verified user. `0` or `null` means unlimited |
 | `websocket.realtime_models` | array of strings | `[]` | Models a `/v1/graph/live` client may request |
+| `websocket.realtime_client_overrides` | array of strings | `["voice", "modalities", "vad"]` | Init-frame session options a client may set. `system_prompt` is also allowed; it lets a client rewrite the agent's instructions |
 | `ag_ui.enabled` | boolean | `false` | Mounts `POST /v1/ag-ui`. Needs the `ag-ui` extra |
 | `ag_ui.allow_client_tools` | boolean | `true` | Offer tools sent by the AG-UI client to the model |
 
@@ -302,37 +262,4 @@ Each entry declares a tool the model can call that runs in the client. Unknown f
 
 ## Environment variables
 
-The server reads configuration from environment variables, which are listed in full in the [environment variables reference](/docs/reference/api-cli/environment). Common ones include `MODE`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `ORIGINS`, `MAX_REQUEST_SIZE`, `REDIS_URL`, `LOG_FORMAT` (`text` or `json`), `SENTRY_DSN`, and OTEL/observability settings. Set them as process environment variables or in a `.env` file referenced by the `env` key in `10xgraph.json`.
-
-## What does a complete config look like?
-
-```json title="10xgraph.json"
-{
-  "agent": "graph.agent:app",
-  "env": ".env",
-  "auth": "jwt",
-  "injectq": "graph.agent:container",
-  "store": null,
-  "thread_name_generator": "first_message",
-  "id_generator": "uuid",
-  "cache_store": {
-    "type": "redis",
-    "rate_limit": {
-      "enabled": true,
-      "requests": 100,
-      "window": 60,
-      "by": "user",
-      "trusted_proxy_headers": true,
-      "trusted_proxy_hops": 1,
-      "exclude_paths": ["/docs"],
-      "fail_open": true
-    },
-    "token_revocation": true
-  },
-  "websocket": { "max_connections": 500, "max_connections_per_user": 5 },
-  "ag_ui": { "enabled": false },
-  "observability": { "level": "standard", "logfire": { "enabled": false } },
-  "test": { "path": "tests", "coverage": true, "coverage_threshold": 80 },
-  "evaluation": { "directory": "evals", "output_dir": "eval_reports", "threshold": 0.75 }
-}
-```
+Environment variables are listed in [Environment variables](/docs/reference/api-cli/environment). Set them in the process or in the `.env` file named by `env`.

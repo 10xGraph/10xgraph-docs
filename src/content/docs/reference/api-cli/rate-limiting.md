@@ -1,14 +1,14 @@
 ---
 title: Rate Limiting
-seoTitle: "rate_limit configuration reference"
-description: "Complete reference for the rate_limit block in 10xgraph.json: the cache store, limits, and every option for throttling requests to the 10xGraph API server."
+seoTitle: "cache_store.rate_limit reference"
+description: "Fields, headers and errors of the cache_store.rate_limit block in 10xgraph.json."
 section: Reference
 group: "CLI and configuration"
 order: 450
-updated: "2026-11-10"
+updated: "2026-11-25"
 ---
 
-The `rate_limit` object inside `cache_store` in `10xgraph.json` turns on a sliding-window limiter for the API server. It counts REST requests, WebSocket handshakes and WebSocket graph runs against one bucket per client. The limiter is off unless the block exists; this page lists every option, header and error.
+The `rate_limit` object inside `cache_store` in `10xgraph.json` turns on a sliding-window limiter for the API server. It counts REST requests, WebSocket handshakes and WebSocket graph runs against one bucket per client.
 
 ## Configuration fields
 
@@ -18,15 +18,15 @@ The `rate_limit` object inside `cache_store` in `10xgraph.json` turns on a slidi
 | `requests` | integer | `100` | Maximum requests allowed per window. Must be positive. |
 | `window` | integer | `60` | Window size in seconds. Must be positive. |
 | `by` | string | `"ip"` | Bucket key: `"ip"` (client address), `"user"` (authenticated user ID), or `"global"` (whole service). See [Bucket keys](#bucket-keys). |
-| `exclude_paths` | array | `[]` | Exact request paths to exclude from rate limiting (no wildcards). The `/ping` health check is always exempt. |
+| `exclude_paths` | array | `[]` | Exact request paths to exclude from rate limiting (no wildcards). `/ping` and `/health/ready` are always exempt. |
 | `trusted_proxy_headers` | boolean | `false` | Honor the `X-Forwarded-For` header to extract the client IP. Only enable behind a proxy you control. |
 | `trusted_proxy_hops` | integer | `1` | Number of proxies (counted from the right of `X-Forwarded-For`) that your infrastructure operates. Requires `trusted_proxy_headers: true`. Must be >= 1. |
-| `trusted_proxies` | array | `[]` | IP addresses or CIDR ranges your proxies connect from. When set, `X-Forwarded-For` is honored only for requests from these networks. |
+| `trusted_proxies` | array | `[]` | IP addresses or CIDR ranges your proxies connect from. `[]` means loopback and private networks only (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, link-local, CGNAT and IPv6 equivalents). `X-Forwarded-For` is honored only from the listed networks. `0.0.0.0/0` and `::/0` trust every peer. |
 | `fail_open` | boolean | `true` | When `true`, requests are allowed if the cache store raises an error (fail-open). When `false`, requests are denied with `503` `RATE_LIMIT_UNAVAILABLE` (fail-closed). |
 
-The `rate_limit` object sits inside `cache_store`, and the counters are kept in that cache store. Set `cache_store.type` to `redis` to share them between workers, or `custom` with a `path` for your own store. The Redis keys use the `10xgraph:ratelimit2` namespace. An unknown key inside `rate_limit` stops the server with an error that lists the valid ones.
+The `rate_limit` object sits inside `cache_store`, and the counters are kept in that cache store. Set `cache_store.type` to `redis` to share them between workers, or `custom` with a `path` for your own store. An unknown key inside `rate_limit` stops the server with an error that lists the valid ones.
 
-Config load validates all values. Invalid `by`, non-positive `requests` or `window`, `trusted_proxy_hops` < 1, invalid networks in `trusted_proxies` raise `ValueError` and prevent the server from starting. A `rate_limit` block with `enabled: false` behaves as if the block were absent.
+Invalid values stop the server at startup.
 
 ## Bucket keys
 
@@ -38,33 +38,17 @@ The `by` field determines which bucket counts a request.
 | `"user"` | One bucket per authenticated user (keyed as `user:<user_id>`). Falls back to the client IP (`ip:<address>`) for unauthenticated requests, so anonymous traffic is still rate-limited per caller. |
 | `"global"` | One bucket for the entire service (`__global__`). All clients share the limit. |
 
-Use `"user"` when authentication is enabled to tie the limit to identity rather than address. A user roaming between addresses is then fairly limited, and a NAT-sharing office is not penalized.
-
 ## Proxy hops and X-Forwarded-For
 
 The `X-Forwarded-For` header is a comma-separated list where each proxy appends the client it observed. The caller's original value is on the left; entries on the right were added by your infrastructure.
 
 `trusted_proxy_hops` specifies how many proxies of yours sit in front of the app. It counts entries from the **right** of the list. With the default of `1` (one proxy), the last entry is the true client address as seen by that proxy. If the header has fewer entries than configured hops, it is ignored entirely and the peer address is used instead, with a warning.
 
-`trusted_proxy_hops` only applies when `trusted_proxy_headers` is `true`.
-
-Example: your app is behind a reverse proxy (nginx). Set `trusted_proxy_headers: true` and `trusted_proxy_hops: 1`. A request reaching the app with `X-Forwarded-For: attacker-ip, nginx-ip` uses `nginx-ip` (the last entry), not `attacker-ip`.
-
-When `trusted_proxies` is configured, `X-Forwarded-For` is honored only for requests whose peer address (the direct connection) is in one of the listed networks. This prevents a client that can reach the app directly (bypassing the proxy) from spoofing the `X-Forwarded-For` header to get a fresh bucket.
-
-```json
-"cache_store": {
-  "rate_limit": {
-    "trusted_proxy_headers": true,
-    "trusted_proxy_hops": 1,
-    "trusted_proxies": ["10.0.0.0/8", "172.16.0.0/12"]
-  }
-}
-```
+See [Behind a reverse proxy](/docs/server/rate-limiting#behind-a-reverse-proxy).
 
 ## Response headers and errors
 
-Every HTTP response includes these headers:
+Every response to a rate-limited path includes these headers:
 
 | Header | Description |
 |---|---|
@@ -114,72 +98,9 @@ WebSocket handshakes bypass HTTP middleware, so the server re-applies the same c
 
 Each graph run sent over an open `/v1/graph/ws` connection also counts against the bucket. When the bucket is full, the connection stays open, the run is skipped, and the server sends an `error` stream event whose data holds `reason` (`Rate limit exceeded. Retry after <n>s.`) and `retry_after_seconds`.
 
-The separate `websocket.max_connections` and `websocket.max_connections_per_user` caps (in the `websocket` block of `10xgraph.json`) are enforced by the same handshake guard and also reject with close code `1013`. They are shared by all workers when a shared cache store is configured and per process otherwise.
-
 ## Cache store
 
-The limiter takes one slot per request from the API's cache store (`BaseCacheStore.acquire`); the slot is never released and expires after `window` seconds. A denied call adds nothing, so a client over its limit does not extend its own penalty.
-
-| Cache store | Use case |
-|---|---|
-| `InMemoryCacheStore` | Development, tests, single-process deployments. Counters are in-process memory and reset when the worker restarts. With N workers, the effective limit is `requests x N`. It keeps at most 50,000 slot keys and evicts the least recently used. This is the default when no `cache_store` is set. |
-| `RedisCacheStore` | Production multi-worker deployments (Gunicorn/Uvicorn), Docker, Kubernetes. Counters are shared across all workers. Chosen by `"type": "redis"` in `cache_store`; the URL is `cache_store.url` or `REDIS_URL`. Valkey, Dragonfly and KeyDB work through the same URL. |
-| Your own | A store that does not speak the Redis protocol. Implement `BaseCacheStore` and set `"cache_store": {"type": "custom", "path": "module:attr"}`. See [Bring your own backend](/docs/server/bring-your-own-backend). |
-
-A cache store signals an outage by raising; `fail_open` decides what happens next.
-
-## Examples
-
-Minimal configuration with the in-memory cache store and default limits:
-
-```json
-{
-  "agent": "graph.react:app",
-  "cache_store": {
-    "rate_limit": {
-      "enabled": true,
-      "requests": 100,
-      "window": 60,
-      "by": "ip",
-      "exclude_paths": ["/ping", "/docs", "/redocs", "/openapi.json"]
-    }
-  }
-}
-```
-
-Production setup with a Redis cache store, user-based limiting, trusted proxies:
-
-```json
-{
-  "agent": "graph.react:app",
-  "cache_store": {
-    "type": "redis",
-    "rate_limit": {
-      "enabled": true,
-      "requests": 1000,
-      "window": 60,
-      "by": "user",
-      "trusted_proxy_headers": true,
-      "trusted_proxy_hops": 1,
-      "trusted_proxies": ["10.0.0.0/8"],
-      "exclude_paths": ["/ping", "/docs", "/redocs"],
-      "fail_open": false
-    }
-  }
-}
-```
-
-With the `.env` file:
-
-```bash
-REDIS_URL=redis://localhost:6379/0
-```
-
-With no `url` the server reads `REDIS_URL` from the environment; a `url` such as `${REDIS_URL}` is expanded when the store is built. To use Redis, install the optional dependency:
-
-```bash
-pip install "10xgraph-api[redis]"
-```
+Counters live in the API's `cache_store` (one slot per request, never released, expires after `window`). See [BaseCacheStore](/docs/reference/api-cli/cache-store).
 
 ## See also
 

@@ -5,16 +5,10 @@ section: Reference
 group: "REST API"
 order: 380
 label: Observability
-updated: "2026-10-08"
+updated: "2026-11-25"
 ---
 
-`GET /v1/observability/{thread_id}` returns a reconstructed trace for a run on a thread: a span tree, a flat event list, aggregated token usage, and call counts. It reads from an in-memory store that is only available outside production, so use it for development and the playground, not for production tracing. It is turned off in production mode: nothing is recorded and the response carries `enabled: false`.
-
-| Property | Value |
-| --- | --- |
-| Method and path | `GET /v1/observability/{thread_id}` |
-| Permission | `graph:read` |
-| Availability | Development only (`MODE` other than `production`) |
+`GET /v1/observability/{thread_id}` returns a reconstructed trace for a run on a thread: a span tree, a flat event list, aggregated token usage, and call counts. It needs the `graph:read` permission. It reads from an in-memory store that is only available outside production (`MODE` other than `production`), so use it for development and the playground, not for production tracing. In production nothing is recorded and the response carries `enabled: false`.
 
 ---
 
@@ -44,9 +38,7 @@ curl -H "Authorization: Bearer $TOKEN" \
   "http://localhost:8000/v1/observability/my-thread-1?run_id=run-a"
 ```
 
-Omit the `Authorization` header if the server runs without auth.
-
-**Response:** the standard success envelope (`data`, plus `message` and `metadata`), shown here with the `data` payload.
+**Response:** the standard envelope, shown here with the `data` payload.
 
 ```json
 {
@@ -84,7 +76,7 @@ Omit the `Authorization` header if the server runs without auth.
           "kind": "llm",
           "parent": "s1",
           "start_ms": 10.0,
-          "duration_ms": 0.0,
+          "duration_ms": 1700.0,
           "model": "gpt-4o-mini",
           "input_tokens": 812,
           "output_tokens": 143
@@ -95,7 +87,7 @@ Omit the `Authorization` header if the server runs without auth.
           "kind": "tool",
           "parent": "s1",
           "start_ms": 1750.0,
-          "duration_ms": 0.0
+          "duration_ms": 45.0
         }
       ],
       "events": [
@@ -129,6 +121,8 @@ Omit the `Authorization` header if the server runs without auth.
 | `thread_id` | string | The thread that was queried |
 | `run_count` | integer | Number of runs recorded for the thread |
 | `run_ids` | string array | Every recorded run id, so a client can offer a run picker |
+| `enabled` | boolean | `false` when run tracing is off on this server |
+| `reason` | string or `null` | Why there is no run: `disabled_in_production`, `store_unavailable` or `no_runs` |
 | `run` | object or `null` | The requested (or latest) run. `null` when the thread has no recorded runs. |
 
 ### Run
@@ -144,13 +138,17 @@ Omit the `Authorization` header if the server runs without auth.
 | `spans` | array | The span tree, see below |
 | `events` | array | Flat event list, see below |
 | `usage` | object | Aggregated token usage |
-| `llm_calls` | integer | Number of records that carried token usage |
-| `tool_calls` | integer | Number of tool calls observed in the records |
-| `iterations` | integer | Number of distinct nodes the run touched |
+| `llm_calls` | integer | Number of `llm` spans |
+| `tool_calls` | integer | Number of `tool` spans |
+| `iterations` | integer | Number of node visits |
+| `error` | string or `null` | First error text seen in the run |
+| `model` | string or `null` | First model seen in the run |
+| `models` | string array | Distinct models seen |
+| `notes` | string array | Limits of the reconstruction |
 
 ### Span
 
-Spans form a tree rooted at a single `root` span covering the whole run. Node spans hang off the root; LLM and tool spans hang off the node span they occurred under, falling back to `root` when the node is unknown.
+Spans form a tree rooted at a single `root` span covering the whole run.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -159,14 +157,24 @@ Spans form a tree rooted at a single `root` span covering the whole run. Node sp
 | `kind` | string | `root`, `node`, `llm`, or `tool` |
 | `parent` | string or `null` | Parent span id. `null` for the root span. |
 | `start_ms` | number | Offset from the run start, in milliseconds |
-| `duration_ms` | number | Span duration in milliseconds. LLM and tool spans are point-in-time markers and report `0.0`; only root and node spans carry a real duration. |
+| `duration_ms` | number | Span duration in milliseconds |
+| `status` | string | `ok`, `error` or `running` |
+| `error` | string or `null` | Error text when `status` is `error` |
+| `inputs` | object or `null` | What went in (root: `user_message`, node: `incoming_message`, tool: `args`; `llm` is always `null`) |
+| `outputs` | object or `null` | What came out (root: `assistant_message`, node: emitted messages, llm: text and tool calls, tool: result) |
+| `step` | integer or `null` | Graph step of the visit. Present on `node` spans. |
+| `visit` | integer or `null` | 1-based visit count of this node name. Present on `node` spans. |
 | `model` | string or `null` | Model name. Present on `llm` spans. |
 | `input_tokens` | integer or `null` | Prompt tokens. Present on `llm` spans. |
 | `output_tokens` | integer or `null` | Completion tokens. Present on `llm` spans. |
+| `total_tokens` | integer or `null` | Total tokens. Present on `llm` spans. |
+| `reasoning_tokens` | integer or `null` | Reasoning tokens. Present on `llm` spans. |
+| `tool_name` | string or `null` | Tool name. Present on `tool` spans. |
+| `tool_call_id` | string or `null` | Tool call id. Present on `tool` spans. |
 
 ### Event
 
-Events are returned **newest first**, so a UI can render the list without reversing it. Ids are assigned in chronological order (`e0` is the oldest), which means the ids count down through the array.
+Events are returned **newest first**.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -189,15 +197,11 @@ Events are returned **newest first**, so a UI can render the list without revers
 
 ## Availability
 
-Traces come from an in-process telemetry store that records chunks as runs execute. It is bound **only outside production**: when `MODE=production` the store is never created, nothing is recorded, and this endpoint returns an empty payload (`run_count: 0`, `run: null`, `enabled: false`, `reason: "disabled_in_production"`) rather than an error. The other `reason` values are `store_unavailable` and `no_runs`.
-
-The store is in-memory and not durable, and a restart clears it. It keeps at most 200 threads, 20 runs per thread, and 2000 records per run, dropping the oldest first. Deleting a thread through the threads API also clears its traces. It is a development and playground aid, not a production observability system. For production tracing, configure OpenTelemetry (`OTEL_ENABLED`) or the `observability` block in `10xgraph.json`.
-
-Both `POST /v1/graph/invoke` and `POST /v1/graph/stream` record runs. Invoke has no chunk stream, so its trace is reconstructed from the final messages, which is enough for usage and cost but produces a coarser span tree than a streamed run.
+The store is in-memory and not durable, and a restart clears it. It keeps at most 200 threads, 20 runs per thread, and 2000 records per run, dropping the oldest first. Invoke and stream both record runs; an invoke trace is coarser.
 
 ### Errors and empty results
 
-A thread with no runs, or an unknown `run_id`, is not an error: the endpoint returns 200 with `run: null` (and `run_count` and `run_ids` for any runs that do exist). A missing or invalid token returns 401, and a token without `graph:read` returns 403. The thread is read through the caller's reach first, so a thread the caller cannot see (unknown, or owned by someone else) returns 404, and by default a user can read traces only for their own threads.
+A thread with no runs, or an unknown `run_id`, is not an error: the endpoint returns 200 with `run: null` (and `run_count` and `run_ids` for any runs that do exist). A missing or invalid token returns 401, and a token without `graph:read` returns 403. In development the thread is read through the caller's reach first, so a thread the caller cannot see returns 404. In production the thread is not checked and the answer is always `enabled: false`.
 
 ---
 

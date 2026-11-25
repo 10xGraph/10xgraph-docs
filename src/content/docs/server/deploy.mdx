@@ -4,7 +4,7 @@ description: Generate a Dockerfile, docker-compose.yml and Kubernetes manifest w
 section: "Deploy"
 order: 10
 label: "Docker and Compose"
-updated: "2026-11-10"
+updated: "2026-11-25"
 faq:
   - q: Why does the generated config wait so long to shut down?
     a: An agent run can take minutes, and Gunicorn's default 30 second graceful timeout would kill runs mid-flight on every rolling deploy. The generated files use a 600 second graceful timeout, a 660 second worker timeout, a 660 second Compose stop grace period and a 675 second Kubernetes grace period.
@@ -13,10 +13,10 @@ faq:
   - q: Does build read my 10xgraph.json?
     a: No. It looks for a requirements file or pyproject.toml, and the container reads 10xgraph.json at runtime, so your code and config must be copied into the image.
   - q: The 10xgraph-api package contains CLI code, project templates and a browser config editor. Is that a security risk in production?
-    a: No. The server never imports or serves any of it, and the generated Dockerfile deletes the templates and the config editor from the image after installing dependencies. The only CLI file the server loads is a small constants module.
+    a: No. The server never imports the CLI half, and the generated Dockerfile strips it from the image.
 ---
 
-`10xgraph build` generates a production-ready `Dockerfile` and `.dockerignore` for your agent, and with flags also a `docker-compose.yml` and a `k8s.yaml` manifest. The images run Gunicorn with Uvicorn workers in `MODE=production`. This guide covers building, configuring, and shipping your deployment with a release checklist.
+`10xgraph build` generates a `Dockerfile` and `.dockerignore` for your agent, and with flags also a `docker-compose.yml` and a `k8s.yaml` manifest. The images run Gunicorn with Uvicorn workers in `MODE=production`. This guide covers building, configuring, and shipping your deployment with a release checklist.
 
 The image and manifests implement the behavior described in [scaling and reliability](/docs/production/scaling). Draining runs on shutdown is covered in [Graceful shutdown](/docs/guides/graceful-shutdown).
 
@@ -90,45 +90,9 @@ Pass `--yes` or `--non-interactive` to skip the questions. Without a terminal, t
 
 The Dockerfile sets `MODE=production` and `WEB_CONCURRENCY=2`, installs `gunicorn` and `uvicorn`, removes the CLI-only files from the installed package, copies your project, drops to the non-root user `appuser` (fixed uid and gid 10001, set as `USER 10001:10001` so Kubernetes can verify it is not root), and defines a `HEALTHCHECK` that calls `/ping`. Its `CMD` runs `tenxgraph_api.src.app.main:app` under Gunicorn with the `TenxGraphUvicornWorker` class (`tenxgraph_api.src.app.uvicorn_worker.TenxGraphUvicornWorker`), `--graceful-timeout 600`, `--timeout 660` and `--no-control-socket` (the gunicorn control server would write `/app/.gunicorn`, and the root filesystem is read-only). The worker marks the app as draining on SIGTERM, so `/health/ready` answers 503 while open runs finish. `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` (default 540) sets how long uvicorn waits for open responses; see [Graceful shutdown](/docs/guides/graceful-shutdown).
 
-## Does the image ship the CLI and the config editor?
+The builder stage strips the CLI's templates and config editor and uninstalls the CLI-only libraries (typer, rich, questionary) unless your project needs them, so the image carries no CLI code paths.
 
-No. `10xgraph-api` is one package with two halves: the API server, and the CLI you use on your machine (`init`, `build`, `eval`, the `10xgraph config` browser editor, project templates and the bundled agent skill). Seeing CLI code and HTML/JS in the package can look like extra attack surface on a production server. It is not, for two reasons.
-
-**The server never touches the CLI half.** It imports one CLI file, `tenxgraph_api/cli/constants.py`, for the version string. No route serves the editor's HTML or JS, and the editor itself only runs when you type `10xgraph config`. Even then it listens on `127.0.0.1` and needs a random per-session token.
-
-**The generated image removes it anyway.** Right after installing dependencies, the Dockerfile deletes the templates and the config editor from the installed package:
-
-```dockerfile
-# Strip CLI-only assets the server never loads: project scaffolds, the bundled
-# agent skill, and the local config editor (HTML/JS). Only the server code and
-# its dependencies stay in the image.
-RUN python -I -c "import importlib.util, pathlib, shutil; spec = importlib.util.find_spec('tenxgraph_api'); cli = pathlib.Path(spec.origin).parent / 'cli' if spec and spec.origin else None; [shutil.rmtree(cli / d, ignore_errors=True) for d in ('templates', 'config_editor') if cli]"
-```
-
-The CLI's small Python modules stay, so `10xgraph version` and `10xgraph audit` still work inside a running container for debugging.
-
-The generated `.dockerignore` does the same for your project: `tests/`, `evals/` and installed skill folders (`.claude/`, `.agents/`, `.github/`) are not copied into the image, along with `.env` files, private keys and certificates (`*.pem`, `*.key`, `*.p12`), cloud credential files (`service_account*.json`, `credentials*.json`, `.aws/`), caches and virtual environments.
-
-You can check a built image yourself:
-
-```bash
-docker build -t my-agent .
-docker run --rm my-agent python -c "import pathlib, tenxgraph_api; print(sorted(p.name for p in (pathlib.Path(tenxgraph_api.__file__).parent / 'cli').iterdir()))"
-```
-
-The list has no `templates` or `config_editor` entry.
-
-<Callout type="note" title="Older Dockerfiles">
-
-A Dockerfile generated by a 0.x version of `10xgraph-api` does not have the strip step. Run `10xgraph build --force` to regenerate it, or add the `RUN` line above after your `pip install` step.
-
-</Callout>
-
-## How do I run it in Docker Compose or Kubernetes?
-
-<Tabs syncKey="target">
-
-<TabItem label="Docker Compose">
+## Run it with Docker Compose
 
 The compose file defines one service with `build: .`, the production environment, the same Gunicorn command, `stop_grace_period: 660s` and `restart: unless-stopped`. It reads secrets and `ORIGINS`/`ALLOWED_HOST` from `.env` through `env_file`, so they never enter the image. Copy `.env.example` to `.env` and fill it in first.
 
@@ -142,77 +106,7 @@ The port is published on `127.0.0.1:8000` only: the server speaks plain HTTP, so
 
 The container runs with `read_only: true`, `cap_drop: [ALL]` and `no-new-privileges`. Only `/tmp` (a tmpfs) and `/app/uploads` (the named volume `uploads`) are writable. If your graph writes elsewhere, for example a SQLite checkpointer file, mount a volume at that path.
 
-</TabItem>
-
-<TabItem label="Kubernetes">
-
-`k8s.yaml` holds a Deployment with 2 replicas and a Service on port 80 that targets your container port.
-
-If you included the worker, the file also has a `<service>-worker` Deployment, and with the scheduler a `<service>-scheduler` Deployment. They have no Service and no HTTP probes, and use the same security context and Secret as the API. The scheduler runs one replica with `strategy: Recreate`, so a rollout never runs two.
-
-```bash
-docker build -t registry.example.com/my-agent:1.0 .
-docker push registry.example.com/my-agent:1.0
-kubectl create secret generic my-agent-secrets \
-  --from-literal=JWT_SECRET_KEY=... --from-literal=GOOGLE_API_KEY=... \
-  --from-literal=ORIGINS=https://your-frontend.example.com \
-  --from-literal=ALLOWED_HOST=your-app.example.com
-# edit the image in k8s.yaml, then:
-kubectl apply -f k8s.yaml
-```
-
-The settings that protect running agents:
-
-| Setting | Value | Why |
-|---|---|---|
-| `terminationGracePeriodSeconds` | 675 | Longer than the 600 second Gunicorn drain plus the 15 second `preStop` sleep, which runs inside the same period |
-| `preStop` | `sleep 15` | Lets the load balancer stop sending new requests first |
-| `readinessProbe` | `/health/ready`, every 10s | Removes the pod from rotation |
-| `livenessProbe` | `/ping`, every 30s, 5 failures | Slack enough that a busy worker is not restarted mid-run |
-| Resources | request 500m CPU and 512Mi, limit 2 CPU and 2Gi | Starting point, tune for your load |
-
-The settings that lock the pod down:
-
-| Setting | Value |
-|---|---|
-| `automountServiceAccountToken` | `false`: the server never calls the Kubernetes API |
-| Pod `securityContext` | `runAsNonRoot`, uid/gid/fsGroup 10001, `seccompProfile: RuntimeDefault` |
-| Container `securityContext` | `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, all capabilities dropped |
-| Volumes | `emptyDir` at `/tmp` (Gunicorn heartbeats) and `/app/uploads` (local media) |
-| Secrets | `envFrom` the Secret `<service>-secrets`; the pod does not start until it exists |
-
-The manifest sets `MODE`. `ORIGINS` and `ALLOWED_HOST` come from the Secret too, with everything secret; a value in the manifest would override the Secret. Create it with `--from-literal` or a secret manager, not `--from-env-file .env`: `kubectl` keeps the quotes from a `.env` file as part of each value.
-
-<Callout type="warning" title="Uploads with more than one replica">
-
-`/app/uploads` is an `emptyDir`: each pod has its own, and it is lost when the pod restarts. A file uploaded through one replica is missing on the others. For production uploads set `MEDIA_STORAGE_TYPE=cloud` (S3 or GCS) in the Secret.
-
-</Callout>
-
-</TabItem>
-
-</Tabs>
-
-## Choose your deployment path
-
-Before building, decide whether you need persistence, multiple instances, and public access. This flowchart guides the decision:
-
-```mermaid
-flowchart TD
-    A[Do you need public or team access?] -->|No| B[Stay local with 10xgraph dev]
-    A -->|Yes| C[Do you need persistence?]
-    C -->|No| D[Single-instance simple deployment]
-    C -->|Yes| E[Shared durable checkpointer]
-    E --> F[Do you need multiple replicas?]
-    F -->|No| G[Single durable instance]
-    F -->|Yes| H[Load balanced multi-instance deployment]
-```
-
-For local development, `10xgraph dev` is sufficient. For shared or production use:
-
-- **Persistence required:** Set a durable checkpointer (for example `PgCheckpointer`), by passing it to `graph.compile(checkpointer=...)` in your graph code (`10xgraph.json` has no `checkpointer` key). In-memory checkpointing loses all threads on restart.
-- **Multiple instances:** Use a shared durable checkpointer and a shared store (if using long-term memory). Each instance must access the same database backend.
-- **Shared state across instances:** Set `"cache_store": {"type": "redis"}` so the API's cache store is shared. It holds the run locks, caps, idempotency state, token revocation and rate-limit counters. The in-memory store counts per process and is not shared.
+For Kubernetes, see [Deploy on Kubernetes](/docs/server/kubernetes).
 
 ## Production environment settings
 
@@ -223,58 +117,10 @@ The generated files set `MODE=production`. Add the following at runtime:
 | `ORIGINS` | Comma-separated list of your frontend origins | `k8s.yaml` reads it from the Secret; compose reads it from `.env`. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false`, and is always refused when `CORS_ALLOW_CREDENTIALS` is true |
 | `ALLOWED_HOST` | Your hostnames | Comma-separated. `k8s.yaml` reads it from the Secret; compose reads it from `.env`. A wildcard `*` stops startup in production unless `STRICT_PRODUCTION_CHECKS=false` |
 | `JWT_SECRET_KEY` | 32+ bytes, from a secret manager | Required if `auth` is `jwt`. See [Add JWT authentication](/docs/server/auth) |
-| `JWT_ALGORITHM` | `HS256` or your choice | Required with `jwt` |
+| `JWT_ALGORITHM` | `HS256` (default) or your choice | Optional |
 | `REDIS_URL` | Your Redis connection URL | Optional. The server uses it for a `cache_store` of type `redis` that has no `url`. Without such a `cache_store` the cache store is in-memory and per process |
 | `WEB_CONCURRENCY` | Workers per container | Default 2. Tune for your CPU and load |
 
-For durable persistence and distributed deployments, also configure:
-
-- A `PgCheckpointer` or equivalent (never rely on in-memory checkpointing in production).
-- A `BaseStore` subclass if you use long-term memory.
-- Role-based access control, if owner-only threads are not enough: add `roles` to the `auth` object.
-
 Full reference is in the [configuration](/docs/reference/api-cli/configuration) and [environment](/docs/reference/api-cli/environment) pages.
 
-<Callout type="warning" title="CORS and credentials">
-
-Set `ORIGINS` and `ALLOWED_HOST` in the Secret (Kubernetes) or `.env` (compose) before you deploy. In production the server refuses to start with wildcard origins, a wildcard host or enabled docs paths, because `STRICT_PRODUCTION_CHECKS` is on by default. It always refuses wildcard origins while `CORS_ALLOW_CREDENTIALS` is true. These are safety checks: wildcard CORS with credentials would allow any website to read your data.
-
-</Callout>
-
-## Before release: verification checklist
-
-Before deploying to production, run these checks to catch configuration issues early:
-
-1. **Health endpoint**
-   ```bash
-   curl http://127.0.0.1:8000/ping
-   ```
-
-2. **Graph schema**
-   ```bash
-   curl http://127.0.0.1:8000/v1/graph
-   ```
-
-3. **Auth is enforced** (if enabled)
-   - Without credentials: auth-protected routes return 401
-   - With valid credentials: requests succeed
-
-4. **CORS is restricted**
-   - Requests from allowed origins succeed
-   - Requests from disallowed origins are rejected
-
-5. **Documentation is hidden** (if intentional)
-   - In `MODE=production` the server turns `/docs` and `/redocs` off unless you set `DOCS_PATH` or `REDOCS_PATH` explicitly (they should return 404)
-   - Check that neither variable is set in your deployment
-
-6. **Persistence survives restart**
-   - Invoke an agent without a `thread_id` and save the one the server returns in `data.thread_id`
-   - Restart the server or container
-   - Fetch the same thread: messages and state should be intact
-
-7. **Multiple instances sync** (if deployed with replicas)
-   - Invoke an agent on instance A, get a thread_id
-   - Fetch that thread on instance B: state should be identical
-   - This confirms the checkpointer and store backends are shared
-
-Record the results before going live. If any check fails, fix the configuration and repeat.
+Before release, run the [verification checklist](/docs/server/production-checklist#verification-checklist).

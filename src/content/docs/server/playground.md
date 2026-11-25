@@ -4,17 +4,17 @@ description: Test your agent with the 10xGraph playground, a hosted UI for inter
 section: "API server"
 group: "Tools"
 order: 110
-updated: "2026-11-10"
+updated: "2026-11-25"
 faq:
   - question: "Is the playground hosted locally or on the web?"
-    answer: "The playground UI is hosted by 10xScale on the web. Your agent runs locally, and the browser communicates with your local API server via the backendUrl parameter. The playground never has access to your code or data; only network requests travel between your browser and your API."
+    answer: "The playground UI is hosted by 10xScale on the web. Your agent runs locally, and the browser communicates with your local API server via the backendUrl parameter."
   - question: "Can I use the playground in production?"
     answer: "No. The playground is designed for interactive development and testing. For production, expose your API directly or build a custom UI with the TypeScript client and your own frontend."
   - question: "How do I troubleshoot playground connection errors?"
     answer: "See the Playground Troubleshooting page for detailed diagnosis steps, including how to verify your API is running, check the backendUrl, and inspect browser and API logs."
 ---
 
-`10xgraph dev` starts your API server and opens the playground in your browser, so you can chat with your agent and inspect its threads and runs without building a frontend. The 10xGraph playground is a hosted web application that lets you test your agent interactively during development. Pass `--no-open` to start the server without opening the browser. The playground connects to your local API over the network, so you can see messages, trace execution, inspect state, and debug tools in real time without writing any client code.
+`10xgraph dev` starts your API server and opens the playground in your browser, so you can chat with your agent and inspect its threads and runs without building a frontend. Pass `--no-open` to start the server without opening the browser. The playground connects to your local API over the network, so you can see messages, trace execution, inspect state, and debug tools in real time without writing any client code.
 
 ## Prerequisites
 
@@ -37,8 +37,6 @@ Playground opened: https://play.10xgraph.com?backendUrl=http%3A%2F%2F127.0.0.1%3
 ```
 
 If the browser tab does not open automatically, copy the playground URL from the terminal output and paste it into your browser's address bar. You can also open [play.10xgraph.com](https://play.10xgraph.com) directly and enter your server URL on the Connect page.
-
-Older 0.x versions of `10xgraph-api` open the same playground at its previous address, `playground-463bd.web.app`. Both addresses serve the same app.
 
 ## Allow the playground to reach your local server
 
@@ -139,76 +137,9 @@ Build a realtime agent with [Use realtime audio](/docs/guides/use-realtime-audio
 
 **Files** is a placeholder marked "Soon" in the rail; file upload is not wired up in the playground yet. Upload files over the API endpoint `POST /v1/files/upload` or with the TypeScript client (see [Files and multimodal](/docs/client/files-and-multimodal)).
 
-## Customizing the dev command
-
-### Use a different config file
-
-If you have multiple `10xgraph.json` files (e.g., for dev vs staging), specify which one:
-
-```bash
-10xgraph dev --config ./config/staging.json --port 8001
-```
-
-### Use a different host or port
-
-By default, the playground listens on `127.0.0.1:8000`. To listen on a different address:
-
-```bash
-10xgraph dev --host 0.0.0.0 --port 9000
-```
-
-Be aware that `0.0.0.0` exposes the server to your entire network and beyond if port-forwarded.
-
-## Environment variables and secrets
-
-The playground runs in your browser and does not have access to your local environment variables. All secrets (API keys, database URLs, etc.) must be available to your graph module when the server starts.
-
-Configure secrets one of two ways:
-
-**Option 1: set env vars before starting the server**
-
-```bash
-export GOOGLE_API_KEY="..."
-10xgraph dev
-```
-
-The server also loads the `.env` file named by the `env` key in `10xgraph.json`. Your graph module reads the variables when it is imported:
-
-```python
-# graph.py
-import os
-
-from tenxgraph.prebuilt.agent import ReactAgent
-
-if not os.environ.get("GOOGLE_API_KEY"):
-    raise ValueError("GOOGLE_API_KEY not set")
-
-agent = ReactAgent(model="google/gemini-2.5-flash", provider="google")
-app = agent.compile()
-```
-
-Install the provider extra first: `pip install "10xgraph[google-genai]"`.
-
-**Option 2: pass secrets via dependency injection**
-
-If your graph uses an `InjectQ` container, point the `injectq` key in `10xgraph.json` at it and bind your secrets there:
-
-```json
-{
-  "agent": "graph:app",
-  "injectq": "graph:container"
-}
-```
-
-Your tools and nodes can then inject them as needed.
-
 ## Stopping the playground
 
 Press `Ctrl+C` in the terminal where `10xgraph dev` is running to stop both the API server and the playground. The browser tab remains open but shows "Connection failed" since the API is no longer available.
-
-## One command: dev
-
-`10xgraph dev` is the only command that starts the server. It opens the playground by default; pass `--no-open` to skip the browser step (CI, programmatic clients). It reloads on file changes by default (`--no-reload` turns that off) and runs the Uvicorn development server, which the CLI marks as not for production. For production, build an image with `10xgraph build` (it runs Gunicorn). The commands `10xgraph play` and `10xgraph api` were removed before 1.0.
 
 ## Sharing your agent with others
 
@@ -231,7 +162,7 @@ If the playground does not connect or load correctly, see [Playground Troublesho
 
 - **Test with tools**: Add tools to your graph and invoke them from the Chat page to confirm they work correctly
 - **Check persistence**: Enable a checkpointer (`compile(checkpointer=...)`) and verify threads persist across server restarts in Thread Inspector
-- **Trace execution**: Send a message, then open the Observability page to see the span timeline and token usage
+- **Trace execution**: Send a message, then open the Run trace page to see the span timeline and token usage
 - **Deploy**: Use `10xgraph build --docker-compose` to generate a Dockerfile and deploy to production
 
 ## Related pages

@@ -14,8 +14,9 @@ batch feature, the `10xgraph revoke` command and the tracing `setup_*` helpers a
 exceptions, listed under Removed. Some behavior does change without a
 code change on your side. Read the behavior changes first.
 
-This page covers `10xgraph` 1.0 and `10xgraph-api` 1.0. The 1.1 entries below come from the
-changelogs of both packages, which still list them as unreleased.
+This page covers `10xgraph` 1.0, `10xgraph-api` 1.0 and `10xgraph-client` 1.0. The 1.1 entries
+below come from the changelogs of the three packages, which still list them as unreleased. The
+client has one change: `invoke()` returns `thread_id` and `run_id` (see the API section).
 
 ## Install 1.1
 
@@ -87,20 +88,94 @@ These work differently after the upgrade, with no code change. Check each one ag
   For several tracing backends at once, use the API `observability` block. A list or
   `CompositePublisher` is how you combine one tracing publisher with event publishers (Redis,
   Kafka, RabbitMQ, console).
-- **Events.**
-  - Tool END and ERROR events carry `data["status"]` (`"success"` or `"error"`) and
-    `data["duration_ms"]`. `ToolResultEvent` has the same two fields.
-  - Each tool call sends one start and one end (or error) event. Before, it sent about five
-    from two layers. Kafka, Redis and RabbitMQ consumers that counted the duplicates see fewer.
-  - Tool event `node_name` is the graph node. The tool name, as the model called it, is in
+- **Fewer events, routed by publisher kind.** Event consumers see a different stream, and no
+  setting restores the old one. Each event has a tag. `all` events go to event publishers (Kafka,
+  Redis, RabbitMQ, custom) and to tracing publishers (OTEL, Phoenix, LangSmith, Logfire).
+  `observability` events (node start, LLM calls, node errors) go to tracing publishers only.
+  `ConsolePublisher` gets every event. The domain name is in `metadata["event_name"]`. A 3-node
+  run (model, tool, model) sends event publishers 7 events instead of 48: `run.started`,
+  `node.completed` three times, `tool.started`, `tool.completed` and `run.completed`.
+  - **State only on run-end events.** `data["state"]` is on `run.completed`, `run.failed`,
+    `run.interrupted` and `run.stopped`, still bounded by `state_snapshot_limit`. `run.started`
+    carries no state and no run config (`metadata["config"]` and
+    `metadata["response_granularity"]` are removed).
+  - **Run-level events have an empty `node_name`.** The node is in `metadata["current_node"]`
+    (`data["interrupted_node"]` for a stop). `run.interrupted` keeps the interrupted node.
+  - **Old to new.**
+
+    | Before | Now |
+    |---|---|
+    | GRAPH START | `run.started` |
+    | GRAPH END | `run.completed` (not sent for a paused or stopped run) |
+    | GRAPH ERROR (sent more than once) | `run.failed`, once |
+    | NODE END (twice per node) | `node.completed`, once per node, with the node's new messages and `next_node` |
+    | TOOL START / END / ERROR | `tool.started`, `tool.completed`, `tool.failed` |
+    | GRAPH INTERRUPTED, `graph_interrupt` lifecycle event | `run.interrupted` (interrupt before or after, `interrupt()`, client tools), `run.stopped` (stop or cancel) |
+    | Crash recovery | `run.recovered` (`dead_run_id`, no state) |
+    | Validation rejection | `input.rejected` |
+    | PROGRESS, GRAPH UPDATE, `graph_start`, `graph_end`, `graph_error`, `state_update`, `checkpoint` | Removed |
+
+  - **Tracing.** The OTEL graph span ends on every run-end event and carries
+    `tenxgraph.graph.run_status` (`completed`, `failed`, `interrupted`, `stopped`,
+    `input_rejected`). An interrupted or stopped run no longer leaves it open. The
+    `graph.lifecycle.*`, `graph.checkpoint` and `node.state_update` span events are gone.
+  - **Realtime.** A `LiveAgent` session sends `run.started` and `run.completed` (or `run.failed`
+    or `run.stopped`) instead of `graph_start` and `graph_end`.
+  - **Tool events.** END and ERROR carry `data["status"]` (`"success"` or `"error"`) and
+    `data["duration_ms"]`. `ToolResultEvent` has the same two fields. Each tool call sends one
+    start and one end (or error) event, not about five. A call cancelled by `tool_timeout`, a stop
+    or a shutdown now sends its ERROR event too. An MCP result with `isError` set is an error
+    result.
+  - **Tool event `node_name`** is the graph node. The tool name, as the model called it, is in
     `data["function_name"]`. Read the tool name from there.
-  - A pause by `interrupt()` or `interrupt_before` / `interrupt_after`, and a stop, send one
-    GRAPH_EXECUTION `INTERRUPTED` event (`graph_interrupt`). The run's own `INTERRUPTED` event
-    is no longer sent.
-  - Lifecycle events reach publishers on every run, not only when a lifecycle hook is registered.
-  - Event payloads are built only when a publisher is bound.
-  - LLM end events are built from the converted reply. Google's finish reason is the enum name
+  - **Payloads** are built only when a publisher is bound, and only for a tag that a bound
+    publisher takes.
+  - **LLM end events** are built from the converted reply. Google's finish reason is the enum name
     (`STOP`), and OpenAI's is `UNKNOWN` when the provider sends none.
+
+  See [Events and observability](/docs/concepts/events-and-observability) and
+  [Use publishers](/docs/guides/use-publishers) for the event list and fields.
+- **Publishers batch events, always.** `RabbitMQPublisher`, `KafkaPublisher` and `RedisPublisher`
+  put each event in a bounded queue, and one worker per publisher sends a batch every
+  `batch_size` events (default 100) or `flush_interval_ms` (default 20), in order. `queue_size`
+  (default 2048) bounds the queue and `publish_timeout` bounds one batch. A full queue drops the
+  event, counts it in the `tenxgraph.publish.dropped` metric and warns at most every 10 seconds.
+  `CompiledGraph.aclose()`, sync `invoke` and `stream`, and the publisher's `close()` flush the
+  queue. `publisher.publish(event)` still sends one event at once. The Kafka message key is now
+  the thread id, so one thread's events keep their order. All three encode an event with
+  `model_dump_json()`: the payload parses to the same value, but the bytes differ (compact
+  separators, UTF-8 instead of `\uXXXX` escapes). See [Use publishers](/docs/guides/use-publishers)
+  and the [publishers reference](/docs/reference/python/publishers).
+- **A run saves the next node.** The durable save after each step names the node that runs
+  next. It named the node that had just finished, so a crash after that save with the Redis cache
+  lost resumed at the finished node and ran it, and its tool calls, twice. In `astream`, the
+  state in the chunk after each step names the next node too.
+- **`astop` writes only the stop key.** It no longer copies the stop request into the cached
+  state. A run reads the stop key.
+- **Closing `astream` early saves the thread.** If the consumer breaks out while a node or tool
+  runs, the thread is saved as interrupted, like a cancel, not left `running`.
+- **Other fixes you may notice.**
+  - A node named `start` or `end` is no longer renamed when a run resumes from a stored
+    `current_node`. Node `before_invoke` and `after_invoke` callbacks no longer fire for
+    `__start__` and `__end__`.
+  - `compile()` without `callback_manager` gives each graph its own `CallbackManager`, not one
+    shared default.
+  - The tool result of a handoff tool in a hand-built `StateGraph` streams as a `tool` chunk under
+    `astream`, as `ainvoke` already returned it.
+  - A tool that raises a `BaseException` that is not an `Exception` gets a failed tool result
+    under `astream` too.
+  - Gemini: non-streaming calls report tokens, response id and model. Large media uploads use the
+    Agent's own client (`base_url`, `api_key`, Vertex settings, `http_client`).
+  - Claude: Haiku 4.5, Sonnet 4.5, Opus 4.5 and older models no longer get a 400 on the default
+    reasoning config. `temperature`, `top_p` and `top_k` are removed for Bedrock cross-region
+    ids and Vertex ids with an `@date` suffix when the model rejects them.
+  - MCP: tool schemas from a fastmcp 4 server load, and `tools_tags` reads tags under
+    `meta["fastmcp"]`.
+  - Realtime tool calls honour `tool_timeout`, record tool metrics, and run in their own task.
+  - Assistant messages from the OpenAI and Google converters are stamped with local time, so
+    `PgCheckpointer` no longer lists a reply before its question.
+  - The in-memory checkpointer keeps the first of two `aput_tool_result` calls for one tool call,
+    and compares message ids as text.
 - **Data classes are pydantic models.** `RetryConfig`, `MCPAuthContext`, `WorkerConfig`,
   `SwarmMemberConfig`, `MediaFetchPolicy`, `CallbackContext`, `GraphLifecycleContext`,
   `TaskMetadata`, `TokenUsage`, `ReporterOutput`, `NodeResponse` and `TempCacheEntry` keep their
@@ -205,6 +280,17 @@ These work differently after the upgrade, with no code change. Check each one ag
   instead of `meta.thread_id`.
 - **Requires injectq `>=0.7.0,<0.8`**, now a direct dependency. A container workaround and the
   `current_container()` helper are removed.
+- **Trace export outages log once.** When a trace backend is down (Phoenix, LangSmith, plain OTLP
+  over HTTP, or the legacy `OTEL_ENABLED` gRPC exporter), the `tenxgraph.trace_export` logger
+  writes one WARNING when exports start failing and one INFO when they recover, not a line per
+  batch.
+- **Uploads and logs.** File names and signatures are checked by core's `sanitize_filename` and
+  `validate_magic_bytes`, so the API and core apply one rule. Log lines escape U+2028 and U+2029.
+- **Worker shutdown.** The worker closes the same resources as the API server, in the same order
+  (graph, lease manager, cache store, auth, telemetry).
+- **WebSocket container.** A WebSocket connection no longer replaces an app's own InjectQ container
+  with the global one, so an app on its own container keeps it on `/v1/graph/ws` and
+  `/v1/graph/live`.
 - **CLI.** Every command finds `10xgraph.json` (or `agentflow.json`) in the current or nearest
   parent folder. `10xgraph eval` loads the agent as the server does. `10xgraph config` validates
   with the server's rules.
@@ -284,6 +370,9 @@ cache store (`InjectQ.get_instance().get(BaseCacheStore)`) from your own code.
 - **Partial state updates.** A node can return a `dict` or `Command(update={...})`: each key
   sets a state field, and `"messages"` appends.
 - **Tool event fields** `status` and `duration_ms` (see behavior changes).
+- **Publish timers.** `tenxgraph.publish.duration` (one event send, or one batch for the Kafka,
+  Redis and RabbitMQ publishers, with a `publisher` attribute), `tenxgraph.publish.batches`,
+  `tenxgraph.publish.events` and `pg_checkpointer.save_state_cache.duration`.
 - **Memory origin and expiry.** Every memory has an `origin` (`user`, `agent`, `tool`, `system`,
   or unknown) and an optional `expires_at`. `MemoryConfig(ttl=...)` expires what the model
   remembers; `MemoryConfig(origins=list(TRUSTED_ORIGINS))` turns on trusted-only retrieval, which
@@ -326,6 +415,13 @@ The changelog states these measurements:
 - Stop checks on that run cost 0.15 ms instead of 130 ms with `InMemoryCheckpointer` (Postgres
   with Redis: 1.7 ms instead of 49 ms), and the state is read from the cache once instead of 9
   times.
+- With `PgCheckpointer`, the run start writes its run marker and reads the saved state together (3
+  round trips instead of 5 for a new thread). A stop from another process is read once per step,
+  not before and after every node. A save on an existing thread, the history prune and the
+  messages use fewer statements.
+- A run writes the state cache once less per node when `durable_checkpoint_every_step` is on (the
+  default). Paths that end the run before the per-step save (client tools, stop, interrupt, error,
+  cancel) save on their own.
 - Checking a model for NUL or lone-surrogate text is about 2.5 times faster.
 - A thread resume in the API reads the thread state once before the run. A stream resume read it
   up to four times.

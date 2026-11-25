@@ -6,7 +6,7 @@ section: Reference
 group: "REST API"
 order: 340
 label: Threads
-updated: "2026-10-28"
+updated: "2026-11-25"
 faq:
   - q: "How do I create a thread over the REST API?"
     a: "There is no create-thread endpoint. A thread comes into existence when you call the invoke or stream endpoint without a thread_id and the server generates one. With `runs.thread_ids` set to `client`, it also comes into existence the first time a request uses an id you picked."
@@ -16,11 +16,11 @@ faq:
     a: "Yes. The list endpoints default to 100 items and clamp any larger limit to 1000. A limit of 0 or less returns 422."
 ---
 
-The thread endpoints read and manage what the checkpointer stores for a conversation: the thread record, its saved state and its messages. Every route lives under `/v1/threads` and is addressed by `thread_id`. Each route needs a `threads` permission when auth is configured.
+The thread endpoints read and manage what the checkpointer stores for a conversation: the thread record, its saved state and its messages. Every route lives under `/v1/threads` and is addressed by `thread_id`.
 
 ## Route summary
 
-The server exposes ten thread routes. Reads need `threads:read`, writes need `threads:write`, and deletes need `threads:delete`. There is no route to import messages.
+The server exposes ten thread routes. Reads need `threads:read`, writes need `threads:write`, and deletes need `threads:delete`.
 
 | Method | Path | Permission |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ The server exposes ten thread routes. Reads need `threads:read`, writes need `th
 | `PUT` | `/v1/threads/{thread_id}/messages/{message_id}` | `threads:write` |
 | `DELETE` | `/v1/threads/{thread_id}/messages/{message_id}` | `threads:delete` |
 
-There is no create-thread endpoint. A thread is created implicitly when `POST /v1/graph/invoke` or `POST /v1/graph/stream` omits `thread_id` and the server generates one. With `runs.thread_ids` set to `client`, the first request that names an unused id creates it instead. See [Graph endpoints](/docs/reference/rest-api/graph).
+There is no create-thread route: omit `thread_id` on invoke or stream. With `runs.thread_ids: client`, naming an unused id creates it. See [Graph endpoints](/docs/reference/rest-api/graph).
 
 ## Response envelope and shared rules
 
@@ -46,9 +46,7 @@ Every successful response is a JSON object with a `data` field holding the resul
 | `thread_id` type | String or integer. An empty or whitespace-only string, or an integer below `1`, returns `422`. |
 | `limit` | Default `100`, clamped to a maximum of `1000`. A value of `0` or less returns `422`. |
 | `offset` | Must be `>= 0`, otherwise `422`. |
-| `config` in a request body | Client keys are merged into the checkpointer config. The path `thread_id` always wins, and the server-owned keys `user`, `user_id`, `remote_tools` and any key starting with `_` are dropped. |
-
-The curl examples in this page assume a local server on port 8000 and a token in `$TOKEN`. Omit the `Authorization` header if auth is not configured.
+| `config` in a request body | Client keys are merged into the checkpointer config. The path `thread_id` always wins; server-owned keys are dropped (see [Conventions](/docs/reference/rest-api/conventions)). |
 
 ## List threads
 
@@ -72,15 +70,20 @@ curl -G "http://localhost:8000/v1/threads" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Each item is a thread record with `thread_id`, `thread_name`, `user_id`, `metadata`, `updated_at` and `run_id` (the full field set of `ThreadInfo`; unset fields are `null`).
+Each item is a thread record with `thread_id`, `thread_name`, `user_id`, `metadata`, `updated_at` and `run_id`.
 
 ```json
 {
   "threads": [
     {"thread_id": "t1", "thread_name": "Weather in Paris", "user_id": "user-123", "metadata": null, "updated_at": "2026-04-01T10:00:00", "run_id": null}
-  ]
+  ],
+  "has_more": false,
+  "offset": 0,
+  "limit": 100
 }
 ```
+
+`has_more` is true when another page follows; `offset` and `limit` are the values applied.
 
 ## Get a thread
 
@@ -115,25 +118,25 @@ curl -X DELETE http://localhost:8000/v1/threads/t1 \
 {"success": true, "message": "Thread deleted successfully", "data": null}
 ```
 
-If file or trace cleanup fails after the thread is deleted, the answer is `success: false` with the message `Thread deleted, but cleanup did not finish: <steps>` and `data` like this. The thread itself is gone. A delete also releases the files linked to that thread by their own metadata, even when no message references them (local and memory media stores; the cloud store cannot list its files, so it is skipped). A file left with no thread is deleted only with `media.delete_with_thread` on, which is the default.
+If file or trace cleanup fails after the thread is deleted, the answer is `success: false` with the message `Thread deleted, but cleanup did not finish: <steps>` and `data` like this. The thread itself is gone. Files that only this thread referenced are deleted too (`media.delete_with_thread`, default true).
 
 ```json
 {"success": false, "message": "Thread deleted, but cleanup did not finish: traces", "data": {"deleted": true, "cleanup_failed": ["traces"], "result": {}}}
 ```
 
-`cleanup_failed` lists the steps that failed. Check `success` before you treat the delete as fully clean. On success, the inner `data` is whatever the checkpointer returns from its clean-up. The server also deletes the thread's telemetry traces when a telemetry store is bound.
+`cleanup_failed` lists the steps that failed. Check `success` before you treat the delete as fully clean. On success, the inner `data` is whatever the checkpointer returns from its clean-up.
 
 ## Thread and message ids
 
-Thread, message and memory ids must match `^[A-Za-z0-9._:@-]{1,128}$`: 1 to 128 letters, digits and `. _ : @ -`, with no spaces or slashes. Other ids in the path or body get `422` `VALIDATION_ERROR`. See [Conventions](/docs/reference/rest-api/conventions#resource-ids).
+Ids must match the rule in [Conventions](/docs/reference/rest-api/conventions#resource-ids).
 
 ## Writes while a run is active
 
-These routes answer `409` (code `HTTPException`, message `thread is busy`, `Retry-After: 5`) at once while a run holds the thread, instead of waiting: `PUT /v1/threads/{thread_id}/state`, `DELETE /v1/threads/{thread_id}/state`, `DELETE /v1/threads/{thread_id}/messages/{message_id}`, `DELETE /v1/threads/{thread_id}` and `POST /v1/graph/fix`. A write that raced a run would be overwritten by it, or would bring a deleted thread back. Retry after the run ends, or stop it with `POST /v1/graph/stop`.
+These routes answer `409` (code `HTTPException`, message `thread is busy`, `Retry-After: 5`) at once while a run holds the thread, instead of waiting: `PUT /v1/threads/{thread_id}/state`, `DELETE /v1/threads/{thread_id}/state`, `DELETE /v1/threads/{thread_id}/messages/{message_id}`, `DELETE /v1/threads/{thread_id}` and `POST /v1/graph/fix`. Retry after the run ends, or stop it with `POST /v1/graph/stop`.
 
 ## Get thread state
 
-`GET /v1/threads/{thread_id}/state` returns the saved state for a thread. If the checkpointer has no persisted state, the server falls back to the state cache.
+`GET /v1/threads/{thread_id}/state` returns the saved state for a thread.
 
 ```bash
 # Read the saved state of thread t1
@@ -151,7 +154,7 @@ curl http://localhost:8000/v1/threads/t1/state -H "Authorization: Bearer $TOKEN"
 }
 ```
 
-The exact fields depend on your `AgentState` subclass. `state` is `null` when nothing is stored. Messages in `context` carry no `raw` field, and `execution_meta.internal_data` holds only `error` when a run failed. With `MODE=production` that error is a generic message with its error code, as in stream error chunks, not the exception text. The rest of `internal_data` stays on the server.
+The exact fields depend on your `AgentState` subclass. `state` is `null` when nothing is stored. Messages carry no `raw` field.
 
 ## Update thread state
 
@@ -166,11 +169,11 @@ The merge rules are fixed. `context` is appended to the existing list, not repla
 
 - The built-in fields `context_summary` and `execution_meta` can never be set by a client.
 - Messages in `context` must be user messages. A message with role `assistant` or `system` returns `422`. A `tool` message is accepted only as `tool_result` blocks that answer a pending client tool call.
-- Messages that carry a tool call return `422`, because only the model may request tools.
+- Messages that carry a tool call return `422`.
 - Any `message_id` you send in `context` is ignored. The server generates the ids.
 - A value that does not match the type of its state field returns `422` and names the field. This includes `context`, which must be a list of messages.
 
-Custom state fields are denied unless the operator lists them in `runs.state_keys` in `10xgraph.json`; only listed keys are accepted. `context` is always allowed.
+Keys outside `runs.state_keys` get `422` (`context` is always allowed).
 
 ```bash
 # Add a custom field to the state before the first invoke
@@ -180,7 +183,7 @@ curl -X PUT http://localhost:8000/v1/threads/t1/state \
   -d '{"state": {"user_id": "user-456"}, "config": {}}'
 ```
 
-The response `data` has the same shape as the get-state response: `{"state": {...}}` with the merged state. Use this endpoint to seed custom fields before the first invoke call or to repair inconsistent state. A custom field must exist on your state class to survive validation.
+The response `data` has the same shape as the get-state response: `{"state": {...}}` with the merged state.
 
 ## Clear thread state
 
@@ -218,9 +221,14 @@ curl "http://localhost:8000/v1/threads/t1/messages?limit=50" \
   "messages": [
     {"message_id": "m1", "role": "user", "content": [{"type": "text", "text": "Hello"}]},
     {"message_id": "m2", "role": "assistant", "content": [{"type": "text", "text": "Hi there!"}]}
-  ]
+  ],
+  "has_more": false,
+  "offset": 0,
+  "limit": 100
 }
 ```
+
+`has_more` is true when another page follows; `offset` and `limit` are the values applied.
 
 Each item is a `Message` object. Fields such as `timestamp`, `metadata` and `usages` are also included; they are omitted above for brevity.
 
@@ -249,7 +257,7 @@ curl -X PUT http://localhost:8000/v1/threads/t1/messages/m2 \
   -d '{"feedback": {"rating": "down", "comment": "Wrong city"}}'
 ```
 
-The response `data` is the updated `Message`, the same shape as [Get a message](#get-a-message). The route returns `404` when the thread has no such message, and `501` when the checkpointer lacks `aupdate_message_metadata` (added in `10xgraph` 1.0; the message is "This checkpointer does not support message feedback").
+The response `data` is the updated `Message`, the same shape as [Get a message](#get-a-message). The route returns `404` when the thread has no such message, and `501` when the checkpointer cannot store message feedback.
 
 ## Delete a message
 
@@ -264,13 +272,9 @@ curl -X DELETE http://localhost:8000/v1/threads/t1/messages/m1 \
 ```
 
 ```json
-{"success": true, "message": "Message deleted successfully", "data": null}
+{"success": true, "message": "Message deleted successfully"}
 ```
 
 ## Authentication and ownership
 
-When auth is configured, every thread route requires a bearer token and the permission shown in the [route summary](#route-summary). A failed login returns `401`. A missing permission returns `403`. A thread owned by someone else, or one that does not exist, returns `404`. When auth is not configured, these checks are skipped entirely.
-
-Ownership is enforced in storage: every query is filtered by the caller's reach. The default reach is `own`, so a request for another user's thread answers `404` for every action, before it reaches the graph. A role with reach `tenant` or `all` can also read, list and delete threads outside its own, but state and message writes (`PUT`) and runs always stay on the caller's own threads. A `thread_id` that does not exist yet is refused with `404`, the same answer as for another user's thread, unless `runs.thread_ids` is `client`. A new thread is started by omitting the id. The checkpointer write routes follow the same rule. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids) and [Authentication and authorization](/docs/server/auth).
-
-See [Authentication](/docs/reference/api-cli/auth) for the backends and how to write your own.
+Ownership is enforced in storage. With reach `own` another user's thread answers `404`; roles with reach `tenant` or `all` can read, list and delete beyond their own, but state and message writes (`PUT`) and runs stay on the caller's own threads. See [Authentication and authorization](/docs/server/auth).

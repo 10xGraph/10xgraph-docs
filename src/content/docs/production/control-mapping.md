@@ -5,12 +5,10 @@ description: "Which 10xGraph features you can point to as evidence in a SOC 2 or
 section: "Platform"
 order: 60
 label: Control mapping
-updated: "2026-11-15"
+updated: "2026-11-25"
 ---
 
-Built for teams going through SOC 2 and ISO 27001 audits.
-
-10xGraph is software you run. An auditor examines your organization and your deployment, not the code you install. This page shows which 10xGraph features you can point to as evidence, what is on by default, and what stays yours. It does not say that 10xGraph, or anything built with it, is compliant, ready or certified. Those words apply to an organization after an audit.
+10xGraph is software you run. An auditor examines your organization and your deployment, not the code you install. This page lists the 10xGraph features you can cite as evidence, their default, and what stays yours. It makes no claim about the audit outcome of any deployment.
 
 The control descriptions below are short paraphrases, not the official text. Check each one against the AICPA Trust Services Criteria (2017, with the 2022 revised points of focus) and ISO/IEC 27001:2022 Annex A before you cite it in an audit.
 
@@ -35,29 +33,9 @@ Flags change this:
 
 The Quick setup writes none of these settings.
 
-### What holds across workers
+With the memory cache store, rate limits, revocations, run locks and run caps hold per process, and the image from `10xgraph build` runs two workers (`WEB_CONCURRENCY=2`). See [Scaling and reliability](/docs/production/scaling#what-the-cache-store-shares-across-workers).
 
-With a memory cache store, these are kept per process: rate-limit counters, token revocations, the per-thread run lock and the per-user run caps. The image that `10xgraph build` generates runs 2 Gunicorn workers (`WEB_CONCURRENCY=2`), so each worker keeps its own copy and they are not shared. The server warns about this at boot.
-
-These controls hold across all workers and replicas only with a Redis cache store, or a custom cache store that is shared. Durable thread state needs Postgres storage (`PgCheckpointer`). For a deployment with more than one worker, choose `--storage postgres` (or `postgres-memory`), or set both yourself.
-
-Two more points:
-
-- Once revocation is on, a token without a `jti` claim gets 401.
-- If the cache store fails, the run lock falls back to a per-process lock.
-
-### What `MODE=production` adds
-
-`MODE=production` is a separate switch from the Full setup. The Dockerfile, Compose file and Kubernetes manifest that `10xgraph build` writes set `MODE=production` and `LOG_FORMAT=json`. In that mode the server refuses to start with:
-
-- `ALLOWED_HOST=*` or `ORIGINS=*` (both are the defaults),
-- API docs paths explicitly enabled,
-- wildcard CORS with credentials,
-- an HS secret under 32 bytes,
-- tenant columns that do not match between the checkpointer, the store and `tenant_claims`,
-- auth configuration errors.
-
-The first two are the strict checks. They are on in production without any setting, and `STRICT_PRODUCTION_CHECKS=false` turns them into warnings. A generated image does not boot until you set `ALLOWED_HOST` and `ORIGINS`. Production mode also turns the API docs off, hides internal error details, requires a file owner and sets a 300-second run timeout.
+The Dockerfile, Compose file and Kubernetes manifest from `10xgraph build` set `MODE=production` and `LOG_FORMAT=json`. What production mode refuses at startup and what it changes is in the [security model](/docs/production/security-model#what-production-mode-refuses-at-startup).
 
 ## How to read the Default column
 
@@ -80,11 +58,11 @@ The first two are the strict checks. They are on in production without any setti
 |---|---|---|---|---|---|
 | CC6.1 | Logical access controls protect information assets. | Bearer JWT verification: an algorithm allowlist (HS, RS, ES, PS and EdDSA), `none` refused, `exp` required. Issuer, audience and max age checks are optional. Custom `BaseAuth`. A route guard refuses to boot if any non-public route lacks a permission guard. Storage reads are scoped to the caller's owner and reach. Client `filters` that name tenant columns or `user_id` are rejected. Tenant scoping and row-level security exist only in Postgres storage. | Route guard: on. JWT rules, owner scoping, filter checks: with auth. Issuer, audience, max age: opt-in. Tenant scoping: with Postgres storage. Row-level security: opt-in, with Postgres storage. | Identity provider, token issuing, MFA, secret storage, database roles. | [Auth](/docs/server/auth), [Multi-tenant data](/docs/guides/multi-tenant-data) |
 | CC6.2 | Users are authorized before access and access is removed when no longer needed. | 10xGraph is a resource server with no user registry. Token revocation per token or per user, from code (`revoke_user`, `revoke_token`). Revocation fails closed. Once it is on, a token without `jti` gets 401. | Full setup (shared cache store). | Joiner, mover and leaver process, deprovisioning in your identity provider, calling revoke on offboarding. | [Auth](/docs/server/auth), [Auth reference](/docs/reference/api-cli/auth) |
-| CC6.3 | Access is granted by role with least privilege. | Role-based access with permissions from one registry, role inheritance, a required reach per role (own, tenant, all), token scopes that only narrow. `admin:*` is excluded from the default set. Without roles, every user gets the default permissions with reach own. With `permissions_claim` set and no roles, permissions come from that claim instead (reach stays own). Reach `all` roles are logged at boot. `GET /v1/me` shows a caller's resolved access. | with auth. | Role design, role assignment, periodic access reviews. | [Auth](/docs/server/auth), [Authorization scopes](/docs/guides/authorization-scopes) |
+| CC6.3 | Access is granted by role with least privilege. | Role-based access with permissions from one registry, role inheritance, a required reach per role (own, tenant, all), token scopes that only narrow. `admin:*` is excluded from the default set. Without roles, every user gets the default permissions with reach own. With `permissions_claim` set and no roles, permissions come from that claim instead (reach stays own). Reach `all` roles are logged at boot. `GET /v1/me` shows a caller's resolved access. Per-tool permissions (`tools:<name>`) checked at call time by `ToolGuard`. | with auth. | Role design, role assignment, periodic access reviews. | [Auth](/docs/server/auth), [Authorization scopes](/docs/guides/authorization-scopes) |
 | CC6.6 | Systems are protected against threats from outside the boundary. | Rate limiting (by IP, user or global, with a fail-closed option). Per-user run cap. Security headers and a 10 MB request size limit. Trusted-host check and CORS, which check nothing until you set `ALLOWED_HOST` and `ORIGINS`. Client input rules: clients may send only user messages, `state_keys` deny by default, message ids are assigned by the server, and thread ids are picked by the server (`runs.thread_ids: "server"`). An optional `config_keys` allowlist. SSRF policy for media URL fetches. A prompt-injection validator. Strict boot checks. | Rate limit: Full setup (shared cache store). Run cap: with auth (shared cache store). Headers, size limit, input rules, SSRF policy: on. `config_keys`: opt-in. Validator: Full setup. Host and CORS values: opt-in, and required by `MODE=production`. Strict checks: `MODE=production`. | Firewall, WAF, DDoS protection, TLS termination, `ORIGINS` and `ALLOWED_HOST` values. | [Rate limiting](/docs/server/rate-limiting), [CORS and security headers](/docs/server/cors-and-security-headers), [Protect against prompt injection](/docs/guides/protect-against-prompt-injection), [Security model](/docs/production/security-model) |
 | CC6.7 | Information is protected in transmission. | HSTS, sent only on HTTPS requests (scheme `https`, or `X-Forwarded-Proto: https`, which is trusted from any client). The WebSocket bearer is carried in a subprotocol. No token in the URL: `?token=` is not accepted. File reads are checked against owner and reach. | HSTS, no token in URL: on. File checks: with auth. | TLS everywhere (proxy, Postgres, Redis, brokers), certificate management, stripping `X-Forwarded-Proto` from clients at your proxy. | [CORS and security headers](/docs/server/cors-and-security-headers), [WebSockets](/docs/server/websockets), [Files and multimodal](/docs/server/files-and-multimodal) |
 | CC6.8 | Unauthorized or malicious software is prevented or detected. | Upload checks: a leading-byte signature check (for types that have one), a type allowlist (`MEDIA_ALLOWED_CONTENT_TYPES`; empty allows all types), a 25 MB cap and filename cleaning. The generated image runs as non-root, with pip and the CLI's own libraries removed. The generated Kubernetes manifest sets `runAsNonRoot`, a read-only root filesystem, `allowPrivilegeEscalation: false`, drops all capabilities, uses the `RuntimeDefault` seccomp profile and sets `automountServiceAccountToken: false`. | Upload checks: on. Type allowlist: opt-in. Image and manifest settings: generated deploy files. | Malware and image scanning, runtime protection. | [Files and multimodal](/docs/server/files-and-multimodal), [Kubernetes](/docs/server/kubernetes) |
-| CC7.1 | Configuration and vulnerabilities are monitored. | `10xgraph audit` checks the environment and `10xgraph.json`. `10xgraph config` and `10xgraph build` warn when settings are not production ready. The server refuses unsafe production settings at boot. | CLI checks: run by hand. Boot checks: `MODE=production`. | Scans, patching and dependency updates in your own project. | [CLI](/docs/server/cli), [Production checklist](/docs/server/production-checklist) |
+| CC7.1 | Configuration and vulnerabilities are monitored. | `10xgraph audit` checks the environment and `10xgraph.json`. `10xgraph config` and `10xgraph build` warn about unsafe production settings. The server refuses unsafe production settings at boot. | CLI checks: run by hand. Boot checks: `MODE=production`. | Scans, patching and dependency updates in your own project. | [CLI](/docs/server/cli), [Production checklist](/docs/server/production-checklist) |
 | CC7.2 | Components are monitored for anomalies that may indicate attacks or errors. | The audit log records each access decision, authentication failure and change as metadata-only JSON lines. HTTP responses carry `X-Request-ID`; a WebSocket gets a request id in its context, not a header. Application logs carry request and user ids only in JSON format. OpenTelemetry tracing, Prometheus or OTLP metrics and Sentry are available. | Audit log: Full setup. JSON logs: generated deploy files (`LOG_FORMAT=json`). Request ids: on. Tracing, metrics, Sentry: opt-in. | Log collection, storage, alert rules, on-call. | [Audit log](/docs/server/audit-log), [Observability](/docs/observability) |
 | CC7.3 | Security events are evaluated to decide whether they are incidents. | Supporting only. Request ids help correlate events. Token revocation helps contain a leaked token. | Request ids: on. Revocation: Full setup (shared cache store). | The incident process. | [Audit log](/docs/server/audit-log), [Auth](/docs/server/auth) |
 | CC8.1 | Changes are authorized, tested and implemented in a controlled way. | `10xgraph test` and `10xgraph eval` for testing your own changes. A versioned Postgres schema with advisory-lock migrations. `10xgraph build` for the image. | Test, eval, build: run by hand. Schema migrations: with Postgres storage. | Change approval, code review, deployment pipeline, rollback (a schema upgrade needs stop, migrate, start; rollback needs a restore). | [CLI](/docs/server/cli), [Upgrade to 1.0](/docs/project/upgrade-to-1.0) |
@@ -111,7 +89,7 @@ The first two are the strict checks. They are on in production without any setti
 | 8.9 Configuration management | Establish, document and monitor secure configurations. | The Full setup. Strict boot checks. API docs and OpenAPI off in production. `10xgraph audit` and `10xgraph config` warnings. Config schema validation. The generated deploy files set `MODE=production` and the hardening listed under CC6.8. | Full setup: Full setup. Boot checks, docs off: `MODE=production`. CLI warnings: run by hand. Schema validation: on. | Config in version control, drift detection. | [Production checklist](/docs/server/production-checklist), [CLI](/docs/server/cli) |
 | 8.10 Information deletion | Delete information when no longer required. | As C1.2: per-thread delete with cleanup, memory and file delete, snapshot pruning in `PgCheckpointer`. | Delete endpoints: on. Pruning: with Postgres storage. | Schedules. See not provided below. | [Threads API](/docs/reference/rest-api/threads) |
 | 8.11 Data masking | Mask data per policy. | Secrets masked in logs (bearer tokens, JWTs, common API key shapes, sensitive key names). This covers secret masking only; there is no PII masking. | on | PII masking. | [Observability](/docs/observability) |
-| 8.12 Data leakage prevention | Prevent unauthorized disclosure. | Partial. Owner scoping, tenant scoping in Postgres storage, sanitized production errors, SSRF guard. Traces carry message content at the default level `full` once tracing is enabled; set `OTEL_LEVEL=spans` to keep content out. | Owner scoping: with auth. Sanitized errors: `MODE=production`. SSRF guard: on. Tracing: opt-in. | DLP tooling, egress control, the trace level. | [Security model](/docs/production/security-model), [Observability](/docs/server/observability) |
+| 8.12 Data leakage prevention | Prevent unauthorized disclosure. | Partial. Owner scoping, tenant scoping in Postgres storage, sanitized production errors, SSRF guard. Trace content as C1.1. | Owner scoping: with auth. Sanitized errors: `MODE=production`. SSRF guard: on. Tracing: opt-in. | DLP tooling, egress control, the trace level. | [Security model](/docs/production/security-model), [Observability](/docs/server/observability) |
 | 8.15 Logging | Produce, store, protect and analyze logs of activity and events. | The audit log (metadata-only JSON lines for access, authentication and change events). Application logs carry request and user ids in JSON format. 10xGraph produces the logs; it does not store or protect them. See [tamper protection](/docs/server/audit-log#tamper-protection). | Audit log: Full setup. JSON logs: generated deploy files. | Storage, protection, retention and analysis. | [Audit log](/docs/server/audit-log), [Observability](/docs/observability) |
 | 8.16 Monitoring activities | Monitor for anomalous behaviour. | OpenTelemetry traces, metrics, Sentry, readiness checks. | Traces, metrics, Sentry: opt-in. Readiness: on. | Monitoring and response. | [Observability](/docs/observability), [Send traces to OTLP](/docs/guides/send-traces-to-otlp) |
 | 8.20 Networks security | Secure, manage and control networks and network devices. | Supporting only. 10xGraph has no network controls. The trusted-host and CORS settings are application settings and are listed under 8.26. | n/a | Network design, segmentation, firewalls, TLS. | [CORS and security headers](/docs/server/cors-and-security-headers) |
@@ -134,21 +112,17 @@ An auditor may ask for these. They are not features of the server, or only partl
 | Malware scanning of uploads | Not provided | Uploads get signature, type and size checks. PDFs get a 10 MB and 500-page limit while `DOCUMENT_HANDLING=extract_text` (the default). Add a scanner in front of storage or in your upload path. |
 | Backup and restore | Your infrastructure | Back up Postgres, Redis and object storage. See [Backup and restore](/docs/server/backup-and-restore). |
 | MFA, user provisioning, access reviews | Your identity provider | 10xGraph verifies tokens and does not issue them. `GET /v1/me` shows the resolved access of a caller to support a review. |
-| Per-tool authorization enforced by the framework | Partial | A tool can call `tenxgraph.core.authz.can(config, permission)`. It checks only the fixed registry permissions, and it returns true when there is no identity (auth off). Per-tool permissions cannot be declared. See [Authorization scopes](/docs/guides/authorization-scopes). |
 | Per-run usage and cost record | Partial | Spans carry token counts at trace level `standard` or higher, and a `tenxgraph.llm.tokens` counter exists. Neither is a per-run record. See [Observability](/docs/observability). |
 
 ## Project practices
 
 These are practices of the 10xGraph project itself, relevant to SDLC questions in vendor reviews. They are not controls of your deployment.
 
-- A security policy with private vulnerability reporting through GitHub advisories and email. See [Security policy](/docs/project/security).
-- Dependabot for dependencies and GitHub Actions in all three repositories.
-- CodeQL scanning on the API server and the TypeScript client.
-- Pre-commit hooks for the Python packages: the core runs `bandit`, `ruff`, `mypy` and a private-key detection hook; the API server runs `bandit`, `ruff` and a private-key detection hook, and runs `mypy` in CI.
-- CI that runs lint, type checks and tests. Core integration tests run against real Postgres and Redis; API integration tests run against real Redis.
-- A changelog in each repository, and a deprecation policy for the public API from 1.0.
+- A security policy with private vulnerability reporting. See [Security policy](/docs/project/security).
+- Dependabot in all three repositories; CodeQL on the API server and the TypeScript client.
+- CI runs lint, type checks and tests on every repository.
 
-What is not there yet: signed releases, build provenance, PyPI trusted publishing, npm provenance and an SBOM. CodeQL is not enabled on the core repository, and CI does not run dependency vulnerability audits. If your auditor requires these, plan for your own scanning of the packages you install.
+Not in place: signed releases, build provenance, PyPI trusted publishing, npm provenance, an SBOM, CodeQL on the core repository and dependency vulnerability audits in CI.
 
 ## See also
 

@@ -5,10 +5,10 @@ section: "Observability"
 group: "Events"
 order: 60
 label: "Publishers (Kafka, Redis, RabbitMQ)"
-updated: "2026-10-29"
+updated: "2026-11-25"
 ---
 
-Publishers allow you to observe and audit agent execution by forwarding structured events to external systems. Every time your graph runs, publishers emit events for graph starts and ends, node execution, tool calls, LLM requests, state updates, errors, and streaming tokens. You can subscribe to these events in real-time to monitor your agent, log audits, trigger alerts, or analyze behavior. Publishers are optional: your graph works without them, but adding one is essential for production deployments.
+Publishers allow you to observe and audit agent execution by forwarding structured events to external systems. Every time your graph runs, event publishers (Kafka, Redis, RabbitMQ) receive a short stream of run, node and tool events, and tracing publishers receive the extra detail they need for spans, such as model calls. You can subscribe to these events in real-time to monitor your agent, log audits, trigger alerts, or analyze behavior. Publishers are optional: your graph works without them, but adding one is essential for production deployments.
 
 <aside class="callout callout-note" role="note"><p class="callout-title">The set is closed</p>
 
@@ -26,7 +26,7 @@ In development, you might test your agent locally and call it once. In productio
 
 ## Two kinds of publishers
 
-A publisher has a `kind`. An event publisher (`kind = "events"`) is an event stream for your own consumers: Kafka, Redis, RabbitMQ, the console, or a class you write. A tracing publisher (`kind = "observability"`) turns graph, node, LLM and tool events into spans for Logfire, LangSmith, Phoenix or an OTLP endpoint. Task lifecycle events from the API worker go to event publishers only. See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability#publishers-ai-tracing-and-metrics) for what each one receives.
+A publisher has a `kind`. An event publisher (`kind = "events"`) is an event stream for your own consumers: Kafka, Redis, RabbitMQ, the console, or a class you write. A tracing publisher (`kind = "observability"`) turns graph, node, LLM call and tool events into spans for Logfire, LangSmith, Phoenix or an OTLP endpoint. Event publishers get the domain events (`run.started`, `node.completed`, `tool.completed` and so on, see [Domain events](/docs/concepts/events-and-observability#domain-events)). Tracing publishers also get the model call events. The console prints everything. Each event has a tag (`all` or `observability`) that decides who gets it; see [How events are routed](/docs/concepts/events-and-observability#how-events-are-routed). Task lifecycle events from the API worker go to event publishers only. See [Publishers, AI tracing and metrics](/docs/concepts/events-and-observability#publishers-ai-tracing-and-metrics) for what each one receives.
 
 A custom publisher is an event publisher unless you say otherwise. To write a custom tracing backend, set `kind = "observability"`. To send an app event to event publishers only, pass `only="events"` to `publish_event`:
 
@@ -91,7 +91,7 @@ app = graph.compile()
 
 ### Step 3: Run your agent and verify
 
-Invoke your agent normally. Events are emitted asynchronously in the background.
+Invoke your agent normally. Events are queued and sent in the background in batches.
 
 ```python
 import asyncio
@@ -102,7 +102,7 @@ async def main():
         config={"thread_id": "test"},
     )
     print(result["messages"][-1].text())
-    await publisher.close()  # flush pending events
+    await app.aclose()  # flush queued events, then shut down
 
 asyncio.run(main())
 ```
@@ -119,12 +119,12 @@ async def listen():
     for _stream, entries in await r.xread({"agent.events": "0"}, count=10):
         for _msg_id, fields in entries:
             event = json.loads(fields[b"data"])
-            print(f"Event: {event['event']} / {event['event_type']}")
+            print(f"Event: {event['metadata']['event_name']} / node: {event['node_name']!r}")
 
 asyncio.run(listen())
 ```
 
-You should see output like `Event: node_execution / start`, `Event: llm_call / start`, `Event: node_execution / end`, etc.
+For a one-node agent you should see `run.started`, `node.completed` and `run.completed`, and `tool.started` and `tool.completed` for each tool call. Model call events do not reach Redis, because they are for tracing backends. See [Domain events](/docs/concepts/events-and-observability#domain-events) for every event and its fields.
 
 ---
 
@@ -234,7 +234,7 @@ publisher = KafkaPublisher({
 graph = StateGraph(publisher=publisher)
 ```
 
-Consumers on the same topic receive all events in order:
+The message key is the thread ID, so all events of one thread go to the same partition and stay in order. A consumer on the topic reads them like this:
 
 ```python
 import asyncio
@@ -250,7 +250,7 @@ async def listen():
     await consumer.start()
     try:
         async for record in consumer:
-            print(f"Event: {record.value['event']}")
+            print(f"Event: {record.value['metadata']['event_name']}")
     finally:
         await consumer.stop()
 
@@ -320,6 +320,7 @@ Bind a queue to the exchange and consume:
 
 ```python
 import asyncio
+import json
 from aio_pika import connect_robust
 
 async def listen():
@@ -327,10 +328,12 @@ async def listen():
     channel = await connection.channel()
     exchange = await channel.get_exchange("agent.events")
     queue = await channel.declare_queue(auto_delete=True)
-    await queue.bind(exchange, "agent.*")
+    # The publisher sends every event with its routing_key ("agent.executions" here)
+    await queue.bind(exchange, "agent.executions")
     
     async for message in queue.iterator():
-        print(message.body.decode())
+        event = json.loads(message.body)
+        print(event["metadata"]["event_name"], event["run_id"])
 
 asyncio.run(listen())
 ```
@@ -347,11 +350,41 @@ asyncio.run(listen())
 | `durable` | `True` | Exchange survives broker restarts. |
 | `connection_timeout` | `10` | Connection timeout in seconds. Also bounds opening the channel after the connection is up. |
 | `heartbeat` | `60` | Heartbeat interval in seconds. |
-| `publish_timeout` | none | Seconds to wait for one send. Unset waits for the broker; a timed-out event is dropped and logged. |
+| `publish_timeout` | none | Seconds one batch may take. Unset waits for the broker; a timed-out batch is dropped and logged. |
+| `batch_size`, `flush_interval_ms`, `queue_size` | `100`, `20`, `2048` | Batching. See [Batching](#batching). |
 
-Any publisher also accepts `publish_timeout` and `state_snapshot_limit` in its config. See [Large state snapshots](/docs/reference/python/publishers#large-state-snapshots).
+Redis, Kafka and RabbitMQ publishers accept `batch_size`, `flush_interval_ms`, `queue_size` and `publish_timeout`, and any publisher accepts `state_snapshot_limit`, in its config. See [Large state snapshots](/docs/reference/python/publishers#large-state-snapshots).
 
 For TLS, use an `amqps://` URL, for example `"url": "amqps://user:pass@mq.example.com/"`.
+
+---
+
+## Batching
+
+Redis, Kafka and RabbitMQ publishers send in batches. It is always on and you do not need to enable it. `publish_event` puts the event in a bounded queue and returns at once. One worker per publisher sends the queue in order, when it holds `batch_size` events or `flush_interval_ms` after the first queued event, whichever comes first.
+
+```python
+publisher = KafkaPublisher({
+    "bootstrap_servers": "localhost:9092",
+    "topic": "agent-events",
+    "batch_size": 200,         # default 100
+    "flush_interval_ms": 50,   # default 20
+    "queue_size": 4096,        # default 2048
+    "publish_timeout": 10,     # seconds for one batch, no default
+})
+```
+
+How each broker sends a batch:
+
+- **RabbitMQ** publishes the whole batch together and waits once for the broker confirms.
+- **Kafka** calls `send()` for every event and then waits once for all deliveries. The message key is the thread ID, so events of one thread stay in order on one partition.
+- **Redis** sends one pipeline without a transaction (Pub/Sub or stream, as configured).
+
+If the queue is full, the new event is dropped. The counter `tenxgraph.publish.dropped` goes up and a warning is logged, at most once every 10 seconds. A batch that fails or times out is dropped as well, and counted the same way. Delivery stays at-most-once, with no retry.
+
+Queued events are sent when you call `await app.aclose()`, when a sync `invoke` or `stream` returns, and when you call the publisher's `close()`. With `ainvoke` and `astream`, call `aclose()` before your process exits.
+
+Three metrics help you size the batches: `tenxgraph.publish.duration` (time to send one batch), `tenxgraph.publish.batches` and `tenxgraph.publish.events`, each with a `publisher` attribute. `publisher.publish(event)` called by hand still sends one event at once.
 
 ---
 
@@ -396,13 +429,13 @@ Every event published is an `EventModel` with these fields:
 | `event` | `Event` | Source: `GRAPH_EXECUTION`, `NODE_EXECUTION`, `LLM_CALL`, `TOOL_EXECUTION`, `STREAMING`, or `REALTIME`. |
 | `event_type` | `EventType` | Phase: `START`, `PROGRESS`, `RESULT`, `END`, `UPDATE`, `ERROR`, or `INTERRUPTED`. |
 | `content_type` | `list[ContentType]` | Content tags: `TEXT`, `MESSAGE`, `TOOL_CALL`, `TOOL_RESULT`, `IMAGE`, `AUDIO`, `TRANSCRIPT`, `STATE`, etc. |
-| `node_name` | `str \| None` | Name of the node that emitted the event. |
+| `node_name` | `str` | Name of the node that emitted the event. Empty for run-level events (`run.started`, `run.completed` and so on). |
 | `data` | `dict` | Event payload: arguments, results, error messages, token counts, etc. |
 | `content_blocks` | `list[ContentBlock]` | Structured message blocks (tool calls, tool results, etc.). |
 | `run_id`, `thread_id`, `user_id`, `timestamp` | various | Run identity and UNIX timestamp, top-level fields. |
-| `metadata` | `dict` | Extra run metadata, such as `run_timestamp` and `is_stream`. |
+| `metadata` | `dict` | Extra run metadata, such as `run_timestamp` and `is_stream`. `metadata["event_name"]` is the domain name of the event, for example `node.completed`. |
 
-To inspect the event structure, use `ConsolePublisher` locally:
+The domain events, the fields of each one and a consumer example are in [Events and observability](/docs/concepts/events-and-observability#domain-events). Custom events from `publish_event()` have no `event_name`. To inspect the event structure, use `ConsolePublisher` locally:
 
 ```python
 from tenxgraph.runtime.publisher import Event, EventType, ContentType
@@ -422,13 +455,14 @@ For OpenTelemetry-based tracing to Logfire, LangSmith, Arize Phoenix, or other b
 
 ## What you learned
 
-- Publishers emit structured `EventModel` events from every stage of graph execution.
+- Event publishers get a short stream of domain events (`run.started`, `node.completed`, `tool.completed`, `run.completed` and others). Tracing publishers get more, for spans.
 - Add a publisher by instantiating it and passing it to `StateGraph(publisher=...)`.
 - `ConsolePublisher` is for development; use Redis, Kafka, or RabbitMQ in production.
 - `RedisPublisher` supports Pub/Sub (live subscribers) and Streams (durable log).
+- Redis, Kafka and RabbitMQ publishers send in batches. Call `await app.aclose()` before exit to flush.
 - `CompositePublisher` sends events to multiple transports simultaneously.
 - Publishers have a `kind`: `"events"` (default) or `"observability"` for tracing. `publish_event(..., only=...)` picks one kind.
-- Every event has a source, phase, node name, and structured data for downstream processing.
+- Switch on `metadata["event_name"]` in your consumer.
 
 ## Run it in production
 

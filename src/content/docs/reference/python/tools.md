@@ -43,6 +43,7 @@ ToolNode(
     mcp_cache_tools=True,
     mcp_connect_timeout=30.0,
     mcp_auth=None,
+    fence_results=True,
 )
 ```
 
@@ -60,6 +61,7 @@ ToolNode(
 | `mcp_cache_tools` | `bool` | `True` | List the server's tools once per `ToolNode` and reuse the list, which saves a connect and list round trip per model call. Set `False` to list the server every time. See [MCP tool list caching](#mcp-tool-list-caching). |
 | `mcp_connect_timeout` | `float \| None` | `30.0` | Seconds to wait for the MCP connection to open. Only the connect is bounded, never a tool call. If the connect times out, the tool call fails like any other tool error (the model sees a generic failure and the log says `MCP connect timed out after ...s`), and a tool listing that times out returns no MCP tools and is not cached. `None` waits without a limit. |
 | `mcp_auth` | `Callable[[MCPAuthContext], Awaitable[dict[str, str]]] \| None` | `None` | Async function that returns HTTP headers for one MCP request, so each call carries its own credentials (for example a short-lived JWT naming the user and the agent as actor, which the server verifies). It runs before every tool listing and tool call, and its headers win over the transport's `auth=` on the same name. Needs a client (`ValueError` otherwise), fastmcp 4.1.7 or later (`ImportError` otherwise) and an HTTP transport, streamable HTTP or SSE (`ValueError` for stdio or in-memory). The tool list is cached per node and shared by all users, so it must not differ per user. See [MCPAuthContext](#mcpauthcontext). |
+| `fence_results` | `bool` | `True` | Wrap the text of every tool result (local, MCP and client tools) in a `<tool_output_xxxxxxxx>` fence before the model sees it, with one system prompt line saying the content is data. Saved messages, API responses, events and traces keep the plain output. `False` restores the 1.0 behavior. See [Zero-trust agents](/docs/security/zero-trust-agents). |
 
 `tools` may also be a generator. If a different callable is registered under the name of an existing tool, `ToolNode` logs a warning and the new one replaces the old.
 
@@ -92,7 +94,7 @@ If your server changes its tools while the process runs and you want every model
 
 ### MCPAuthContext
 
-`mcp_auth` is an async callable `(MCPAuthContext) -> dict[str, str]`. It must return a dict of header names to string values, or the call fails with `TypeError`. `MCPAuthContext` is a frozen dataclass:
+`mcp_auth` is an async callable `(MCPAuthContext) -> dict[str, str]`. It must return a dict of header names to string values, or the call fails with `TypeError`. `MCPAuthContext` is a frozen pydantic model (keyword arguments only):
 
 | Field | Type | Meaning |
 |---|---|---|

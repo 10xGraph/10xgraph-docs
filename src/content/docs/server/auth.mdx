@@ -5,7 +5,7 @@ section: "Security and access"
 group: "Identity and roles"
 order: 10
 label: "Authentication and roles"
-updated: "2026-11-08"
+updated: "2026-11-25"
 faq:
   - q: "Which claims must my JWT contain?"
     a: "Every token needs `exp` (expiration) and `user_id` claims. If you set JWT_ISSUER or JWT_AUDIENCE, the token must also carry matching `iss` or `aud` claims. A token without `user_id` is rejected with status 401, code `INVALID_TOKEN`."
@@ -36,7 +36,7 @@ Auth is opt-in. With `"auth": null` no check runs and no thread has an owner.
 
 ## Quick start with JWT
 
-JWT is the easiest path: a stateless, standard bearer token that carries the user's identity.
+JWT needs no code: the server verifies a bearer token with a shared secret or public key.
 
 <Steps>
 
@@ -55,7 +55,7 @@ JWT is the easiest path: a stateless, standard bearer token that carries the use
    JWT_ALGORITHM=HS256
    ```
 
-   `JWT_ALGORITHM` must be one of `HS256`, `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512` or `EdDSA`. `none`, an empty value or an unknown value stops startup. Startup also stops if PyJWT is not installed, and the `auth` value must be exactly `"jwt"`. The server refuses a short HS* secret at startup when `MODE=production`, and warns otherwise. RFC 7518 requires HMAC secrets to be at least 32 bytes for HS256.
+   `JWT_ALGORITHM` must be one of `HS256`, `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512` or `EdDSA`. `none`, an empty value or an unknown value stops startup. Startup also stops if PyJWT is not installed, and the `auth` value must be exactly `"jwt"`. The server refuses a short HS* secret at startup when `MODE=production`, and warns otherwise. RFC 7518 requires HMAC secrets to be at least 32 bytes for HS256. `JWT_ALGORITHM` defaults to `HS256`.
 
 3. **Enable JWT in 10xgraph.json**
 
@@ -108,14 +108,6 @@ The server reads a standard bearer credential from the `Authorization` header:
 To pin tokens to your service and prevent replay across services, set `JWT_ISSUER` and `JWT_AUDIENCE` in your environment. Set both in production when the same signing key or identity provider also issues tokens for other services, so a token minted for another service is rejected here.
 
 `JWT_ISSUER` and `JWT_AUDIENCE` are both off when unset or empty. With `JWT_ISSUER` unset, the issuer is not checked: a token with any `iss`, or none, is accepted. With it set, the token must carry `iss` and it must match exactly. With `JWT_AUDIENCE` unset, a token without `aud` is accepted, but a token that carries an `aud` claim is refused. With it set, the token must carry `aud` and it must match. A failure of either check answers 401 `INVALID_TOKEN`.
-
-The codes tell a client what to do:
-
-- `INVALID_TOKEN`: the token cannot be used as it is. Sign in again.
-- `EXPIRED_TOKEN`: the token is past its `exp`. Refresh it.
-- `REVOKED_TOKEN`: the token was revoked. Sign in again.
-
-A correctly signed token that lacks a configured tenant claim (`auth.tenant_claims`), and a token whose `user_id` starts with the reserved prefix `__system__`, both answer 401 `INVALID_TOKEN`.
 
 ### WebSocket connections
 
@@ -176,16 +168,7 @@ Everything about auth sits under one key. `method` picks who verifies the creden
 }
 ```
 
-| Key | Meaning |
-|---|---|
-| `method` | `none`, `jwt` or `custom`. `"auth": null` is `none`. `"auth": "jwt"` is a shortcut for `{"method": "jwt"}`. |
-| `path` | Only for `custom`: `"module:Class"` or `"dir/file.py:Class"` of a `BaseAuth` subclass. |
-| `roles` | Role table. Each role has `permissions`, optional `inherits` and a required `reach`. |
-| `roles_claim` | Token claim that lists the caller's roles. Defaults to `roles` when `roles` is set. |
-| `permissions_claim` | Token claim that lists permissions directly. Use it instead of `roles`, never with it. |
-| `tenant_claims` | Token claims that name the caller's tenant, such as `org_id`. Every token must carry each one. |
-| `default_role` | Role given to a token that has no roles claim at all. |
-| `system_identities` | Named non-user callers for background jobs. See [Background tasks](/docs/server/background-tasks). |
+Every key (`method`, `path`, `roles`, `roles_claim`, `permissions_claim`, `tenant_claims`, `default_role`, `system_identities`) is described in [The auth object](/docs/reference/api-cli/auth#the-auth-object). For `system_identities`, see [Background tasks](/docs/server/background-tasks).
 
 With only `"auth": "jwt"`, every authenticated user gets the default permission set (everything except `admin:*`) with reach `own`.
 
@@ -205,29 +188,15 @@ Token `scope` and `scopes` claims only narrow. Effective permissions are the gra
 
 ### The permission registry
 
-Permissions are `resource:action` and come from one list. A role that names anything else refuses to boot.
+Permissions are `resource:action` and come from one list. A role that names anything else refuses to boot. The resources, their actions and the permission each route needs are listed in [Permissions](/docs/reference/api-cli/auth#permissions). Tool permissions (`tools:<name>`) are checked by core's `ToolGuard`, never by a route; see [Zero-trust agents](/docs/security/zero-trust-agents#on-the-api-server).
 
-| Resource | Actions | Guards |
-|---|---|---|
-| `graph` | `read`, `invoke`, `stream`, `stop`, `fix` | `read`: graph structure routes. `invoke` and `stream`: runs (`stream` also covers WebSocket, live and AG-UI). |
-| `threads` | `read`, `write`, `delete` | Thread, state and message routes. |
-| `store` | `read`, `write`, `delete` | Long-term memory routes. |
-| `files` | `read`, `upload`, `delete` | Media routes. |
-| `config` | `read` | The server config route. |
-| `tasks` | `trigger`, `read`, `cancel` | `/v1/tasks` routes. |
-| `admin` | `read`, `write` | No built-in route uses these. They are for your own checks. |
-
-Wildcards: `resource:*` grants every action of a resource, and `*` grants everything. The default set is every permission except `admin:*`.
+Wildcards: `resource:*` grants every action of a resource, and `*` grants everything. The default set is every permission except `admin:*`, and it has no tool permissions: a tool behind a `ToolGuard` rule is denied until a role or token claim grants `tools:<name>` or `tools:*`.
 
 ### Reach: how far a caller sees
 
 Reach says whose data a caller can see. It is set per role and is never a fallback: a missing or unknown reach refuses to boot (config) or denies (token, custom `authorize`).
 
-| Reach | Sees |
-|---|---|
-| `own` | Rows of this `user_id` within their tenant. |
-| `tenant` | Rows of every user with the same tenant values. Needs `tenant_claims` and a checkpointer with tenant columns (`PgCheckpointer`). On `SqliteCheckpointer` and `InMemoryCheckpointer`, which have no tenant columns, a read, list or delete by a caller with reach `tenant` raises an error (the request fails); it does not fall back to `own`. Writes still use `own`. |
-| `all` | Every row. |
+The three values (`own`, `tenant`, `all`) and what each matches are in [Reach](/docs/reference/api-cli/auth#reach). `tenant` needs `tenant_claims` and a checkpointer with tenant columns.
 
 Reach widens **reads, lists, deletes and stop only**. Runs and state or message writes always stay on the caller's own threads, admins included. Nobody runs inside another user's thread. Boot logs a warning for every role with reach `all`.
 
@@ -311,7 +280,7 @@ class MyAuth(BaseAuth):
         return await my_extra_rule(identity, permission, resource)
 ```
 
-A custom `authorize` decides permissions only. Reach still comes from the identity, which `auth.roles` resolves from your claims. Recipes with a database, Casbin and Cerbos are [below](#recipes-for-a-custom-authorize).
+A custom `authorize` decides permissions only. Reach still comes from the identity, which `auth.roles` resolves from your claims. A database recipe is [below](#recipes-for-a-custom-authorize).
 
 ## Revoke tokens
 
@@ -335,92 +304,17 @@ async def log_out_everywhere(user_id: str) -> None:
 }
 ```
 
-With revocation on, every token must carry a `jti` claim (a non-empty string or an integer). A token without it is refused with 401 `INVALID_TOKEN` and the message "Invalid token, jti missing". One token is revoked by its `jti`, so without it the token could never be revoked on its own. This also applies to a custom `BaseAuth` class: the claims it returns must include `jti`. With revocation off, `jti` stays optional. A revoked token answers 401 `REVOKED_TOKEN`; on a WebSocket the socket is closed with code 1008.
-
-If the cache store is unreachable, the server refuses to boot and requests that need the check answer 503. See [Token revocation](/docs/reference/api-cli/auth#token-revocation) for the object form.
-
+With revocation on, every token must carry a `jti` claim, including tokens from a custom `BaseAuth` class. The status codes, the `jti` rule and the fail-closed behavior are in [Token revocation](/docs/reference/api-cli/auth#token-revocation).
 
 ## Boot-time refusals
 
 One validator runs at boot, in `10xgraph config`, `10xgraph audit` and `10xgraph build`. A setup the server would refuse cannot be saved in the editor, fails `audit`, and shows as a warning in `build`.
 
-| Setup | Result |
-|---|---|
-| `auth` null or `none` with any RBAC key | Refused: set `auth.method` or remove the RBAC keys. |
-| Top-level `authorization` key (any value) | Refused. The key is removed. See [Migrating from authorization](#migrating-from-authorization). |
-| Top-level `graph_introspection` key | Refused. Reading the graph is the `graph:read` permission. |
-| `method: custom` without `path`, or `path` not a `BaseAuth` subclass | Refused, naming the path. |
-| `path` with `method` `jwt` or `none` | Refused: `path` is only for `custom`. |
-| `roles` (or `roles_claim`) together with `permissions_claim` | Refused: pick one permission source. |
-| `roles_claim` without `roles` | Refused. |
-| `default_role`, an `inherits` entry or a `system_identities` role not in `roles` | Refused, naming the role. |
-| Inheritance cycle | Refused, naming the cycle. |
-| Unknown permission in a role | Refused. |
-| Missing or unknown `reach` on a role | Refused. |
-| Role with reach `tenant` and no `tenant_claims` | Refused. |
-| `tenant_claims` and the tenant columns on the checkpointer or store do not match | Refused with `MODE=production`, warning otherwise. Declare the same names on both sides. |
-| Custom class overrides `authorize` and `roles` is set | Allowed, with a warning. |
-| Role with reach `all` | Allowed, with a warning that lists the roles. |
-| `MODE=production` with auth off | Allowed, with a warning from `build`, `config` and `audit`. |
-
-At request time a token without a configured tenant claim, or with a malformed roles or permissions claim, is 401.
-
-## Migrating from authorization
-
-The top-level `authorization` key and `AuthorizationBackend` are removed. A leftover `authorization` key stops the server at boot and names `auth.method: custom` and `auth.roles` as the replacement. Stored data does not change: ownership is read from the same thread rows as before.
-
-| Before | Now |
-|---|---|
-| `"authorization": "ownership"` | Delete the key. With auth on, every thread, memory and file is private to its owner (reach `own`), and a foreign id answers 404 (it used to answer 403). |
-| `"authorization": "allow_all"` | No equivalent. To let a group read each other's data, give their role reach `tenant`. Reads, lists and deletes widen; runs stay on the caller's own threads. |
-| `{"backend": "rbac", "roles": {...}, "default_scopes": [...]}` | `auth.roles`, each role with `permissions` and `reach`. `isolation: "owner"` is reach `own`. |
-| `"authorization": "module:MyBackend"` | `"auth": {"method": "custom", "path": "module:MyAuth"}` and override `authorize` on your `BaseAuth` class. |
-| `authorize(user, resource, action, resource_id)` | `authorize(identity, "resource:action", resource)` |
-| `isolation_scope(user)` returning `"owner"`, `"none"` or `["org_id"]` | Role `reach`: `own`, `all` or `tenant`, with `tenant_claims`. |
-| `scopes_for(user)` | `permissions_claim`, or `roles_claim` with a role table. |
-| `"graph_introspection": "scoped"` | Delete the key. Grant `graph:read` only to the roles that may read the graph. |
-| `"graph_introspection": "open"` | Delete the key. The default set already includes `graph:read`. |
-| `checkpointer:read`, `checkpointer:write`, `checkpointer:delete` | `threads:read`, `threads:write`, `threads:delete` |
-| `checkpointer:import` and `POST /v1/threads/{id}/messages` | Removed. There is no history import route. |
-| `graph:setup` | Removed. |
-| `files:upload`, `files:read` | Same, plus `files:delete`. |
-| `tasks:invoke` | `tasks:trigger` |
-| `config["authz"]`, `get_authz`, `has_scope`, `isolation_scope`, `build_authz` | `config["user"]` as an `Identity`: `get_identity(config)`, `identity.can("resource:action")`, `identity.reach`. |
-| Redis ownership cache | Removed. Nothing to configure. |
-
-A typical role setup, before and after:
-
-```json title="before"
-{
-  "auth": "jwt",
-  "authorization": {
-    "backend": "rbac",
-    "roles": {"admin": ["*"], "member": ["graph:invoke", "graph:stream", "checkpointer:read"]},
-    "default_scopes": ["graph:read"]
-  }
-}
-```
-
-```json title="after"
-{
-  "auth": {
-    "method": "jwt",
-    "roles": {
-      "admin": {"permissions": ["*"], "reach": "own"},
-      "member": {"permissions": ["graph:invoke", "graph:stream", "graph:read", "threads:read"], "reach": "own"}
-    },
-    "default_role": "member"
-  }
-}
-```
-
-The old `default_scopes` applied to everyone. `default_role` applies only to a token with no roles claim. For a floor that every user gets, list those permissions in each role, or `inherits` from a base role.
-
-For direct SDK use, `config["user"]` takes an `Identity` or a dict that validates into one (`user_id`, `tenant`, `roles`, `permissions`, `reach`, `kind`, `claims`). An unknown key in that dict raises. `permissions=None` means unrestricted.
+The full list of refused and warned setups is in [Boot-time checks](/docs/reference/api-cli/auth#boot-time-checks).
 
 ## Recipes for a custom `authorize`
 
-`authorize` is where checks that need a lookup belong. The recipes below show the pattern for a database, Casbin and Cerbos.
+`authorize` is where checks that need a lookup belong.
 
 ### Database lookup
 
@@ -448,83 +342,6 @@ class DbAuth(BaseAuth):
 ```
 
 The lookup runs on every guarded request, so index it and cache short-lived answers yourself if it is hot. Storage still filters by reach after `authorize` passes.
-
-### Casbin
-
-[Casbin](https://casbin.apache.org/docs/get-started/) keeps the policy in a model file and a policy file. This follows its Python quick start: `casbin.Enforcer(model, policy)` and `e.enforce(sub, obj, act)`.
-
-```ini title="auth/model.conf"
-[request_definition]
-r = sub, obj, act
-
-[policy_definition]
-p = sub, obj, act
-
-[policy_effect]
-e = some(where (p.eft == allow))
-
-[matchers]
-m = r.sub == p.sub && r.obj == p.obj && r.act == p.act
-```
-
-```csv title="auth/policy.csv"
-p, alice, threads, read
-p, alice, graph, invoke
-```
-
-```python title="auth/casbin_auth.py"
-import casbin
-from tenxgraph_api import BaseAuth
-
-class CasbinAuth(BaseAuth):
-    def __init__(self):
-        self.enforcer = casbin.Enforcer("auth/model.conf", "auth/policy.csv")
-
-    async def authenticate(self, request, response, credential):
-        ...  # verify the credential, return {"user_id": ...}
-
-    async def authorize(self, identity, permission, resource=None):
-        resource_name, _, action = permission.partition(":")
-        return bool(self.enforcer.enforce(identity.user_id, resource_name, action))
-```
-
-This version replaces the built-in role check, so do not set `roles` with it. For role mapping inside Casbin, see its docs.
-
-### Cerbos
-
-[Cerbos](https://docs.cerbos.dev/cerbos/latest/api/) runs as a separate policy service. This calls its HTTP API, `POST /api/check/resources` on the default HTTP port 3592, with `httpx`.
-
-```python title="auth/cerbos_auth.py"
-import httpx
-from tenxgraph_api import BaseAuth
-
-CERBOS_URL = "http://localhost:3592/api/check/resources"
-
-class CerbosAuth(BaseAuth):
-    async def authenticate(self, request, response, credential):
-        ...  # verify the credential, return {"user_id": ..., "roles": [...]}
-
-    async def authorize(self, identity, permission, resource=None):
-        kind, _, action = permission.partition(":")
-        body = {
-            "principal": {
-                "id": identity.user_id,
-                "roles": sorted(identity.roles) or ["user"],
-                "attr": dict(identity.tenant),
-            },
-            "resources": [{
-                "resource": {"id": resource or "*", "kind": kind, "attr": {}},
-                "actions": [action],
-            }],
-        }
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            reply = await client.post(CERBOS_URL, json=body)
-        reply.raise_for_status()
-        effect = reply.json()["results"][0]["actions"][action]
-        return effect == "EFFECT_ALLOW"
-```
-
-A network error raises, so the request fails instead of passing. Write Cerbos policies for the resource kinds `graph`, `threads`, `store`, `files`, `config` and `tasks`. The recipe uses the HTTP API directly; it does not use the Cerbos Python SDK.
 
 ## Production deployment checklist
 
@@ -560,8 +377,8 @@ Expected: HTTP 200 with your `user_id`, `roles`, `permissions` and `reach`. Then
 | 401 `REVOKED_TOKEN` | The token or all of the user's tokens were revoked | Sign in again for a new token |
 | 403 `Missing required permission: <resource>:<action>` | The caller's roles do not grant it | Add the permission to a role, or give the user the role |
 | 404 on a thread you expect to exist | It belongs to another user or tenant, or does not exist | Check `GET /v1/me` for reach and the token's tenant claim |
-| Startup `ValueError`: "JWT_SECRET_KEY and JWT_ALGORITHM must be set" | One of the two env vars is missing with JWT | Set both |
-| Refuses to boot, naming `authorization` or `graph_introspection` | Removed keys | See [Migrating from authorization](#migrating-from-authorization) |
+| 500 `JWT_SETTINGS_NOT_CONFIGURED` on every request | `JWT_SECRET_KEY` is not set | Set it (32+ bytes for HS*) |
+| Refuses to boot, naming `authorization` or `graph_introspection` | Removed keys | See [Upgrade to 1.0](/docs/project/upgrade-to-1.0#auth-roles-and-reach) |
 
 ### Boot guard
 
@@ -572,17 +389,7 @@ RuntimeError: Refusing to start: the following routes are not protected:
   - POST /v1/my-new-endpoint
 ```
 
-This is intentional: a forgotten guard becomes a deploy-time error, not a silent open endpoint. `/ping` and `/health/ready` are the only public paths.
-
-## Production recommendations
-
-1. Always set `"auth"` in production; never leave it `null` unless a gateway does the check
-2. Use HTTPS everywhere
-3. Keep `JWT_SECRET_KEY` outside version control; inject it at deploy time
-4. Use short-lived tokens and rotate secrets intentionally
-5. Give reach `all` to as few roles as you can; boot logs each one
-6. Set `MODE=production` to disable `/docs` and `/redocs` (enable only if intentional)
-7. Test both successful and rejected requests before release, asserting on the status and error code
+This is intentional: a forgotten guard becomes a deploy-time error, not a silent open endpoint. `/ping` and `/health/ready` are the only public routes, plus the Prometheus scrape path when the `metrics` block turns it on.
 
 ## See also
 

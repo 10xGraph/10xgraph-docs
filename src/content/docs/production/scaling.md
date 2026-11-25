@@ -1,26 +1,22 @@
 ---
 title: Scaling and reliability
 seoTitle: "Scaling and reliability for a 10xGraph agent"
-description: What Redis shares across API workers, how workers and IDs scale, what is replay-safe, how the server behaves when Redis or Postgres is down, and its honest limits.
+description: What Redis shares across API workers, how workers and IDs scale, what is replay-safe, and how the server behaves when Redis or Postgres is down.
 section: "Platform"
 order: 40
-updated: "2026-11-10"
+updated: "2026-11-25"
 faq:
   - q: "Do I need Redis to run more than one worker?"
     a: "You can run without it, but the per-thread run lock, the per-user run cap, WebSocket caps, idempotency, rate limits and token revocation then live in each process (the in-memory cache store). A cap of 10 across 4 workers becomes up to 40. Configure Redis, or your own cache store, for any multi-worker deployment."
-  - q: "What happens if Redis goes down?"
-    a: "Rate limiting follows cache_store.rate_limit.fail_open (default true: requests are allowed; false answers 503 RATE_LIMIT_UNAVAILABLE). The run lock, run cap, WebSocket caps and idempotency fail open. Token revocation fails closed with a 503. The readiness probe reports the cache store as failed, and returns 503 only when token revocation or a fail-closed rate limit uses it."
-  - q: "What happens if Postgres goes down?"
-    a: "Runs that need the checkpointer fail, and GET /health/ready returns 503 so an orchestrator takes the pod out of rotation. Liveness (/ping) stays up."
   - q: "Is there a queue for long runs?"
     a: "An interactive run (invoke or stream) executes in the API worker that received the request, bounded by runs.timeout. For work that should outlive a request, enqueue a background job: the API sends it to a TaskIQ broker and a separate 10xgraph worker process runs it. Scale the job workers independently of the API."
 ---
 
-You scale a served 10xGraph agent by running more stateless API workers behind a load balancer, with Postgres for durable state and a shared cache store (Redis, or a custom shared store) for the things workers must share: locks, caps, rate limits and caches. Work that should not hold a request open goes to a separately scaled job worker tier. Without a shared cache store, the locks and caps still work but count per process. This page lists exactly what the cache store shares, how reliability works under failure, and where the limits are. For the request path and state layers, read [Architecture](/docs/production/architecture) first.
+You scale a served 10xGraph agent by running more stateless API workers behind a load balancer, with Postgres for durable state and a shared cache store (Redis, or a custom shared store) for the things workers must share: locks, caps, rate limits and caches. Work that should not hold a request open goes to a separately scaled job worker tier.
 
 ## What the cache store shares across workers
 
-The API keeps its shared state in one `BaseCacheStore`. Set `cache_store.type` to `redis` in `10xgraph.json` to use `RedisCacheStore` (the URL comes from `cache_store.url` or `REDIS_URL`; Valkey, Dragonfly and KeyDB work through the same URL), or to `custom` with a `path` to your own class. With no `cache_store` the store is `InMemoryCacheStore`, in one process; `REDIS_URL` alone does not select Redis. See [Bring your own backend](/docs/server/bring-your-own-backend). The tables below say "Redis" for the shared case.
+The API keeps shared state in its cache store. Set `cache_store.type` to `redis` (or `custom`) to share it; the default is per process and `REDIS_URL` alone does not select Redis. See [cache_store](/docs/reference/api-cli/configuration#cache_store).
 
 | Feature | With Redis | Without Redis (per process) |
 |---|---|---|
@@ -45,11 +41,7 @@ If you use [background jobs](/docs/server/background-tasks), run `10xgraph worke
 
 ## Snowflake IDs
 
-By default the framework generates IDs with UUIDs. If you want time-ordered numeric IDs, pass a `SnowFlakeIdGenerator` (from `tenxgraph_api`, needs the `snowflakekit` package) to `StateGraph(id_generator=...)`. When several instances generate IDs, give each a unique `SNOWFLAKE_NODE_ID` and `SNOWFLAKE_WORKER_ID` so two instances never produce the same ID. See [Environment variables](/docs/reference/api-cli/environment).
-
-## Events out: publishers
-
-A publisher sends run events (node start and end, tool calls, errors) to systems outside the worker, so you can build dashboards, audit logs and alerts without touching the graph. Core ships Redis Pub/Sub, Kafka, RabbitMQ and console publishers, plus an OpenTelemetry publisher for traces (also Logfire and LangSmith through it). Several can run at once through a composite publisher. On shutdown the server waits up to 30 seconds for in-flight background work, such as event publishing, then exits. See [Events and observability](/docs/concepts/events-and-observability).
+For time-ordered numeric ids set `"id_generator": "snowflake"` in `10xgraph.json` (needs the `snowflakekit` extra) and give each instance its own `SNOWFLAKE_NODE_ID` and `SNOWFLAKE_WORKER_ID`. See [ID generators](/docs/guides/configure-id-generator).
 
 ## Reliability mechanisms
 
@@ -61,7 +53,7 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 | Timeouts | `runs.timeout` bounds a whole run. Set `node_timeout` and `tool_timeout` (no default) so one stuck tool cannot hold a run forever. |
 | Parallel tool cap | Tools run in parallel up to 10 by default. Change it with `runs.max_parallel_tool_calls` or `TENXGRAPH_MAX_PARALLEL_TOOL_CALLS`. |
 | Graceful shutdown | On SIGTERM the worker marks the app as draining, so `/health/ready` answers 503 and the load balancer stops sending new requests. Open runs get up to `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` (540 by default) to finish. Open streams then end with a final "interrupted" chunk. The app calls `graph.aclose()` with `SHUTDOWN_GRACE_SECONDS`, `SHUTDOWN_STOP_SECONDS` and `SHUTDOWN_TIMEOUT_SECONDS` (10, 10 and 30 seconds by default), which also drains background work, and closes limiters and revocation. A run that was cut off leaves a thread the next message can use. See [Graceful shutdown](/docs/guides/graceful-shutdown). |
-| Readiness probe | `GET /health/ready` calls `aping()` on the checkpointer, the store and the cache store (each time-boxed to 2 s, cached for 3 s) and returns 200 or 503. The response keys are `checkpointer`, `store` and `cache`. The cache store fails readiness only when token revocation or a fail-closed rate limit uses it. It is public and returns only `ok` or `fail` per component. `/ping` is the liveness probe. |
+| Readiness probe | `GET /health/ready` returns 503 while a required backend is down or the worker is draining; `/ping` is liveness. See [Health API](/docs/reference/rest-api/ping). |
 
 ## Failure behaviour
 
@@ -69,7 +61,6 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 |---|---|
 | Redis down: rate limit | Follows `cache_store.rate_limit.fail_open`. Default `true` allows the request; set `false` to answer `503` `RATE_LIMIT_UNAVAILABLE` with `Retry-After: 5`. |
 | Redis down: run lock, run cap, WebSocket caps, idempotency | Fail open. The request proceeds and the error is logged, because refusing every request would be an outage of its own. The Postgres version check still protects state. |
-| Redis down: ownership | Falls back to the checkpointer lookup in the database. A request is never failed by the cache. |
 | Redis clock | Lease expiry for the run cap uses the Redis clock (`TIME`), not each pod's own, so clock skew between pods cannot trim a live lease. |
 | Redis not answering | Every call fails after `REDIS_SOCKET_TIMEOUT` (5 seconds by default) instead of hanging the request. See [environment variables](/docs/reference/api-cli/environment#redis-variables). |
 | Redis down: token revocation | Fails closed: a 503, not a possibly revoked token served. |
@@ -77,13 +68,7 @@ A publisher sends run events (node start and end, tool calls, errors) to systems
 | Postgres down | Runs that need the checkpointer fail. `/health/ready` returns 503, so Kubernetes stops routing to the pod. `/ping` stays 200 so the pod is not restarted for a dependency outage. |
 | Worker dies mid-run | Locks and caps held in Redis expire. Resume by sending the thread another request; finished tool calls are skipped. |
 
-## Honest limits
-
-- Interactive runs execute in the API worker that received the request, so a long run ties up that worker's connection and a deploy waits on the graceful timeout. Move work that must outlive a request to a job worker.
-- A tool can still run twice if a run crashes in the short gap between the tool finishing and its ledger record being written, or if the run was cut off while the tool was running. Use idempotency keys for tools with side effects.
-- With the in-memory cache store, every cap and lock in the table above is per process.
-- There are no published benchmarks for throughput or latency. Load-test your own graph, model and tools.
-- Pin versions and read the changelog before upgrading. From 1.0 breaking changes come only in a major release.
+There are no published throughput or latency benchmarks; load-test your own graph, model and tools.
 
 ## Related
 

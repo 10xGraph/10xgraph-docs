@@ -5,7 +5,7 @@ section: "Security and access"
 group: "Protect the server"
 order: 40
 label: "Rate limiting"
-updated: "2026-11-10"
+updated: "2026-11-25"
 faq:
   - question: Do I need rate limiting in development?
     answer: "In development, you can run without limits. In any production environment, rate limiting protects your infrastructure from both accidental overuse and abuse."
@@ -15,9 +15,7 @@ faq:
     answer: "With `fail_open: true` (the default), requests pass through; with `fail_open: false`, requests are denied with 503 `RATE_LIMIT_UNAVAILABLE`. Choose based on whether uptime matters more than protection."
 ---
 
-Rate limiting protects your API from overuse and abuse by enforcing a ceiling on how many requests a client can make within a time window. Without it, a single user or malicious actor can consume all your infrastructure resources and degrade service for everyone. The 10xGraph API server includes a built-in sliding-window rate limiter that you enable with a few lines of configuration.
-
-By default, the 10xGraph API accepts unlimited requests. This guide shows how to enable the rate limiter, choose where the counters live, and handle edge cases like proxy headers and WebSocket connections.
+By default the API accepts unlimited requests.
 
 Rate limits and run caps are part of how the server scales safely; see [scaling and reliability](/docs/production/scaling) and the [security model](/docs/production/security-model).
 
@@ -25,7 +23,7 @@ Rate limits and run caps are part of how the server scales safely; see [scaling 
 
 The rate limiter is HTTP middleware that executes before your graph logic runs on every request. It maintains a count of requests per client (or globally) inside a rolling time window and returns `429 Too Many Requests` when the limit is exceeded. The limit is never active until you add a `rate_limit` block to `10xgraph.json`.
 
-The limiter uses a **sliding-window algorithm**, not fixed time buckets. This means the window rolls with each request: a client with a limit of 100 requests per 60 seconds can send 100 requests in the first 30 seconds, then nothing until 60 seconds have passed, then 100 more. This prevents bursts that would succeed with a simple bucket-based counter.
+The limiter uses a **sliding-window algorithm**, not fixed time buckets. This means the window rolls with each request: a client with a limit of 100 requests per 60 seconds can send 100 requests in the first 30 seconds, then nothing until 60 seconds have passed, then 100 more.
 
 The counters live in the API's **cache store**, the same one that holds the run locks and caps. There is no separate rate-limit backend. With `cache_store.type` set to `redis` every worker shares the counters; with the default `memory` type they live in each process. The `rate_limit` object sits inside `cache_store`. To keep counters somewhere else, supply your own cache store (see [Bring your own backend](/docs/server/bring-your-own-backend)).
 
@@ -51,98 +49,6 @@ With no `cache_store` (the in-memory store) the counters live in process memory.
 ```
 
 Each client IP can make up to `100` requests every `60` seconds. Health-check and documentation paths are excluded so monitoring and browser access are not affected.
-
-**Verify it works:** Start the server and make requests from the same IP until you exceed the limit.
-
-```bash
-10xgraph dev --no-open
-```
-
-In another terminal, test the limiter:
-
-```bash
-# First 100 requests succeed
-for i in {1..100}; do
-  curl -s http://localhost:8000/v1/graph/invoke \
-    -H "Content-Type: application/json" \
-    -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "test"}]}]}' > /dev/null
-done
-
-# Next request is rate-limited
-curl -i http://localhost:8000/v1/graph/invoke \
-  -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": [{"type": "text", "text": "test"}]}]}'
-# Returns: 429 Too Many Requests
-```
-
-<aside class="callout callout-warning" role="note"><p class="callout-title">In-memory counters are per process</p>
-
-With the in-memory cache store the counters live in process memory. Run four workers and the real limit is `400` per window, not `100`, and a rolling restart resets everything. Use a Redis cache store for anything with more than one worker.
-
-</aside>
-
-## Several workers or servers (production)
-
-When you run multiple Uvicorn workers, containers, or servers, each process would have its own counter. Point the API at Redis so the limit is enforced across the whole deployment. The same Redis also shares the run locks, caps, idempotency state and token revocation.
-
-### Install the Redis extra
-
-```bash
-pip install "10xgraph-api[redis]"
-```
-
-### Update `10xgraph.json`
-
-```json
-{
-  "agent": "graph.react:app",
-  "cache_store": {
-    "type": "redis",
-    "rate_limit": {
-      "enabled": true,
-      "requests": 1000,
-      "window": 60,
-      "by": "ip",
-      "trusted_proxy_headers": true,
-      "exclude_paths": ["/ping", "/metrics", "/docs", "/redocs", "/openapi.json"],
-      "fail_open": true
-    }
-  }
-}
-```
-
-### Set the environment variable
-
-```bash
-# .env
-REDIS_URL=redis://localhost:6379/0
-```
-
-The `${REDIS_URL}` placeholder is expanded from the environment at startup. Never commit Redis credentials into `10xgraph.json`. Leave out `url` and the server reads `REDIS_URL` on its own; set `"url": "${REDIS_URL}"` to say so in the file. `REDIS_URL` alone never turns Redis on: `"type": "redis"` does. Valkey, Dragonfly and KeyDB work the same way, through the URL.
-
-**How it works:** The Redis cache store uses a Lua script with sorted sets to atomically check and record a request in one operation. This prevents concurrent requests from slipping past the configured limit. Each request adds a slot that expires when the window ends; Redis evicts idle keys using TTL.
-
-The rate-limit counters use their own Redis key namespace (`10xgraph:ratelimit2`).
-
-**Verify it works:** Set up Redis, update your config, restart the server, and load-test from multiple processes:
-
-```bash
-# Start Redis if needed
-redis-server
-
-# Run the server
-10xgraph dev --no-open
-
-# In another terminal, hammer it with concurrent requests
-ab -n 2000 -c 50 http://localhost:8000/v1/graph/invoke
-# Some requests will return 429
-```
-
-<aside class="callout callout-tip" role="note"><p class="callout-title">Atomic enforcement</p>
-
-The check and the recording happen as one atomic Redis operation, which prevents concurrent requests from slipping past the configured limit. A denied request adds nothing to the counter. Even with thousands of concurrent clients, no request will leak through.
-
-</aside>
 
 ## Another store
 
@@ -200,7 +106,7 @@ Requests with no authenticated user fall back to an `ip:<address>` bucket, so an
 }
 ```
 
-Enforces a single limit for the entire service. Use this when you want to control total throughput rather than per-client fairness. This is rare; per-IP or per-user is almost always better.
+Enforces a single limit for the entire service. Use this when you want to control total throughput rather than per-client fairness.
 
 ## WebSocket handshakes count too
 
@@ -268,7 +174,7 @@ Add monitoring, health-check, and documentation paths to `exclude_paths` so they
 }
 ```
 
-Health checks (`/ping`) are excluded automatically and do not need to be listed. Other status endpoints, readiness checks, and documentation paths should be added here so your monitoring and developers do not trigger limits. The ReDoc page is served at `/redocs`, not `/redoc`, so listing `/redoc` excludes nothing.
+`/ping` and `/health/ready` are excluded automatically and do not need to be listed. Other status endpoints, readiness checks, and documentation paths should be added here so your monitoring and developers do not trigger limits. The ReDoc page is served at `/redocs`, not `/redoc`, so listing `/redoc` excludes nothing.
 
 ## Disabling rate limiting
 
@@ -330,13 +236,11 @@ With `fail_open: false`, a cache store outage (for example Redis) denies request
 
 A real limit hit stays `429 RATE_LIMIT_EXCEEDED`. With `fail_open: true` requests pass during the outage. The limiter logs a traceback for the first error of an outage and one line for each error after it. Clients that retried on 429 should retry on 503 too.
 
-Clients can check `X-RateLimit-Remaining` before sending the next request to avoid hitting the limit, and use `Retry-After` to back off intelligently.
-
 ## Troubleshooting
 
 **I still get unlimited requests even though I configured a limit.**
 
-Verify that `10xgraph.json` has a `cache_store.rate_limit` block with `"enabled"` not set to `false` and that you restarted the server after editing the file. Check the startup logs for rate-limit configuration messages. If you use Redis, ensure the connection is working: a cache store error with `fail_open: true` allows all requests.
+Verify that `10xgraph.json` has a `cache_store.rate_limit` block with `"enabled"` not set to `false` and that you restarted the server after editing the file. If you use Redis, ensure the connection is working: a cache store error with `fail_open: true` allows all requests.
 
 **Different workers seem to have different limits.**
 
@@ -348,7 +252,7 @@ Verify `trusted_proxy_headers: true` is set and `trusted_proxy_hops` matches you
 
 **Rate-limit headers are not appearing in responses.**
 
-They should appear on every response, including successful ones. If missing, check that rate limiting is enabled and the response is not being cached by a proxy. Middleware rate-limit headers are always fresh.
+They should appear on every response, including successful ones. If missing, check that rate limiting is enabled and the response is not being cached by a proxy.
 
 ## See also
 

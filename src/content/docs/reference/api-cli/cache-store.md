@@ -5,32 +5,18 @@ description: "Reference for BaseCacheStore, the API server's shared-state interf
 section: Reference
 group: "CLI and configuration"
 order: 455
-updated: "2026-11-10"
+updated: "2026-11-25"
 ---
 
-The cache store holds the state the API shares between its workers: run locks and caps, idempotency records, token revocation and rate-limit counters. Every one of those features uses two primitives, timed slots and keys with a TTL. `BaseCacheStore` is the abstract class that defines them. The built-in `RedisCacheStore` shares the state across workers (Valkey, Dragonfly and KeyDB work through the same URL), and `InMemoryCacheStore` keeps it in one process.
+The cache store holds the state the API shares between its workers: run locks and caps, idempotency records, token revocation and rate-limit counters. Every one of those features uses two primitives, timed slots and keys with a TTL. `BaseCacheStore` is the abstract class that defines them.
 
 Source: [`tenxgraph_api/src/app/core/cache_store/base.py`](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/cache_store/base.py)
 
-## Select a custom store
-
-Write a subclass of `BaseCacheStore` for a backend that does not speak the Redis protocol, then select it in `10xgraph.json`:
-
-```json title="10xgraph.json"
-{
-  "agent": "graph.agent:app",
-  "cache_store": {
-    "type": "custom",
-    "path": "graph.cache:store"
-  }
-}
-```
-
-`path` is a `module:attr` path to a `BaseCacheStore` instance, or to a zero-argument factory (a class or function) that returns one. The server reads `type` and `path` when it boots and binds the store. The skeleton and the rules for a replacement are in [Bring your own backend](/docs/server/bring-your-own-backend).
+Select a custom store with `cache_store.type` `custom` and `path`; see [cache_store](/docs/reference/api-cli/configuration#cache_store) and [Bring your own backend](/docs/server/bring-your-own-backend).
 
 ## Methods
 
-`BaseCacheStore` has 10 methods: 8 abstract and 2 optional (`describe` and `aclose`). `SlotResult` is the dataclass that `acquire` returns; it has the fields `granted`, `count`, `oldest_expiry` and `slot_id`.
+`BaseCacheStore` has 10 methods: 8 abstract and 2 optional (`describe` and `aclose`). `SlotResult` is the frozen model that `acquire` returns; its fields are `granted: bool`, `count: int`, `oldest_expiry: float | None` and `slot_id: str | None`.
 
 | Method | Required | What it must do |
 |---|---|---|
@@ -45,15 +31,11 @@ Write a subclass of `BaseCacheStore` for a backend that does not speak the Redis
 | `def describe(self) -> str \| None` | No | Say where the store lives (for example `host:port`) for logs and startup checks. Never include credentials. Return `None` when there is nothing useful to name. |
 | `async def aclose(self) -> None` | No | Release resources. Called once on app shutdown. |
 
-`SetMode` is `Literal["always", "if_absent", "if_greater"]`. The three modes:
-
-- `"always"` writes the value and returns `True`.
-- `"if_absent"` writes only when the key does not exist, and returns whether it wrote.
-- `"if_greater"` treats the value as a decimal number and writes only when it is greater than the stored one, or when nothing is stored. The comparison and write are atomic. A value that is not a decimal number raises `ValueError`.
+`SetMode` is `Literal["always", "if_absent", "if_greater"]`.
 
 ## Rules a custom store must keep
 
-The contract test suite checks these rules. Every built-in store passes it.
+The contract suite (`tenxgraph_api.testing.cache_store_contract`) checks these rules.
 
 - **`acquire` is atomic.** Drop expired slots, and only if the live count is below `limit`, add a new slot expiring at `now() + ttl`. Two callers can never both take the last slot. `limit < 1` always denies.
 - **A denied `acquire` adds nothing.** The rate limiter relies on this: a client over its limit does not extend its own penalty.

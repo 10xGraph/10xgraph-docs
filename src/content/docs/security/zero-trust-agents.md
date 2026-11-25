@@ -6,19 +6,17 @@ section: "Security and access"
 group: "Zero trust"
 order: 65
 label: "Zero-trust agents"
-updated: "2026-11-22"
+updated: "2026-11-25"
 faq:
   - question: "Does hiding a tool from the model stop it from being called?"
     answer: "No. A model can still name a hidden tool, by mistake or because an injected text told it to. Hiding (mcp_include, tool tags) only shapes the tool list. ToolGuard is what blocks the call."
   - question: "What does the model see when a tool call is denied?"
     answer: "A failed tool result with the text 'Denied by policy: <tool>. <reason>'. The tool does not run, on_error recovery is skipped, and the run continues so the model can tell the user."
-  - question: "Is a 10xGraph agent zero-trust compliant out of the box?"
-    answer: "No framework makes an app compliant. 10xGraph gives you the controls: per-call tool checks, approvals, fencing, audit events and tracing. You choose the policy, run the network and own the data rules."
 ---
 
 Zero trust for an agent means one thing in practice: the model never gets more power than the person it acts for. Every tool call is checked against the caller's identity at the moment it runs, risky actions wait for a human, and text that comes back from tools is treated as data, not as instructions.
 
-10xGraph 1.1 gives you these controls in the framework. The policy (which tools, which permissions, who approves) is yours. This page shows each control with a short example, then maps the controls of a typical zero-trust guide to 10xGraph features, including the parts that stay with you.
+10xGraph gives you these controls in the framework; the policy (which tools, which permissions, who approves) is yours.
 
 ## The model: check every call
 
@@ -230,12 +228,12 @@ app = graph.compile(callback_manager=manager)
 
 ## Tool result fencing
 
-A web page, a file or an MCP server can return text that tries to steer the model ("ignore your instructions and..."). Since 1.1 the text of every tool result reaches the model inside a fence, `<tool_output_xxxxxxxx>`, and one system prompt line tells the model the content is data returned by a tool, not instructions. This is on by default for local, MCP and client tools.
+A web page, a file or an MCP server can return text that tries to steer the model ("ignore your instructions and..."). The text of every tool result reaches the model inside a fence, `<tool_output_xxxxxxxx>`, and one system prompt line tells the model the content is data returned by a tool, not instructions. This is on by default for local, MCP and client tools.
 
 - Only the outgoing model request is wrapped. Saved messages, API responses, events and traces keep the plain output.
 - Text inside a result that looks like the fence's tags (`<tool_output` or `</tool_output`, any case) is escaped, so a result cannot close the fence or fake an opening one.
 - Results the framework writes itself are not fenced: handoff answers, skill tools and `ToolDenied` results.
-- It is cache-safe. The suffix is derived from the message id and the tool call id, so the same saved result gets the same fence on every turn. The system prompt line is added whenever tools exist, from the first turn on. The provider's prompt cache keeps matching. A cache built with 1.0 misses once after the upgrade, because of the new line.
+- It is cache-safe. The suffix is derived from the message id and the tool call id, so the same saved result gets the same fence on every turn. The system prompt line is added whenever tools exist, from the first turn on.
 
 Fencing lowers the chance that the model obeys injected text. It does not make that impossible, which is why the guard and approvals sit behind it.
 
@@ -248,7 +246,7 @@ tool_node = ToolNode([get_order, refund], fence_results=False)
 agent = Agent(model="gpt-5-mini", tool_node=tool_node)
 ```
 
-Turn it off only when every result comes from code you trust and the fence gets in the way, for example a tool whose exact output a test compares against a recorded model request. `fence_results=False` restores the 1.0 behaviour.
+Turn it off only when every result comes from code you trust and the fence gets in the way, for example a tool whose exact output a test compares against a recorded model request.
 
 ## On the API server
 
@@ -295,66 +293,9 @@ Things to know:
 
 See [Authentication and roles](/docs/server/auth) for the role table and [Permissions in tools](/docs/guides/authorization-scopes) for `Identity` and `can()`.
 
-## Transport: mTLS on each link
+## Transport
 
-TLS and mTLS end at your proxy or service mesh (nginx, Envoy, Istio, Linkerd). 10xGraph does not terminate TLS itself. For the links your app opens, each client takes the settings it needs. [Use mutual TLS](/docs/security/use-mutual-tls) has a full, tested example for each link and the limits.
-
-| Link | How |
-|---|---|
-| Client to API | Ends at your proxy or mesh. A custom `BaseAuth` can read the client certificate identity from a header the proxy sets. Trust that header only when the API is reachable through the proxy alone. |
-| App to Postgres | `sslmode`, `sslrootcert`, `sslcert` and `sslkey` in the DSN, or your own asyncpg pool (`PgCheckpointer(pg_pool=...)`). |
-| App to Redis | A `rediss://` URL with certificate options in `redis_pool_config`, or your own pool (`redis_pool=...`). |
-| App to LLM (OpenAI, Anthropic, Google) | `http_client=` on the `Agent` passes straight through to the provider SDK, including Gemini on the Developer API and Vertex AI. |
-| App to MCP | `ToolNode(client=...)` takes your own fastmcp client and transport. |
-
-Postgres and Redis for `PgCheckpointer`:
-
-```python
-from tenxgraph.storage.checkpointer import PgCheckpointer
-
-checkpointer = PgCheckpointer(
-    postgres_dsn=(
-        "postgresql://app@db.internal:5432/app"
-        "?sslmode=verify-full&sslrootcert=/certs/ca.pem"
-        "&sslcert=/certs/client.pem&sslkey=/certs/client.key"
-    ),
-    redis_url="rediss://cache.internal:6380/0",
-    redis_pool_config={
-        "ssl_ca_certs": "/certs/ca.pem",
-        "ssl_certfile": "/certs/client.pem",
-        "ssl_keyfile": "/certs/client.key",
-    },
-)
-```
-
-LLM and MCP clients take an `ssl.SSLContext` with your client certificate:
-
-```python
-import ssl
-
-import httpx2
-from fastmcp import Client
-from fastmcp.client.transports import StreamableHttpTransport
-
-from tenxgraph.core.graph import Agent, ToolNode
-
-tls = ssl.create_default_context(cafile="/certs/ca.pem")
-tls.load_cert_chain("/certs/client.pem", "/certs/client.key")
-
-tool_node = ToolNode(
-    tools=[],
-    client=Client(StreamableHttpTransport("https://tools.internal/mcp", verify=tls)),
-)
-
-agent = Agent(
-    model="claude-haiku-5-5",
-    base_url="https://llm-gateway.internal",  # your gateway that requires the client cert
-    http_client=httpx2.AsyncClient(verify=tls),
-    tool_node=tool_node,
-)
-```
-
-The `http_client` type must match the installed SDK: the Anthropic SDK (1.0 and later) and openai 3.x take an `httpx2.AsyncClient`, openai 1.x and 2.x take an `httpx.AsyncClient`, and google-genai 1.x and 2.x take an `httpx.AsyncClient` (3.x takes either). The wrong one fails at request time.
+TLS and mTLS end at your proxy or mesh; for the links the app opens (Postgres, Redis, LLM, MCP) see [Use mutual TLS](/docs/security/use-mutual-tls).
 
 ## PII is your job
 
@@ -426,7 +367,7 @@ To run each user's calls with their own credential, use `mcp_auth` (see [Call se
 
 ## Zero-trust controls and where they live
 
-The table maps the controls of a typical zero-trust guide for AI agents to 10xGraph features. It is a map, not a certification: no framework makes your app compliant on its own.
+The table maps the controls of a typical zero-trust guide for AI agents to 10xGraph features. It is a map, not a certification.
 
 | Control | 10xGraph feature | Your job |
 |---|---|---|
@@ -443,8 +384,8 @@ The table maps the controls of a typical zero-trust guide for AI agents to 10xGr
 | Action logs and tracing | [Audit log](/docs/server/audit-log) (metadata only), denial logs with user id, `tenxgraph.tool.denied` on OTEL spans, tool events with status `denied` | Storage, retention, alerting, tamper evidence |
 | Loop and cost limits | `recursion_limit` (default 25), [rate limiting](/docs/server/rate-limiting) | Set budgets per run and per user |
 | SSRF on fetched URLs | `MediaFetchPolicy` checks external media URLs. [Security model](/docs/production/security-model) | Network egress rules for your own tools |
-| Encryption in transit, mTLS | Each client takes TLS settings (see [Transport](#transport-mtls-on-each-link)) | Proxy or mesh, certificates, rotation |
-| Container hardening | `10xgraph build` image: non-root user, read-only root filesystem. [Deploy](/docs/server/deploy) | Image scanning, runtime policy |
+| Encryption in transit, mTLS | Each client takes TLS settings (see [Use mutual TLS](/docs/security/use-mutual-tls)) | Proxy or mesh, certificates, rotation |
+| Container hardening | `10xgraph build` image: non-root user; the generated Kubernetes manifest adds a read-only root filesystem. [Deploy](/docs/server/deploy) | Image scanning, runtime policy |
 | PII detection and redaction | The `after_invoke` hook | All of it: rules, detection, retention |
 | Sandboxed code execution | Connects to your sandbox through MCP or a provider tool | Run and isolate the sandbox |
 | Memory poisoning (provenance and expiry) | Each memory records its `origin`, optional `expires_at`, opt-in trusted-only retrieval and `adelete_expired()`. [Memory origin and expiry](/docs/concepts/memory-and-store#memory-origin-and-expiry) | Turn on trusted-only retrieval and a TTL, schedule the cleanup, review what the model wrote |

@@ -514,8 +514,7 @@ Supervisor routes tasks to specialist workers. The supervisor is a dedicated Age
 Configuration for a single worker.
 
 ```python
-@dataclass
-class WorkerConfig:
+class WorkerConfig(BaseModel):
     agent: BaseAgent
     description: str = ""
 ```
@@ -605,8 +604,7 @@ Peer-to-peer multi-agent handoff. Each member is a pre-built Agent; members can 
 Configuration for a single swarm member.
 
 ```python
-@dataclass
-class SwarmMemberConfig:
+class SwarmMemberConfig(BaseModel):
     agent: BaseAgent
     can_handoff_to: list[str] | None = None
     description: str = ""

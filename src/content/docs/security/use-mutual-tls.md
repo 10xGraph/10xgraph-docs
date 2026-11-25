@@ -12,13 +12,11 @@ faq:
     answer: "No. TLS and mTLS between your callers and the API end at your proxy or service mesh. For the links the app opens (Postgres, Redis, LLM, MCP) you give the client a certificate."
   - question: "Why do Python 3.13 and later reject my test certificate?"
     answer: "Python 3.13 turned on strict certificate checks. A certificate without the Authority Key Identifier and Subject Key Identifier extensions fails with 'Missing Authority Key Identifier'. Generate your certificates with both."
-  - question: "Which httpx client does http_client take?"
-    answer: "openai 3.x and anthropic 1.x take an httpx2.AsyncClient. google-genai 1.x and 2.x take an httpx.AsyncClient, and 3.x takes either."
 ---
 
 Mutual TLS (mTLS) means both sides of a connection show a certificate. The server proves who it is, and the client proves who it is too. A connection without a valid client certificate is refused before any request is read.
 
-A 10xGraph app has five links. This page shows how to put each one behind mTLS. It is the longer version of the transport table in [Zero-trust agents](/docs/security/zero-trust-agents#transport-mtls-on-each-link). Each snippet was run against real servers: nginx, Postgres, Redis, an LLM endpoint and an MCP server, each refusing a missing or wrong certificate.
+A 10xGraph app has five links. This page shows how to put each one behind mTLS.
 
 | Link | Where mTLS is set |
 |---|---|
@@ -305,12 +303,11 @@ agent = ReactAgent(model="claude-haiku-4-5", tools=[get_weather], client=mcp)
 
 - **Certificates need key identifiers.** Python 3.13 and later reject a certificate without the Authority Key Identifier and Subject Key Identifier extensions ("Missing Authority Key Identifier"). redis-py hit this. With openssl, add `subjectKeyIdentifier=hash` and `authorityKeyIdentifier=keyid,issuer` to the extensions when you sign.
 - **Rate limits behind a proxy.** A request that fails authentication is keyed by `ip:`, and behind a proxy that is the proxy's address for every caller. Have the proxy send `X-Forwarded-For`, and set `trusted_proxy_headers` and `trusted_proxies` in the `rate_limit` block of `cache_store`. See [Rate limiting](/docs/server/rate-limiting#behind-a-reverse-proxy).
-- **Test the refusals too.** A link that works with a certificate proves little. Also check that it fails with no certificate, and with one from another CA.
 
 ## Not covered today
 
 - **Gemini Live.** The realtime Gemini client builds its client without an `http_client`, and its audio session uses websockets. There is no custom client path.
 - **WebSocket routes through the proxy.** They were not tested with mTLS.
-- **OpenAI.** The OpenAI path passes `http_client` the same way as Anthropic, but the check ran against an Anthropic-format and a Gemini-format endpoint only.
+- **OpenAI.** Passes `http_client` the same way as Anthropic but was not tested against a mutual-TLS endpoint.
 
 For these, use mTLS from your mesh at the network level.

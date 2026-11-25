@@ -6,7 +6,7 @@ label: "CORS and security headers"
 order: 50
 group: "Protect the server"
 section: "Security and access"
-updated: "2026-11-10"
+updated: "2026-11-25"
 faq:
   - question: "Can I use ORIGINS='*' with credentials in production?"
     answer: "No. Wildcard origins combined with credentials is rejected at startup in production mode. Set explicit ORIGINS or disable CORS_ALLOW_CREDENTIALS."
@@ -15,8 +15,6 @@ faq:
   - question: "Do I need to configure security headers?"
     answer: "They are enabled by default. In production, review HSTS, CSP, and FRAME_OPTIONS to match your deployment topology."
 ---
-
-Cross-origin resource sharing (CORS) controls which websites can call your API. Security headers protect against browser-based attacks. Request size limits guard against denial-of-service payloads. Trusted proxy headers let you run behind load balancers and reverse proxies safely. Together, these form the network perimeter of a production 10xGraph deployment.
 
 For how these settings fit the rest of the server's defenses, see the [security model](/docs/production/security-model).
 
@@ -58,7 +56,7 @@ When a public page such as `https://play.10xgraph.com` calls a server on `localh
 
 ### Host validation
 
-The `ALLOWED_HOST` setting (comma-separated, default `*`, no spaces after the commas) is checked by the `TrustedHostMiddleware`. It rejects requests to hostnames not in the list, protecting against Host header injection attacks. The `/ping` health check is exempt so container orchestration probes work.
+The `ALLOWED_HOST` setting (comma-separated, default `*`, no spaces after the commas) is checked by the `TrustedHostMiddleware`. It rejects requests to hostnames not in the list, protecting against Host header injection attacks. `/ping` and `/health/ready` are exempt so orchestration probes work.
 
 In production, set `ALLOWED_HOST` to the DNS names your API answers to:
 
@@ -76,7 +74,7 @@ When `MODE=production`, the server runs a set of startup checks by default. If a
 - a wildcard `ORIGINS`
 - an enabled `DOCS_PATH` or `REDOCS_PATH`
 
-Set `STRICT_PRODUCTION_CHECKS=false` to opt out. The server then starts and logs the same problems as warnings. A wildcard `ORIGINS` together with credentials is still refused, because that check is separate.  The checks apply only in production.
+Set `STRICT_PRODUCTION_CHECKS=false` to opt out. The server then starts and logs the same problems as warnings. A wildcard `ORIGINS` together with credentials is still refused, because that check is separate. The checks apply only in production.
 
 Verify your configuration is working by inspecting the headers:
 
@@ -139,12 +137,6 @@ curl -i https://yourapi.com/ping | grep -E "^(Strict-Transport-Security|X-Conten
 
 The default CSP restricts loading and connections to your own origin plus a few CDNs, and sets `frame-ancestors 'none'`. Setting `CSP_POLICY` replaces the whole default policy. If you serve a dashboard or playground from your API server, adjust the policy to allow it. The default permits inline scripts and styles, scripts from `https://cdn.jsdelivr.net` and `https://unpkg.com` (for hosted libraries like Swagger UI), and styles from jsDelivr and Google Fonts.
 
-If you use a custom CSP, ensure it covers:
-- Script sources (for your app and any documentation)
-- Style sources (fonts, frameworks)
-- Image and media sources (data URLs, external CDNs)
-- Frame ancestors (set to `'none'` to prevent clickjacking unless you need embedding)
-
 ## Request size limits
 
 The server enforces a maximum request body size to prevent denial-of-service attacks via large payloads. The default is 10 MB.
@@ -185,63 +177,7 @@ For example, if `MAX_REQUEST_SIZE=10MB` and `MEDIA_MAX_SIZE_MB=50MB`, the upload
 
 ## Trusted proxies
 
-When your API runs behind a load balancer, reverse proxy, or CDN, client IP and the original request scheme (HTTP vs HTTPS) come from proxy headers, not the direct connection.
-
-### Proxy headers
-
-The server trusts these headers when appropriate:
-
-| Header | Used by | Purpose |
-|---|---|---|
-| `X-Forwarded-Proto` | Security headers | Detects if original request was HTTPS (for HSTS header) |
-| `X-Forwarded-For` | Rate limiting | Client IP for per-IP rate limits |
-
-The rate limiter explicitly checks the `trusted_proxy_headers` setting in `10xgraph.json`. Set it to `true` to read `X-Forwarded-For` for rate limiting:
-
-```json
-{
-  "cache_store": {
-    "rate_limit": {"by": "ip", "trusted_proxy_headers": true}
-  }
-}
-```
-
-Security headers middleware automatically checks `X-Forwarded-Proto` to detect HTTPS and send the HSTS header. `X-Forwarded-For` is read from the right: `trusted_proxy_hops` (default `1`) is how many entries your own proxies appended. See [rate limiting](/docs/server/rate-limiting#behind-a-reverse-proxy).
-
-### Production configuration
-
-In production behind a proxy, ensure:
-1. The proxy sets `X-Forwarded-Proto: https` if the client connection is HTTPS
-2. The proxy sets `X-Forwarded-For: <client-ip>` if you use IP-based rate limiting
-3. The proxy is the only service that can reach your API (firewall/network policy)
-4. You set `trusted_proxy_headers=true` in rate limiting config if you rely on the header
-
-Example Nginx configuration:
-
-```nginx
-location /api/ {
-  proxy_pass http://10xgraph-api:8000;
-  proxy_set_header X-Forwarded-For $remote_addr;
-  proxy_set_header X-Forwarded-Proto $scheme;
-  proxy_set_header X-Forwarded-Host $server_name;
-}
-```
-
-## Production checklist
-
-Before deploying to production:
-
-- [ ] Set `MODE=production` (turns off `/docs` and `/redocs` unless you set `DOCS_PATH` or `REDOCS_PATH`, and enforces the CORS, host and JWT secret checks, and turns debug off)
-- [ ] Set explicit `ORIGINS` (comma-separated list of domains your frontend runs on)
-- [ ] Set `CORS_ALLOW_CREDENTIALS=false` if your API is public and token-based, or `true` if it uses cookies
-- [ ] Set `ALLOWED_HOST` to the DNS names the API answers to
-- [ ] Review `HSTS_MAX_AGE` (1 year default); ensure your deployment can sustain HTTPS
-- [ ] Review `FRAME_OPTIONS` (DENY by default) if you embed the API response in iframes
-- [ ] Customize `CSP_POLICY` if you serve a dashboard alongside the API
-- [ ] Set `MAX_REQUEST_SIZE` based on your largest expected payload (default 10 MB)
-- [ ] If behind a proxy, set `trusted_proxy_headers=true` in rate limiting config and ensure the proxy sets `X-Forwarded-Proto` and `X-Forwarded-For`
-- [ ] Verify CORS headers with a curl request from your frontend origin
-- [ ] Verify security headers are present: `curl -i https://yourapi.com/ping`
+The security headers middleware reads `X-Forwarded-Proto` to decide whether the request was HTTPS and HSTS applies. The rate limiter reads `X-Forwarded-For` only with `trusted_proxy_headers`; see [Behind a reverse proxy](/docs/server/rate-limiting#behind-a-reverse-proxy).
 
 ## Troubleshooting
 
@@ -250,7 +186,5 @@ Before deploying to production:
 **413 Request Too Large:** Either your payload is over `MAX_REQUEST_SIZE`, or file upload is over `MEDIA_MAX_SIZE_MB`. Increase the relevant limit or split the payload.
 
 **HSTS not sent:** Ensure the request is HTTPS. Check that `HSTS_ENABLED=true` and the server can detect HTTPS (either via request scheme or `X-Forwarded-Proto` header if behind a proxy).
-
-**Rate limits based on IP not working:** Set `trusted_proxy_headers=true` in your rate limit config. Verify the proxy sends the `X-Forwarded-For` header.
 
 Related pages: [`/docs/server/auth`](/docs/server/auth) (auth configuration), [`/docs/server/rate-limiting`](/docs/server/rate-limiting) (rate limiter details), [`/docs/server/production-checklist`](/docs/server/production-checklist) (full production hardening guide).

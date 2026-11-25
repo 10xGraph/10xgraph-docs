@@ -15,6 +15,7 @@ from tenxgraph.core.exceptions import (
     GraphRecursionError,
     GraphStopRequested,
     InterruptMismatchError,
+    MessageNotFoundError,
     MetricsError,
     ModelNotFoundError,
     NodeError,
@@ -25,6 +26,7 @@ from tenxgraph.core.exceptions import (
     SerializationError,
     StaleStateError,
     StorageError,
+    ToolDenied,
     TransientStorageError,
 )
 
@@ -52,8 +54,10 @@ Exception
     StaleStateError
     ResourceNotFoundError
   MetricsError
+  ToolDenied
   UnsupportedMediaInputError
   ModelNotFoundError (also ValueError)
+  MessageNotFoundError (also IndexError and ValueError)
 ```
 
 | Exception | HTTP status from the API server |
@@ -584,6 +588,55 @@ raise ResourceNotFoundError(
     error_code="STORAGE_NOT_FOUND_001",
     context={"thread_id": "thread_xyz"},
 )
+```
+
+## MessageNotFoundError
+
+Raised by `aget_message` on every checkpointer when the thread has no message with that id. It is both an `IndexError` and a `ValueError`, so code that caught either one keeps working. The text is `"Message not found"` and does not say whether the thread exists or belongs to someone else.
+
+**Signature**
+
+```python
+class MessageNotFoundError(IndexError, ValueError):
+    def __init__(self) -> None: ...
+```
+
+**Example**
+
+```python
+from tenxgraph.core.exceptions import MessageNotFoundError
+
+try:
+    message = await checkpointer.aget_message(config, "missing-id")
+except MessageNotFoundError:
+    message = None
+```
+
+## ToolDenied
+
+Blocks a tool call by policy. Raise it from a `before_invoke` callback for `InvocationType.TOOL` or `InvocationType.MCP`, or from the tool itself. The tool does not run, and `on_error` recovery is skipped, so a recovery result cannot turn a block into a success. The model gets a failed tool result, `"Denied by policy: <tool>. <reason>"`. The denial is logged with the tool name, user id and reason, never argument values. The tool event has status `denied`, the stream chunk has status `tool_denied`, and the trace span gets `tenxgraph.tool.denied`.
+
+`reason` goes to the model, the logs and the events, so keep it short and free of secrets and argument values. `ToolGuard` raises it for you; see [Zero-trust agents](/docs/security/zero-trust-agents).
+
+**Signature**
+
+```python
+class ToolDenied(Exception):
+    def __init__(self, reason: str = DEFAULT_DENIED_REASON, *, tool_name: str | None = None) -> None: ...
+```
+
+`reason` (default `"This tool call is not allowed."`) is kept as an attribute, safe to show to the model. `tool_name` is filled in by the tool node when you do not pass it.
+
+**Example**
+
+```python
+from tenxgraph.core.exceptions import ToolDenied
+
+
+async def no_deletes(context, input_data):
+    if context.function_name.startswith("delete_"):
+        raise ToolDenied("Deleting is turned off for this assistant.")
+    return input_data
 ```
 
 ## MetricsError

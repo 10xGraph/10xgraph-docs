@@ -4,18 +4,16 @@ description: "Set up structured logging, metrics collection, error tracking with
 section: "Observability"
 order: 10
 label: Logs and server telemetry
-updated: "2026-11-10"
+updated: "2026-11-25"
 ---
 
-The API server gives you the signals an operator needs: application logs on stdout with a request id, an optional audit log, metrics, error tracking and tracing. Logs are on by default. Metrics are off until you add a `metrics` block to `10xgraph.json`. Sentry, the audit log and tracing are optional. This page covers logs, metrics, secret redaction, Sentry setup, and the REST API endpoint to inspect run traces. For per-node spans in Logfire or LangSmith, see the link at the end.
-
-Logs and metrics are independent of each other and of tracing: you can enable any combination, and a failure in one does not affect the others.
+The API server writes application logs to stdout with a request id. Metrics are off until you add a `metrics` block to `10xgraph.json`. The audit log, Sentry and tracing are optional.
 
 ## Logs
 
 The API server writes its application logs to stdout, with secrets redacted. Each request gets an id, returned in the `X-Request-ID` response header and attached to the log lines of that request.
 
-Set `LOG_FORMAT=json` to write every log line as one JSON object (`ts`, `level`, `logger`, `message`, plus `request_id`, `transport` and `user_id` when known and `exc_info` for an exception). The default is `text`. Use `json` in production so your log pipeline can parse and index the lines.
+Set `LOG_FORMAT=json` to write every log line as one JSON object (`ts`, `level`, `logger`, `message`, plus `request_id`, `transport` and `user_id` when known and `exc_info` for an exception). The default is `text`. Use `json` in production so your log pipeline can parse and index the lines. `10xgraph build` sets `LOG_FORMAT=json` in the generated Dockerfile, Compose file and Kubernetes manifest.
 
 ```bash
 LOG_FORMAT=json
@@ -24,160 +22,13 @@ LOG_LEVEL=INFO
 
 Ship stdout to storage you retain and protect (Docker or Kubernetes logging, Fluent Bit, Vector, a SIEM). 10xGraph does not store logs. For a record of who accessed or changed which data, turn on the [audit log](/docs/server/audit-log).
 
-## Structured logging
-
-The library never configures logging by default, so nothing changes until you opt in. Call `setup_structured_logging()` once at startup before the graph handles its first request.
-
-```python
-import logging
-from tenxgraph.utils.logging import setup_structured_logging
-
-setup_structured_logging(
-    level=logging.INFO,
-    json_format=True,
-    redact_secrets=True,
-    logger_name="tenxgraph",
-)
-```
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `level` | `int` | `logging.INFO` | Minimum level for both the logger and handler. |
-| `json_format` | `bool` | `True` | Emit JSON objects, one per line. If `False`, emits plain text with the same correlation fields. |
-| `redact_secrets` | `bool` | `True` | Install the secret redaction filter on the handler to mask credentials. |
-| `logger_name` | `str` | `"tenxgraph"` | Name of the logger to configure. |
-
-The function returns the installed `logging.Handler` so you can attach custom filters or swap the output stream.
-
-### Correlation fields
-
-Every log record includes four optional fields that correlate logs to execution context:
-
-```json
-{
-  "timestamp": "2026-10-08 14:33:02,421",
-  "level": "INFO",
-  "logger": "tenxgraph.agent",
-  "message": "Node 'respond' completed",
-  "run_id": "run_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-  "thread_id": "thread-42",
-  "user_id": "user-alice",
-  "node": "respond"
-}
-```
-
-The correlation fields (`run_id`, `thread_id`, `user_id`, `node`) make logs queryable by filtering rather than grepping. They are only included when in scope. The 10xGraph execution loop binds them automatically at the start of each run and when entering a node.
-
-To log from outside a graph run, bind the fields manually:
-
-```python
-from tenxgraph.utils.logging import set_log_context, get_log_context
-
-set_log_context(run_id="my_run", thread_id="my_thread", user_id="alice")
-# or set individual fields:
-set_log_context(node="background_worker")
-
-get_log_context()  # -> {"run_id": "my_run", "thread_id": "my_thread", "user_id": "alice"}
-```
-
-Context variables are per-async-context, so concurrent requests do not leak fields.
-
-### Adding custom data to logs
-
-Pass extra fields through the `extra` dict:
-
-```python
-import logging
-logger = logging.getLogger("tenxgraph")
-
-logger.info("Processed order", extra={"order_id": "ORD-123", "amount_cents": 4900})
-```
-
-The fields are merged into the same JSON object, provided they are JSON-serializable. Exceptions logged with `exc_info=True` appear under an `exception` key.
-
-### Secret redaction
-
-`SecretRedactionFilter` scrubs credentials from log messages. It masks OpenAI, Google, GitHub, Slack, and AWS key formats, `Bearer` tokens, `key=value` patterns, and credential query parameters in signed URLs.
-
-Install it on a handler, not a logger. Logger-level filters only see records emitted directly on that logger, missing all child loggers:
-
-```python
-from tenxgraph.utils.logging import SecretRedactionFilter, install_secret_redaction, mask_secrets
-
-handler.addFilter(SecretRedactionFilter())   # covers all child loggers
-install_secret_redaction("tenxgraph")        # convenience wrapper
-mask_secrets(some_string)                    # redact an arbitrary string
-```
-
-`setup_structured_logging(redact_secrets=True)` already installs the filter on the handler.
-
-This is a heuristic and best-effort. It will not catch every possible secret and can over-redact. Do not rely on it alone; always avoid logging sensitive values.
+To configure logging in your own process (outside the server), see [Logging and secret redaction](/docs/reference/python/runtime-utilities#logging-and-secret-redaction).
 
 ## Metrics
 
-The `tenxgraph.utils.metrics` module is a zero-dependency, thread-safe in-process metrics registry. The 10xGraph framework automatically instruments node executions, tool calls, background tasks, and checkpointer operations.
-
-```python
-from tenxgraph.utils.metrics import counter, timer, snapshot
-
-counter("orders.processed").inc()
-counter("orders.processed").inc(5, attributes={"channel": "web"})
-
-with timer("database.write"):
-    await db.save()
-```
-
-| Callable | Returns / Type | Description |
-|---|---|---|
-| `counter(name)` | `Counter` | Get or create a named counter. Call `.inc(amount=1, attributes=None)` to increment. |
-| `timer(name, attributes=None)` | context manager | Records elapsed milliseconds of a code block with `outcome` (ok/error) attribute. |
-| `snapshot()` | `dict` | Thread-safe point-in-time copy of all counters and timers. |
-| `enable_metrics(value)` | - | Global on/off switch; calls return immediately when disabled. |
-| `setup_otel_metrics(meter=None)` | `bool` | Bridge the registry to OpenTelemetry for export. |
-
-`Counter` has an `inc(amount, attributes)` method and a `value` property. `TimerMetric` has `observe(duration_ms, attributes)` and read-only properties: `count`, `total_ms`, `max_ms`, `avg_ms`.
-
-Timers automatically tag observations with an `outcome` of `"ok"` or `"error"` when exceptions occur. This separation is critical: a p99 latency mixing success and failure is not actionable.
-
-### Reading metrics locally
-
-```python
-from tenxgraph.utils.metrics import snapshot
-
-snapshot()
-# {
-#   "counters": {"tenxgraph.node.executions": 128, "tenxgraph.tool.errors": 2},
-#   "timers": {
-#     "tenxgraph.node.duration": {"count": 128, "avg_ms": 412.7, "max_ms": 2891.0}
-#   }
-# }
-```
-
-This is sufficient for a debug `/metrics` endpoint or a health check. Metrics are process-local and are not persisted or aggregated across replicas.
-
-### Exporting to OpenTelemetry
-
-Install the OTEL extra:
-
-```bash
-pip install "10xgraph-api[otel]"
-```
-
 When `OTEL_ENABLED=true`, the API and the background worker do this for you: they install a `MeterProvider` that exports to `OTEL_EXPORTER_OTLP_ENDPOINT` (the console when it is unset outside production) and call `setup_otel_metrics()`, so the metrics below, and the task metrics in [background tasks](/docs/server/background-tasks), reach your collector along with the traces. To export metrics to Prometheus or Grafana without the legacy settings, use the `metrics` block instead. See [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana). When the block is enabled, it owns metrics and this path sends traces only.
 
-In your own process, call `setup_otel_metrics()` once at startup, after your application has configured an OTEL `MeterProvider` with an exporter:
-
-```python
-from tenxgraph.utils.metrics import setup_otel_metrics
-
-setup_otel_metrics()  # meter named "10xgraph" is taken from the global MeterProvider
-# or use a specific meter:
-setup_otel_metrics(meter=my_meter)
-```
-
-From that point on, every call to `counter()` and `timer()` automatically exports: counters become OTEL counters, timers become histograms with unit `ms`, and attributes become dimensions.
-
-`setup_otel_metrics()` returns `False` and logs a warning if OpenTelemetry is not installed. The in-process registry keeps working, so it is safe to call unconditionally.
+The in-process metrics API (`counter`, `timer`, `snapshot`, `setup_otel_metrics`) is in [Metrics instrumentation](/docs/reference/python/runtime-utilities#metrics-instrumentation).
 
 ### Framework-instrumented metrics
 
@@ -214,14 +65,21 @@ The `tool` attribute is the tool name only when the node can run that tool. A na
 | `pg_checkpointer.save_checkpoint.error` | counter | - |
 | `pg_checkpointer.save_checkpoint.conflict` | counter | - |
 | `pg_checkpointer.save_checkpoint.duration` | timer | - |
+| `pg_checkpointer.save_state_cache.duration` | timer | - |
+| `tenxgraph.publish.duration` | timer | `publisher` |
+| `tenxgraph.publish.batches` | counter | `publisher` |
+| `tenxgraph.publish.events` | counter | `publisher` |
+| `tenxgraph.publish.dropped` | counter | `publisher` |
 
-`pg_checkpointer.save_state.conflict` counts optimistic-concurrency rejections. `background_task_manager.tasks_dropped` counts events shed under backpressure. Both are good alert candidates: a rising trend indicates concurrent writers contending for state, or a publisher unable to keep up.
+`pg_checkpointer.save_state.conflict` counts optimistic-concurrency rejections. `background_task_manager.tasks_dropped` counts events shed under backpressure.
 
-Observability failures are logged at debug level and never propagate to the caller: a misconfigured exporter does not crash the API.
+`tenxgraph.publish.*` come from the Kafka, Redis and RabbitMQ publishers, which batch events. `tenxgraph.publish.dropped` counts events dropped because the publisher queue was full, so a rising value means the broker is slower than your event rate. `tenxgraph.publish.duration` times one batch for those publishers and one send for the others. `pg_checkpointer.save_state_cache.duration` times one state-cache write to Redis.
+
+A trace backend that is down logs once, not once per batch: the `tenxgraph.trace_export` logger writes one WARNING naming the endpoint when exports start failing and one INFO when they recover. Other observability failures are logged at debug level and never propagate to the caller: a misconfigured exporter does not crash the API.
 
 ## Error tracking with Sentry
 
-The API server supports Sentry for error tracking and performance monitoring. Install the optional extra:
+Sentry is optional. Install the extra:
 
 ```bash
 pip install "10xgraph-api[sentry]"
@@ -243,11 +101,11 @@ SENTRY_TRACES_SAMPLE_RATE=0.1
 SENTRY_PROFILES_SAMPLE_RATE=0.01
 ```
 
-Sentry is only initialized when `MODE` (default `development`) is `production`, `staging` or `development`, case-insensitive. When the API starts, Sentry initialization is best-effort: if the SDK is not installed or DSN is invalid, a warning is logged and the server continues. Only HTTP 5xx status codes are reported to Sentry; client errors (4xx) are not, preventing floods of validation error events. The error handlers log a 4xx as one WARNING line (method, path, status, error code) without a traceback, and a 5xx as ERROR with the traceback. Only ERROR logs become Sentry events; warnings and info lines stay breadcrumbs. Request bodies are never sent to Sentry (`max_request_body_size="never"`), nor are local variables or default PII.
+When the API starts, Sentry initialization is best-effort: if the SDK is not installed or DSN is invalid, a warning is logged and the server continues. Only HTTP 5xx status codes are reported to Sentry; client errors (4xx) are not, preventing floods of validation error events. The error handlers log a 4xx as one WARNING line (method, path, status, error code) without a traceback, and a 5xx as ERROR with the traceback. Only ERROR logs become Sentry events; warnings and info lines stay breadcrumbs. Request bodies are never sent to Sentry (`max_request_body_size="never"`), nor are local variables or default PII.
 
 ## The observability API endpoint
 
-The `/v1/observability/{thread_id}` endpoint reconstructs a trace for a thread from captured run events. This lets you inspect execution flow, token usage, and timing without a separate tracing backend.
+`GET /v1/observability/{thread_id}` rebuilds a run trace for a thread. It backs the playground's Run trace page and records nothing with `MODE=production`.
 
 Query the latest run in a thread:
 
@@ -320,51 +178,6 @@ The response is wrapped in the standard envelope; `data` holds the thread's run 
 This endpoint is a development tool built for the playground's Run trace page. The traces come from an in-memory, process-local store that the server creates only when `MODE` is not `production`. With `MODE=production`, which the generated Docker files set, the store is never created: nothing is recorded, and the endpoint returns an empty result with `enabled: false` and `reason: "disabled_in_production"`. Other reasons are `store_unavailable` and `no_runs`. Use OTEL, LangSmith, Logfire or another publisher for production tracing. When enabled, it keeps at most 200 threads, 20 runs per thread and 2000 records per run, and a restart clears it. It is not a durable tracing backend. When no run exists for a thread, `run` is `null` and the endpoint still returns 200. It requires the `graph:read` permission, and with auth on the thread is read through the caller's scope, so a user can read traces only for their own threads by default. See [authorization](/docs/server/auth) for how to set up access control.
 
 The TypeScript client wraps this endpoint as `client.observability(threadId, runId?)`.
-
-## Complete setup example
-
-Here is a self-contained example that configures logging, metrics, and Sentry:
-
-```python
-import logging
-import os
-
-from tenxgraph.utils.logging import setup_structured_logging
-from tenxgraph.utils.metrics import setup_otel_metrics
-
-def configure_telemetry() -> None:
-    """Configure all observability surfaces at startup."""
-    
-    # Structured logging with secret redaction
-    setup_structured_logging(
-        level=logging.INFO,
-        json_format=True,
-        redact_secrets=True,
-        logger_name="tenxgraph",
-    )
-    
-    # Metrics with optional OTEL export
-    setup_otel_metrics()
-    
-    # Sentry is initialized automatically by the API server
-    # (no code needed here; configure via SENTRY_DSN env var)
-
-# Call this at app startup:
-configure_telemetry()
-```
-
-The API server does not call these functions for you. Put `configure_telemetry()` in the module your `10xgraph.json` `agent` key points to, so it runs when the graph is loaded at startup:
-
-```python
-import logging
-
-from tenxgraph.utils.logging import setup_structured_logging
-
-setup_structured_logging()
-logger = logging.getLogger("tenxgraph")
-
-# ... build your StateGraph here and export the compiled graph as `app`
-```
 
 For per-node spans sent to any OTLP endpoint, see [Send traces to an OTLP endpoint](/docs/guides/send-traces-to-otlp). For Prometheus and Grafana, see [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana). For per-node spans sent to Logfire, LangSmith or Arize Phoenix, see [Send traces to Logfire or LangSmith](/docs/guides/send-traces-to-logfire-langsmith) and [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix).
 

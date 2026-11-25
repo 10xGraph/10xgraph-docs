@@ -5,7 +5,7 @@ section: "API server"
 group: "Basics"
 order: 30
 label: Configure 10xgraph.json
-updated: "2026-10-27"
+updated: "2026-11-25"
 ---
 
 The `10xgraph.json` file tells the API server which graph to load, how to persist state, who can access it, and how to manage resources. This guide covers the keys you need to configure for a working deployment. For a complete list of every key, type and default, see the [configuration reference](/docs/reference/api-cli/configuration).
@@ -135,7 +135,7 @@ class MyThreadNameGenerator(ThreadNameGenerator):
 
 To pick a built-in choice, set `"thread_name_generator": "first_message"`.
 
-Thread names appear in logs, dashboards, and the `/v1/threads` API response, making it easier to identify conversations at a glance.
+Thread names appear in the `/v1/threads` response.
 
 ## Enable authentication and authorization
 
@@ -166,8 +166,8 @@ A minimally secured production config looks like this:
 }
 ```
 
-- `"auth": "jwt"` requires `JWT_SECRET_KEY` (at least 32 characters; shorter keys are rejected in production) and `JWT_ALGORITHM` (for example `HS256`) in the environment. See [Authentication](/docs/server/auth) for custom auth.
-- With auth on, threads, memories and files are private to their owner by default (reach `own`). A thread outside the caller's reach answers 404. With the default `runs.thread_ids` of `"server"`, ids the server did not create are refused too (see [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids)). Add `auth.roles` to grant fewer permissions or a wider reach. The old `authorization` key is removed and refuses to boot.
+- `"auth": "jwt"` needs `JWT_SECRET_KEY` (32+ bytes for HS*; shorter keys stop boot in production). `JWT_ALGORITHM` defaults to `HS256`.
+- With auth on, threads, memories and files are private to their owner (reach `own`). See [Authentication](/docs/server/auth).
 - `"cache_store": {"type": "redis"}` gives the API a Redis cache store, which shares the rate limit (and the run locks, caps and revocations) across all replicas. Without it the counters live in each process, so three replicas allow three times the configured limit, which is unsuitable for production.
 
 ## Choose the cache store (rate limits, run locks, token revocation)
@@ -177,7 +177,7 @@ The API keeps everything it shares between workers in one **cache store**: the p
 | Key | Meaning |
 |---|---|
 | `type` | `memory` (default, also when `cache_store` or `type` is absent), `redis` or `custom`. |
-| `url` | Type `redis` only, optional. Empty uses the `REDIS_URL` environment variable. A value you set wins, as a literal or `${VAR}`, so the cache store can use a different Redis than the checkpointer. |
+| `url` | Type `redis` only, optional. Empty uses the `REDIS_URL` environment variable. A value you set wins, as a literal or `$VAR` / `${VAR}`; an unset variable stops startup. |
 | `path` | Type `custom` only, required. A `module:attr` path to your `BaseCacheStore` (an instance or a zero-argument factory). See [Bring your own backend](/docs/server/bring-your-own-backend). |
 | `rate_limit` | The rate limit object. See [Rate limiting](/docs/server/rate-limiting). |
 | `token_revocation` | `true`, `false` or an object. See [Authentication](/docs/server/auth). |
@@ -206,10 +206,10 @@ This table shows what each setting does when its key is absent from `10xgraph.js
 |---|---|---|---|
 | Auth | Off: every request is accepted | `null` (off) | `jwt` |
 | Roles and reach | Default permission set (all but `admin:*`), reach `own`, when auth is on. Nothing when auth is off | not written | not written (default set, reach `own`) |
-| Cache store | In-memory, per process | not written (in-memory) | `type: redis`, URL from `REDIS_URL` |
-| Rate limiting | Off | off | on: 100 requests per 60 seconds, by user, `fail_open` false |
+| Cache store | In-memory, per process | not written (in-memory) | `memory` with Memory or SQLite storage, `redis` (URL from `REDIS_URL`) with Postgres storage or a worker |
+| Rate limiting | Off | off | on: 100 requests per 60 seconds, by user (by IP with auth none), `fail_open` false |
 | Token revocation | Off | off | on |
-| ID generator | The graph's own generator | not written | `uuid` |
+| ID generator | The graph's own generator | not written | not written |
 | Thread naming | `none`: threads are saved without a name | not written (none) | `first_message` |
 | WebSocket | Routes `/v1/graph/ws` and `/v1/graph/live` mounted; a warning if no WebSocket library is installed | `enabled: false` | `enabled: false` unless you pass `--websocket` |
 | AG-UI | Off | `enabled: false` | `enabled: false` |
@@ -262,7 +262,7 @@ The `ag_ui` key exposes an AG-UI endpoint so frameworks like CopilotKit can run 
 }
 ```
 
-When enabled, `POST /v1/ag-ui` streams AG-UI events. This feature requires `pip install "10xgraph-api[ag-ui]"`. Set `allow_client_tools` to `false` to accept only the tools you explicitly declare in `remote_tools` (tools the client sends in each request are rejected). By default, it is `true`, allowing clients to offer ad-hoc tools as long as they fit size limits.
+This needs `pip install "10xgraph-api[ag-ui]"`. See [Serve over AG-UI](/docs/server/ag-ui) for `allow_client_tools` and the rest.
 
 ## Control WebSocket connections
 
@@ -286,7 +286,7 @@ The `websocket` key manages connection limits for `/v1/graph/ws` (streaming) and
 - `realtime_client_overrides` lists the session options a `/v1/graph/live` client may set in its init frame: any of `voice`, `modalities`, `vad` and `system_prompt`. The default is `["voice", "modalities", "vad"]`. `system_prompt` replaces the agent's instructions, so list it only when every caller is trusted to rewrite them.
 - `enabled` set to `false` leaves `/v1/graph/ws` and `/v1/graph/live` out of the app.
 
-When a shared cache store is configured (`cache_store` of type `redis` or `custom`), the connection caps are shared by all workers and replicas. Without one, each process counts its own connections, so the real cap is the limit times the number of workers. If a worker dies, its slots expire on their own. If the cache store is unreachable, the server allows the connection and logs the error.
+When a shared cache store is configured (`cache_store` of type `redis` or `custom`), the connection caps are shared by all workers and replicas. Without one, each process counts its own connections, so the real cap is the limit times the number of workers. If a worker dies, its slots expire on their own. If the cache store is unreachable, each process counts its own connections until it is back.
 
 ## Limit concurrent runs per user
 
@@ -303,26 +303,11 @@ When a shared cache store is configured (`cache_store` of type `redis` or `custo
 
 `GET /v1/graph`, `GET /v1/graph/tools` and `GET /v1/graph:StateSchema` expose node names, tool schemas and the state schema. They need the `graph:read` permission. The default permission set includes it. To hide the graph structure from a role, leave `graph:read` out of that role's `permissions` in `auth.roles`; a refusal is `403`. With auth off there is no identity, so these routes stay open.
 
-The old `graph_introspection` key is removed and refuses to boot. See [Migrating from authorization](/docs/server/auth#migrating-from-authorization).
+The old `graph_introspection` key refuses to boot.
 
 ## Keys the server owns in request config
 
-A client can send a `config` object with a run, and your nodes and tools can read its keys. The server drops these keys from client config before the graph sees them (no error is returned): `user`, `user_id`, `remote_tools`, `ag_ui`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection`, and any key that starts with `_`. Identity comes from the verified token, never from config. To narrow the rest, list allowed keys in `runs.config_keys`. Client state is separate and closed by default: list the keys a client may set in `runs.state_keys`, or it can set none. See [Invoke and stream](/docs/server/invoke-and-stream).
-
-## Environment variable expansion in the cache store URL
-
-`cache_store.url` supports environment variable expansion. Both `$VAR` and `${VAR}` forms work:
-
-```json
-{
-  "agent": "graph.react:app",
-  "cache_store": { "type": "redis", "url": "${REDIS_URL}" }
-}
-```
-
-If a variable is missing, the server fails at startup with an error rather than silently starting without a shared store. This is deliberate: a misconfigured server is worse than one that refuses to start.
-
-All other configuration keys in `10xgraph.json` are read literally. Keep credentials out of the file: use the environment, `.env` files, or your orchestration platform.
+A client can send a `config` object with a run, and your nodes and tools can read its keys. The server drops the keys it owns, such as `user`, `credential` and `remote_tools`, and identity comes from the verified token, never from config. Which other keys a client may send in `config` and in state is set by `runs.config_keys` and `runs.state_keys`; see [runs](/docs/reference/api-cli/configuration#runs).
 
 ## Configure per environment
 
@@ -339,7 +324,7 @@ config/
 # Development: auto-reload, all features open
 10xgraph dev --no-open --config config/dev.json
 
-# Production-like local run: no reload, hardened settings
+# Production-like local run: no reload, production checks on
 # (for real deployments use `10xgraph build`, see the deploy guide)
 MODE=production 10xgraph dev --no-open --config config/prod.json --no-reload
 ```
@@ -353,7 +338,7 @@ A typical dev config:
 }
 ```
 
-A typical prod config (see production checklist below):
+A typical prod config:
 
 ```json
 {
@@ -377,61 +362,7 @@ A typical prod config (see production checklist below):
 }
 ```
 
-## Production decisions checklist
-
-Before deploying to production, make five explicit decisions:
-
-### 1. Turn on authentication
-
-With `auth` unset or `null`, every request is accepted. This is fine for internal development. In production, set `"auth": "jwt"` with `JWT_SECRET_KEY` (at least 32 characters) and `JWT_ALGORITHM` in the environment, or point at a custom `BaseAuth` subclass. See [Authentication](/docs/server/auth).
-
-Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](https://github.com/10xGraph/10xgraph-api/blob/main/tenxgraph_api/src/app/core/auth/base_auth.py)
-
-### 2. Set roles and reach
-
-With auth on, every user gets the default permission set and sees only their own data. A thread, message, memory or file outside the caller's reach answers 404. To give some users fewer permissions or a wider reach, add `auth.roles` with a `permissions` list and a `reach` (`own`, `tenant` or `all`) per role. Reach `tenant` and `all` widen reads, lists and deletes only; runs always stay on the caller's own threads. For checks that need a database or a policy service, use `"method": "custom"` and override `authorize`. See [Authentication](/docs/server/auth). The `authorization` key from earlier versions is removed and refuses to boot; [the migration table](/docs/server/auth#migrating-from-authorization) shows the replacement for each setting.
-
-### 3. Use a shared, durable checkpointer
-
-`InMemoryCheckpointer` loses all threads on restart and is invisible to other replicas. In production, pass `PgCheckpointer` to `compile()` in your graph module. This ensures thread history survives restarts and is consistent across all replicas.
-
-### 4. Use a shared cache store with multiple replicas
-
-The in-memory cache store counts per process, so with three workers you allow three times the configured limit. With multiple replicas, set `"cache_store": {"type": "redis"}` and ensure all replicas point to the same Redis instance. Also set `trusted_proxy_hops` correctly: it counts from the right of the `X-Forwarded-For` header, so the value must match how many proxies sit in front of your server. Set it too high and a client can forge its own address to bypass limits.
-
-### 5. Wire observability
-
-A production agent you cannot trace is one you cannot debug. At minimum, set `MODE=production` in the environment (it turns debug off), and configure logging. See [Observability](/docs/server/observability).
-
-## Verify before you deploy
-
-Run the audit command to check your setup:
-
-```bash
-10xgraph audit
-```
-
-This checks the Python interpreter, the installed `10xgraph-api` and `10xgraph` packages, evaluation API compatibility, `10xgraph.json` (valid JSON, an `agent` value in `module:attribute` form, valid `remote_tools`), and whether port 8000 is free. It does not import your graph. It exits with status `0` if only warnings appear, or `1` if errors are found.
-
-Then start the server and verify each control:
-
-```bash
-# 1. Config loads and graph imports
-10xgraph dev --no-open --no-reload &
-
-# 2. The health endpoint works
-curl http://127.0.0.1:8000/ping
-
-# 3. Auth is on: an unauthenticated call must be rejected (expect 401, not 200)
-curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:8000/v1/graph/invoke -d '{}'
-
-# 4. Rate limiting is on: after 100 requests in 60 seconds, you get 429
-for i in $(seq 1 120); do
-  curl -s -o /dev/null -w "%{http_code} " http://127.0.0.1:8000/ping
-done
-```
-
-Finally, verify that persistence survives a restart: start a thread by invoking without a `thread_id`, restart the server, and read the thread back via `/v1/threads/{thread_id}` using the id the server returned.
+Before you deploy, go through the [production checklist](/docs/server/production-checklist).
 
 ## Common configuration issues
 
@@ -440,9 +371,9 @@ Finally, verify that persistence survives a restart: start a thread by invoking 
 | `ModuleNotFoundError` or import fails | The module path is spelled correctly and exists in your project. Test with `python -c "from module import attr"`. |
 | `AttributeError: module has no attribute` | `graph.react:app` expects an `app` variable in the `graph/react.py` file. Check the name and that it is a compiled graph. |
 | Checkpointer connection fails | The Postgres DSN is correct and the database is reachable. Test: `psql <dsn>`. The Redis URL is reachable: `redis-cli -u <url> ping`. |
-| `JWT_SECRET_KEY and JWT_ALGORITHM must be set` | Export both variables, or set `"env": ".env"` and add them there. The secret needs at least 32 characters. |
+| 500 `JWT_SETTINGS_NOT_CONFIGURED` on requests | `JWT_SECRET_KEY` is not set. Export it, or set `"env": ".env"` and add it there. |
 | Rate limiting not working on multi-replica setup | Set `"cache_store": {"type": "redis"}` (with `REDIS_URL` set, or a `url`) so the cache store is shared. Ensure all replicas point to the same Redis instance. |
 | Threads visible to users who did not create them | Check that `auth` is on and that no role has reach `tenant` or `all` for them. `GET /v1/me` shows the resolved reach. Check that all replicas use the same config. |
-| Refuses to boot naming `authorization` | The key is removed. See [Migrating from authorization](/docs/server/auth#migrating-from-authorization). |
+| Refuses to boot naming `authorization` | The key is removed. See [Upgrade to 1.0](/docs/project/upgrade-to-1.0#auth-roles-and-reach). |
 
 For a complete list of configuration keys, defaults, and types, see the [configuration reference](/docs/reference/api-cli/configuration).

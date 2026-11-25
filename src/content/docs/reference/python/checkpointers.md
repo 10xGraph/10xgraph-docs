@@ -99,6 +99,21 @@ message = await checkpointer.aupdate_message_metadata(
 
 Optional, non-abstract async methods also exist on the base class, for example `aput_checkpoint`, `aput_cache_value`, `aput_cache_value_if_absent` (set a cache value only if the key is missing: Redis `SET NX`, one SQLite statement, in-memory under its lock; the base class falls back to get-then-put), `aget_cache_value`, `arequest_stop`, `aget_thread_owner` and `aget_thread_scope` (the thread's `user_id` plus tenant column values, not scoped to the caller, for authorization layers; the base class returns `{"user_id": owner}`). Backends override them as needed.
 
+### Contract every checkpointer follows
+
+`InMemoryCheckpointer`, `SqliteCheckpointer` and `PgCheckpointer` behave the same on these points. A custom checkpointer should too.
+
+- **Thread record.** The first write of a thread (state, messages or a tool result) creates its record on `InMemoryCheckpointer` and `SqliteCheckpointer`, as `PgCheckpointer` already did. The name is `config["thread_name"]` (else `Thread <id>`) and the metadata is `config["thread_meta"]`. An existing record is never overwritten.
+- **Missing message.** `aget_message` raises `MessageNotFoundError` (an `IndexError` and a `ValueError`) when the thread has no message with that id.
+- **Message metadata.** `aput_messages(metadata=...)` is merged into each message's metadata, the message's own keys winning, and read back by `aget_message` and `alist_messages`.
+- **Search.** `alist_messages(search=...)` matches the message text only. `alist_threads(search=...)` matches `thread_name` only. `%`, `_` and `\` in the query match literally.
+- **Thread id.** `aput_thread` raises `ValueError` when `thread_info.thread_id` differs from `config["thread_id"]`.
+- **Cache values.** `aclear_cache_value` returns `True` when a value was removed and `False` otherwise.
+- **Bad text.** A write that holds the NUL character or a lone surrogate in text raises `ValueError` before anything is stored.
+- **Clean up.** `aclean_thread` also removes the thread's stop request and active-run marker.
+- **Id type.** `BaseCheckpointer.declared_id_type` is `None` by default, meaning the backend stores any id. Override it to return the `IDType` your id columns hold. `StateGraph.compile()` and the first run raise a `ValueError` when the bound id generator makes ids your checkpointer cannot store.
+- **Cross-process stop.** A stop from another process is read with `aput_cache_value` and `aget_cache_value`. A custom checkpointer without them gets no cross-process stop.
+
 ### Stop requests and active runs
 
 A stop request belongs to the run it targets. The base class tracks which run is active on each thread, so a new run cannot erase a stop meant for a run that is still going. It uses the generic cache (`aput_cache_value`, `aget_cache_value`, `aclear_cache_value`), so it works on every backend with no schema change.

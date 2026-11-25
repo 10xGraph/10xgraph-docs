@@ -6,7 +6,7 @@ section: "Data and state"
 group: "Your databases"
 order: 70
 label: "Bring your own database"
-updated: "2026-10-31"
+updated: "2026-11-25"
 faq:
   - question: "Do I need a custom cache store to use Valkey, Dragonfly or KeyDB?"
     answer: "No. They speak the Redis protocol, so set `cache_store.type` to `redis` and point `cache_store.url` (or REDIS_URL) at them and RedisCacheStore works. Write a BaseCacheStore only for a store that does not speak the Redis protocol."
@@ -26,7 +26,7 @@ Valkey, Dragonfly and KeyDB speak the Redis protocol, so you do not need any of 
 |---|---|---|---|
 | `BaseCheckpointer` | `10xgraph` | `PgCheckpointer` (Postgres plus its own Redis hot cache) | Threads, messages and state |
 | `BaseStore` | `10xgraph` | `PgVectorStore` or `QdrantStore` | Long-term memory |
-| `BaseCacheStore` | `10xgraph-api` | `RedisCacheStore`; `InMemoryCacheStore` when no Redis is set | Everything the API shares between workers |
+| `BaseCacheStore` | `10xgraph-api` | `InMemoryCacheStore`; `RedisCacheStore` with `cache_store.type` `redis` | Everything the API shares between workers |
 
 Each of the three has an abstract `aping()`. The server calls it at startup and on `/health/ready`, so a replacement tells the server whether it is usable in the same way as a built-in.
 
@@ -34,9 +34,9 @@ Each of the three has an abstract `aping()`. The server calls it at startup and 
 
 | Feature | What it keeps | If the store raises an error |
 |---|---|---|
-| Per-thread run lock | A timed slot, limit 1 | Fails open: the run proceeds and the error is logged |
-| Run cap (`runs.max_concurrent_per_user`) | Timed slots | Fails open |
-| WebSocket caps (`websocket.max_connections`, `max_connections_per_user`) | Timed slots | Fails open |
+| Per-thread run lock | A timed slot, limit 1 | Falls back to a per-process lock and logs a warning |
+| Run cap (`runs.max_concurrent_per_user`) | Timed slots | Falls back to a per-process count |
+| WebSocket caps (`websocket.max_connections`, `max_connections_per_user`) | Timed slots | Falls back to a per-process count |
 | Idempotency | The running lease and the stored records | Fails open |
 | Token revocation | Keys with a TTL; a per-user cutoff that only moves forward | Fails closed: the request gets `503` |
 | Rate limiting | Timed slots that are never released | Follows `rate_limit.fail_open` (default `true`); `false` answers `503` `RATE_LIMIT_UNAVAILABLE` with `Retry-After: 5` |
@@ -103,40 +103,11 @@ When the cache store is down and no fail-closed feature uses it, the server logs
 
 Two primitives cover every feature above. **Timed slots** (`acquire`, `renew`, `release`) are a set of expiring slots per key, capped at `limit`. A lock is a slot set with `limit=1`; a rate limit is a slot set whose slots are never released and expire after the window. **Keys with a TTL** (`get`, `set`, `delete`) hold values such as idempotency records and revocations.
 
-| Method | Meaning |
-|---|---|
-| `aping() -> None` | Return when the store answers; raise otherwise. |
-| `now() -> float` | The store's clock, in seconds since the epoch. |
-| `acquire(key, limit, ttl) -> SlotResult` | Take one of `limit` slots for `key`, expiring `ttl` seconds from now. |
-| `renew(key, slot_id, ttl) -> bool` | Move a held slot's expiry to `now() + ttl`. Returns `False` when the slot is gone. |
-| `release(key, slot_id) -> None` | Remove a slot. No error when it is already gone. |
-| `get(key) -> bytes \| None` | The value under `key`, or `None`. |
-| `set(key, value, ttl, mode="always") -> bool` | Store a value. `mode` is `"always"`, `"if_absent"` or `"if_greater"`. Returns whether it wrote. |
-| `delete(key) -> None` | Remove `key`. No error when it does not exist. |
-| `describe() -> str \| None` | Optional. Where the store lives, without credentials, for logs and startup messages. |
-| `aclose() -> None` | Optional. Release resources; called once on shutdown. |
-
-`acquire` returns `SlotResult(granted, count, oldest_expiry, slot_id)`: whether a slot was granted, the live slots after the call (including yours when granted), the expiry of the oldest live slot on the store's clock (or `None`), and the new slot's id when granted (or `None`).
-
-An implementation must keep these rules. The contract test suite checks them.
-
-- **`acquire` is atomic.** Drop expired slots, and only if the live count is below `limit`, add a new slot expiring at `now() + ttl`. Two callers can never both take the last slot. `limit < 1` always denies.
-- **A denied `acquire` adds nothing.** The rate limiter relies on this: a client over its limit does not extend its own penalty.
-- **`renew` never re-creates a slot.** It returns `False` when the slot expired or was released.
-- **`release` of a missing slot is not an error.**
-- **`set(mode="if_absent")`** writes only when the key does not exist.
-- **`set(mode="if_greater")`** treats the value as a decimal number and writes only when it is greater than the stored one, or nothing is stored. It is atomic. Token revocation uses it so an older cutoff never overwrites a newer one. A value that is not a decimal number raises `ValueError`.
-- **`ttl` is in seconds and must be positive.** `set(ttl=None)` keeps the key until it is deleted. A write replaces the TTL of the key it writes.
-- **TTLs are never dropped early.** A key or slot must not disappear before its TTL. A store that evicts data under memory pressure breaks locks: two workers run the same thread. For Redis this means `maxmemory-policy` must be `noeviction` or a `volatile-*` policy. Any other policy is a deployment mistake.
-- **Every method touches exactly one key.** That keeps the store safe on Redis Cluster and on sharded stores.
-- **Raise on errors.** When the backend fails, raise any exception. The features decide whether to fail open or closed (see the table above). The store never swallows errors.
-- **Use the store's clock.** All times come from `now()`, so pods with skewed clocks agree on when a slot expires.
-
-Keys arrive as `"<feature>:<id>"`, for example `concurrency:runs:thread:42`. The store may map the feature segment to its own namespace and add a deployment prefix, but two different keys must never land on the same entry, and any string (with `:`, spaces or unicode) is a valid key. A key holds either slots or a value, never both.
+The full method list, the `SlotResult` fields and the rules an implementation must keep (atomic `acquire`, no early TTL expiry, one key per call, raise on errors) are in the [cache store reference](/docs/reference/api-cli/cache-store). The contract test suite checks them.
 
 ### Built-in stores
 
-`RedisCacheStore` uses Lua scripts on sorted sets for the slots, `SET` with `PX` for values, and a small script for `if_greater`. It applies `REDIS_KEY_PREFIX` and keeps the Redis key layouts of earlier releases, except for the rate limiter, which uses the `10xgraph:ratelimit2` namespace.Its connection limits come from the `REDIS_*` settings; see the [environment reference](/docs/reference/api-cli/environment).
+`RedisCacheStore` uses Lua scripts on sorted sets for the slots, `SET` with `PX` for values, and a small script for `if_greater`. It applies `REDIS_KEY_PREFIX` and keeps the Redis key layouts of earlier releases, except for the rate limiter, which uses the `10xgraph:ratelimit2` namespace. Its connection limits come from the `REDIS_*` settings; see the [environment reference](/docs/reference/api-cli/environment).
 
 `InMemoryCacheStore` keeps everything in one process. It is correct for a single worker and wrong for several: locks, caps and revocations do not cross processes. To bound memory it caps slot keys at 50,000 and plain values at 10,000 and evicts the least recently used entry at the cap, with a warning. That is its one exception to "TTLs are never dropped early". It never evicts lease keys (`concurrency:`) or revocation keys (`revoked:`) while they are live, so a lock or a revoked token cannot disappear.
 

@@ -6,10 +6,10 @@ section: "API server"
 group: "Basics"
 order: 50
 label: CLI
-updated: "2026-11-10"
+updated: "2026-11-25"
 ---
 
-The `10xgraph` command-line interface (`10xgraph-api` package) is your complete toolkit for building and operating 10xGraph agents in production. From initial scaffolding through deployment and evaluation, each command handles a specific phase of agent development.
+The `10xgraph` command (package `10xgraph-api`) scaffolds, runs, tests, evaluates and packages a 10xGraph project.
 
 ## Install the CLI
 
@@ -32,6 +32,8 @@ The CLI requires Python 3.12+. It depends on the core framework (`10xgraph`), wh
 | [`10xgraph init`](/docs/server/project-setup) | Scaffold a new agent project interactively |
 | [`10xgraph dev`](/docs/server/run-the-server) | Start the development server with reload and open the [playground](/docs/server/playground) (`--no-open` to skip) |
 | [`10xgraph build`](/docs/server/deploy) | Generate Docker files, with worker and scheduler services for background jobs |
+| [`10xgraph worker`](/docs/server/background-tasks) | Run background tasks |
+| [`10xgraph scheduler`](/docs/server/background-tasks) | Send scheduled tasks |
 | [`10xgraph skills`](/docs/integrations/coding-assistants) | Install coding-agent skills (Claude, Codex, GitHub) |
 | [`10xgraph test`](/docs/testing/run-tests) | Run the project test suite (pytest wrapper) |
 | [`10xgraph eval`](/docs/testing/run-evals) | Run agent evaluations and generate reports |
@@ -46,7 +48,7 @@ Each command accepts `--help` to show its full options. Detailed flags and param
 
 ### Create a new project
 
-Start with `10xgraph init` to scaffold your agent project. The command asks three questions: the agent name, the setup (Quick or Full) and the AI provider. Full writes the recommended setup without asking: JWT auth with owner-only data, a UUID ID generator, and a Redis cache store (reads `REDIS_URL`) with rate limiting and token revocation. WebSocket and AG-UI stay off.
+Start with `10xgraph init` to scaffold your agent project. It asks for the setup (Quick or Full), the agent name and the AI provider; Full also asks for storage, auth, a background worker and extras. See [Initialize a project](/docs/server/project-setup).
 
 If any file init would write already exists, it asks before overwriting (default No) and writes nothing on No. Without a terminal (`--yes`, `--non-interactive`, CI) it stops before writing and lists the files; pass `--force` to overwrite them. `--dry-run` marks the files that already exist.
 
@@ -61,8 +63,6 @@ The scaffold generates a `10xgraph.json` configuration file, graph code, and opt
 ```
 
 `--mode quick|full` picks the setup. `--template quick-start|production` still works as an alias of `--mode`.
-
-See [Initialize a project](/docs/server/project-setup) for the full guide.
 
 ### Run locally during development
 
@@ -116,15 +116,6 @@ See [Run tests](/docs/testing/run-tests) and [Run evaluations](/docs/testing/run
 10xgraph build --python-version 3.12   # Specify Python version (default: 3.13)
 ```
 
-`10xgraph build` also generates the background-job processes. At an interactive terminal it asks up to four questions, and skips any that a flag answers or that do not apply:
-
-1. **Where will you deploy?** Docker Compose, Kubernetes or Dockerfile only. Skipped with `--docker-compose` or `--k8s`.
-2. **Run a background worker?** Default yes. Asked only when `10xgraph.json` has a `worker` key whose broker is not `memory`, and the target is Compose or Kubernetes.
-3. **Run the scheduler?** Default no. Asked only after a yes to the worker.
-4. **Overwrite existing files?** Asked only when files exist and you did not pass `--force`. No stops without writing.
-
-`--worker/--no-worker` and `--scheduler/--no-scheduler` answer questions 2 and 3. Without a terminal the worker is included when the config has a non-`memory` `worker` key, and the scheduler only with `--scheduler`. `--worker` without a `worker` key or with the `memory` broker is an error, and so is `--scheduler` without a worker.
-
 See [Deployment guide](/docs/server/deploy) for more.
 
 ### Configure the server
@@ -136,9 +127,7 @@ See [Deployment guide](/docs/server/deploy) for more.
 10xgraph config --port 8765 --no-open  # Use a custom port, don't open browser
 ```
 
-The sidebar groups the pages as Get running, Before production (Auth, Cache store, Observability), Runs and streaming, Project wiring (Checkpointer, ID generation, Thread naming, Memory store, Dependency injection) and Developer tools. The Cache store page holds the type (Memory, Redis, Custom) and the Rate limiting and Token revocation tabs. See the [command reference](/docs/reference/api-cli/commands#config).
-
-The Observability page has "Send AI traces to" (None first, then Logfire, LangSmith, Phoenix or an OTLP endpoint, one card per destination) and "Export metrics" (None, OTLP push or Prometheus scrape). See [Send traces to an OTLP endpoint](/docs/guides/send-traces-to-otlp) and [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana).
+See the [command reference](/docs/reference/api-cli/commands#config).
 
 The editor is loopback-only for security. See [Configure the server](/docs/server/configure) for the full configuration schema.
 
@@ -164,8 +153,6 @@ Before deploying, use `10xgraph audit` to run a read-only check: the Python inte
 10xgraph skills --all                  # Install for all agents
 10xgraph skills --validate ./skills    # Check skills against the spec
 ```
-
-The command refuses to install when any existing part of the destination (`.claude`, `.agents`, `.github` and the paths under them) is a symlink, or when the resolved destination is outside `--path`. A repository can ship `.claude` as a symlink to another directory, and installing through it would write files elsewhere. Replace the link with a real directory, or pass a different `--path`.
 
 See [Integrate with coding assistants](/docs/integrations/coding-assistants).
 
@@ -207,27 +194,10 @@ Root flags apply to every command and go before the command name:
 10xgraph --yes init --non-interactive   # Accept defaults, fail instead of prompting
 ```
 
-| Flag | Purpose |
-| --- | --- |
-| `--format {human,plain,json,jsonl}` | Output format (default: human) |
-| `--json` | Shorthand for `--format json` |
-| `--color {auto,always,never}` | Color output (default: auto) |
-| `--no-color` | Disable color |
-| `--progress {auto,tty,plain,json,quiet}` | Progress rendering mode |
-| `--animation / --no-animation` | Enable or disable decorative animation |
-| `--fullscreen / --no-fullscreen` | Use full-screen UI (default: off) |
-| `--cwd DIR` | Run as if started in DIR |
-| `--verbose / -v` | Detailed logging (can repeat for more) |
-| `--quiet / -q` | Errors only |
-| `--debug` | Enable debug diagnostics |
-| `--yes / -y` | Accept recommended defaults |
-| `--non-interactive` | Never prompt; fail instead |
-| `--version / -V` | Show version and exit |
+Every global flag, with defaults, is listed in [Global options](/docs/reference/api-cli/commands#global-options).
 
 Flags specific to a command (like `--coverage` for `test`) are documented in that command's help:
 
 ```bash
 10xgraph eval --help
 ```
-
-See the [CLI commands reference](/docs/reference/api-cli/commands) for the complete flag table with defaults and descriptions.

@@ -4,10 +4,10 @@ description: "Bidirectional WebSocket endpoints for turn-based agent streaming a
 order: 70
 group: "Interfaces"
 section: "API server"
-updated: "2026-10-27"
+updated: "2026-11-25"
 ---
 
-The API server offers two WebSocket endpoints, `/v1/graph/ws` for turn-based runs and `/v1/graph/live` for realtime audio. Both use the same token check and handshake rate limit as HTTP. WebSockets keep a persistent connection open so the server can stream responses token-by-token, the client can resume from checkpoints, and (for realtime agents) both sides can exchange audio in near-real-time. Both endpoints support the same authentication, rate limiting, and concurrency controls as REST APIs.
+The API server offers two WebSocket endpoints, `/v1/graph/ws` for turn-based runs and `/v1/graph/live` for realtime audio. Both use the same token check and handshake rate limit as HTTP. WebSockets keep a persistent connection open so the server can stream responses token-by-token, the client can resume from checkpoints, and (for realtime agents) both sides can exchange audio in near-real-time.
 
 WebSocket auth and connection limits are part of the [security model](/docs/production/security-model).
 
@@ -15,11 +15,10 @@ WebSocket auth and connection limits are part of the [security model](/docs/prod
 
 Use WebSocket when the client needs true bidirectional streaming or low-latency two-way communication. For simple invoke-and-wait workflows, REST's `/v1/graph/invoke` is simpler. For streaming where the client reads until done, REST's `/v1/graph/stream` (NDJSON) is also sufficient and works in more environments (proxies, browsers without WebSocket support).
 
-WebSocket shines for:
+Use WebSocket for:
 
 - **Resume workflows**: the client detects a remote tool call in the stream, executes it, and resumes the same run without losing context.
-- **Interactive agents**: the client sends new instructions mid-run without waiting for the current response.
-- **Realtime audio**: the client streams audio input while the model speaks output, with near-zero latency.
+- **Realtime audio** over `/v1/graph/live`.
 - **Long-lived connections**: applications that keep one socket open for many sequential runs over hours.
 
 ## Authentication
@@ -128,7 +127,7 @@ The server runs one graph run at a time on a thread, and each run on the socket 
 {"event": "error", "data": {"reason": "thread is busy"}}
 ```
 
-To stop the running run and take its place, add `"on_busy": "cancel"` to the frame (the default is `"wait"`). New threads are locked as soon as their id exists. When a shared cache store is configured, the lock is shared across processes. `/v1/graph/live` is not covered.
+To stop the running run and take its place, add `"on_busy": "cancel"` to the frame (the default is `"wait"`). New threads are locked as soon as their id exists. When a shared cache store is configured, the lock is shared across processes. `/v1/graph/live` holds the thread's lock for the whole session.
 
 ### Request limits and error text
 
@@ -188,28 +187,7 @@ Refer to the [realtime audio guide](/docs/guides/use-realtime-audio) for details
 
 ## Configuration
 
-WebSocket behavior is controlled by keys in the `websocket` object within `10xgraph.json`:
-
-| Key | Type | Default | Purpose |
-|---|---|---|---|
-| `max_connections` | integer, null | 1000 | Hard cap on concurrent WebSocket connections (both `/v1/graph/ws` and `/v1/graph/live`) across this process. Set to `0` or `null` for unlimited. |
-| `max_connections_per_user` | integer, null | 10 | Cap on how many WebSocket connections one verified user can hold (by `user_id`). Set to `0` or `null` for unlimited. |
-| `realtime_models` | array of strings | `[]` | Models a `/v1/graph/live` client is allowed to request (for example `["gemini-3.8-live"]`). Empty means clients cannot override the agent's model. |
-
-**Example:**
-
-```json
-{
-  "agent": "graph:app",
-  "websocket": {
-    "max_connections": 5000,
-    "max_connections_per_user": 50,
-    "realtime_models": ["gemini-3.8-live"]
-  }
-}
-```
-
-In a multi-worker deployment (Gunicorn + Uvicorn), these limits are global when a shared cache store is configured (`cache_store` of type `redis` or `custom`): all workers and replicas count their sockets in it, so `max_connections: 1000` means 1000 in total. Slots held by a worker that dies expire on their own, and a cache store error lets the connection through (logged). Without a shared store, each process counts its own sockets, so 4 workers with `max_connections: 1000` can hold 4000.
+Connection caps and realtime options are under `websocket` in `10xgraph.json`; see [Control WebSocket connections](/docs/server/configure#control-websocket-connections).
 
 ## Close codes
 
@@ -221,13 +199,14 @@ WebSocket close codes follow RFC 6455. The server sends these in specific situat
 | 1003 | Unsupported data: the `/v1/graph/live` init frame is not a JSON object or could not be parsed | No |
 | 1008 | Policy violation: wrong endpoint for the agent type, token expired/revoked between runs (or during a live session), or auth/authorization failure at the handshake | No |
 | 1011 | Unexpected server error during run | May retry after brief delay |
+| 1012 | Service restart: the server is shutting down | Yes, reconnect |
 | 1013 | Try again later: rate limit or connection cap exceeded at the handshake | Yes, after a delay |
 
 On `/v1/graph/ws`, an `error` chunk is sent before closing for the wrong-agent-type and expired-token cases. Handshake rejections (auth failure, rate limit, connection cap) close before the socket is accepted, so no chunk is sent.
 
 ## Proxy settings
 
-If the API server is behind a reverse proxy (Nginx, HAProxy, CloudFlare, etc.), the proxy must be configured to preserve the WebSocket connection and pass through the upgrade headers. Additionally, when authentication is enabled and the proxy forwards client IP via `X-Forwarded-For`, the server must be told to trust that header.
+If the API server is behind a reverse proxy (Nginx, HAProxy, CloudFlare, etc.), the proxy must be configured to preserve the WebSocket connection and pass through the upgrade headers.
 
 ### Proxy compatibility
 
@@ -250,28 +229,7 @@ location /v1/graph/ws {
 }
 ```
 
-### Client IP detection
-
-If you use the `trusted_proxy_headers` setting in `rate_limit`, the server reads the client IP from `X-Forwarded-For` to bucket rate limits correctly:
-
-```json
-{
-  "agent": "graph:app",
-  "cache_store": {
-    "rate_limit": {
-      "enabled": true,
-      "by": "ip",
-      "trusted_proxy_headers": true,
-      "trusted_proxy_hops": 1
-    }
-  }
-}
-```
-
-- **`trusted_proxy_headers`**: whether to honor `X-Forwarded-For` at all. Set `true` only if there is a proxy you control.
-- **`trusted_proxy_hops`**: how many proxy layers to count back from the right of the `X-Forwarded-For` list. Set to 1 if you have one proxy, 2 for two proxies in series, etc.
-
-Without this, clients behind a proxy appear to have the proxy's IP and all land in the same rate-limit bucket.
+For client IPs behind a proxy, see [Behind a reverse proxy](/docs/server/rate-limiting#behind-a-reverse-proxy).
 
 ## Example: TypeScript client
 
@@ -353,7 +311,6 @@ socket.onclose = (event) => {
 
 **Proxy forwarding issues**
 - Confirm the proxy forwards the `Upgrade` and `Connection` headers. Most proxies do by default.
-- If behind a proxy, set `trusted_proxy_headers: true` in rate_limit config so the server reads the real client IP from `X-Forwarded-For`.
 - Increase proxy timeouts: WebSocket connections can be long-lived, so set read/write timeouts to several minutes or higher.
 
 **Audio glitches or delays on `/v1/graph/live`**

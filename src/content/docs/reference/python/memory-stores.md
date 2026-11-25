@@ -394,6 +394,16 @@ Abstract base class that every store backend implements. Every method takes a `c
 
 Provenance keywords. `astore` and `aupdate` take `origin` (a `MemoryOrigin`) and `expires_at` (timezone-aware `datetime`; naive raises `ValueError`). `aupdate` keeps the stored value when you leave one out. `asearch` and `aget_all` take `origins` (a non-empty list of `MemoryOrigin`; `None` in the list also keeps unknown origin). Expired records are hidden from `asearch`, `aget` and `aget_all`. A caller `metadata` key named `origin` or `expires_at` is dropped on write.
 
+Contract for all three stores (`PgVectorStore`, `QdrantStore`, `qa.testing.InMemoryStore`):
+
+- `astore(memory_id=...)` with the id of another user's or another tenant's memory raises `ValueError` ("Memory <id> not found"), the answer `aupdate` and `adelete` give. The memory stays unchanged.
+- `astore` and `aupdate` raise `ValueError` before anything is stored when content, metadata (keys and values, nested too), category or `memory_key` holds the NUL character or a lone surrogate.
+- `QdrantStore` and `InMemoryStore` refuse a `filters` key that is `user_id` or a tenant column, with the same `FilterError` as `PgVectorStore`. `QdrantStore` also raises `FilterError` for a filter value that is not a string, integer or boolean.
+- `QdrantStore` result `metadata` is your metadata plus `category`, `memory_type` and `memory_key`. Read `content`, `user_id`, `thread_id` and `timestamp` from the result fields.
+- `QdrantStore.aget` raises when Qdrant fails; a missing id still returns `None`. `aget_all` returns the newest memories first and honours `filters`. `aupdate(replace_metadata=True)` without a `category` keeps the stored category and `memory_key`.
+- `QdrantStore.aupdate` of another user's memory raises `ValueError` (not found) under every reach.
+- `qa.testing.InMemoryStore` follows the real stores: writes need a non-blank `user_id`, and tests that stored memories without one must now pass one.
+
 `BaseStore.supports_provenance` is `False` by default and `True` on `PgVectorStore`, `QdrantStore` and `InMemoryStore`. A store that sets it must keep both fields, hide expired records, filter by `origins` and implement `adelete_expired`. A sync `delete_expired` wraps it.
 
 There is no bulk `abatch_store`; call `astore` in a loop or with `asyncio.gather`.

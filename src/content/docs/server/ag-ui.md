@@ -6,7 +6,7 @@ section: "API server"
 group: "Interfaces"
 order: 80
 label: Serve over AG-UI
-updated: "2026-10-27"
+updated: "2026-11-25"
 faq:
   - q: "Do I need AG-UI to build a frontend for 10xGraph?"
     a: "No. The TypeScript client over /v1/graph/stream is the standard path. Use AG-UI when your frontend already speaks it, such as CopilotKit."
@@ -15,10 +15,6 @@ faq:
 ---
 
 AG-UI is an open event protocol that connects agent backends to chat frontends. The API server can expose AG-UI at `/v1/ag-ui` (off by default), so chat frontends such as CopilotKit connect under the same authentication and permission checks as the other routes. If you are building a custom frontend, the [TypeScript client](/docs/client) over `/v1/graph/stream` is the direct path. This guide covers the server side of AG-UI. For frontend integration with CopilotKit, see [10xGraph with CopilotKit](/docs/integrations/copilotkit). For complete endpoint and event documentation, see the [AG-UI endpoint reference](/docs/reference/rest-api/ag-ui).
-
-## Prerequisites
-
-You need the `ag-ui` extra for the API server, a 10xGraph compiled graph, and a frontend built for AG-UI (such as CopilotKit). If you are writing a custom frontend, the [TypeScript client](/docs/client) over `/v1/graph/stream` is simpler and requires no extra package.
 
 ## Install the AG-UI extra
 
@@ -99,7 +95,7 @@ By handling the connection on your server, the token stays server-side and you d
 
 ## Configure for production
 
-The AG-UI endpoint is mounted whenever enabled, regardless of `MODE`. Treat it with the same care as `/v1/graph/stream`. The following checklist ensures security, durability, and performance:
+The endpoint is mounted whenever enabled, in every `MODE`.
 
 ### Persistent checkpointing
 
@@ -107,9 +103,12 @@ AG-UI clients identify the conversation by `threadId`, which the server maps to 
 
 - Threads are lost when the server restarts
 - State is not shared across replicas
-- The feature appears broken in production
 
 Use a persistent checkpointer (Postgres or SQLite). See [Set up checkpointing](/docs/guides/set-up-checkpointing) for configuration.
+
+### Message ids
+
+The server gives every user and tool message its own id from the id generator, as REST does. It does not keep the client's message id. The client's id is stored in the message's `metadata["client_message_id"]`, and a retry that resends the same id is not stored twice. This keeps a client such as CopilotKit, which sends uuids, working under an integer id generator like Snowflake.
 
 ### Authentication and authorization
 
@@ -144,22 +143,11 @@ With `allow_client_tools` true, a client tool whose name equals a server tool (a
 
 ### Rate limiting
 
-The AG-UI endpoint counts against the global `rate_limit` configuration like any other route. In production with multiple replicas, give the API a Redis cache store so the counters are shared:
-
-```json
-{
-  "cache_store": {
-    "type": "redis",
-    "rate_limit": {"enabled": true, "requests": 100, "window": 60}
-  }
-}
-```
-
-See [Rate limiting](/docs/server/rate-limiting) for details.
+The endpoint counts against `cache_store.rate_limit` like any route; see [Rate limiting](/docs/server/rate-limiting).
 
 ### One run per thread and request limits
 
-The server runs one graph run at a time on a thread. A second AG-UI run on a busy thread waits up to 30 seconds, then gets `409` with `thread is busy`. AG-UI always waits; it cannot ask the running run to stop. With Redis configured, the lock is shared across replicas.
+The server runs one graph run at a time on a thread. A second AG-UI run on a busy thread waits up to 30 seconds, then gets `409` with `thread is busy`. AG-UI always waits; it cannot ask the running run to stop. With a Redis cache store, the lock is shared across replicas.
 
 Because AG-UI clients resend the whole conversation, the size limits (500 messages, 100 content blocks per message, 1,000,000 characters of text) apply to the trailing turn only. The full history is capped at 10,000 messages. Requests over a limit get `422`. See the [AG-UI endpoint reference](/docs/reference/rest-api/ag-ui#request-size-limits).
 
@@ -171,7 +159,7 @@ The endpoint streams responses as server-sent events. Disable buffering on any r
 
 - **nginx**: The response headers already include `X-Accel-Buffering: no` to disable nginx buffering.
 - **Other proxies and load balancers**: Explicitly disable response buffering for `/v1/ag-ui`.
-- **Connection timeout**: Set the idle timeout longer than your slowest graph run. A typical consumer-facing agent may take 10-30 seconds.
+- **Connection timeout**: Set the idle timeout longer than your slowest graph run.
 
 ## Related
 

@@ -5,7 +5,7 @@ section: Reference
 group: "REST API"
 order: 330
 label: AG-UI
-updated: "2026-11-15"
+updated: "2026-11-25"
 faq:
   - q: Is POST /v1/ag-ui always available?
     a: "No. It is mounted only when 10xgraph.json has \"ag_ui\" set to {\"enabled\": true} and the ag-ui extra is installed. Without it the route returns 404."
@@ -19,25 +19,14 @@ faq:
 
 ## Enabling the endpoint
 
-The route is off by default. It exists only when both of these hold:
-
-```bash
-pip install "10xgraph-api[ag-ui]"
-```
-
-```json
-{
-  "agent": "graph.agent:app",
-  "ag_ui": { "enabled": true }
-}
-```
+The route is off by default. It exists only when `ag_ui.enabled` is `true` and the `ag-ui` extra is installed; see [Serve your agent over AG-UI](/docs/server/ag-ui).
 
 | Key | Default | Effect |
 | --- | --- | --- |
 | `ag_ui.enabled` | `false` | Mounts `POST /v1/ag-ui` |
 | `ag_ui.allow_client_tools` | `true` | Offers the tools the client sends with each run to the model. Set `false` to accept only the tools declared under [`remote_tools`](/docs/reference/api-cli/configuration#remote_tools) |
 
-If `ag_ui.enabled` is `true` but the extra is missing, the server refuses to start and prints the install command. The endpoint is mounted in every `MODE`, production included.
+If `ag_ui.enabled` is `true` but the extra is missing, the server refuses to start and prints the install command.
 
 ---
 
@@ -59,7 +48,7 @@ If `ag_ui.enabled` is `true` but the extra is missing, the server refuses to sta
 | `resume` | no | Answers to an open `interrupt()`. Each entry has `interruptId`, `status` (`resolved` or `cancelled`) and an optional `payload` |
 | `parentRunId`, `protocolVersion` | no | Accepted and validated, not used |
 
-Messages with role `assistant`, `system` or `developer` are never forwarded to the graph: the checkpoint is the record of what the model said and was told, and a client-written system prompt would let the caller rewrite the agent's instructions.
+Messages with role `assistant`, `system` or `developer` are never forwarded to the graph.
 
 User message `content` is a string or a list of parts. Supported parts are `text` and the media parts `image`, `audio`, `video` and `document`, whose `source` is `{"type": "data" | "url" | "file", "value": ..., "mimeType": ...}`. A `file` source takes a `file_id` from [`POST /v1/files/upload`](/docs/reference/rest-api/files). The legacy `binary` part that older CopilotKit versions send is converted to the matching media part.
 
@@ -92,8 +81,6 @@ data: {"type":"STEP_FINISHED","stepName":"MAIN"}
 data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r1"}
 ```
 
-The response sets `Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no` and `Content-Encoding: identity`, so nginx and the GZip middleware pass events through without buffering.
-
 ---
 
 ## Event stream
@@ -113,7 +100,7 @@ Every stream starts with `RUN_STARTED` and ends with exactly one `RUN_FINISHED` 
 | `interrupt()` | `RUN_FINISHED` with an `interrupt` outcome |
 | Graph error | `RUN_ERROR` with code `GRAPH_ERROR` |
 
-`RUN_FINISHED` carries an `outcome` only for an interrupt. CopilotKit 1.75 pins an `@ag-ui/core` version that rejects the newer `success` and `cancelled` outcome shapes, so they are not sent.
+`RUN_FINISHED` carries an `outcome` only for an interrupt.
 
 A run whose `messages` contain nothing new, for example a client syncing state, still gets `RUN_STARTED` and `RUN_FINISHED`, with a `STATE_SNAPSHOT` of the thread's state in between when it differs from the client's.
 
@@ -160,9 +147,9 @@ Resume by sending a new run on the same thread with a `resume` entry:
 
 ## Client tools
 
-Tools in `RunAgentInput.tools` are offered to the model for that run only, next to the server's tools. The graph needs a `ToolNode`. When the model calls a browser tool, the stream sends the `TOOL_CALL_*` events and ends with `RUN_FINISHED`, leaving the call unanswered. The client runs the tool and starts a new run on the same thread with a `tool` message whose `toolCallId` matches. Server tools called in the same step still run.
+Tools in `RunAgentInput.tools` are offered to the model for that run only, next to the server's tools. The graph needs a `ToolNode`. When the model calls a browser tool, the stream sends the `TOOL_CALL_*` events and ends with `RUN_FINISHED`, leaving the call unanswered. The client runs the tool and starts a new run on the same thread with a `tool` message whose `toolCallId` matches.
 
-A browser tool cannot replace a server tool: if the `ToolNode` already has a tool with that name, the browser's is ignored and logged. Each run's tool list is checked before anything runs:
+Each run's tool list is checked before anything runs:
 
 | Limit | Value |
 | --- | --- |
@@ -179,11 +166,11 @@ With `ag_ui.allow_client_tools` set to `false`, tools sent by the client are ign
 
 ## Authentication
 
-The route uses `RequirePermission("graph", "stream")`, the same permission as [`POST /v1/graph/stream`](/docs/reference/rest-api/graph). When auth is configured, the server also checks that the caller may access `threadId` through the [authorization backend](/docs/reference/api-cli/auth), so with `ownership` one user cannot run or read another user's thread. AG-UI follows [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids) like REST. Under the default `server`, a `threadId` the server never issued gets `404`. A blank or `"new"` `threadId` makes the server create the thread, and the new id comes back in `RUN_STARTED`. Frontends that make their own ids (CopilotKit does by default) must set `runs.thread_ids` to `client`.
+The route uses `RequirePermission("graph", "stream")`, the same permission as [`POST /v1/graph/stream`](/docs/reference/rest-api/graph). When auth is configured, the server also checks that the caller may run on `threadId` through the [authorization backend](/docs/reference/api-cli/auth), so one user cannot run on another user's thread. AG-UI follows [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids) like REST. Under the default `server`, a `threadId` the server never issued gets `404`. A blank or `"new"` `threadId` makes the server create the thread, and the new id comes back in `RUN_STARTED`. Frontends that make their own ids (CopilotKit does by default) must set `runs.thread_ids` to `client`.
 
 Browsers should not hold the API token. With CopilotKit, set the `Authorization` header in the Next.js route handler through `HttpAgent`'s `headers` option, so the token stays on the server.
 
-The route counts against [`rate_limit`](/docs/reference/api-cli/rate-limiting) like any other path unless you add it to `exclude_paths`.
+The route counts against [`cache_store.rate_limit`](/docs/reference/api-cli/rate-limiting) like any other path.
 
 ---
 
@@ -196,8 +183,10 @@ Errors found before the stream starts return a normal HTTP error. See [Conventio
 | `401` | Auth is configured and no valid token was sent |
 | `403` | The caller lacks `graph:stream` |
 | `404` | The endpoint is not enabled (`ag_ui.enabled` is not `true`), or the `threadId` is unknown or not visible to the caller (including an id the server never issued under `runs.thread_ids: server`) |
-| `409` | Another run is still active on this `threadId` after 30 seconds. See [One run per thread](#one-run-per-thread) |
-| `422` | The body is not JSON, is not a valid `RunAgentInput`, has no `threadId`, breaks a [client tool limit](#client-tools), or breaks a [request size limit](#request-size-limits) |
+| `400` | A media URL in the request is blocked by the media policy |
+| `409` | Another run is still active on this `threadId` after 30 seconds (see [One run per thread](#one-run-per-thread)), or an `Idempotency-Key` was repeated |
+| `422` | The body is not JSON, is not a valid `RunAgentInput`, has no `threadId`, breaks a [client tool limit](#client-tools), or breaks a [request size limit](#request-size-limits). Also an `Idempotency-Key` that is malformed or reused with a different body |
+| `429` | The user has more than `runs.max_concurrent_per_user` runs in flight (`Retry-After: 5`) |
 
 Once the stream has started, failures arrive as a `RUN_ERROR` event instead:
 
@@ -211,25 +200,23 @@ Once the stream has started, failures arrive as a `RUN_ERROR` event instead:
 
 ## One run per thread
 
-The server runs one graph run at a time on a thread. A second AG-UI run on a busy thread waits up to 30 seconds for the first to finish, then gets `409` with `thread is busy` in the standard error body. This happens before the stream starts. AG-UI has no `on_busy` field, so it always waits and never cancels the running run. When Redis is configured, the lock is shared across replicas; otherwise it is per process.
+See [One run per thread](/docs/reference/rest-api/graph#one-run-per-thread). AG-UI has no `on_busy` field, so it always waits and never cancels the running run.
 
 ---
 
 ## Idempotency
 
-Send an `Idempotency-Key` header to make a retried request safe. A repeat while the run is going answers `409` with `Retry-After`; a repeat after it finished answers `409` too, because the event stream is not stored; a different body with the same key answers `422`. See [Idempotency keys](/docs/reference/rest-api/graph#idempotency-keys).
+See [Idempotency keys](/docs/reference/rest-api/graph#idempotency-keys). A repeated key after the run finished answers `409`, because the event stream is not stored.
 
 ## Request size limits
 
 AG-UI clients resend the whole conversation on every run, so the limits work differently here than on invoke and stream:
 
-- The messages after the last assistant message (the trailing turn, which is what reaches the graph) get the normal limits: at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total.
+- The messages after the last assistant message (the trailing turn, which is what reaches the graph) get the normal [size limits](/docs/reference/rest-api/graph#post-v1graphinvoke): at most 500 messages, 100 content blocks per message and 1,000,000 characters of text in total.
 - The full history gets a looser cap of 10,000 messages, plus the 100 blocks per message cap.
 
 A request over a limit returns `422`.
 
 ---
 
-## Not supported yet
-
-- **`MESSAGES_SNAPSHOT`.** The endpoint does not send the checkpoint's messages back, so reopening an old thread in the browser depends on the client's own storage. Use [`GET /v1/threads/{thread_id}/messages`](/docs/reference/rest-api/threads) to load history.
+`MESSAGES_SNAPSHOT` is not sent; load history from [`GET /v1/threads/{thread_id}/messages`](/docs/reference/rest-api/threads).

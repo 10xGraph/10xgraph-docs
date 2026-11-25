@@ -6,10 +6,10 @@ section: "Security and access"
 group: "Audit"
 order: 70
 label: Audit log
-updated: "2026-11-23"
+updated: "2026-11-25"
 ---
 
-The audit log records who accessed or changed which resource, when, and whether it was allowed. It is a stream of JSON lines. 10xGraph produces the stream; it does not store it. Your log pipeline collects it and your storage keeps it. The audit log and JSON application logs ship in 1.0.
+The audit log records who accessed or changed which resource, when, and whether it was allowed. It is a stream of JSON lines. 10xGraph produces the stream; it does not store it. Your log pipeline collects it and your storage keeps it.
 
 ## What it records
 
@@ -86,10 +86,6 @@ In `10xgraph.json`:
 
 Unknown keys under `audit` refuse to boot, like `cache_store`. With auth off the audit log still runs, with `user_id` set to `null`, and the server logs a warning at boot. `10xgraph audit` warns when the audit log is off in production.
 
-### JSON application logs
-
-`LOG_FORMAT=text|json` (default `text`) sets the format of every application log line. With `json`, each line is one JSON object with `ts`, `level`, `logger` and `message`, plus `request_id`, `transport` and `user_id` when known and `exc_info` for an exception. The secret sanitizer still applies. `10xgraph build` sets `LOG_FORMAT=json` in the generated Dockerfile, Compose file and Kubernetes manifest, next to `MODE=production`.
-
 ## Sinks
 
 - **`log`**: writes one JSON line per event to the logger `tenxgraph_api.audit` on stdout. These lines are always JSON, whatever `LOG_FORMAT` says. The write is synchronous, so there is nothing to flush on shutdown. This is the record.
@@ -111,66 +107,11 @@ Reference it in config as `"sinks": ["log", "my_project.audit:MySink"]`. `event.
 
 ## Tamper protection
 
-10xGraph sends each audit event to your sinks. It does not store the events and it does not protect them from change. Tamper protection is a property of the storage you choose. There are two ways to get it.
-
-### Option 1: storage that cannot be changed
+10xGraph sends each audit event to your sinks. It does not store the events or protect them from change. Tamper protection comes from the storage you ship to:
 
 - **Write-once object storage.** S3 Object Lock in compliance mode stops anyone, including the account root, from deleting or overwriting an object until its retention date. Ship the log lines there with your collector.
 - **A log service with immutability.** Pick a log or SIEM product that offers immutable retention, and turn that setting on.
 - **A Postgres table with an insert-only role.** The role your app uses gets `INSERT` on the audit table and no `UPDATE` or `DELETE`. Keep the owner and admin credentials away from the app.
-
-### Option 2: a hash chain in your own sink
-
-A hash chain makes changes visible. Each record stores the SHA-256 of the previous record plus its own canonical JSON. A verifier walks the chain and reports the first broken link.
-
-```python
-import asyncio
-import hashlib
-import json
-from pathlib import Path
-
-from tenxgraph_api import AuditEvent, BaseAuditSink
-
-PATH = Path("audit-chain.jsonl")
-GENESIS = "0" * 64
-
-
-def _hash(prev: str, body: str) -> str:
-    return hashlib.sha256((prev + body).encode()).hexdigest()
-
-
-class ChainSink(BaseAuditSink):
-    def __init__(self) -> None:
-        self._lock = asyncio.Lock()
-        lines = PATH.read_text().splitlines() if PATH.exists() else []
-        self._prev = json.loads(lines[-1])["hash"] if lines else GENESIS
-
-    async def emit(self, event: AuditEvent) -> None:
-        body = json.dumps(event.model_dump(), sort_keys=True, separators=(",", ":"))
-        async with self._lock:
-            h = _hash(self._prev, body)
-            with PATH.open("a") as f:
-                f.write(json.dumps({"prev": self._prev, "body": body, "hash": h}) + "\n")
-            self._prev = h
-
-
-def verify(path: Path = PATH) -> int | None:
-    """Return the line number of the first broken link, or None if the chain is intact."""
-    prev = GENESIS
-    for n, line in enumerate(path.read_text().splitlines(), 1):
-        rec = json.loads(line)
-        if rec["prev"] != prev or rec["hash"] != _hash(prev, rec["body"]):
-            return n
-        prev = rec["hash"]
-    return None
-```
-
-Reference it as `"sinks": ["log", "my_project.audit:ChainSink"]`. Run one server process per chain, or give each process its own file, because two writers would fork the chain.
-
-Limits:
-
-- A chain shows that a record was changed or removed in the middle. It cannot show that the last records were cut off, and someone who can rewrite the whole file can rebuild every hash.
-- Anchor the latest hash somewhere else, for example write it every few minutes to write-once storage. Then a rewrite or a cut tail no longer matches the anchor.
 
 ## Ship the lines to storage
 

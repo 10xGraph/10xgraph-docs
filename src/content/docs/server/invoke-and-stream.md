@@ -4,10 +4,10 @@ description: "Call your graph over HTTP: synchronous invoke, streaming with NDJS
 order: 60
 group: "Interfaces"
 section: "API server"
-updated: "2026-10-27"
+updated: "2026-11-25"
 ---
 
-The 10xGraph API server puts an authenticated HTTP interface in front of your graph: synchronous invoke, streaming, per-user threads and run control. This page covers the REST routes. This page covers the REST interface for graph execution.
+The 10xGraph API server puts an authenticated HTTP interface in front of your graph: synchronous invoke, streaming, per-user threads and run control. This page covers the REST routes.
 
 ## Invoke and wait for results
 
@@ -67,7 +67,7 @@ The request body is a JSON object with these fields:
 | `config` | object | `{}` | Optional configuration for the run, such as `thread_id` for continuing an existing conversation. Omit it to start a new thread. |
 | `initial_state` | object | `null` | Optional initial state for the graph execution. Only keys listed in `runs.state_keys` are accepted (none by default; any other key returns 422), and `current_node` must be listed too. `context_summary` and `execution_meta` always return 422. |
 | `response_granularity` | string | `low` | How much to return: `low`, `partial` or `full`. `state` in the response is filled only at `full`. |
-| `recursion_limit` | integer | 25 | Maximum depth of graph execution (1-100). Raise this if your graph has deep loops. |
+| `recursion_limit` | integer | 25 | Maximum depth of graph execution, at least 1. The server rejects a value above `runs.max_recursion_limit` (default 100) with 422. See [`runs`](/docs/reference/api-cli/configuration#runs). |
 | `resume` | any | `null` | Set this to resume a paused thread (see human-in-the-loop section below). |
 | `interrupt_id` | string | `null` | The id of the interrupt `resume` answers. Optional. A mismatch returns 409. |
 | `on_busy` | string | `wait` | What to do if another run is active on the thread: `wait` or `cancel` (see [One run per thread](#one-run-per-thread)). |
@@ -127,7 +127,7 @@ The stream emits chunks as the graph runs (fields trimmed for readability):
 {"event":"updates","data":{"status":"graph_invoked","reason":"Graph execution completed successfully"},"thread_id":"thread-abc123","run_id":"run-123"}
 ```
 
-Each line is a separate JSON object (a `StreamChunk`). Your client must parse each line independently. Message chunks carry the message in the `message` field, and `delta` is `true` for partial text. Chunks also carry `metadata` and `timestamp`. When the graph runs to completion, the last chunk is an `updates` chunk; if you have a thread name generator configured, a final `updates` chunk with `"status": "completed"` follows.
+Each line is a separate JSON object (a `StreamChunk`). Your client must parse each line independently. Message chunks carry the message in the `message` field, and `delta` is `true` for partial text. Chunks also carry `metadata` and `timestamp`. A stream that finishes without an error ends with an `updates` chunk whose `data.status` is `done`.
 
 ### Stream event types
 
@@ -162,16 +162,10 @@ To replace the running run instead of waiting, send `"on_busy": "cancel"`. The s
 A few details:
 
 - A new thread is locked as soon as its id exists, so the first run on it is covered too.
-- With Redis configured, the lock is shared across processes. Without it, the lock is per process.
+- With a Redis cache store, the lock is shared across processes. Without it, the lock is per process.
 - The lock expires by itself if a worker dies, and is released when the run ends, fails, is cancelled or the client disconnects.
-- If Redis fails, the run proceeds without the lock and the error is logged.
-- `/v1/graph/live` is not covered.
-
-<aside class="callout callout-warning" role="note"><p class="callout-title">Parallel runs on one thread now queue</p>
-
-An app that sent parallel runs on the same thread will see them queue, or get `409` after 30 seconds. Use a separate thread for each concurrent conversation.
-
-</aside>
+- If the cache store fails, the lock falls back to a per-process lock.
+- `/v1/graph/live` holds the lock for the whole session.
 
 ## Use threads for conversation memory
 
@@ -224,6 +218,8 @@ curl -X POST http://localhost:8000/v1/graph/invoke \
 The graph now sees all previous messages in the thread, so it can answer contextually. The checkpointer (passed to `graph.compile(checkpointer=...)` in your graph code) stores the thread state durably.
 
 By default (`runs.thread_ids` is `"server"`), a `thread_id` that does not exist answers `404`, the same as an id another user owns. Do not invent an id for a new conversation. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids).
+
+With `"client"`, any request may start a thread under an id it picks. With owner-only access the first user to write an id owns it. A user who claims a guessable id such as `default` first locks out its intended owner, and an unknown id answers differently from a taken one. Use `"client"` only if you accept that. Frontends that make their own ids, such as CopilotKit by default, need it.
 
 ### Read thread history
 
@@ -380,10 +376,6 @@ With auth on, a thread belongs to the user who created it. Check that the token 
 **Stream stops abruptly**
 
 Your graph may have crashed or the server restarted. Check server logs and the thread checkpoint to diagnose. Use `/v1/graph/fix` if needed.
-
-**Tool call returns empty result**
-
-The client may not have sent the tool result back to the server. Resend it with `invoke` or `stream` and use the same thread_id to let the graph retry.
 
 ## Next steps
 

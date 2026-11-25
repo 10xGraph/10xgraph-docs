@@ -6,12 +6,12 @@ section: Reference
 group: "REST API"
 order: 310
 label: Graph
-updated: "2026-11-21"
+updated: "2026-11-25"
 ---
 
-The graph endpoints run your compiled graph over HTTP and WebSocket: invoke it for a complete result, stream it chunk by chunk, stop or repair a thread, and inspect the graph's nodes, tools, and state schema. This page lists each route with its permission, request body, and response.
+The graph endpoints run your compiled graph over HTTP and WebSocket: invoke it for a complete result, stream it chunk by chunk, stop or repair a thread, and inspect the graph's nodes, tools, and state schema.
 
-Routes sit under `/v1/graph`, and every response wraps its payload in `{"success": true, "data": ...}`.
+Responses use the [standard envelope](/docs/reference/rest-api/conventions#base-url-and-response-envelope).
 
 ## Route summary
 
@@ -61,9 +61,10 @@ Run the graph and return the complete result when all nodes finish.
 | `config` | object | no | Run configuration. Nested no deeper than 64 levels by default (`MAX_NESTING_DEPTH`). |
 | `config.thread_id` | string | no | Id of an existing thread to continue. Must match `^[A-Za-z0-9._:@-]{1,128}$`, else `422`. When absent or blank, the server starts a new thread, generates its id and persists it; the id comes back in `data.thread_id`. With the default `runs.thread_ids` of `server`, an id that does not exist answers `404`. See [`runs.thread_ids`](/docs/reference/api-cli/configuration#thread_ids). |
 | `config.model` | string | no | Name of a model the graph's Agent registers in its `model_registry`. Take the names from [`info.models`](#infomodels) of `GET /v1/graph`. No name means the default model. A name that is not registered answers `422` before the run starts, with the registered names in the message, in production too. A node can read another key (`config_key` in `info.models`). |
-| `config.remote_tools` | - | - | Server-owned: dropped from client config, along with `user`, `user_id`, `collection` and `_`-prefixed keys. A client cannot choose a memory collection; it is ignored, not refused. See [Collections](/docs/concepts/memory-and-store#collections-keeping-data-apart). |
-| `recursion_limit` | integer | no | Maximum graph iterations. Default `25`, range `1`-`100`. |
+| `recursion_limit` | integer | no | Maximum graph iterations. Default `25`, at least `1`. A value above `runs.max_recursion_limit` (default `100`) gets `422`. |
 | `response_granularity` | string | no | `full`, `partial`, or `low`. Default `low`. |
+
+Server-owned `config` keys (for example `user`, `user_id`, `remote_tools`, `collection`, and any key starting with `_`) are dropped, not refused; see [Conventions](/docs/reference/rest-api/conventions).
 
 **Input rules.** The server refuses these with `422`:
 
@@ -101,8 +102,8 @@ Messages may carry image and document content blocks referencing an uploaded `fi
 | `state` | State from the run, or `null`. |
 | `context` | Context messages, or `null`. |
 | `summary` | Summary text, or `null`. |
-| `thread_id` | Thread of the run, the same name every stream event carries. Present since 1.1. |
-| `run_id` | Run id, the same name every stream event carries. Present since 1.1. |
+| `thread_id` | Thread of the run, the same name every stream event carries. |
+| `run_id` | Run id, the same name every stream event carries. |
 | `meta` | Run metadata (`is_new_thread`, `thread_id`), or `null`. How much is filled in depends on `response_granularity`. |
 
 ### One run per thread
@@ -116,11 +117,11 @@ The server runs one graph run at a time on a thread. A second run on a busy thre
 }
 ```
 
-On invoke and stream, this answer comes before the response starts. A new thread (no `thread_id` in the request) is locked as soon as its id exists. The lock is shared across processes when Redis is configured, and per process otherwise. It expires on its own if a worker dies, and is released when the run ends, fails, is cancelled or the client disconnects. `/v1/graph/live` is not covered.
+On invoke and stream, this answer comes before the response starts. A new thread (no `thread_id` in the request) is locked as soon as its id exists. The lock is shared across processes when the cache store is shared, and per process otherwise. It expires on its own if a worker dies, and is released when the run ends, fails, is cancelled or the client disconnects. `/v1/graph/live` takes the same lock for the whole session; a busy thread ends the session with a fatal `thread_busy` error and close code `1013`.
 
 Set `on_busy` to `"cancel"` to stop the running run (the same mechanism as [`POST /v1/graph/stop`](#post-v1graphstop)) and start the new one. The 30-second wait limit and the `409` still apply if the old run does not stop in time.
 
-On invoke, a run that passes its recursion limit (`GraphRecursionError`) answers `422`, not `500`.
+On invoke, a run that passes its recursion limit answers `422` (`GRAPH_RECURSION_000`).
 
 ### Idempotency keys
 
@@ -137,7 +138,7 @@ Send an `Idempotency-Key` header (1 to 255 printable ASCII characters, else `422
 | The first run failed | Nothing is stored, so the key can be retried. |
 | A result over 1 MiB | Not stored; later requests with the key answer `409`. |
 
-A finished run is remembered for `IDEMPOTENCY_TTL_SECONDS` (default 86400). Records live in Redis when it is configured, otherwise in the process, so without Redis they are per worker. If Redis cannot be reached the request runs without idempotency and a warning is logged.
+A finished run is remembered for `IDEMPOTENCY_TTL_SECONDS` (default 86400). Records live in the cache store, so they are per process unless it is shared (Redis). If the cache store cannot be reached the request runs without idempotency.
 
 ### Resume answers
 
@@ -160,11 +161,11 @@ Run the graph and stream one JSON-encoded `StreamChunk` per line.
 
 **Request body:** Same as `/v1/graph/invoke`, including `resume`, `interrupt_id`, `on_busy` and the size limits.
 
-A repeated `Idempotency-Key` is answered the same way (see [Idempotency keys](#idempotency-keys)). A busy thread (`409`, with `Retry-After: 5`), a run over the per-user cap (`429`, with `Retry-After: 5`), a resume that does not fit the thread (`409`) and a client that left while waiting for a busy thread (`499`, never read) are answered before the stream starts, as a normal HTTP error. Failures once the stream is running arrive as an `error` chunk. With `MODE=production`, the text in an `error` chunk's `data` (`reason`, `error` or `message`) is replaced by the same generic message invoke uses, such as `An error occurred in a graph node.`; development shows the details. The built-in text for an unexpected tool failure (`Tool '<name>' failed with an internal error (reference <id>).`) is kept, because it holds no detail.
+A repeated `Idempotency-Key` is answered the same way (see [Idempotency keys](#idempotency-keys)). Errors found before the stream starts (busy thread `409`, per-user run cap `429`, bad resume `409`, client gone `499`) are normal HTTP errors; later failures arrive as an `error` chunk. With `MODE=production` the text of an `error` chunk is replaced by a generic message.
 
 **Response:** `Content-Type: application/x-ndjson`
 
-The body is newline-delimited JSON, not SSE. There are no `data:` prefixes. Split the body on newlines rather than using `EventSource` or an SSE client library. While the run is silent, the server sends a blank line every 15 seconds so a proxy's idle timeout does not cut the connection. Skip empty lines.
+NDJSON, one `StreamChunk` per line (not SSE). A blank line is sent every 15 seconds while silent; skip empty lines.
 
 ```
 {"event": "message", "message": {"role": "assistant", "content": [{"type": "text", "text": "The capital"}]}, "thread_id": "t1", ...}
@@ -179,14 +180,11 @@ The body is newline-delimited JSON, not SSE. There are no `data:` prefixes. Spli
 | `event` | `string` | Chunk discriminator. One of `message`, `state`, `updates`, `error`. |
 | `message` | `object \| null` | Populated when `event` is `message`. A full `Message` with a `content` block list. |
 | `state` | `object \| null` | Populated when `event` is `state`. The current `AgentState`. |
-| `data` | `object \| null` | Populated for `updates` (for example `{"status": "done"}`) and `error` (for example `{"reason": "..."}`). |
+| `data` | `object \| null` | Populated for `updates` (for example `{"status": "done"}`) and `error` (for example `{"reason": "...", "code": "..."}`). |
 | `thread_id` | `string \| null` | Thread this chunk belongs to. |
 | `run_id` | `string \| null` | Run this chunk belongs to. |
 | `metadata` | `object \| null` | Additional per-chunk metadata. |
 | `timestamp` | `number` | UNIX timestamp of chunk creation. |
-
-Tool activity arrives as ordinary `message` chunks whose `content` carries `tool_call` and
-`tool_result` blocks. There is no separate `tool_call` event type.
 
 A run that is refused because the graph is closing ends with a terminal `error` chunk whose `data` has `code: "SERVICE_UNAVAILABLE"`, a `reason` and `retry_after_seconds` (the same hint as the HTTP 503 `Retry-After`). No `done` chunk follows. Treat it as "retry on another replica", not as a failed run.
 
@@ -216,7 +214,7 @@ Cancel an in-progress graph execution.
 }
 ```
 
-The request records a stop flag on the thread, and the running graph checks it between nodes, so the current node finishes first. When nothing is running the call still succeeds, with `running: false` (`reason: "no-state"`) or `ok: false` (`reason: "no-checkpointer"`). Stopping needs a checkpointer. A stop request belongs to the run it targets: starting a new run on the thread does not clear a stop meant for a run that is still going.
+The request records a stop flag on the thread, and the running graph checks it between nodes, so the current node finishes first. When nothing is running the call returns `200` with `ok: false` and `reason` `no-state` or `no-checkpointer`. A thread outside the caller's reach is `404`. Stopping needs a checkpointer.
 
 ---
 
@@ -233,6 +231,7 @@ Get metadata about the loaded graph: its nodes, edges, and an `info` block descr
       "node_count": 2,
       "edge_count": 3,
       "is_realtime": false,
+      "realtime_options": null,
       "checkpointer": true,
       "checkpointer_type": "PgCheckpointer",
       "publisher": false,
@@ -273,7 +272,7 @@ Get metadata about the loaded graph: its nodes, edges, and an `info` block descr
 | `false` | `POST /v1/graph/invoke`, `POST /v1/graph/stream`, `WS /v1/graph/ws` |
 | `true` | `WS /v1/graph/live` |
 
-Connecting to the wrong one is rejected at the handshake with close code `1008`, so read this field once at startup and route accordingly.
+Connecting to the wrong one sends an error and closes with code `1008`. For a live graph `info.realtime_options` lists the init options `/v1/graph/live` honors (`client_overrides`, `models`, `model_selectable`, `tools_tags`).
 
 ### `info.models`
 
@@ -291,7 +290,7 @@ Build a model dropdown from `names`, and send the choice as `config[config_key]`
 {"messages": [...], "config": {"thread_id": "t1", "model": "vllm"}}
 ```
 
-An unregistered name answers `422` on invoke and stream, before the run starts. On the WebSocket the server sends an `error` chunk before the run. The message names the registered models and is not replaced in production. There is no setting in `10xgraph.json` for this: the registry in your code is the allowlist. See [Model registry](/docs/reference/python/agent#model-registry).
+An unregistered name answers `422` on invoke and stream, before the run starts. On the WebSocket the server sends an `error` chunk before the run. The message names the registered models and is not replaced in production. The registry in your code is the allowlist. See [Model registry](/docs/reference/python/agent#model-registry).
 
 ---
 
@@ -387,9 +386,9 @@ When nothing needs fixing, the response has `removed_count: 0` and the state is 
 
 Turn-based streaming over a WebSocket. Same payloads as `POST /v1/graph/stream`, but the connection stays open across runs, which is what makes client-side tool execution possible without a second HTTP request.
 
-**Always mounted.** There is no setting that turns this endpoint off. Concurrent connections are capped (shared by all workers with Redis, per process without) by [`websocket.max_connections`](/docs/reference/api-cli/configuration#websocket-ag_ui-and-observability) and `max_connections_per_user`; a refused handshake closes with code `1013`.
+**Mounted unless `websocket.enabled` is `false`.** Serving it needs the `websocket` extra. Concurrent connections are capped (shared by all workers when the cache store is shared, per process otherwise) by [`websocket.max_connections`](/docs/reference/api-cli/configuration#websocket-ag_ui-and-observability) and `max_connections_per_user`; a refused handshake closes with code `1013`.
 
-**Authentication.** Bearer token via the `Authorization` header, the `10xgraph-bearer` `Sec-WebSocket-Protocol` (preferred for browsers). A `?token=` query parameter is not accepted. Identical to the [live socket](/docs/reference/rest-api/live#authentication).
+**Authentication.** See [Conventions](/docs/reference/rest-api/conventions#authentication).
 
 **Fresh run.** Client sends:
 
@@ -436,16 +435,7 @@ Both frames also accept `initial_state`, `recursion_limit`, `on_busy` and `respo
 
 The server does not inspect chunks for tool calls; detecting a remote tool call is the client's job. `invoke_type` is used only for validation and logging.
 
-**Close codes.**
-
-| Code | Meaning |
-| --- | --- |
-| `1000` | Normal closure |
-| `1008` | Auth or authorization rejected, or the graph is a live agent (use `/v1/graph/live`) |
-| `1011` | Unexpected server error |
-| `1013` | Rate limit or `websocket.max_connections` exceeded |
-
-Recoverable problems (an invalid frame, an unauthorized `thread_id`, a busy thread, a resume that does not match the open interrupt) are sent as an `error` `StreamChunk` and the connection stays open for the next request.
+Close codes are listed in [Conventions](/docs/reference/rest-api/conventions#websocket-close-codes). Recoverable problems (an invalid frame, an unauthorized `thread_id`, a busy thread, a resume that does not match the open interrupt) are sent as an `error` `StreamChunk` and the connection stays open for the next request.
 
 ---
 
@@ -467,15 +457,3 @@ Get the JSON schema for the graph's state class.
   "metadata": {"request_id": "...", "timestamp": "...", "message": "OK"}
 }
 ```
-
----
-
-## Authentication
-
-When auth is configured, all endpoints require an `Authorization` header:
-
-```
-Authorization: Bearer <token>
-```
-
-See [Authentication](/docs/reference/api-cli/auth) for configuration details.

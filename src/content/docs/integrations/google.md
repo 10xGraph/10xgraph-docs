@@ -40,7 +40,7 @@ Both backends support the same advanced features: context caching, extended thin
 
 ## Basic usage
 
-Create an agent with a Gemini model. You need only the model name and provider; 10xGraph reads `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) from the environment. The Google provider does not accept an `api_key=` argument.
+Create an agent with a Gemini model. You need only the model name and provider; 10xGraph reads `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) from the environment. To pass a key in code, use `Agent(provider="google", api_key=...)`.
 
 ```python
 from tenxgraph.core.graph import Agent

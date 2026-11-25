@@ -6,17 +6,17 @@ section: "API server"
 group: "Basics"
 order: 20
 label: Run the API Server
-updated: "2026-11-10"
+updated: "2026-11-25"
 faq:
   - question: "Can I use 10xgraph dev in production?"
     answer: "No. The 10xgraph dev command runs a single-worker development server with reload. There is no separate production command. For production, use Docker with Gunicorn and multiple Uvicorn workers. Generate production files with 10xgraph build --docker-compose."
   - question: "How do I check if the server is running?"
-    answer: "Call the /ping endpoint via curl. It returns a JSON object with success true and data pong, and requires no authentication."
+    answer: 'Call the /ping endpoint via curl. It returns `{"data": "pong", "metadata": {...}}` and needs no authentication.'
   - question: "Why does my server restart when I save a file?"
     answer: "Auto-reload is enabled by default in development. Files are watched and the server reloads when any Python file changes. Disable it with --no-reload."
 ---
 
-`10xgraph dev` runs the same API server that production runs, locally, with reload on. This page covers running it for development and in production. This guide covers running the server for development and production, configuring it, and troubleshooting deployment issues.
+`10xgraph dev` runs the same API server that production runs, locally, with reload on. This page covers running it for development and in production.
 
 For a production setup see the [production checklist](/docs/server/production-checklist); stopping the server without losing runs is covered in [Graceful shutdown](/docs/guides/graceful-shutdown).
 
@@ -50,7 +50,7 @@ The server binds to `http://127.0.0.1:8000` and restarts whenever you edit any P
 10xgraph dev
 ```
 
-Flags: `--config`/`-c`, `--host`/`-H`, `--port`/`-p`, `--reload/--no-reload`, `--open/--no-open`, `--verbose`/`-v` and `--quiet`/`-q`. The commands `10xgraph api` and `10xgraph play` were removed before 1.0; use `10xgraph dev`.
+Flags: `--config`/`-c`, `--host`/`-H`, `--port`/`-p`, `--reload/--no-reload`, `--open/--no-open`, `--verbose`/`-v` and `--quiet`/`-q`.
 
 ### Run `10xgraph dev` against Docker backends
 
@@ -129,8 +129,6 @@ Leave `config` out. The server starts a new thread and returns its id in `data.t
 
 5. Click "Execute"
 
-You will see the full response, including the graph's output, any tool calls, and messages. This is the best way to understand your API's behavior.
-
 ## Development options and flags
 
 ### Bind to a different host or port
@@ -147,46 +145,9 @@ To use a different port:
 10xgraph dev --no-open --port 8001
 ```
 
-### Environment variables and config file
-
-Your graph may require environment variables (API keys, database URLs, Redis, etc.). Load them from a `.env` file by specifying the path in `10xgraph.json`:
-
-```json
-{
-  "agent": "graph.react:app",
-  "env": ".env"
-}
-```
-
-Or pass them directly to the shell:
-
-```bash
-export GOOGLE_API_KEY=your_key
-export REDIS_URL=redis://localhost:6379
-10xgraph dev --no-open
-```
-
-To use a non-default config file:
-
-```bash
-10xgraph dev --no-open --config config/staging.json
-```
-
-This is useful when you have separate configs for dev, staging, and production.
-
 ### Logging verbosity
 
-Enable verbose output for debugging (shows request details, node execution times, checkpointer operations):
-
-```bash
-10xgraph dev --no-open --verbose
-```
-
-Or suppress all output except errors:
-
-```bash
-10xgraph dev --no-open --quiet
-```
+`--verbose` and `--quiet` change the CLI's own output. The server's log level comes from `LOG_LEVEL`, and `LOG_FORMAT=json` writes JSON lines; see [Observability](/docs/server/observability#logs).
 
 ## Disable API documentation
 
@@ -200,38 +161,7 @@ export REDOCS_PATH=""
 
 When `MODE=production`, these paths default to empty unless explicitly set. In other modes, they are enabled by default.
 
-## Production: deploy with Docker and workers
-
-The `10xgraph dev` command runs a **development server only** (single Uvicorn worker with file watching). It is not suitable for production traffic. Production runs Gunicorn with Uvicorn workers inside the image that `10xgraph build` generates.
-
-For production, generate a Docker setup with multiple workers and production configuration:
-
-```bash
-10xgraph build --docker-compose
-```
-
-This creates:
-
-- `Dockerfile` with production layers and multi-worker setup
-- `docker-compose.yml` (with `--docker-compose`) for easy local testing of the built image
-- `k8s.yaml` (with `--k8s`) for Kubernetes deployment
-
-The generated Dockerfile runs the app via Gunicorn with Uvicorn workers. The worker count comes from `WEB_CONCURRENCY` (the Dockerfile sets it to 2; override it at run time) and the graceful shutdown timeout is raised so in-flight runs can finish.
-
-To build and test locally:
-
-```bash
-docker build -t my-agent:latest .
-docker run -p 8000:8000 my-agent:latest
-```
-
-Set required environment variables:
-
-```bash
-docker run -e JWT_SECRET_KEY=your_secret -e WEB_CONCURRENCY=4 -p 8000:8000 my-agent:latest
-```
-
-See [Deploy the server](/docs/server/deploy) for the complete production guide, Kubernetes setup, and deployment checklist.
+`10xgraph dev` is a single-worker development server. Production runs Gunicorn with Uvicorn workers in the image that `10xgraph build` generates; see [Deploy](/docs/server/deploy).
 
 ## Troubleshooting
 
@@ -256,41 +186,6 @@ The server cannot import your graph module. Check:
 3. Test manually: `python -c "from graph.react import app"`
 
 If still failing, check that the project root is in `sys.path` and that all dependencies are installed.
-
-### Environment variable is not set
-
-If you see an error like `"GOOGLE_API_KEY" not set`, either export it before starting:
-
-```bash
-export GOOGLE_API_KEY=your_value
-10xgraph dev --no-open
-```
-
-Or add it to a `.env` file and configure `10xgraph.json`:
-
-```json
-{
-  "agent": "graph.react:app",
-  "env": ".env"
-}
-```
-
-Ensure `.env` contains the variable and is in the project root.
-
-### Requests are slow
-
-Check whether the slowness is in the server or your graph:
-
-```bash
-# Enable verbose logging
-10xgraph dev --no-open --verbose
-```
-
-Look at the logs to see if the server itself is slow (networking, checkpointer reads) or if the graph is slow (tool execution, model latency). Check:
-
-- Does your graph make external API calls? Test those connections.
-- Is a tool taking a long time? Check its implementation and any external services it calls.
-- Is the checkpointer slow? Verify database connectivity and load.
 
 ### "Connection refused" or cannot reach the server
 

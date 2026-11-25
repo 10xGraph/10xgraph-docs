@@ -6,39 +6,10 @@ section: Reference
 group: "CLI and configuration"
 order: 1770
 label: Environment Variables
-updated: "2026-11-10"
+updated: "2026-11-25"
 ---
 
-The 10xGraph API server and CLI read configuration from environment variables. This page lists every variable with its default and effect, grouped by area. Set server variables in a `.env` file referenced by `10xgraph.json` or in the process environment. CLI variables control terminal output.
-
-## Setting server variables
-
-### Via .env file
-
-In `10xgraph.json`:
-
-```json
-{
-  "agent": "graph.react:app",
-  "env": ".env"
-}
-```
-
-In `.env`:
-
-```bash
-GOOGLE_API_KEY=your-key
-JWT_SECRET_KEY=your-secret
-MODE=production
-```
-
-### At the process level
-
-```bash
-MODE=production 10xgraph dev --no-reload
-```
-
----
+The 10xGraph API server and CLI read configuration from environment variables. This page lists every variable with its default and effect, grouped by area. Set server variables in the process environment or in the `.env` file named by `env` in `10xgraph.json`. CLI variables control terminal output.
 
 ## Application variables
 
@@ -46,15 +17,13 @@ MODE=production 10xgraph dev --no-reload
 | --- | --- | --- |
 | `APP_NAME` | `MyApp` | Application name shown in logs |
 | `APP_VERSION` | `0.1.0` | Application version |
-| `MODE` | `development` | `production` (or `prod`), or `development` (or `dev`, `local`). Trimmed and case-insensitive. Unset means `development`. Any other value stops the server at startup, and `10xgraph dev` exits with code 2; the message lists the accepted values. Drives several defaults, including debug mode (on in development, off in production), the run timeout and the strict startup checks. |
+| `MODE` | `development` | `production` (or `prod`), or `development` (or `dev`, `local`). Trimmed and case-insensitive. Unset means `development`. Any other value stops the server at startup. The message lists the accepted values. Drives several defaults, including debug mode (on in development, off in production), the run timeout and the strict startup checks. |
 | `STRICT_PRODUCTION_CHECKS` | on in production | In production, refuse to start on a wildcard `ALLOWED_HOST`, a wildcard `ORIGINS`, or an enabled `DOCS_PATH` or `REDOCS_PATH`. Set `false` to log warnings instead. Has no effect outside production. |
 | `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `LOG_FORMAT` | `text` | `json` writes every application log line as one JSON object (`ts`, `level`, `logger`, `message`, plus `request_id`, `transport` and `user_id` when known and `exc_info` for an exception). Secret redaction still applies. `10xgraph build` sets `json` in the generated production env. See [Observability](/docs/server/observability#logs). |
 | `SUMMARY` | `10xGraph Backend` | One-line service summary shown in the OpenAPI schema |
 | `LOGGER_NAME` | `10xgraph-api` | Name of the root logger the server writes under. Read at import time, so it must be a process environment variable; setting it in `.env` is too late. |
 | `GRAPH_PATH` | `10xgraph.json` | Path to the config file the ASGI app loads. `10xgraph dev --config` sets this for you; set it directly when running the app under an external server such as Gunicorn or Uvicorn. |
-
-The settings model allows extra variables, so unknown names in the environment are tolerated rather than rejected.
 
 ---
 
@@ -65,7 +34,7 @@ The settings model allows extra variables, so unknown names in the environment a
 | `STARTUP_CHECKS` | `true` | Before serving, ping every configured backend and refuse to start while one stays unreachable. Applies in development and production. `false` skips the check and logs a warning. |
 | `STARTUP_CHECK_TIMEOUT_SECONDS` | `30` | Seconds the check keeps retrying an unreachable backend (with a short backoff) before it gives up, so services started together can come up in any order. Must be 0 or more. |
 
-The check calls `aping()` on the checkpointer (Postgres, its schema version and its Redis cache), on the store when one is bound, and on the API's cache store. It does not check the model provider. The checkpointer and the store are fatal when they stay down. The cache store is fatal only when a fail-closed feature uses it (`cache_store.token_revocation` on with auth, or `cache_store.rate_limit` on with `fail_open` set to `false`); otherwise the server logs one warning and starts. When the server exits, the message names each backend and its endpoint, never credentials. See [Startup check](/docs/server/production-checklist#startup-check) and [Backend unreachable at startup](/docs/troubleshooting/api-server#issue-backend-unreachable-at-startup).
+Before serving, the server calls `aping()` on the checkpointer, the store and the cache store; the cache store is fatal only when `token_revocation` or `rate_limit` with `fail_open: false` uses it. See [Startup check](/docs/server/production-checklist#startup-check) and [Backend unreachable at startup](/docs/troubleshooting/api-server#issue-backend-unreachable-at-startup).
 
 ---
 
@@ -99,21 +68,7 @@ Applied by the security-headers middleware when `SECURITY_HEADERS_ENABLED` is tr
 
 <aside class="callout callout-danger" role="note"><p class="callout-title">Wildcard origins plus credentials refuses to start in production</p>
 
-`ORIGINS=*` on its own is a legitimate choice for a public, token-less API, but in production it needs `STRICT_PRODUCTION_CHECKS=false`, because the strict checks refuse a wildcard. The dangerous combination is wildcard origins **together with** credentials: Starlette reflects the caller's `Origin` back alongside `Access-Control-Allow-Credentials: true`, which turns every origin into a trusted, credentialed one.
-
-With `MODE=production`, that combination raises `InsecureCorsConfigError` at startup and the server does not boot, whatever `STRICT_PRODUCTION_CHECKS` says. There are exactly two ways forward:
-
-```bash
-# 1. Name the origins explicitly (the usual answer)
-ORIGINS=https://yourapp.com,https://api.yourapp.com
-
-# 2. Or serve a public, non-credentialed API from any origin
-#    (production also needs the strict checks off)
-CORS_ALLOW_CREDENTIALS=false
-STRICT_PRODUCTION_CHECKS=false
-```
-
-In development the same combination only logs a warning, which tells you the deploy will fail before it does.
+With `MODE=production`, wildcard `ORIGINS` together with `CORS_ALLOW_CREDENTIALS=true` raises `InsecureCorsConfigError` and the server does not boot, whatever `STRICT_PRODUCTION_CHECKS` says. Name the origins, or set `CORS_ALLOW_CREDENTIALS=false`. See [CORS and security headers](/docs/server/cors-and-security-headers).
 
 </aside>
 
@@ -124,13 +79,13 @@ In development the same combination only logs a warning, which tells you the dep
 | Variable | Description | Required for |
 | --- | --- | --- |
 | `JWT_SECRET_KEY` | Secret key for JWT signing and verification. No default. | `auth: "jwt"` |
-| `JWT_ALGORITHM` | JWT algorithm. Default `HS256`. Allowed values: `HS256`, `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512` and `EdDSA`, spelled exactly. `none`, an empty value or any other value stops startup. | `auth: "jwt"` |
+| `JWT_ALGORITHM` | JWT algorithm. Default `HS256`. Allowed values: `HS256`, `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `ES512`, `PS256`, `PS384`, `PS512` and `EdDSA`, spelled exactly. `none`, an empty value or any other value stops startup. | Optional |
 | `JWT_ISSUER` | Required `iss` claim. Unset or empty: the issuer is not checked and a token with any `iss`, or none, is accepted. Set: the token must carry `iss` and it must match exactly, else 401 `INVALID_TOKEN`. | Optional |
 | `JWT_AUDIENCE` | Required `aud` claim. Unset or empty: a token without `aud` is accepted, but a token that carries `aud` is refused (401 `INVALID_TOKEN`). Set: the token must carry `aud` and it must match, else 401 `INVALID_TOKEN`. | Optional |
 | `JWT_SECRET_KEYS` | Extra verification keys for rotation, as a JSON list of `{"kid": "...", "key": "..."}` objects or plain strings. Tried beside `JWT_SECRET_KEY`, which keeps working unchanged. Unset by default. See [rotate the signing key](/docs/reference/api-cli/auth#rotating-the-signing-key). | Optional |
 | `JWT_MAX_TOKEN_AGE_SECONDS` | Refuse a token older than this many seconds by its `iat` claim, and refuse a token with no `iat`. Unset (off) by default. | Optional |
 
-Both must be set when `10xgraph.json` has `"auth": "jwt"`; the config load raises a `ValueError` otherwise and the server does not start. JWT support also needs the extra: `pip install "10xgraph-api[jwt]"`. The server checks at startup that PyJWT is installed and stops if it is missing.
+With `"auth": "jwt"` the server needs `JWT_SECRET_KEY` (a request answers 500 `JWT_SETTINGS_NOT_CONFIGURED` without it) and PyJWT (`pip install "10xgraph-api[jwt]"`). Startup stops when PyJWT is missing, the algorithm is not allowed, or, in production, an HS secret is under 32 bytes.
 
 ---
 
@@ -153,8 +108,6 @@ The `REDIS_*` limits apply to the Redis client behind the API's cache store (`Re
 - **The cache store.** `RedisCacheStore` shares run locks, run and WebSocket caps, idempotency, token revocation and rate limiting between workers. With the in-memory type they live in each process. Valkey, Dragonfly and KeyDB work through the same URL.
 - **`PgCheckpointer`.** It requires a Redis connection (`redis_url`, `redis_pool` or `redis`) as the hot cache in front of Postgres; constructing it without one raises `ValueError`. It does not read `REDIS_URL` itself, so pass the URL to its constructor in your own code, for example `redis_url=os.environ["REDIS_URL"]`. The durable data lives in Postgres.
 
-The rate limiter has no Redis setting of its own; it uses the cache store.
-
 ---
 
 ## Snowflake ID variables
@@ -167,17 +120,11 @@ Read only by `SnowFlakeIdGenerator`, and only when it is constructed with no arg
 | `SNOWFLAKE_TOTAL_BITS` | `64` | Total bits in the generated id |
 | `SNOWFLAKE_TIME_BITS` | `39` | Bits reserved for the timestamp |
 | `SNOWFLAKE_NODE_BITS` | `7` | Bits reserved for the node id |
-| `SNOWFLAKE_NODE_ID` | `0` | This node's id |
+| `SNOWFLAKE_NODE_ID` | derived from the host name | This node's id. A warning is logged when unset |
 | `SNOWFLAKE_WORKER_BITS` | `5` | Bits reserved for the worker id |
-| `SNOWFLAKE_WORKER_ID` | `0` | This worker's id |
+| `SNOWFLAKE_WORKER_ID` | derived from the process id | This worker's id. A warning is logged when unset |
 
-<aside class="callout callout-warning" role="note"><p class="callout-title">Two different sets of SNOWFLAKE_* defaults exist</p>
-
-The settings model also declares `SNOWFLAKE_*` fields, with **different** defaults (`SNOWFLAKE_EPOCH=1609459200000`, `SNOWFLAKE_NODE_ID=1`, `SNOWFLAKE_WORKER_ID=2`, `SNOWFLAKE_NODE_BITS=5`, `SNOWFLAKE_WORKER_BITS=8`, and no `SNOWFLAKE_TOTAL_BITS` at all). The generator never reads that model; it reads `os.environ` directly. The table above is what actually takes effect.
-
-The practical consequence: reading a default off `get_settings()` will not tell you what ids the generator produces. Set every variable explicitly in any deployment that runs more than one node or worker, and never rely on either set of defaults.
-
-</aside>
+The generator reads these variables itself; the same-named fields on the settings model are not used.
 
 See [ID Generator](/docs/reference/python/id-generator) for the constructor contract.
 
@@ -255,7 +202,7 @@ See [Files and multimodal](/docs/server/files-and-multimodal) for how these fit 
 | --- | --- | --- |
 | `MAX_REQUEST_SIZE` | `10485760` (10MB) | Maximum request body size in bytes |
 | `MAX_NESTING_DEPTH` | `64` | Deepest nesting of objects and lists accepted in client messages (`metadata`, `raw`, content blocks), `initial_state`, `config`, `resume` and `filters`. Deeper input is refused with 422 before the graph runs. Allowed range 1 to 900 |
-| `IDEMPOTENCY_TTL_SECONDS` | `86400` | How long a finished run is remembered under its `Idempotency-Key`. The header is opt-in. See [idempotency keys](/docs/reference/rest-api/conventions#idempotency-keys). |
+| `IDEMPOTENCY_TTL_SECONDS` | `86400` | How long a finished run is remembered under its `Idempotency-Key`. The header is opt-in. See [idempotency keys](/docs/reference/rest-api/graph#idempotency-keys). |
 
 Client dicts and lists (`config`, `initial_state`, `resume`, `metadata`, `filters`) also have fixed structure caps (the nesting depth is `MAX_NESTING_DEPTH` above) that have no setting: 1000 keys per object, 10000 items per list and 200000 values in all. A larger body gets 422 `VALIDATION_ERROR`.
 
@@ -306,59 +253,13 @@ Only Gunicorn reads this variable, for example when started as `gunicorn -k uvic
 
 ## LLM provider variables
 
-Set these based on the `provider` you use on your `Agent`. They are read at client creation time.
-
-### LLM timeout
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `TENXGRAPH_LLM_TIMEOUT` | `600.0` | Default request timeout in seconds applied to every LLM client. Must be a positive number. The deprecated `AGENTFLOW_LLM_TIMEOUT` is read only when this one is unset or empty. See [Configure Agent](/docs/guides/configure-agent#llm-call-timeout) for the programmatic API. |
-
-### OpenAI (`provider="openai"`)
-
-| Variable | Description |
-| --- | --- |
-| `OPENAI_API_KEY` | API key from https://platform.openai.com |
-
-### Google Gemini (`provider="google"`)
-
-The Google provider supports two backends: the Gemini API (default) and Vertex AI. See [Google integration](/docs/integrations/google#using-vertex-ai).
-
-**Gemini API (Google AI Studio):**
-
-| Variable | Description |
-| --- | --- |
-| `GEMINI_API_KEY` | API key from https://aistudio.google.com (preferred) |
-| `GOOGLE_API_KEY` | Fallback name for the Gemini API key |
-
-**Vertex AI** (enable with `use_vertex_ai=True` on the agent or `GOOGLE_GENAI_USE_VERTEXAI=true`):
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `GOOGLE_GENAI_USE_VERTEXAI` | unset | Set to `true` to route the Google provider through Vertex AI process-wide |
-| `GOOGLE_CLOUD_PROJECT` | unset | **Required.** GCP project ID with the Vertex AI API enabled |
-| `GOOGLE_CLOUD_LOCATION` | `us-central1` | GCP region for Vertex AI calls |
-| `GOOGLE_APPLICATION_CREDENTIALS` | unset | Path to a service-account JSON key (Application Default Credentials) |
-
-<aside class="callout callout-note" role="note"><p class="callout-title">Vertex AI authentication</p>
-
-Vertex AI authenticates via [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials), not an API key. In local development point `GOOGLE_APPLICATION_CREDENTIALS` at a service-account key file. On GCP runtimes (Cloud Run, GKE, Compute Engine) the attached service account is picked up automatically.
-
-</aside>
-
-### Anthropic (`provider="anthropic"` or `provider="anthropic_vertex"` or `provider="anthropic_bedrock"`)
-
-| Variable | Description |
-| --- | --- |
-| `ANTHROPIC_API_KEY` | API key from https://console.anthropic.com |
-
-For Vertex AI models, see [Anthropic integration](/docs/integrations/anthropic#choosing-a-claude-backend).
+Model provider keys and `TENXGRAPH_LLM_TIMEOUT` are read by the core package: see [Configure Agent](/docs/guides/configure-agent) and the integration pages.
 
 ---
 
 ## CLI variables
 
-These variables control how the `10xgraph` command-line interface renders output: animation, the full-screen frame, and Unicode symbols. A flag is on when the value is `1`, `true`, `yes`, or `on` (case-insensitive). There is no `TENXGRAPH_THEME` variable; the CLI theme is fixed.
+These variables control how the `10xgraph` command-line interface renders output: animation, the full-screen frame, and Unicode symbols. A flag is on when the value is `1`, `true`, `yes`, or `on` (case-insensitive).
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -367,4 +268,4 @@ These variables control how the `10xgraph` command-line interface renders output
 | `TENXGRAPH_NO_FULLSCREEN` | `false` | Force the full-screen frame off even when `TENXGRAPH_FULLSCREEN` is set. Falls back to `AGENTFLOW_NO_FULLSCREEN` if set. |
 | `TENXGRAPH_ASCII` | `false` | Disable Unicode symbols in output; use ASCII equivalents instead. Set to `1`, `true`, `yes`, or `on` for ASCII-only mode. Falls back to `AGENTFLOW_ASCII` if set. Useful in terminals with poor Unicode support. |
 
-Each CLI variable has a deprecated `AGENTFLOW_*` equivalent that is used only when the `TENXGRAPH_*` name is not set. The `AGENTFLOW_*` names will be removed in 10xGraph 2.0.
+Each CLI variable has a deprecated `AGENTFLOW_*` equivalent that is used only when the `TENXGRAPH_*` name is not set.

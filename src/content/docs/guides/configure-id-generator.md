@@ -41,7 +41,7 @@ All are imported from `tenxgraph.utils.id_generator` or the top-level `tenxgraph
 
 ## Quick start: use a built-in generator
 
-When you serve the graph with the API server, you can instead set `"id_generator"` in `10xgraph.json` (`uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or a `module:attr` path). Set it in one place only: the server refuses to boot when the graph code also sets a generator, or when the id columns of an existing `PgCheckpointer` table cannot hold the ids. The checkpointer's id type follows the generator (default string, Snowflake gives bigint); its `id_type` argument is deprecated. See the [configuration reference](/docs/reference/api-cli/configuration#id_generator).
+When you serve the graph with the API server, you can instead set `"id_generator"` in `10xgraph.json` (`uuid`, `hex`, `short`, `int`, `bigint`, `timestamp`, `snowflake` or a `module:attr` path). Set it in one place only: the server refuses to boot when the graph code also sets a generator, or when the id columns of an existing `PgCheckpointer` table cannot hold the ids. New thread ids and run ids come from the generator bound in the shared container. A thread or message id from a path, body, WebSocket frame or AG-UI message is converted to the generator's type: `int` for Snowflake and the other integer generators (a non-numeric value gets 422), `str` otherwise. The checkpointer's id type follows the generator (default string, Snowflake gives bigint); its `id_type` argument is deprecated. See the [configuration reference](/docs/reference/api-cli/configuration#id_generator).
 
 To replace the default UUID generator, pass `id_generator` to `StateGraph()`:
 

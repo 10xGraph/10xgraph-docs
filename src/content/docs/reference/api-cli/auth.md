@@ -6,10 +6,10 @@ section: Reference
 group: "CLI and configuration"
 order: 440
 label: Authentication
-updated: "2026-11-10"
+updated: "2026-11-25"
 ---
 
-By default, the 10xGraph API accepts all requests without authentication (suitable for local development). For production, set the `auth` key to JWT or to a custom `BaseAuth` class to verify identity, and add roles to control what each user may do and how far their data reaches. This page is the reference. For a guided walk-through and the migration from the removed `authorization` key, see [Set up API authentication](/docs/server/auth).
+By default, the 10xGraph API accepts all requests without authentication (suitable for local development). For production, set the `auth` key to JWT or to a custom `BaseAuth` class to verify identity, and add roles to control what each user may do and how far their data reaches. This page is the reference. See [Set up API authentication](/docs/server/auth) for a walk-through.
 
 ## No authentication (default)
 
@@ -20,7 +20,7 @@ By default, the 10xGraph API accepts all requests without authentication (suitab
 }
 ```
 
-All endpoints are publicly accessible, no thread has an owner, and `GET /v1/me` answers `{"auth": "off"}`. Only use this locally or behind a secure gateway. `"auth": {"method": "none"}` is the same. RBAC keys with auth off refuse to boot.
+All endpoints are publicly accessible, no thread has an owner, and `GET /v1/me` answers `{"auth": "off"}`. `"auth": {"method": "none"}` is the same. RBAC keys with auth off refuse to boot.
 
 ## JWT authentication
 
@@ -43,23 +43,12 @@ Set the required environment variables:
 
 ```bash
 JWT_SECRET_KEY=your-secret-key
-JWT_ALGORITHM=HS256
+JWT_ALGORITHM=HS256  # optional, default HS256
 ```
 
-Both are validated at startup. Missing either one raises `ValueError` and the server does not start.
+Startup stops when PyJWT is missing, `JWT_ALGORITHM` is not an allowed algorithm, or, in production, an HS secret is shorter than 32 bytes. A missing `JWT_SECRET_KEY` answers 500 `JWT_SETTINGS_NOT_CONFIGURED` on the first request.
 
-### Using JWT
-
-Send a Bearer token in the `Authorization` header:
-
-```bash
-curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1..." \
-  -H "Content-Type: application/json" \
-  -d '{"messages": [...]}'
-```
-
-The server decodes and validates the JWT on every request. The decoded payload becomes the `user` context, available to your graph as `config["user"]`.
+Send `Authorization: Bearer <token>`. The resolved `Identity` becomes `config["user"]`.
 
 ### Required JWT claims
 
@@ -104,32 +93,11 @@ Set `JWT_MAX_TOKEN_AGE_SECONDS` to refuse tokens older than that many seconds, c
 | 401 | `INVALID_TOKEN` (message "Invalid token, please login again") | A configured `tenant_claims` claim is missing, or the roles or permissions claim is malformed |
 | 401 | `INVALID_TOKEN` | The `user_id` starts with the reserved prefix `__system__`, or `cache_store.token_revocation` is on and the token has no usable `jti` (message "Invalid token, jti missing") |
 | 401 | `REVOKED_TOKEN` | The token, or all of the user's tokens, were revoked |
-| 500 | `JWT_SETTINGS_NOT_CONFIGURED` | `JWT_SECRET_KEY` or `JWT_ALGORITHM` is unset at request time |
+| 500 | `JWT_SETTINGS_NOT_CONFIGURED` | `JWT_SECRET_KEY` is unset, or `JWT_ALGORITHM` is not an allowed value, at request time |
 
 On WebSocket routes, errors become a clean close with code 1008 instead of an HTTP response.
 
 Client action: refresh the token on `EXPIRED_TOKEN`; sign in again on `INVALID_TOKEN` or `REVOKED_TOKEN`.
-
-### Generating test tokens
-
-10xGraph does not issue tokens; use your identity provider or mint one locally for testing:
-
-```python
-import datetime
-import jwt  # PyJWT, installed by the [jwt] extra
-
-token = jwt.encode(
-    {
-        "user_id": "user-123",
-        "exp": datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1),
-        "roles": ["member"],
-    },
-    key="your-secret-key",
-    algorithm="HS256",
-)
-```
-
-A token using `sub` instead of `user_id` is rejected with 401. A token with no `exp` is also rejected with 401.
 
 ## Sending auth over WebSocket
 
@@ -150,9 +118,9 @@ const ws = new WebSocket(
 );
 ```
 
-The subprotocol offer must be exactly two entries with the sentinel first. With anything else, no credential is found and the handshake is refused with close code `1008`.
+The subprotocol offer must start with the sentinel, followed by the token. With anything else, no credential is found and the handshake is refused with close code `1008`.
 
-The older sentinel `agentflow-bearer` is still accepted until 2.0, and the server echoes whichever one you send. The TypeScript client sends `10xgraph-bearer`.
+`agentflow-bearer` is accepted as a deprecated alias until 2.0.
 
 ## Custom authentication backend
 
@@ -170,19 +138,20 @@ Provide your own `BaseAuth` subclass when you need integration with an internal 
 
 The `path` accepts four forms: `auth_app:Cls` (a top-level module in the project folder), `auth_app.py:Cls`, `pkg.mod:Cls` (a dotted package path) and `pkg/mod.py:Cls` (a file path). A path that does not exist raises an error naming it.
 
-Subclass `BaseAuth` and implement `authenticate`. The method is `async def` (the server awaits it) and receives the request, response, and credential:
+Subclass `BaseAuth` and implement `authenticate`. The method is `async def` (the server awaits it) and receives the connection, the response (or `None`) and the credential:
 
 ```python
 from typing import Any
-from fastapi import HTTPException, Request, Response
+from fastapi import HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials
+from starlette.requests import HTTPConnection
 from tenxgraph_api import BaseAuth
 
 class MyAuthBackend(BaseAuth):
     async def authenticate(
         self,
-        request: Request,  # Request or WebSocket (HTTPConnection)
-        response: Response,
+        request: HTTPConnection,  # HTTP request or WebSocket
+        response: Response | None,
         credential: HTTPAuthorizationCredentials | None,  # bearer token or None
     ) -> dict[str, Any] | None:
         """Return the verified claims, or raise to reject.
@@ -205,13 +174,15 @@ class MyAuthBackend(BaseAuth):
 
 <aside class="callout callout-warning" role="note"><p class="callout-title">`authenticate` must be `async def`</p>
 
-The server awaits `authenticate(...)`. A plain `def` is not supported, so a custom class written that way must change to `async def`. A slow lookup no longer blocks the event loop. For non-Bearer schemes (API keys, cookies), ignore `credential` and read `request.headers` directly.
+`authenticate` must be `async def`; the server awaits it. For non-Bearer schemes (API keys, cookies), ignore `credential` and read `request.headers` directly.
 
 </aside>
 
+Override `downstream_credential(connection, credential, claims)` to change the credential runs use to call other services; the default returns the bearer token. See [Calling services as the user](/docs/guides/call-services-as-the-user).
+
 ## Authorization (roles, permissions, reach)
 
-Authorization decides what an authenticated user may do and whose data they can see. It sits under the same `auth` key as authentication. The top-level `authorization` key and `AuthorizationBackend` are removed: a leftover `authorization` key stops the server at boot.
+Authorization decides what an authenticated user may do and whose data they can see. It sits under the same `auth` key as authentication.
 
 ### The `auth` object
 
@@ -259,6 +230,7 @@ Permissions are `resource:action` from one registry. A role naming anything else
 | `config` | `read` |
 | `tasks` | `trigger`, `read`, `cancel` |
 | `admin` | `read`, `write` |
+| `tools` | A tool name (1 to 128 of `A-Z a-z 0-9 _ - .`) or `*`. Checked by `ToolGuard`, never by a route. The default set holds none, so grant `tools:<name>` or `tools:*` in a role or token claim. See [Zero-trust agents](/docs/security/zero-trust-agents#on-the-api-server) |
 
 The route guards:
 
@@ -284,7 +256,7 @@ The route guards:
 | `POST /v1/tasks/{id}/cancel` | `tasks:cancel` |
 | `GET /v1/me` | Authentication only |
 
-A refusal answers 403 `Missing required permission: <resource>:<action>`. A permission the registry does not know raises at import, not on the first request.
+A refusal answers 403 `Missing required permission: <resource>:<action>`.
 
 ### Reach
 
@@ -329,18 +301,9 @@ Revoke a token (by `jti`) or all of a user's tokens by calling `revoke_token` or
 
 With `token_revocation` on, every token must carry a `jti` claim (a non-empty string or an integer). A token without it answers 401 `INVALID_TOKEN` ("Invalid token, jti missing"), because one token is revoked by its `jti`. A custom `BaseAuth` class must return `jti` in its claims too. With revocation off, `jti` stays optional. A revoked token answers 401 `REVOKED_TOKEN`, or a 1008 close on a WebSocket.
 
-```python
-from injectq import InjectQ
-from tenxgraph_api import BaseCacheStore, revoke_token, revoke_user
+See [Set up API authentication](/docs/server/auth) for revoking from your own code.
 
-async def log_out_everywhere(user_id: str) -> None:
-    cache = InjectQ.get_instance().get(BaseCacheStore)  # the server's cache store
-    await revoke_user(cache, user_id)  # every token issued so far
-
-# one token: await revoke_token(cache, jti, expires_at=exp)
-```
-
-`cache_store.token_revocation` is `true`, `false`, or an object: `{"enabled": true, "token_lifetime": <seconds>, "user_ttl": <seconds>}`. `user_ttl` is how long a per-user cutoff is kept and defaults to 30 days; `null` keeps entries forever. A string value is a config error.
+The accepted values of `cache_store.token_revocation` are listed under [cache_store](/docs/reference/api-cli/configuration#cache_store).
 
 Revocation fails closed: if the cache store raises an error, requests that need the check answer `503`. With an in-memory cache store in production, or `WEB_CONCURRENCY` above 1, the server warns that revocations only reach this process; set `cache_store.type` to `redis` (or a shared custom store).
 
@@ -361,7 +324,7 @@ class MyAuth(BaseAuth):
 - `permission` is `resource:action`. `resource` is the thread id, memory id, namespace or file id from the path or the JSON body, the task name for a background task, or `None`.
 - It takes no request, so the jobs worker calls it too (`tasks:trigger`).
 - If you override it and `roles` is set, the roles apply only when you call `super().authorize`. Boot warns about it.
-- An exception fails the request; it never counts as allowed.
+- An `HTTPException` keeps its status; any other exception fails the request. Nothing counts as allowed on an error.
 
 ### Boot-time checks
 
@@ -384,44 +347,8 @@ The same validator runs at boot, `10xgraph config`, `10xgraph audit` and `10xgra
 
 ### Ownership and data isolation
 
-Storage enforces ownership. Every checkpointer, store and file query filters by the caller's reach, so no ownership cache or resolver exists. Each thread route makes one scoped read before the run lock, which gives the 404 and enforces `runs.thread_ids`. See [Multi-tenant data](/docs/guides/multi-tenant-data).
+Storage enforces ownership by the caller's reach; a thread, message, memory or file outside it answers 404. See [Multi-tenant data](/docs/guides/multi-tenant-data).
 
-## Boot-time route guard
+## Public paths
 
-Authorization is applied per handler with `Depends(RequirePermission(resource, action))`. `RequireIdentity()` authenticates without a permission check; `GET /v1/me` uses it. To prevent forgotten guards from shipping open endpoints, `assert_all_routes_protected` runs at startup and walks every `APIRoute` and `APIWebSocketRoute` to check that the entire dependency subtree includes a `RequirePermission` instance.
-
-If any non-public route lacks one, the server refuses to start:
-
-```
-RuntimeError: Refusing to start: the following routes are not protected by RequirePermission.
-Add the dependency, or add the path to the public allowlist if it is intentionally open:
-  - POST /v1/my-new-endpoint
-```
-
-The check is free per request. Starlette infrastructure routes (`/docs`, `/redocs`, `/openapi.json`) are not `APIRoute`s and are skipped automatically.
-
-### Public paths
-
-Only these paths are publicly accessible:
-
-| Path | Purpose |
-|---|---|
-| `/ping` | Health check (for load balancers and orchestrators) |
-| `/health/ready` | Readiness check |
-
-
-Adding paths to the allowlist requires editing the source frozenset, which is deliberate: opening a route becomes a reviewable change.
-
-## Using auth with the TypeScript client
-
-```typescript
-import { TenxGraphClient } from "10xgraph-client";
-
-// authToken is sent as a Bearer token on every request
-const client = new TenxGraphClient({
-  baseUrl: "http://127.0.0.1:8000",
-  authToken: token,
-});
-```
-
-The token is fixed per client, so create a new client to rotate it. See [Create a client](/docs/client/create-client) for all options.
+`/ping` and `/health/ready` need no credentials; every other route needs `RequirePermission`.

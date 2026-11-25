@@ -5,17 +5,17 @@ section: "API server"
 group: "Basics"
 order: 40
 label: Initialize a Project
-updated: "2026-10-27"
+updated: "2026-11-25"
 faq:
   - q: "What is the difference between the Quick and Full setups?"
-    a: "Quick generates a minimal graph with 10xgraph.json and environment template. Full adds tests, evaluations, auth stubs, and a full project structure, and writes the recommended config: JWT auth with owner-only data, a UUID ID generator, and a cache store with rate limiting and token revocation. The cache store is memory with the default memory storage and Redis with Postgres storage or a worker."
+    a: "Quick generates a minimal graph with 10xgraph.json and environment template. Full adds tests, evaluations, auth stubs, and a full project structure, and writes the recommended config: JWT auth with owner-only data, an audit log, and a cache store with rate limiting and token revocation. The cache store is memory with the default memory storage and Redis with Postgres storage or a worker."
   - q: "Can I change the setup or auth choice after scaffolding?"
     a: "Yes, re-run 10xgraph init with --force to regenerate, or edit 10xgraph.json directly. See server/configure for full config reference."
   - q: "When should I choose a memory cache store instead of Redis?"
     a: "A memory cache store works for single instances only. Use Redis when running multiple server replicas or containers that need shared counters, locks and token revocation."
 ---
 
-`10xgraph init` scaffolds a new agent project from an interactive questionnaire or command-line flags. It creates a working graph, configuration file, and optional test/evaluation stubs tailored to your deployment model (Quick for development, Full for teams and deployment).
+`10xgraph init` scaffolds an agent project: a graph, `10xgraph.json`, and for the Full setup tests, evals and a production config.
 
 ## Prerequisites
 
@@ -33,7 +33,7 @@ Navigate to an empty directory and run:
 10xgraph init
 ```
 
-The command asks three questions: the agent name, the setup and the AI provider. It then prints a summary of what it wrote and creates the files. The Full setup does not ask about auth or rate limiting; it writes the recommended setup (see [How 10xgraph.json is generated](#how-10xgraphjson-is-generated)). The next steps point to `10xgraph config` for full control.
+The command asks for the setup (Quick or Full), the agent name and the AI provider. Full also asks where state is stored, how the API is secured, whether to run a background worker, and which extras to add (evals, tests, WebSocket, AG-UI, OpenTelemetry).
 
 To scaffold in a specific directory without entering it:
 
@@ -65,18 +65,8 @@ Passing `--yes` or `--non-interactive` skips all prompts. Any value you omit tak
 | `--rate-limit` / `--no-rate-limit` | | Flag | On | Adds or leaves out `cache_store.rate_limit` |
 | `--token-revocation` / `--no-token-revocation` | | Flag | On with auth | Adds or leaves out `cache_store.token_revocation`. Ignored with `--auth none` |
 | `--websocket` / `--no-websocket` | | Flag | Off | Writes `websocket.enabled` |
-| `--force` | `-f` | Flag | Off | Overwrite existing files (careful: replaces graph code) |
-| `--dry-run` | | Flag | Off | Print files that would be created; do not write anything |
-| `--yes` | `-y` | Flag | Off | Accept the recommended defaults and do not prompt |
-| `--non-interactive` | | Flag | Off | Never prompt; invalid values fail instead of being asked for |
 
-Example with `--dry-run`:
-
-```bash
-10xgraph init --name MyBot --mode full --dry-run
-```
-
-This lists files that would be created without touching your filesystem.
+Full also takes `--worker`, `--evals/--no-evals`, `--tests/--no-tests`, `--ag-ui/--no-ag-ui` and `--otel/--no-otel`. Every flag is in the [CLI commands reference](/docs/reference/api-cli/commands).
 
 ## What init generates
 
@@ -87,13 +77,15 @@ Minimal setup for rapid prototyping:
 ```
 10xgraph.json
 .env.example
+.gitignore
+AGENTS.md
 requirements.txt
 graph/
   __init__.py
   agent.py
 ```
 
-- **10xgraph.json**: Server config with just the agent path and env file.
+- **10xgraph.json**: Server config with the agent path, env file, auth off, and AG-UI and WebSocket off.
 - **graph/agent.py**: A starter ReAct agent built with `ReactAgent`, with a sample weather tool and an `app` variable for the server.
 - **.env.example**: API key placeholders. Copy to `.env`, fill in your credentials.
 - **requirements.txt**: `10xgraph[<provider extra>]` and `10xgraph-api`, the packages the agent needs. `10xgraph build` installs from it, and add extras such as `jwt` here when you turn a feature on.
@@ -147,18 +139,6 @@ evals/                      # unless evals are turned off
   user_simulator_eval.py
 ```
 
-**Why each part matters:**
-
-- **pyproject.toml**: Declares your project as a package. Enables `pip install -e .` (editable), integrates `ruff`/`mypy`/`pytest` config, and ensures repeatable environments.
-- **graph/state.py**: Custom state schema (inherits from `AgentState`). Extend it as your agent's state grows.
-- **graph/tools/**: Custom agent tools as decorated functions.
-- **graph/validators/**: Lifecycle validators (before invoke, after step, on error) and validation manager.
-- **auth/agent_auth.py**: Custom authentication logic (only scaffolded when `--auth custom`). Implement `BaseAuth` subclass.
-- **worker/tasks.py**: Example background tasks. Only scaffolded when a worker is chosen.
-- **tests/**: Unit tests (mock the model, test state transitions, tool logic).
-- **.env.example**: Conditional blocks for JWT and Redis; only kept in `.env` if you selected those options.
-- **.pre-commit-config.yaml**: Git hooks for `ruff check/format`, `bandit`, `mypy`.
-
 ## How 10xgraph.json is generated
 
 Init builds your config from your answers, not a static template. Examples:
@@ -188,7 +168,6 @@ Init builds your config from your answers, not a static template. Examples:
   "websocket": {"enabled": false},
   "remote_tools": [],
   "injectq": "graph.agent:container",
-  "id_generator": "uuid",
   "cache_store": {
     "type": "memory",
     "rate_limit": {
@@ -221,7 +200,7 @@ With `"type": "redis"` the cache store has no `url`, so Redis comes from the `RE
 
 **Thread names.** Full writes `"thread_name_generator": "first_message"`. Quick leaves it `null`, which means none: threads are saved without a name. The other choices are `random`, or a `module:attr` path to your own `ThreadNameGenerator` subclass. See [Generate readable thread names](/docs/server/configure#generate-readable-thread-names).
 
-For full details on every config key, see `/docs/server/configure`. To see what each key does when it is absent, see [What is on by default](/docs/server/configure#what-is-on-by-default).
+See [What is on by default](/docs/server/configure#what-is-on-by-default).
 
 ## Overwrite and force flags
 
@@ -231,46 +210,7 @@ For full details on every config key, see `/docs/server/configure`. To see what 
 10xgraph init --force
 ```
 
-This re-runs init in your current directory and overwrites all template files (graph code, tests, validators, auth stub) and `10xgraph.json`. **Use with care.** Without `--force`, init stops with a "File already exists" error at the first file that is already there.
-
-**To preview without writing:**
-
-```bash
-10xgraph init --name MyBot --mode full --dry-run
-```
-
-Lists files that would be created and exits without modifying the filesystem.
-
-## Interactive vs. non-interactive prompts
-
-### Interactive (default)
-
-```bash
-10xgraph init
-```
-
-Asks three questions:
-1. **Agent name?** (default: `MyAgent`)
-2. **Quick or Full?** (default: Quick)
-3. **AI provider?** (Google, OpenAI or Anthropic)
-
-Nothing else is asked. Full writes the recommended config and lists it in the summary. Run `10xgraph config` afterwards to change WebSocket, AG-UI, the ID generator, thread naming and every other setting.
-
-### Non-interactive with defaults
-
-```bash
-10xgraph init --yes
-```
-
-Uses all defaults: agent name inferred from directory, Quick setup, no auth, no cache store.
-
-### Non-interactive with explicit arguments
-
-```bash
-10xgraph init --yes --name WeatherBot --mode full --auth jwt --cache-store memory
-```
-
-Does not prompt; an invalid value fails with an error.
+This re-runs init in your current directory and overwrites all template files (graph code, tests, validators, auth stub) and `10xgraph.json`. **Use with care.** Without `--force`, init asks before overwriting at a terminal (default No) and stops without a terminal.
 
 ## After init: next steps
 
@@ -299,15 +239,7 @@ pre-commit install
 
 Lints your code automatically on each commit.
 
-### 4. Test that the graph loads
-
-```bash
-python -c "from graph.agent import app; print(app)"
-```
-
-If this fails, check that `graph/agent.py` is syntactically correct and imports are available.
-
-### 5. Start the server
+### 4. Start the server
 
 ```bash
 10xgraph dev
@@ -316,22 +248,6 @@ If this fails, check that `graph/agent.py` is syntactically correct and imports 
 Starts the API on `localhost:8000` and opens the web playground.
 
 ## Troubleshooting
-
-**"ModuleNotFoundError: No module named 'tenxgraph_api'"**
-
-Install the API package:
-
-```bash
-pip install 10xgraph-api
-```
-
-**"File already exists" error during init**
-
-A file is in the way. Either:
-
-- Move it aside: `mv <filename> <filename>.bak`
-- Pass `--force`: `10xgraph init --force` (overwrites all template files)
-- Use `--path` to target a different directory: `10xgraph init --path ./new-dir`
 
 **"ModuleNotFoundError: No module named 'graph'"** after init
 
@@ -358,6 +274,6 @@ Init slugifies your agent name (e.g. `My Agent 2024` becomes `my-agent-2024`). U
 
 ## Related pages
 
-- `/docs/server/configure`: Full reference for every 10xgraph.json key and environment variable.
-- `/docs/server/run-the-server`: Starting the API server in development and production.
-- `/docs/server/auth`: Authentication and authorization setup.
+- [Configure](/docs/server/configure): Full reference for every 10xgraph.json key and environment variable.
+- [Run the server](/docs/server/run-the-server): Starting the API server in development and production.
+- [Authentication](/docs/server/auth): Authentication and authorization setup.

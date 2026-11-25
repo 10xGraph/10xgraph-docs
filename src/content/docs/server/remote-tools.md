@@ -4,7 +4,7 @@ description: "Configure client-executed tools on the server: define them in 10xg
 order: 100
 group: "Interfaces"
 section: "API server"
-updated: "2026-10-27"
+updated: "2026-11-25"
 faq:
   - question: "Can a client call a tool that isn't registered as a remote tool?"
     answer: "No. The server only presents remote tools from 10xgraph.json to the model. If ag_ui.allow_client_tools is true, AG-UI clients can bring their own tools for that run, but plain REST/WebSocket callers cannot. See the AG-UI documentation for per-run client tools."
@@ -15,8 +15,6 @@ faq:
 ---
 
 Remote tools are trusted tool schemas configured on the server that the model can call but the client executes. This page covers server-side setup: how to declare remote tools in 10xgraph.json, attach them to graph nodes, and verify they are available when the model runs.
-
-Remote tools are trusted by configuration, not by the client; see the [security model](/docs/production/security-model) for the trust boundary.
 
 ## Why remote tools
 
@@ -112,54 +110,7 @@ With `TenxGraphClient`, `invoke()` and `stream()` run this loop for you; you onl
 
 ## Setting up the client
 
-The client must register a handler for every remote tool you define on the server. This is done at request time, before streaming or invoking.
-
-For the TypeScript client (using the `10xgraph-client` package):
-
-```typescript
-import { TenxGraphClient, Message } from '10xgraph-client';
-
-const client = new TenxGraphClient({
-  baseUrl: 'http://localhost:8000',
-});
-
-// Register handlers for remote tools defined in 10xgraph.json
-client.registerToolHandler('get_user_location', async (args) => {
-  const timeout = args.timeout_ms || 10000;
-  return new Promise((resolve, reject) => {
-    const id = setTimeout(() => reject(new Error('Timeout')), timeout);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        clearTimeout(id);
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        });
-      },
-      (error) => {
-        clearTimeout(id);
-        reject(new Error(`Geolocation error: ${error.message}`));
-      }
-    );
-  });
-});
-
-client.registerToolHandler('read_clipboard', async () => {
-  const text = await navigator.clipboard.readText();
-  return { text };
-});
-
-// Now stream or invoke. The client will run registered tools when the model calls them.
-// Omit thread_id to start a new thread. Each chunk carries the id the server picked.
-const stream = client.stream([Message.text_message('Where am I?')]);
-
-for await (const chunk of stream) {
-  // Process streaming response
-}
-```
-
-If a remote tool is not registered, the ToolExecutor returns a failed tool result ("Tool '<name>' not found") to the graph. The model can handle it or retry.
+With the TypeScript client, register a handler per tool with `client.registerToolHandler(name, handler)`; see [Client: remote tools](/docs/client/remote-tools).
 
 For Python clients or direct HTTP/WebSocket calls, the client framework (or your code) is responsible for routing tool calls to the appropriate handler. The server emits remote tool calls in the stream; you must listen for them, run the tool, and send a tool result message back on the same thread.
 
@@ -174,98 +125,6 @@ The server validates remote tool configurations at startup. Configuration errors
 - The `node` must exist in the compiled graph and be a `ToolNode`.
 
 If validation or attachment fails, the server fails to start. Run `10xgraph audit` to check the config file before starting, and read the `10xgraph dev` output for the message.
-
-## Examples
-
-### Minimal example: geolocation
-
-Server (10xgraph.json):
-
-```json
-{
-  "agent": "graph:app",
-  "remote_tools": [
-    {
-      "node": "TOOL",
-      "name": "get_location",
-      "description": "Get the user's current GPS location."
-    }
-  ]
-}
-```
-
-Client (TypeScript):
-
-```typescript
-client.registerToolHandler('get_location', async () => {
-  return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-      }),
-      (err) => reject(err),
-      { timeout: 5000 }
-    );
-  });
-});
-
-const result = await client.invoke([Message.text_message('Tell me where I am.')]);
-```
-
-The model will call `get_location`, the client will return the coordinates, and the model will read them and respond to the user.
-
-### Example with parameters
-
-Server (10xgraph.json):
-
-```json
-{
-  "agent": "graph:app",
-  "remote_tools": [
-    {
-      "node": "TOOL",
-      "name": "search_local_database",
-      "description": "Search the user's local SQLite database.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "type": "string",
-            "description": "SQL SELECT query to run."
-          },
-          "max_rows": {
-            "type": "number",
-            "description": "Maximum rows to return."
-          }
-        },
-        "required": ["query"]
-      }
-    }
-  ]
-}
-```
-
-Client (TypeScript):
-
-```typescript
-client.registerToolHandler('search_local_database', async (args) => {
-  const { query, max_rows = 100 } = args as {
-    query: string;
-    max_rows?: number;
-  };
-
-  // In a real app, use a SQLite library for the browser, e.g., sql.js
-  try {
-    const results = await myLocalDB.query(query, { limit: max_rows });
-    return { rows: results };
-  } catch (error) {
-    throw new Error(`Database query failed: ${error.message}`);
-  }
-});
-```
-
-The model will pass the SQL query from the user's request, the client will run it, and return results. The model can then interpret them and respond.
 
 ## Troubleshooting
 
@@ -291,8 +150,6 @@ Check that:
 
 **Tool runs but returns wrong result**
 
-- Add logging inside your handler to debug input and output.
-- Use browser DevTools (Network tab) to inspect the request and response.
 - On the server, check that the result from the client was properly returned to the graph.
 
 ## Related pages
