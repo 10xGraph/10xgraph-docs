@@ -37,10 +37,10 @@ A prebuilt agent is a complete graph behind one class. You construct it, call `c
 | `ReactAgent` | Think, call tools, observe, repeat | One agent answers questions using tools | [React agent](/docs/guides/prebuilt/react-agent) |
 | `PlanActReflectAgent` | Plan first, act, then reflect on results | Complex tasks that benefit from structured reasoning | [Plan-act-reflect agent](/docs/guides/prebuilt/plan-act-reflect-agent) |
 | `RAGAgent` | Retrieve documents, then synthesize an answer | Question answering over a knowledge base | [RAG agent](/docs/guides/prebuilt/rag-agent) |
-| `StructuredOutputAgent` | Forces the final answer into a schema | You need typed JSON from the model | [Structured output agent](/docs/guides/prebuilt/structured-output-agent) |
+| `StructuredOutputAgent` | Forces the final answer into a schema | You need typed JSON from the model | [Structured output](/docs/guides/structured-output) |
 | `SupervisorTeamAgent` | A supervisor routes work to specialist workers | Several agents under one coordinator | [Supervisor team agent](/docs/guides/prebuilt/supervisor-team-agent) |
 | `SwarmAgent` | Peer agents hand control to each other | Several agents without a central coordinator | [Swarm agent](/docs/guides/prebuilt/swarm-agent) |
-| `AudioAgent` | Realtime audio over a live connection | Low-latency voice conversations | [Audio agent](/docs/guides/prebuilt/audio-agent) |
+| `AudioAgent` | Realtime audio over a live connection | Low-latency voice conversations | [Use realtime audio](/docs/guides/use-realtime-audio) |
 
 `RAGAgent` also accepts a reranker. `tenxgraph.prebuilt` exports `BaseReranker` (the interface for your own), `CohereReranker` and `CrossEncoderReranker`. For parameters of every agent see the [prebuilt agents reference](/docs/reference/python/prebuilt-agents), and for a side-by-side tour see the [prebuilt agents guide](/docs/guides/prebuilt-agents).
 

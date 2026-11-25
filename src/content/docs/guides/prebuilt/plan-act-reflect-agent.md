@@ -5,34 +5,20 @@ section: "Build agents"
 group: "Prebuilt agents"
 order: 100
 label: PlanActReflectAgent
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
-PlanActReflectAgent is a self-improving agent that breaks tasks into steps, executes them, then explicitly evaluates whether the work is complete. If not, it iterates. This pattern solves a common problem in agent workflows: standard ReAct loops can get stuck or produce incomplete answers because they lack a clear evaluation step. By adding a dedicated critic that inspects all work and decides whether to continue or stop, this agent achieves higher task completion rates on complex assignments like research, analysis, and planning.
+PlanActReflectAgent runs a planner, the planner's tools and a reflector in a loop. The reflector reviews the work after each round and ends the run with `[DONE]`; otherwise the planner gets another round, up to `max_iterations` per turn.
 
 **Import path:** `from tenxgraph.prebuilt.agent import PlanActReflectAgent`
 
 **Install:** `pip install "10xgraph[openai]"` (or `[google-genai]`, `[anthropic]` for other providers)
 
----
-
-## When to use this agent
-
-PlanActReflectAgent is best for tasks that require iterative refinement or verification. Use it when:
-
-- **The task has multiple steps.** A plan phase ensures coherent structure before executing.
-- **Quality verification matters.** The reflect phase catches incomplete or incorrect work before finishing.
-- **Tools are optional but helpful.** It works equally well with or without external tools. With tools, the planner calls them when needed; without them, it performs pure reasoning.
-- **Iteration is acceptable.** The agent may loop several times (bounded by `max_iterations`). If latency is critical, prefer a simpler agent like `ReactAgent`.
-- **You want explicit decision points.** Unlike ReAct, which continues calling tools until it thinks it is done, PlanActReflect always evaluates completion against the full context.
-
-Avoid this agent if you need single-shot responses or if the task is simple enough for a basic agent. For retrieval-heavy workloads, prefer `RAGAgent`. For team-based multi-agent orchestration, use `SwarmAgent` or `SupervisorTeamAgent`.
-
----
+To choose between prebuilt agents and your own graph, see [Choosing a building block](/docs/concepts/choosing-a-building-block).
 
 ## How it works
 
-The agent runs three specialized LLM instances in sequence: a planner, an actor (tool executor), and a reflector.
+The graph has two LLM nodes, PLAN and REFLECT, and one tool node, ACT.
 
 ### The graph topology
 
@@ -54,7 +40,7 @@ flowchart TD
     INC --> PLAN
 ```
 
-Three separate `Agent` instances execute inside the graph, each with its own system prompt:
+PLAN and REFLECT are separate `Agent` instances, each with its own system prompt:
 
 | Node | Responsibility | Sees tools? | Output |
 |---|---|---|---|
@@ -76,92 +62,11 @@ If neither condition is met, the counter increments and the graph loops back to 
 
 To prevent long tool outputs from overflowing context, tool result messages (messages with `role="tool"`) are hidden from the reflector. The planner still sees the full context on the next iteration, so information is not lost, only filtered from the critic's view.
 
-### Default system prompts
+Both prompts have built-in defaults (`DEFAULT_PLAN_SYSTEM_PROMPT` and `DEFAULT_REFLECT_SYSTEM_PROMPT` in `tenxgraph.prebuilt.agent.plan_act_reflect`); override them with `plan_system_prompt` and `reflect_system_prompt`.
 
-Each phase has a built-in prompt that can be overridden (paraphrased here; see `DEFAULT_PLAN_SYSTEM_PROMPT` and `DEFAULT_REFLECT_SYSTEM_PROMPT` in `tenxgraph.prebuilt.agent.plan_act_reflect` for the exact text):
+## Options
 
-**PLAN**, "You are a strategic planner. Break the user's task into clear, actionable steps and make progress toward it. When a step requires external information, call the appropriate tools. When you can make progress without tools, provide your analysis. Be concise."
-
-**REFLECT**, "You are a critical evaluator. Review all work done so far and decide whether the task is fully complete. If complete, provide a concise summary and end with [DONE]. If not complete, identify gaps and give clear guidance for the next planning step."
-
-Both are fully overridable via `plan_system_prompt` and `reflect_system_prompt` parameters.
-
-### No-tools mode
-
-When called without tools, PLAN always routes directly to REFLECT, skipping the ACT node. The agent becomes a pure reasoning loop: plan → reflect → decide → iterate. This is useful for complex multi-step reasoning tasks that do not require external data.
-
----
-
-## Constructor parameters
-
-Create a PlanActReflectAgent by passing a model and optionally tools and configuration:
-
-```python
-agent = PlanActReflectAgent(
-    model="gpt-4o-mini",
-    provider="openai",
-    tools=[search_web, fetch_page],
-    max_iterations=4,
-)
-app = agent.compile()
-```
-
-**Required parameters:**
-
-| Parameter | Type | Description |
-|---|---|---|
-| `model` | `str` | LLM model identifier (e.g., `"gpt-4o-mini"`, `"gemini-2.5-flash"`). Used by the planner and reflector (the ACT node is a plain ToolNode). The provider is inferred from the model name or set `provider` explicitly via `agent_kwargs` (e.g., `provider="anthropic"`). |
-
-**Optional parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `tools` | `Iterable[Callable]` | `None` | Callables made available to the planner. If empty or `None`, the agent skips the ACT phase and performs pure reasoning. Tools run in parallel when the planner requests multiple at once. |
-| `max_iterations` | `int` | `3` | Maximum plan→act→reflect cycles per turn. Prevents runaway loops. Reaching this limit terminates the graph immediately. The count is per turn (one invoke or stream of a user message): it resets when a new message starts a turn after a completed run or a run that ended in an error, and is kept when a paused or stopped run resumes (interrupt, client tool or stop). |
-| `plan_system_prompt` | `list[dict]` | built-in | Override the planner's system message. Pass a list of role/content dicts (e.g., `[{"role": "system", "content": "..."}]`). |
-| `reflect_system_prompt` | `list[dict]` | built-in | Override the reflector's system message. Same format as `plan_system_prompt`. |
-| `plan_model` | `str` | `None` | Use a different model for the planner (e.g., more capable). Falls back to `model` if not set. |
-| `reflect_model` | `str` | `None` | Use a different model for the reflector. Falls back to `model` if not set. |
-| `plan_reasoning_config` | `dict \| bool` | `None` | Override extended reasoning (e.g., Claude Thinking, OpenAI o1 reasoning) for the planner only. Overrides the shared `reasoning_config` if set. |
-| `reflect_reasoning_config` | `dict \| bool` | `None` | Override extended reasoning for the reflector only. Overrides the shared `reasoning_config` if set. |
-| `reasoning_config` | `dict \| bool` | `True` | Enable extended reasoning for all internal agents (applied unless overridden per-phase). |
-| `memory` | `MemoryConfig` | `None` | Long-term memory configuration shared by all agents. Enables retrieval and storage of cross-thread context. |
-| `retry_config` | `Any` | `True` | Retry policy for LLM calls. Passed to all internal agents. |
-| `fallback_models` | `list` | `None` | Backup models if the primary fails (e.g., `["gpt-4-turbo", "gpt-3.5-turbo"]`). |
-| `trim_context` | `bool` | `False` | Trim old messages from context when it grows long, keeping recent messages. Helps control token usage on long runs. |
-| `client` | `Any` | `None` | FastMCP client instance for MCP-hosted tools. |
-| `pass_user_info_to_mcp` | `bool` | `False` | Send the caller as unsigned MCP request metadata. The server cannot verify it; use it only for a trusted internal server. |
-| `mcp_auth` | `Callable[[MCPAuthContext], Awaitable[dict[str, str]]] \| None` | `None` | Async function returning HTTP headers for each MCP call, such as a short-lived signed token the server verifies. Use it for per-user or per-tenant access control. See [Use MCP tools](/docs/guides/use-mcp#authenticate-each-call-with-mcp_auth). |
-| `extra_messages` | `list[Message]` | `None` | Messages sent after the history on every call (e.g., examples or constraints). Text supports `{field}` state placeholders; see [prompt caching](/docs/guides/configure-agent#per-request-context-and-prompt-caching). |
-| `tools_tags` | `set[str]` | `None` | Filter tools by tags; only tools matching these tags are offered. |
-| `skills` | `SkillConfig` | `None` | Agent Skills configuration; enables dynamic skill discovery and activation. |
-| `multimodal_config` | `MultimodalConfig` | `None` | Multimodal settings for image, audio, and document handling. |
-| `**agent_kwargs` | `dict` | - | Extra keyword arguments passed to all inner Agent instances (e.g., `temperature=0.7`, `top_p=0.9`, `provider="anthropic"`). |
-
----
-
-## compile() parameters
-
-Once you have a PlanActReflectAgent instance, call `.compile()` to create a runnable graph:
-
-```python
-app = agent.compile(
-    checkpointer=PgCheckpointer(...),
-    interrupt_before=["REFLECT"],
-)
-```
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `checkpointer` | `BaseCheckpointer` | `None` | Persist and restore agent state across runs. With a checkpointer, passing the same `thread_id` in the run config resumes from the last checkpoint. Without one, state is lost after the run ends. |
-| `store` | `BaseStore` | `None` | Long-term cross-thread memory storage (PgVectorStore, Qdrant, or custom). Pairs with the `memory` parameter in the constructor to enable retrieval across different conversations. |
-| `interrupt_before` | `list[str]` | `None` | Pause before executing the named nodes (e.g., `["REFLECT", "PLAN"]`). Useful for human-in-the-loop workflows. The graph saves the state and can resume with new input. |
-| `interrupt_after` | `list[str]` | `None` | Pause after the named nodes complete. Combined with `interrupt_before`, enables fine-grained control over execution. |
-| `callback_manager` | `CallbackManager` | default | Attach lifecycle hooks (on_start, on_end, on_error, etc.) to monitor or modify execution. |
-| `media_store` | `BaseMediaStore` | `None` | Backend for storing uploaded media files (images, audio, documents). Enables agents to handle multimodal input. |
-| `shutdown_timeout` | `float` | `30.0` | Seconds to wait for graceful shutdown during cleanup. |
-
----
+The options you will reach for: `tools`, `max_iterations` (default `3`, counted per turn and kept when a paused or stopped run resumes), `plan_system_prompt`, `reflect_system_prompt`, `plan_model` and `reflect_model` (fall back to `model`), and `plan_reasoning_config` and `reflect_reasoning_config`. The other `Agent` options (`memory`, `retry_config`, `fallback_models`, `trim_context`, `client`, `mcp_auth`, `skills`, `tools_tags`, `extra_messages`, `multimodal_config`) apply to both inner agents, and extra keyword arguments such as `provider` go to both. `compile()` takes the same arguments as every prebuilt agent. Full tables: [prebuilt agents reference](/docs/reference/python/prebuilt-agents#planactreflectagent).
 
 ## Examples
 
@@ -175,6 +80,8 @@ from dotenv import load_dotenv
 from tenxgraph.prebuilt.agent import PlanActReflectAgent
 from tenxgraph.core.state import Message
 
+load_dotenv()
+
 def fetch_page(url: str) -> str:
     """Fetch a page. Replace with your own fetcher or an MCP server."""
     return f"Content of {url}"
@@ -184,8 +91,6 @@ def search_web(query: str) -> str:
     """Search the web. Replace with your search API or an MCP server."""
     return f"Results for: {query}"
 
-
-load_dotenv()
 
 def summarize_findings(text: str) -> str:
     """Compress a long text to key points."""
@@ -219,15 +124,7 @@ Override the default prompts to steer the agent's behavior. This is useful for d
 ```python
 from tenxgraph.prebuilt.agent import PlanActReflectAgent
 
-def fetch_page(url: str) -> str:
-    """Fetch a page. Replace with your own fetcher or an MCP server."""
-    return f"Content of {url}"
-
-
-def search_web(query: str) -> str:
-    """Search the web. Replace with your search API or an MCP server."""
-    return f"Results for: {query}"
-
+# fetch_page and search_web as in the example above
 
 agent = PlanActReflectAgent(
     model="gpt-4o",
@@ -249,200 +146,6 @@ agent = PlanActReflectAgent(
 )
 ```
 
-### Pure reasoning (no tools)
-
-For complex reasoning tasks that do not require external data, run the agent without tools. The plan phase generates reasoning, then the reflect phase evaluates and iterates if needed.
-
-```python
-import asyncio
-from tenxgraph.prebuilt.agent import PlanActReflectAgent
-from tenxgraph.core.state import Message
-
-agent = PlanActReflectAgent(
-    model="gpt-4o-mini",
-    provider="openai",
-    max_iterations=3,
-)
-
-app = agent.compile()
-
-async def main():
-    result = await app.ainvoke(
-        {"messages": [Message.text_message("Devise three approaches to reduce LLM hallucination.")]},
-        config={"thread_id": "reason-1"},
-    )
-    print(result["messages"][-1].text())
-
-asyncio.run(main())
-```
-
-### Persistent conversations with a checkpointer
-
-Add a checkpointer to persist state across runs. Pass the same `thread_id` in the config to resume a conversation or retrieve the previous result.
-
-```python
-import asyncio
-from tenxgraph.prebuilt.agent import PlanActReflectAgent
-from tenxgraph.storage.checkpointer import PgCheckpointer
-from tenxgraph.core.state import Message
-
-def fetch_page(url: str) -> str:
-    """Fetch a page. Replace with your own fetcher or an MCP server."""
-    return f"Content of {url}"
-
-
-def search_web(query: str) -> str:
-    """Search the web. Replace with your search API or an MCP server."""
-    return f"Results for: {query}"
-
-
-agent = PlanActReflectAgent(
-    model="gpt-4o-mini",
-    provider="openai",
-    tools=[fetch_page, search_web],
-    max_iterations=4,
-)
-
-# Requires: pip install "10xgraph[pg_checkpoint]"
-checkpointer = PgCheckpointer(
-    postgres_dsn="postgresql://user:pass@localhost/db",
-    redis_url="redis://localhost:6379",
-)
-app = agent.compile(checkpointer=checkpointer)
-
-async def main():
-    result = await app.ainvoke(
-        {"messages": [Message.text_message("Research recent breakthroughs in solid-state batteries.")]},
-        config={"thread_id": "user-42-research"},
-    )
-    print(result["messages"][-1].text())
-
-asyncio.run(main())
-```
-
-### Using Google Gemini
-
-PlanActReflectAgent works with any provider. Here is an example using Gemini with context trimming enabled to manage token usage on long conversations.
-
-```python
-from tenxgraph.prebuilt.agent import PlanActReflectAgent
-
-def search_web(query: str) -> str:
-    """Search the web. Replace with your search API or an MCP server."""
-    return f"Results for: {query}"
-
-
-agent = PlanActReflectAgent(
-    model="gemini-2.5-flash",
-    provider="google",
-    tools=[search_web],
-    max_iterations=4,
-    trim_context=True,
-)
-
-app = agent.compile()
-```
-
-Set your `GOOGLE_API_KEY` in the environment before running.
-
-### Streaming events
-
-Stream execution events as they happen instead of waiting for the entire run to complete. Each event is printed as the agent plans, acts, and reflects.
-
-```python
-import asyncio
-from tenxgraph.prebuilt.agent import PlanActReflectAgent
-from tenxgraph.core.state import Message
-
-agent = PlanActReflectAgent(
-    model="gpt-4o-mini",
-    provider="openai",
-    max_iterations=3,
-)
-app = agent.compile()
-
-async def main():
-    async for event in app.astream(
-        {"messages": [Message.text_message("Explain the trade-offs between RAG and fine-tuning.")]},
-        config={"thread_id": "stream-1"},
-    ):
-        print(event)
-
-asyncio.run(main())
-```
-
----
-
-## Deploy with the API server and playground
-
-To test your agent interactively or deploy it as a REST API, use the `10xgraph` CLI.
-
-**`graph.py`**, Define your agent:
-
-```python
-from tenxgraph.prebuilt.agent import PlanActReflectAgent
-
-def fetch_page(url: str) -> str:
-    """Fetch a page. Replace with your own fetcher or an MCP server."""
-    return f"Content of {url}"
-
-
-def search_web(query: str) -> str:
-    """Search the web. Replace with your search API or an MCP server."""
-    return f"Results for: {query}"
-
-
-def multiply(a: float, b: float) -> float:
-    """Multiply two numbers."""
-    return a * b
-
-
-agent = PlanActReflectAgent(
-    model="gpt-4o-mini",
-    provider="openai",
-    tools=[fetch_page, search_web, multiply],
-    max_iterations=4,
-)
-
-app = agent.compile()
-```
-
-**`10xgraph.json`**, Point the CLI to your agent:
-
-```json
-{
-  "agent": "graph:app",
-  "env": ".env",
-  "auth": null,
-  "injectq": null,
-  "store": null,
-  "thread_name_generator": null
-}
-```
-
-**`.env`**, Provide API keys:
-
-```
-OPENAI_API_KEY=sk-...
-GOOGLE_API_KEY=AIza...
-```
-
-**Launch the playground** to test interactively:
-
-```bash
-10xgraph dev
-```
-
-**Launch the API server** to serve the agent over HTTP:
-
-```bash
-10xgraph dev --no-open
-```
-
-The server opens Swagger docs at `http://localhost:8000/docs` with full route reference.
-
----
-
 ## Customization
 
 ### Per-phase model selection
@@ -451,58 +154,15 @@ You can use different models for planning and reflection to balance cost and cap
 
 ```python
 agent = PlanActReflectAgent(
-    model="gpt-4o-mini",  # default
-    plan_model="gpt-4o",  # more capable planner
-    reflect_model="gpt-4o-mini",  # cheaper reflector
-    tools=[...],
+    model="gpt-4o-mini",          # default for both phases
+    plan_model="gpt-4o",          # stronger planner
+    plan_reasoning_config={"effort": "high"},
+    reflect_reasoning_config=False,  # no extended reasoning for the reflector
+    tools=[search_web],
 )
 ```
 
-### Extended reasoning for specific phases
-
-Use `plan_reasoning_config` and `reflect_reasoning_config` to enable extended reasoning only where you need it:
-
-```python
-agent = PlanActReflectAgent(
-    model="gpt-4o",
-    plan_reasoning_config={"effort": "high"},  # Enable thinking for planning
-    reflect_reasoning_config=False,  # Skip for reflection to save tokens
-    tools=[...],
-)
-```
-
-### Filter tools by tags
-
-If you have a large set of tools, use tags to offer only a subset to the planner:
-
-```python
-agent = PlanActReflectAgent(
-    model="gpt-4o-mini",
-    tools=[search_tool, fetch_tool, database_query_tool],
-    tools_tags={"web", "research"},  # Only offer tools tagged with these
-)
-```
-
-### Human-in-the-loop approval
-
-Pause before the REFLECT node so a human can review the planner's proposed actions before evaluation:
-
-```python
-app = agent.compile(interrupt_before=["REFLECT"])
-
-# Run interactively
-result = await app.ainvoke(
-    {"messages": [Message.text_message("Research X")]},
-    config={"thread_id": "t1"},
-)
-print(f"Plan state: {result['messages']}")
-
-# Optionally add feedback, then resume
-result = await app.ainvoke(
-    {"messages": [Message.text_message("Also check Y")]},
-    config={"thread_id": "t1"},
-)
-```
+To pause before a node, compile with `interrupt_before=["REFLECT"]` and resume as shown in [Add human approval](/docs/guides/add-human-approval).
 
 ---
 

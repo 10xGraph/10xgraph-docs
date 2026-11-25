@@ -221,7 +221,7 @@ These work differently after the upgrade, with no code change. Check each one ag
   provenance; an unrecognized value reads as unknown. Rename such keys before you upgrade.
 - **`PgVectorStore` schema version 3.** `asetup()` adds two nullable columns and a partial index
   on its own. During a rolling deploy, 1.0 processes keep working but do not hide expired rows
-  and do not write `origin`. See [Schema version 3](/docs/guides/use-pgvector-store#schema-version-3).
+  and do not write `origin`. See [Schema version 3](/docs/guides/use-pgvector-store#table-layout).
 
 - **A cross-provider fallback with `http_client` raises `ValueError`.** An Agent with `http_client`
   refuses a `(model, provider)` fallback on another provider when it is built. That fallback was

@@ -781,7 +781,7 @@ app = graph.compile()
 
 ## Several tracing backends
 
-Each tracing publisher creates its own span for every graph, node, LLM and tool step. With `StateGraph(publisher=[...])` or a `CompositePublisher` of tracing publishers, each span is therefore built once per backend. For several tracing backends at once, prefer the `observability` block in `10xgraph.json` on the API server: there each span is created once and carries the keys of every enabled backend (`phoenix`, `langsmith`, `logfire`; `otlp` adds none). See [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix).
+Each tracing publisher creates its own span for every graph, node, LLM and tool step. With `StateGraph(publisher=[...])` or a `CompositePublisher` of tracing publishers, each span is therefore built once per backend. For several tracing backends at once, prefer the `observability` block in `10xgraph.json` on the API server: there each span is created once and carries the keys of every enabled backend (`phoenix`, `langsmith`, `logfire`; `otlp` adds none). See [Send AI traces](/docs/guides/send-traces#send-traces-from-the-api-server).
 
 A list or `CompositePublisher` is the right tool to combine one tracing publisher with event publishers:
 

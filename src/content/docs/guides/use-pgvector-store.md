@@ -6,7 +6,7 @@ section: "Data and state"
 group: "Long-term memory"
 order: 40
 label: PgVectorStore
-updated: "2026-11-05"
+updated: "2026-11-26"
 ---
 
 `PgVectorStore` keeps long-term memory in one Postgres table, next to the tables `PgCheckpointer` already uses. It searches by vector similarity (pgvector), by full-text rank, or by both fused with Reciprocal Rank Fusion. You run one database for checkpoints and memory, and you can add your own columns to the table.
@@ -45,27 +45,7 @@ Owner rules match `QdrantStore`: every call needs a non-empty `user_id` in `conf
 
 ## Constructor options
 
-| Option | Default | Meaning |
-|---|---|---|
-| `embedding` | required | A `BaseEmbedding`, or `None` for a text-only store. |
-| `dsn` | `None` | Connection string. The store creates a pool and closes it in `arelease()`. |
-| `pool` | `None` | An existing asyncpg pool. The store never closes it. Pass `dsn` or `pool`, not both. |
-| `pool_config` | `None` | Extra `asyncpg.create_pool` arguments for a pool built from `dsn`. |
-| `schema` | `"public"` | Postgres schema of the table. |
-| `table` | `"tenxgraph_memories"` | Table name: letters, digits, underscore, at most 48 characters. |
-| `collection` | `None` | Default collection: a name, or a function `(config) -> name`. |
-| `distance_metric` | `COSINE` | Metric of the HNSW index and the default for searches. |
-| `retrieval_strategy` | `None` | Default search strategy. `None` means `SIMILARITY`, or `TEXT` for a text-only store. |
-| `hybrid_weights` | `(1.0, 1.0)` | `(vector_weight, text_weight)` for `HYBRID` fusion. |
-| `rrf_k` | `60` | The RRF constant `k`. |
-| `hybrid_candidates` | `None` | Rows each list contributes to fusion. `None` means `max(4 * limit, 20)`. |
-| `text_search_config` | `"english"` | Postgres text search configuration. Fixed when the table is created. |
-| `on_embedding_error` | `"fallback"` | `"fallback"` or `"raise"`. See [Embedding fallback](#embedding-fallback-and-backfill). |
-| `acquire_timeout` | `30.0` | Seconds to wait for a free pooled connection (`None` waits). |
-| `tenant_columns` | `None` | Columns that isolate data. See [Multi-tenant data](/docs/guides/multi-tenant-data). |
-| `extra_columns` | `None` | Your own data columns, same page. |
-| `row_level_security` | `False` | Also enforce tenant columns with native Postgres row-level security. |
-| `ddl_lock_timeout` | `10.0` | Seconds a setup DDL statement waits for a table lock before setup raises `SetupLockTimeoutError` (`None` waits forever). See [Setup on a table that is in use](/docs/guides/multi-tenant-data#setup-on-a-table-that-is-in-use). |
+Every option and its default is in the [PgVectorStore reference](/docs/reference/python/memory-stores#pgvectorstore). The ones you set most often are `dsn` or `pool`, `table`, `retrieval_strategy`, `on_embedding_error` and `tenant_columns`.
 
 Collections work as described in [Collections: keeping data apart](/docs/concepts/memory-and-store#collections-keeping-data-apart). One table holds every collection.
 
@@ -172,11 +152,7 @@ One table (default `tenxgraph_memories`) holds all collections.
 
 `origin` and `expires_at` are real columns, not metadata. See [Memory origin and expiry](/docs/concepts/memory-and-store#memory-origin-and-expiry).
 
-### Schema version 3
-
-1.1 adds schema version 3: the two nullable columns `origin` and `expires_at`, plus the partial index `<table>_exp_idx`. `asetup()` applies it on its own, like earlier versions, under the same Postgres advisory lock, so several processes starting together are safe. The columns use `ADD COLUMN IF NOT EXISTS` with no default, so Postgres does not rewrite the table. On an existing table the index is built concurrently. Old rows read as unknown origin and never expire.
-
-During a rolling deploy, 1.0 processes keep working on the v3 table, but they do not hide expired rows and do not write `origin`. A column you declare in `extra_columns` or `tenant_columns` named `origin` or `expires_at` is refused at setup; rename it first.
+Upgrading from 1.0: `asetup()` adds `origin` and `expires_at` (schema version 3) by itself, without a table rewrite. See [Upgrade to 1.1](/docs/project/upgrade-to-1.1) for the rolling-deploy and column-name notes.
 
 Details that matter in production:
 

@@ -4,37 +4,21 @@ description: "Keep message history within your LLM's context window using trimmi
 section: "Build agents"
 group: "Context and dependencies"
 order: 230
-updated: "2026-10-27"
+updated: "2026-11-26"
 faq:
   - q: "Do I need a context manager?"
     a: "Only if your agent runs for many turns and messages accumulate beyond the model's context window. For short-lived conversations, it is not necessary. Use one if you see truncation errors or degraded quality after many exchanges."
   - q: "Which manager should I use?"
     a: "MessageContextManager for simplicity and speed; it trims by message count. SummaryContextManager when long conversations are important and you can afford LLM-based summarization to preserve information."
   - q: "Does SummaryContextManager always summarize?"
-    a: "No. It summarizes only when the message count or token budget is exceeded. Until then, no summarization happens. The summary is optional and additive."
+    a: "No. It summarizes only when the message count or token budget is exceeded. Until then, no summarization happens."
 ---
 
-As an agent runs, messages accumulate in its context. Without limits, the history grows until it exceeds the model's context window, causing failures or degraded performance. Two strategies handle this: **trimming** (discard old messages) and **summarization** (compress old messages into a concise summary). 10xGraph ships both, and you choose based on your use case.
+Keep message history inside the model's context window by trimming old messages (`MessageContextManager`) or summarizing them (`SummaryContextManager`). Why and the trade-offs are in [Context management](/docs/concepts/context-management).
 
 ## Prerequisites
 
 You have a working graph with at least one `Agent` node. Install 10xGraph with the provider extra your model needs, for example `pip install "10xgraph[google-genai]"` for Gemini.
-
-## Why context management matters
-
-Every LLM has a context window limit. In a long-running agent, the message history grows with each interaction:
-
-1. User sends a message (100 tokens)
-2. Agent responds, adds 2-3 messages to context (300 tokens)
-3. User replies, adds another message (100 tokens)
-4. This pattern repeats...
-
-After 20-30 exchanges, the history may exceed the window. When that happens:
-- Some models silently truncate old messages, losing important context.
-- Others return a hard error.
-- Either way, the agent loses coherence and produces poor results.
-
-Context management prevents this by keeping context within budget while preserving what matters most.
 
 ## Option 1: MessageContextManager (trimming)
 
@@ -82,19 +66,7 @@ context_manager = MessageContextManager(
 )
 ```
 
-| Parameter | Type | Default | Notes |
-|---|---|---|---|
-| `max_messages` | `int` | `10` | Number of user-role messages to keep per LLM call. |
-| `remove_tool_msgs` | `bool` | `False` | If `True`, strips AI messages with tool calls and tool result messages. Useful to reduce clutter from long tool traces. |
-
 **Important:** System messages (role `"system"`) are **always kept** and never trimmed. Only user/assistant/tool messages are trimmed, and always from the oldest end, preserving the most recent context.
-
-### When to use MessageContextManager
-
-- Conversations are moderately long (under 100 messages).
-- You do not need to preserve the entire history.
-- Speed and simplicity matter (no LLM call overhead).
-- You have a known context window and can estimate a safe `max_messages`.
 
 ## Option 2: SummaryContextManager (compression)
 
@@ -152,43 +124,12 @@ context_manager = SummaryContextManager(
 )
 ```
 
-| Parameter | Type | Default | Notes |
-|---|---|---|---|
-| `model` | `str` | Required | Model for summarization (e.g., `"gpt-4o-mini"`, `"gemini-2.0-flash"`). Provider is auto-detected. |
-| `max_messages` | `int \| None` | `30` | Summarize when message count exceeds this. `None` disables count-based trigger. |
-| `token_budget` | `int \| None` | `None` | Summarize when estimated tokens exceed this. `None` disables token-budget trigger. Either threshold fires summarization. |
-| `keep_recent` | `int` | `8` | Non-system messages to retain verbatim after summarization. |
-| `remove_tool_msgs` | `bool` | `False` | If `True`, strips tool-related messages before summarization and trimming. |
-| `summary_system_prompt` | `str \| None` | Default | Override the default instruction sent to the summarizer. |
-| `max_summary_tokens` | `int` | `600` | Upper bound on summary output length (tokens). |
-| `api_style` | `"responses" \| "chat"` | `"responses"` | OpenAI only. Use `"chat"` for older or third-party models. |
+All options are in [Context managers](/docs/reference/python/context-manager#summarycontextmanager).
 
 ### How summarization works
 
-1. **Trigger check**: If message count > `max_messages` or tokens > `token_budget`, summarization is needed.
-2. **Split**: The oldest messages (minus `keep_recent` recent ones) are summarized. System messages and the `keep_recent` newest messages are kept.
-3. **Summarize**: An LLM call generates a concise summary of the old messages.
-4. **Store**: The summary is stored in `state.context_summary`. The agent's response system automatically injects it before the recent messages.
-5. **Continue**: Only the recent messages + summary use context budget.
+When the message count passes `max_messages` or the estimated tokens pass `token_budget`, the older messages (all but the `keep_recent` newest and the system messages) are summarized into `state.context_summary`, which the agent sends before the recent messages. A new summary is appended to the previous one and compacted when it grows too long. If the summary call fails, the context is left unchanged and the error is logged.
 
-If summarization fails (e.g., API error), the context is left unchanged and the error is logged.
-
-### When to use SummaryContextManager
-
-- Conversations are long (50+ messages) and the full history matters.
-- You can afford LLM-based compression (adds latency and cost).
-- Information loss from trimming is unacceptable.
-- You want to preserve facts and decisions across many exchanges.
-
-## Choosing between them
-
-| Aspect | MessageContextManager | SummaryContextManager |
-|---|---|---|
-| **Speed** | Fast (no LLM call) | Slower (LLM call when triggered) |
-| **Cost** | Free | Adds per-summarization cost |
-| **Memory loss** | Loses old messages | Compresses to summary |
-| **Setup** | Simple | Requires a summarization model |
-| **Best for** | Short-to-moderate conversations | Long conversations, information-critical |
 
 ## Custom context managers
 
@@ -231,7 +172,7 @@ Enable debug logging to see when trimming happens:
 
 ```python
 import logging
-logging.getLogger("tenxgraph.state").setLevel(logging.DEBUG)
+logging.getLogger("tenxgraph.state").setLevel(logging.DEBUG)  # summary: "tenxgraph.state.summary"
 ```
 
 **For MessageContextManager:**
@@ -251,10 +192,8 @@ Context reduced to 8 messages; cumulative summary length=450 chars
 | Error | Cause | Fix |
 |---|---|---|
 | Context keeps growing despite `trim_context=True` | `context_manager` was not passed to `StateGraph()`. | Add `context_manager=context_manager` to `StateGraph(...)`. |
-| First user message is always dropped | `max_messages=1` is too low and cutting into important messages. | Increase `max_messages` to at least 3-5. |
 | Tool results disappear from responses | `remove_tool_msgs=True` is too aggressive for your use case. | Set `remove_tool_msgs=False` (default) or keep tool results in `keep_recent`. |
-| `SummaryContextManager` fails silently | The summarization model or API key is misconfigured. | Check logs with `logging.getLogger("tenxgraph.state.summary")` set to `DEBUG`. Verify your API key and model name. |
-| Summary gets very long over time | Each summarization appends to the previous summary, accumulating length. | Lower `max_messages` to trigger summarization more often, or increase `keep_recent` to retain more recent context. |
+| Context is never summarized | The summary call fails (model name or API key). | Look for the ERROR "Summarisation LLM call failed; leaving context unchanged" in the `tenxgraph.state.summary` log. |
 | 400 "Invalid `signature` in `thinking` block" with Claude | Trimming or summarizing removed messages that Claude's signed thinking blocks were bound to. | Pass `thinking` with `block_binding` and the beta header to the `Agent`. See [Context managers and thinking signatures](/docs/integrations/anthropic#context-managers-and-thinking-signatures). |
 
 ## Run it in production
@@ -265,4 +204,3 @@ Trimming or summarizing context keeps every thread's stored state and your token
 
 - Learn about [long-term memory](/docs/concepts/memory-and-store) for storing facts across sessions.
 - See how to [set up checkpointing](/docs/guides/set-up-checkpointing) for multi-turn persistence.
-- Understand [dependency injection](/docs/guides/use-dependency-injection) to pass context managers or other services to nodes.

@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Agents and graphs"
 order: 50
 label: Custom nodes
-updated: "2026-10-27"
+updated: "2026-11-26"
 faq:
   - q: "Do all custom nodes need both state and config parameters?"
     a: "No. The runtime inspects the signature and only provides what is declared. Omit state if you only need config, and vice versa."
@@ -117,7 +117,7 @@ def node_state(state: FlagState, config: dict) -> FlagState:
 
 ## Calling an LLM yourself
 
-If your node calls an LLM directly you have three options.
+If your node calls an LLM directly, return its text or hand the raw response to a converter.
 
 **Option 1, return a `str`:** simplest; the framework wraps it as an assistant message.
 
@@ -134,24 +134,7 @@ async def call_llm(state: AgentState, config: dict) -> str:
     return response.choices[0].message.content
 ```
 
-**Option 2, build a `Message` yourself:** gives full control over content blocks, role, and metadata.
-
-```python
-from tenxgraph.core.state import Message
-
-async def call_llm_message(state: AgentState, config: dict) -> Message:
-    client = openai.AsyncOpenAI()
-    response = await client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": state.context[-1].text()}],
-    )
-    return Message.text_message(
-        response.choices[0].message.content,
-        role="assistant",
-    )
-```
-
-**Option 3, use `ModelResponseConverter`:** lets you hand the raw SDK response to 10xGraph's built-in converters so tool calls, content blocks, and metadata are normalized automatically.
+**Option 2, use `ModelResponseConverter`:** lets you hand the raw SDK response to 10xGraph's built-in converters so tool calls, content blocks, and metadata are normalized automatically.
 
 ```python
 from tenxgraph.runtime.adapters.llm.model_response_converter import ModelResponseConverter
@@ -206,19 +189,22 @@ Services are injected by type through the `Inject[T]` default, not by parameter 
 
 | Type | Notes |
 |---|---|
-| `BaseCheckpointer` | Always bound; defaults to `InMemoryCheckpointer`. |
+| `BaseCheckpointer` | Bound at `compile()`; `InMemoryCheckpointer` when you pass none. |
 | `BaseStore` | `None` unless you pass `store=` to `compile()`. |
 | `BasePublisher` | `None` unless you pass `publisher=` to `StateGraph`. |
 | `BaseContextManager` | `None` unless you pass `context_manager=` to `StateGraph`. |
 | `BackgroundTaskManager` | Always bound. |
 | `BaseIDGenerator` | The graph's ID generator. |
+| `CallbackManager` | Bound at `compile()`. |
+| `BaseMediaStore` | Only when you pass `media_store=` to `compile()`. |
 
-The framework binds these when the graph is built and compiled. A service that was not configured resolves to `None`, so guard for it. Wrap each injected parameter in `fresh()` (from `tenxgraph.utils.injection`) so it is resolved from the active container on every call. Without it, an `Inject[...]` default keeps the first object it resolved for the life of the process.
+A service that was not configured resolves to `None`, so guard for it. Wrap each injected parameter in `fresh()` (from `tenxgraph.utils.injection`) so it is resolved from the active container on every call. Without it, an `Inject[...]` default keeps the first object it resolved for the life of the process.
 
 For your own services, bind them first:
 
 ```python
 from injectq import InjectQ, Inject
+from tenxgraph.utils.injection import fresh
 
 class Analytics:
     def record(self, event: str, meta: dict) -> None:
@@ -227,11 +213,12 @@ class Analytics:
 InjectQ.get_instance().bind_instance(Analytics, Analytics())
 
 def track(state: AgentState, config: dict, analytics: Analytics = Inject[Analytics]) -> list:
+    analytics = fresh(analytics)
     analytics.record("node_visited", {"thread": config["thread_id"]})
     return []
 ```
 
-See [use-dependency-injection.md](/docs/guides/use-dependency-injection) for the full DI reference.
+Bind before `compile()`: compile builds every resolver and fails on a binding it cannot resolve. See [Use dependency injection](/docs/guides/use-dependency-injection).
 
 ---
 
@@ -282,22 +269,9 @@ def router(state: AgentState, config: dict) -> Command:
     return Command(goto=END)
 ```
 
+`Command(state=new_state)` replaces the whole state.
+
 Use `Command` for exceptional branching. For normal routing, prefer `add_conditional_edges`, it is easier to visualize and test.
-
----
-
-## Sync vs async, quick reference
-
-```python
-# Both are valid.
-
-def sync_node(state: AgentState, config: dict) -> str:
-    return "sync result"
-
-async def async_node(state: AgentState, config: dict) -> str:
-    await asyncio.sleep(0)   # any async work here
-    return "async result"
-```
 
 ---
 
@@ -366,26 +340,13 @@ result = app.invoke(
 print(result["messages"][-1].text())
 ```
 
----
-
-## What you learned
-
-- Any Python function (sync or async) can be a graph node, no class required.
-- The runtime auto-injects `state` and `config` by parameter name.
-- Framework services (checkpointer, store, publisher, etc.) are requested via `Inject[T]` defaults.
-- Your own services are registered with `InjectQ.get_instance().bind_instance(...)` and injected the same way.
-- Return a `str`, `Message`, `list`, `AgentState`, or `Command`. Update state fields by changing `state` and returning it.
-
----
-
 ## Run it in production
 
-Nodes run inside the server's per-run limits (`recursion_limit`, `node_timeout`, `tool_timeout`), so a stuck custom node ends with a timeout error instead of hanging the worker. See [Errors and limits](/docs/concepts/errors-and-limits) and [Production readiness](/docs/production).
+Nodes run inside the per-run limits (`recursion_limit`, `node_timeout`, `tool_timeout`), so a stuck node ends with a timeout error. See [Errors and limits](/docs/concepts/errors-and-limits) and [Production readiness](/docs/production).
 
 ## Next steps
 
 - [Choosing a building block](/docs/concepts/choosing-a-building-block) - when to use custom nodes, Agents, and prebuilt agents.
-- [Dependency injection reference](/docs/guides/use-dependency-injection) - full guide to InjectQ bindings and injectable parameters.
 - [Build a graph](/docs/guides/build-a-graph) - wire custom nodes into a full workflow.
 - [Configure Agent](/docs/guides/configure-agent) - Agent constructor options and customization.
 - [Routing and Command](/docs/concepts/callbacks-and-command) - control flow with conditionals and Command returns.

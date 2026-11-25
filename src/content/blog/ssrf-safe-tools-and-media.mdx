@@ -20,7 +20,7 @@ An agent that browses or reads files from links sends requests that you did not 
 
 10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow.
 
-Two places in 10xGraph fetch a URL on behalf of someone else: the prebuilt `fetch_url` tool, and the media path that downloads a link a client put in a message. Both use the same small HTTP client with fixed rules. This post lists the rules, the policy you can tune, and the check the API does before a run starts. Reference: [Web tools](/docs/guides/prebuilt/web-tools) and the [security model](/docs/production/security-model).
+Two places in 10xGraph fetch a URL on behalf of someone else: the prebuilt `fetch_url` tool, and the media path that downloads a link a client put in a message. Both use the same small HTTP client with fixed rules. This post lists the rules, the policy you can tune, and the check the API does before a run starts. Reference: [Prebuilt tools](/docs/guides/prebuilt-tools) and the [security model](/docs/production/security-model).
 
 <Callout type="note" title="fetch_url is deprecated">
 `fetch_url` is deprecated in 10xGraph 1.1.0 and will be removed in 2.0. The media path and the shared client are not affected. If you write your own fetch tool, the rules below are the ones to copy.

@@ -5,14 +5,14 @@ section: "Build agents"
 group: "Agents and graphs"
 order: 20
 label: Build a graph
-updated: "2026-10-27"
+updated: "2026-11-26"
 faq:
   - q: "What imports do I need?"
     a: "Import `StateGraph`, `Agent`, `ToolNode` from `tenxgraph.core.graph`, `AgentState` and `Message` from `tenxgraph.core.state`, and `START`, `END` from `tenxgraph.utils`."
   - q: "How do I route between nodes?"
     a: "Use `add_edge()` for static routes and `add_conditional_edges()` with a function that returns a node name or looks up the name in a map."
   - q: "Do I need a checkpointer?"
-    a: "No; graphs default to in-memory state. Add a checkpointer to `compile()` for persistence across runs."
+    a: "No. Without one, `compile()` uses an `InMemoryCheckpointer` (lost on restart). Pass a durable checkpointer to `compile()` to keep threads across restarts."
 ---
 
 `StateGraph` is the core orchestration primitive in 10xGraph. You construct a workflow by adding nodes (functions, `Agent` instances, or `ToolNode` instances), connecting them with edges, and compiling to get a runnable `CompiledGraph`. This guide walks you through building, wiring, and running a graph end to end.
@@ -53,8 +53,6 @@ def get_weather(city: str) -> str:
 def multiply(a: float, b: float) -> float:
     """Multiply two numbers."""
     return a * b
-
-# Never pass model output to eval(): do the arithmetic in a typed function like this one.
 ```
 
 ## Create a ToolNode
@@ -96,7 +94,7 @@ graph.add_node("TOOL", tool_node)
 # Conditional routing: if the agent produced tool calls, go to TOOL, else END
 def should_use_tools(state: AgentState) -> str:
     last = state.context[-1] if state.context else None
-    if last and last.role == "assistant" and getattr(last, "tools_calls", None):
+    if last and last.role == "assistant" and last.tools_calls:
         return "TOOL"
     return END
 
@@ -109,15 +107,7 @@ graph.add_edge("TOOL", "MAIN")
 graph.set_entry_point("MAIN")
 ```
 
-### Key graph methods
-
-| Method | Purpose |
-|---|---|
-| `add_node(name, func)` | Add a node. The name is a string; `func` is a callable, `Agent`, or `ToolNode`. |
-| `add_edge(from_node, to_node)` | Add a static route: always go from `from_node` to `to_node`. |
-| `add_conditional_edges(from_node, condition, path_map)` | Add dynamic routing. `condition(state)` returns a key; `path_map` maps keys to node names. Or omit `path_map` and have `condition` return the node name directly. |
-| `set_entry_point(node_name)` | Set the starting node. Shorthand for `add_edge(START, node_name)`. |
-| `compile(checkpointer=None, store=None, ...)` | Build the executable graph. Returns a `CompiledGraph`. |
+All `StateGraph` methods are in the [graph reference](/docs/reference/python/graph).
 
 ## Compile
 
@@ -127,7 +117,7 @@ Once the graph is wired, compile it to get a runnable `CompiledGraph`:
 app = graph.compile()
 ```
 
-Compilation validates the graph structure and prepares it for execution. Without a `checkpointer`, the graph uses an `InMemoryCheckpointer`: threads keep their state while the process runs, and everything is lost on restart. For state that survives restarts, pass a durable checkpointer (the SQLite one needs `pip install "10xgraph[sqlite_checkpoint]"`):
+Without a `checkpointer`, the graph uses an `InMemoryCheckpointer`: threads keep their state while the process runs, and everything is lost on restart. For state that survives restarts, pass a durable checkpointer (the SQLite one needs `pip install "10xgraph[sqlite_checkpoint]"`):
 
 ```python
 from tenxgraph.storage.checkpointer import SqliteCheckpointer
@@ -171,24 +161,7 @@ asyncio.run(main())
 
 ## Run config: thread_id, user_id, and more
 
-The `config` dict controls runtime behavior. Most keys are optional:
-
-| Key | Default | Purpose |
-|---|---|---|
-| `thread_id` | UUID (auto-generated, with a logged warning) | Conversation thread ID. Used by the checkpointer to save and load state. Pass one explicitly for any run you may resume or stop. |
-| `user_id` | `"anonymous"` | User identifier. Passed to tools and event publishers. |
-| `recursion_limit` | 25 | Max node execution steps. Prevents infinite loops; raises `GraphRecursionError` if exceeded. |
-
-Other reserved keys are set by the runtime and should not be passed:
-
-- `run_id`: unique execution ID.
-- `is_stream`: true if this is a streaming run.
-- `timestamp`: run start time.
-
-If you enable JWT auth on the API server, two additional keys are injected:
-
-- `user_id`: authenticated user.
-- `user`: the auth object or claims.
+`thread_id` names the conversation (pass one for any run you may resume or stop; without it a random id is used and a warning is logged), `user_id` the caller (default `"anonymous"`, also with a warning) and `recursion_limit` the step cap (default 25). The full list is in [What goes in the run config?](/docs/concepts/state-graph#what-goes-in-the-run-config).
 
 Extra keys in `config` are kept and are readable by nodes that take `config`:
 
@@ -203,7 +176,7 @@ To set fields on a custom state at invoke time, pass them under a `"state"` key 
 
 ## Handle tool errors
 
-When a tool raises an exception, the error is caught and returned as a `ToolResultBlock` with the error message. The agent sees the error and can retry or report it.
+When a tool raises an exception, `ToolNode` catches it and returns a failed tool result. The model gets only `Tool '<name>' failed with an internal error (reference <id>).`; the exception text stays in the server log. To give the model a reason it can act on, return `ToolResult(message=..., is_error=True)` instead of raising.
 
 ```python
 def divide(a: float, b: float) -> float:
@@ -213,7 +186,7 @@ def divide(a: float, b: float) -> float:
     return a / b
 ```
 
-When the agent calls `divide(10, 0)`, the error is turned into a tool result and sent back to the agent in the next message. The agent can decide to inform the user or try a different approach.
+When the agent calls `divide(10, 0)`, the model sees that the tool failed and can try another approach or tell the user.
 
 ## Conditional routing patterns
 
@@ -249,20 +222,6 @@ category_map = {
 graph.add_conditional_edges("categorizer", get_category, category_map)
 ```
 
-### Tool call detection (common pattern)
-
-Check if the last message from the agent contains tool calls:
-
-```python
-def should_use_tools(state: AgentState) -> str:
-    last_msg = state.context[-1] if state.context else None
-    if last_msg and last_msg.role == "assistant" and getattr(last_msg, "tools_calls", None):
-        return "tools"
-    return "end"
-
-graph.add_conditional_edges("agent", should_use_tools, {"tools": "tool_node", "end": END})
-```
-
 ## Complete example
 
 Here is a working agent that can check weather and do math:
@@ -294,7 +253,7 @@ graph.add_node("TOOL", tool_node)
 
 def should_use_tools(state: AgentState) -> str:
     last = state.context[-1] if state.context else None
-    if last and last.role == "assistant" and getattr(last, "tools_calls", None):
+    if last and last.role == "assistant" and last.tools_calls:
         return "TOOL"
     return END
 

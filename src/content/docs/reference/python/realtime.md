@@ -40,7 +40,7 @@ Audio formats: `INPUT_SAMPLE_RATE = 16000` Hz (PCM16), `OUTPUT_SAMPLE_RATE = 240
 
 ## AudioAgent
 
-`AudioAgent` is the prebuilt builder for realtime audio-to-audio sessions. It mirrors `ReactAgent`, but wraps a `LiveAgent` as the graph root and is driven by `CompiledGraph.arealtime()` instead of `invoke` or `stream`. Only Gemini Live is supported. For a walkthrough, see [Audio agent](/docs/guides/prebuilt/audio-agent).
+`AudioAgent` is the prebuilt builder for realtime audio-to-audio sessions. It mirrors `ReactAgent`, but wraps a `LiveAgent` as the graph root and is driven by `CompiledGraph.arealtime()` instead of `invoke` or `stream`. Only Gemini Live is supported. For a walkthrough, see [Use realtime audio](/docs/guides/use-realtime-audio).
 
 ```python title="audio_session.py"
 import asyncio

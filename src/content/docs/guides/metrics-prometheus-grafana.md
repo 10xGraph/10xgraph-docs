@@ -5,7 +5,7 @@ section: "Observability"
 group: "Metrics"
 order: 20
 label: Prometheus and Grafana
-updated: "2026-11-09"
+updated: "2026-11-26"
 ---
 
 The API server and the background worker can export metrics: request rate and latency, task throughput, node and tool timing, and LLM latency and token use. You turn this on with the `metrics` block in `10xgraph.json`. It is separate from AI tracing, which sends spans to Logfire, LangSmith, Phoenix or an OTLP endpoint.
@@ -40,14 +40,7 @@ The `metrics` extra installs the OpenTelemetry SDK, the FastAPI instrumentation,
 }
 ```
 
-| Key | Type | Default | Purpose |
-|---|---|---|---|
-| `metrics.enabled` | boolean | `false` | Turn metrics on |
-| `metrics.export` | string | none | `otlp` (push) or `prometheus` (scrape). Required when `enabled` is `true` |
-| `metrics.otlp.endpoint` | string or null | `null` | OTLP HTTP base URL. `/v1/metrics` is appended unless present. Required for `otlp` unless `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set |
-| `metrics.prometheus.path` | string | `/metrics` | Route the API serves for scraping. Must start with `/`, must not be `/`, and must not match any API route (the server refuses to start and names the clashing route). The route skips the auth guard and rate limit, and its own requests are left out of the HTTP metrics |
-| `metrics.prometheus.worker_port` | integer | `9464` | Port of the worker's scrape server |
-| `metrics.latency_buckets_ms` | array of numbers | 50 to 120000 (see example) | Histogram bucket bounds in milliseconds. Positive and strictly ascending |
+Every key, with types and defaults, is in the [configuration reference](/docs/reference/api-cli/configuration#metrics). `export` is required when `enabled` is `true`. The scrape `path` must start with `/`, must not be `/` and must not match an API route; the server refuses to start and names the clashing route.
 
 Unknown keys inside `metrics` are config errors. The config editor (`10xgraph config`) edits the same block under "Export metrics".
 
@@ -140,7 +133,7 @@ Names below are as Prometheus shows them. OpenTelemetry names turn dots into und
 | `tenxgraph_task_runs_total` | counter | `task`, `status` | Background task runs. `status` is `queued`, `success`, `failure` or `cancelled`. The API process counts `queued` when it enqueues a task; the worker counts the rest |
 | `tenxgraph_task_duration_milliseconds` | histogram | `task` | Background task duration, once per attempt |
 
-The framework also records checkpointer, background-task-manager and run-recovery metrics. See [Observability](/docs/server/observability#framework-instrumented-metrics) for the full list. Task metrics are described in [Background tasks](/docs/server/background-tasks).
+The framework also records checkpointer, publisher (`tenxgraph.publish.duration`, `tenxgraph.publish.dropped`), background-task-manager and run-recovery metrics. See [Observability](/docs/server/observability#framework-instrumented-metrics) for the full list. Task metrics are described in [Background tasks](/docs/server/background-tasks).
 
 The names are the same whether Prometheus scrapes the exporter or receives the push through its OTLP receiver (directly or through a collector). HTTP also exports `http_server_request_body_size_bytes_*` and `http_server_response_body_size_bytes_*`, and Prometheus adds a `target_info` series with the resource attributes.
 
@@ -196,11 +189,11 @@ A streaming request counts as one request for its whole life. `/v1/graph/stream`
 
 ## Shutdown flush
 
-On SIGTERM the API and the worker push their last metrics before exiting, so requests sent just before the stop still reach Prometheus. On shutdown, the last step of the API and the worker is to push the final metrics and flush AI spans. Each is bounded to 5 seconds, and a timeout logs a warning instead of blocking shutdown. With a collector that does not answer, the process can still take up to the exporter timeout (10 seconds) to exit, after your leases and connections are released. Give your container stop grace period at least that long.
+On shutdown, the last step of the API and the worker is to push the final metrics and flush AI spans. Each is bounded to 5 seconds, and a timeout logs a warning instead of blocking shutdown. With a collector that does not answer, the process can still take up to the exporter timeout (10 seconds) to exit, after your leases and connections are released. Give your container stop grace period at least that long.
 
 ## Use it with the legacy OTEL_ENABLED settings
 
-`OTEL_ENABLED=true` with `OTEL_EXPORTER_OTLP_ENDPOINT` still works as before: traces and metrics over OTLP gRPC. When the `metrics` block is enabled, it owns metrics. The legacy path then keeps sending traces only, and the server logs that metrics come from the metrics block. The `metrics` block uses `metrics.otlp.endpoint`, else the standard `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`, and it never reads the legacy OTLP gRPC settings. See [Observability](/docs/server/observability).
+`OTEL_ENABLED=true` with `OTEL_EXPORTER_OTLP_ENDPOINT` still works as before: traces and metrics over OTLP gRPC. When the `metrics` block is enabled, it owns metrics. The legacy path then keeps sending traces only, and the server logs that metrics come from the metrics block. See [Server observability](/docs/server/observability#metrics).
 
 The server adds `http` to `OTEL_SEMCONV_STABILITY_OPT_IN` (keeping any other values you set, and leaving `http` or `http/dup` alone) to get the stable HTTP metric names used above. OpenTelemetry reads that variable once. If another library initialised instrumentation first, the server logs a warning that the HTTP metrics use the older names and units; set the variable in the environment to fix it.
 
@@ -222,7 +215,7 @@ The server adds `http` to `OTEL_SEMCONV_STABILITY_OPT_IN` (keeping any other val
 
 ## See also
 
-- [Send traces to an OTLP endpoint](/docs/guides/send-traces-to-otlp): AI traces to a collector, Tempo or Jaeger.
-- [Server observability](/docs/server/observability): logs, metrics, tracing and Sentry on the API server.
+- [Send AI traces](/docs/guides/send-traces): AI traces to a collector, Tempo, Jaeger, Phoenix, Logfire or LangSmith.
+- [Server observability](/docs/server/observability): logs, the legacy OTEL path, Sentry error tracking and the framework metric list.
 - [Background tasks](/docs/server/background-tasks): task metrics and the worker.
 - [Configure the API server](/docs/reference/api-cli/configuration): all `metrics` and `observability` keys.

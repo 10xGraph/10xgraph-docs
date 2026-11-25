@@ -1,37 +1,23 @@
 ---
 title: Stream graph responses
-description: "Stream token-by-token output using astream(), handle StreamChunk events, and pause with interrupts"
+description: 'Stream token-by-token output using astream(), handle StreamChunk events, and pause with interrupts'
 section: "Build agents"
 group: "Streaming, media and realtime"
 order: 280
 label: Stream responses
-updated: "2026-10-27"
+updated: "2026-11-26"
 faq:
-  - q: "When should I use astream() instead of ainvoke()?"
-    a: "Use astream() to display tokens as they arrive (lower latency in chat UIs), observe intermediate progress during long runs, or cancel execution early. Use ainvoke() when you need the final result and can wait for the entire graph to complete."
-  - q: "What's the difference between chunk.message.delta and a complete message?"
-    a: "delta=True means the message is partial (token-by-token text arriving). delta=False means the complete message is ready. Both carry text in chunk.message.text()."
-  - q: "Do I need to configure streaming, or does it work with any graph?"
-    a: "Streaming works with any compiled graph without configuration. Just call astream() instead of ainvoke(). To pause at specific nodes, pass interrupt_before or interrupt_after to compile()."
+  - q: 'When should I use astream() instead of ainvoke()?'
+    a: 'Use astream() to display tokens as they arrive (lower latency in chat UIs), observe intermediate progress during long runs, or cancel execution early. Use ainvoke() when you need the final result and can wait for the entire graph to complete.'
+  - q: 'What is the difference between chunk.message.delta and a complete message?'
+    a: 'delta=True means the message is partial (token-by-token text arriving). delta=False means the complete message is ready. Both carry text in chunk.message.text().'
 ---
 
-## Overview
-
-Streaming lets you emit graph responses incrementally as they execute, token by token. Instead of waiting for the full result, your frontend receives chunks in real time, enabling responsive chat interfaces, visible progress during tool use, and the ability to cancel long operations. `CompiledGraph.astream()` yields `StreamChunk` objects that you process based on the event type (message, state, tool update, error).
-
-### When to stream
-
-- **Chat interfaces**: Display assistant responses as they arrive, improving perceived latency.
-- **Long-running workflows**: Show progress during extended operations (search, file processing, multiple tool calls).
-- **Cancellation**: Stop the graph mid-execution if the user requests it or closes the connection.
-
-When to prefer `ainvoke()` instead: if you only need the final result, do not need to show progress, and are willing to wait for the entire run to finish.
-
----
+`CompiledGraph.astream()` yields `StreamChunk` objects as the graph runs. Why and when to stream, and the transports, are in [Streaming](/docs/concepts/streaming).
 
 ## Set up a graph for streaming
 
-Streaming requires no special configuration. Any compiled graph can be streamed (`compile()` uses an `InMemoryCheckpointer` by default). Install a provider extra for the model, for example `pip install "10xgraph[openai]"`. If you want the graph to pause at specific nodes (for human-in-the-loop workflows), configure `interrupt_before` or `interrupt_after`:
+Any compiled graph can be streamed. Install a provider extra, for example `pip install "10xgraph[openai]"`.
 
 ```python
 from tenxgraph.core.graph import StateGraph, Agent
@@ -45,14 +31,10 @@ graph.add_node("MAIN", agent)
 graph.set_entry_point("MAIN")
 graph.add_edge("MAIN", END)
 
-# Compile with checkpointer; streaming works by default
 app = graph.compile(
     checkpointer=InMemoryCheckpointer(),
-    interrupt_before=["MAIN"],  # optional: pause before MAIN runs
 )
 ```
-
-The `checkpointer` is required to save the paused state when using interrupts. For basic streaming without pauses, `InMemoryCheckpointer` is sufficient for development; use `PgCheckpointer` in production for durable, multi-replica persistence.
 
 ---
 
@@ -90,37 +72,13 @@ asyncio.run(stream_chat(app, "What is 2 + 2?", thread_id="session-1"))
 ```
 
 **Key patterns:**
-- Always branch on `chunk.event` before reading data.
 - Usually one of `chunk.message`, `chunk.state` and `chunk.data` is set, but not always. A tool result chunk has event `message` and carries both the tool `Message` and `chunk.data` (`status`, `tool_name`, `args`, `tool_call_id`). Branch on `chunk.event`, then check each field for `None` before you read it.
-- `chunk.message.text()` extracts text from a message's content blocks (do not access `.content` directly).
-- Use `async for` to iterate; `astream()` is an async generator.
 - The first `MESSAGE` chunk is an echo of your input messages (role `user`). Skip it if you do not want to display it.
-- With the default `LOW` granularity only `MESSAGE` and `ERROR` chunks are yielded.
+- With the default `LOW` granularity you get `MESSAGE` and `ERROR` chunks, plus `UPDATES` chunks that announce a pause.
 
 ---
 
-## Understand StreamChunk structure
-
-Every chunk yielded by `astream()` is a `StreamChunk` with these fields:
-
-| Field | Type | When set | What it contains |
-|---|---|---|---|
-| `event` | `StreamEvent` | Always | One of `MESSAGE`, `STATE`, `UPDATES`, `ERROR` (string values are lowercase: `"message"`, `"state"`, `"updates"`, `"error"`) |
-| `message` | `Message \| None` | `event == MESSAGE` | A Message object; use `.text()` to extract text |
-| `state` | `AgentState \| None` | `event == STATE` | Current graph state (depends on `response_granularity`) |
-| `data` | `dict \| None` | `UPDATES`, `ERROR`, and some tool `MESSAGE` chunks | Event-specific metadata (tool status, error reason) |
-| `thread_id` | `str \| None` | Sometimes | The thread ID from config |
-| `run_id` | `str \| None` | Sometimes | The run ID from config |
-| `metadata` | `dict \| None` | Sometimes | Extra metadata (e.g., `"node"` and `"step"` keys on `STATE` chunks) |
-
-### Event types
-
-- **`StreamEvent.MESSAGE`**: A Message from the graph (assistant response, tool result, or tool progress). Read `chunk.message`.
-- **`StreamEvent.STATE`**: A snapshot of the graph state (only when `response_granularity` is `PARTIAL` or `FULL`). Read `chunk.state`.
-- **`StreamEvent.UPDATES`**: Lifecycle updates such as `invoking_node`, `node_invoked`, `invoking_tool` and `graph_invoked` (only with `FULL`). Read `chunk.data` for `{"status": "...", "node": "..."}`; tool updates also carry `tool_name`.
-- **`StreamEvent.ERROR`**: A tool failure. Read `chunk.data` for `{"status": "tool_failed", "reason": "...", "error": "..."}`.
-
----
+The chunk fields and event types are in [Streaming](/docs/concepts/streaming#streamchunk-model). Tool failures and denials arrive as `ERROR` chunks with `data["status"]` `tool_failed` or `tool_denied`.
 
 ## Differentiate partial from complete messages
 
@@ -141,7 +99,7 @@ async for chunk in app.astream(
     if chunk.message.delta:
         # Partial message: update the live display buffer
         display_buffer.append(chunk.message.text())
-        update_ui_stream(display_buffer.join(""))
+        update_ui_stream("".join(display_buffer))
     else:
         # Complete message: finalize
         final_text = chunk.message.text()
@@ -153,13 +111,7 @@ async for chunk in app.astream(
 
 ## Control output detail with ResponseGranularity
 
-The `response_granularity` parameter controls how much state information is included in chunks:
-
-| Value | What you get | Use case |
-|---|---|---|
-| `ResponseGranularity.LOW` (default) | `MESSAGE` and `ERROR` chunks only | Chat UI; minimal overhead |
-| `ResponseGranularity.PARTIAL` | Adds `STATE` chunks | Monitor conversation history without lifecycle noise |
-| `ResponseGranularity.FULL` | Adds `STATE` and `UPDATES` chunks (node and tool lifecycle, final `graph_invoked`) | Debugging, observability, rebuilding state on the client |
+`response_granularity` adds chunks: `PARTIAL` adds `STATE` chunks, `FULL` adds `UPDATES` progress chunks and a final summary chunk. The full table is in [Streaming](/docs/concepts/streaming#response-granularity).
 
 ```python
 async for chunk in app.astream(
@@ -176,8 +128,6 @@ async for chunk in app.astream(
         print(chunk.message.text(), end="", flush=True)
 ```
 
-`FULL` mode increases network traffic and processing; use it only when you need full observability.
-
 ---
 
 ## Observe tool calls and progress
@@ -185,7 +135,7 @@ async for chunk in app.astream(
 `UPDATES` chunks are only yielded with `ResponseGranularity.FULL`. When the graph invokes a tool, you receive:
 1. An `UPDATES` chunk when the tool starts (status = "invoking_tool").
 2. A `MESSAGE` chunk with the tool result (role = "tool").
-3. An `ERROR` chunk with status `tool_failed` if the tool returned an error.
+3. An `ERROR` chunk with status `tool_failed` (or `tool_denied` when a policy blocked it) instead of a result when the call failed.
 
 The producing node name is in `chunk.metadata.get("node")` for state chunks and `chunk.data.get("node")` for update and error chunks:
 
@@ -271,13 +221,11 @@ messages = await stream_to_messages(
 # messages now contains all final messages from the run
 ```
 
-Alternatively, run with `ResponseGranularity.FULL` and extract the `context` list from the last `STATE` chunk.
-
 ---
 
 ## Stop a stream early
 
-To cancel a running stream (e.g., if the user closes the chat connection), call `astop()` from another task. The graph checks the stop flag between nodes and halts:
+To cancel a running stream (e.g., if the user closes the chat connection), call `astop()` from another task:
 
 ```python
 import asyncio
@@ -314,18 +262,15 @@ The sync equivalent is `app.stop(config)` for non-async contexts.
 
 ### Stop behavior
 
-- Stop is checked between node executions; a running node or tool call finishes before the graph halts.
-- `astop()` needs a thread with a checkpointer. It returns `{"ok": True, "running": True}` when a stop was recorded, or `{"ok": True, "running": False, "reason": "not-running"}` when the thread is idle or paused.
+- A stop cancels the running node or tool: the run polls for it about every second while a node runs and saves the thread as interrupted.
+- `astop()` returns `{"ok": True, "running": True}` when a stop was recorded, or `{"ok": True, "running": False, "reason": "not-running"}` when the thread is idle or paused. It works without a checkpointer for a run in the same process.
+- Leaving the `async for` loop early (`break`) also saves the thread as interrupted.
 
 ---
 
 ## Pause and resume with interrupts
 
-For human-in-the-loop workflows, pause the graph at specific nodes to let a human review or approve the state before continuing.
-
 ### Compile with interrupts
-
-Declare which nodes should pause:
 
 ```python
 app = graph.compile(
@@ -354,9 +299,6 @@ print("\nPaused. Human review happening...")
 On the same `thread_id`, call `astream()` or `ainvoke()` again with new input. The graph resumes from the pause point. (If the pause came from an `interrupt()` call inside a node, resume with `{"resume": value}` instead; see [Add human approval](/docs/guides/add-human-approval).)
 
 ```python
-# Simulate human approval
-await asyncio.sleep(2.0)
-
 # Resume on the same thread
 async for chunk in app.astream(
     {"messages": [Message.text_message("Approved. Continue with execution.")]},
@@ -368,16 +310,11 @@ async for chunk in app.astream(
 print("\nWorkflow completed.")
 ```
 
-The new message is appended to the conversation history and the graph continues from where it paused. The checkpoint preserves everything between pauses, so your state is consistent.
-
 ---
 
 ## Handle errors in streams
 
-Errors from nodes or tools emit `StreamEvent.ERROR` chunks. The `chunk.data` dict contains:
-- `"reason"`: Human-readable error description.
-- `"error"`: The error message from the failed tool.
-- `"status"`, `"tool_name"`, `"tool_call_id"`, `"node"`: which tool failed.
+Tool failures emit `StreamEvent.ERROR` chunks. `chunk.data` holds `status`, `reason`, `error`, `tool_name`, `tool_call_id` and `node`.
 
 ```python
 async for chunk in app.astream(
@@ -388,19 +325,11 @@ async for chunk in app.astream(
         reason = chunk.data.get("reason", "unknown error")
         print(f"Error occurred: {reason}")
 
-        # Decide whether to retry, fallback, or fail
-        if "rate_limit" in reason.lower():
-            print("Rate limited. Retrying in 5 seconds...")
-            await asyncio.sleep(5.0)
-        else:
-            print("Fatal error. Stopping.")
-            break
-
     elif chunk.event == StreamEvent.MESSAGE and chunk.message:
         print(chunk.message.text(), end="", flush=True)
 ```
 
-`ERROR` chunks report tool failures. Node exceptions are raised from the `async for` loop, so wrap the loop in `try/except` if you need to handle them.
+`ERROR` chunks report tool failures; the model sees the failed result and the run goes on. A node exception, or the recursion limit, ends the stream by raising from the `async for` loop (after one `ERROR` chunk for the recursion limit), so wrap the loop in `try/except`.
 
 ---
 
@@ -451,7 +380,6 @@ app = graph.compile(checkpointer=InMemoryCheckpointer())
 async def chat_session():
     """Multi-turn streaming conversation."""
     thread_id = "user-session-1"
-    messages = []
 
     async def turn(user_input: str):
         """Run a single conversation turn."""
@@ -488,7 +416,6 @@ Over HTTP the same events arrive as NDJSON from the stream endpoint, or over Web
 
 ## Related guides
 
-- [Build a graph](/docs/guides/build-a-graph): Construct and run graphs without streaming.
 - [Add human approval](/docs/guides/add-human-approval): Use the `interrupt()` function for human-in-the-loop patterns.
 - [Set up checkpointing](/docs/guides/set-up-checkpointing): Choose a checkpointer for production persistence.
-- [Concepts: Streaming](/docs/concepts/streaming): Why streaming, transports (REST, WebSocket), and client-side handling.
+- [Streaming](/docs/concepts/streaming): chunk model, granularity and transports.

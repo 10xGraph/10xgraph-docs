@@ -243,7 +243,7 @@ What leaves your process depends on the sink:
 - **OTEL spans** (plain OTLP, Phoenix, Logfire and LangSmith) carry prompts, completions and tool I/O at `ObservabilityLevel.FULL`, which is the default. With `PhoenixPublisher` (or the `phoenix` entry of the `observability` block) node spans also carry the graph state at `FULL` and `STANDARD`. `SPANS` carries structure, timing and ids only.
 - **Ids.** Spans always carry `user_id`, `thread_id` and `run_id`. Events carry the same ids.
 - **TLS.** We recommend TLS in production whenever you can, because events carry message and tool content. For Redis use a `rediss://` URL, for RabbitMQ an `amqps://` URL, and for Kafka the opt-in `security_protocol`, `ssl_*` and `sasl_*` config keys. See [Emit events from your graph](/docs/guides/use-publishers).
-- **`user_id_mode`** changes how `user_id` appears on OTEL spans: `"raw"` (default, unchanged), `"hash"` or `"mask"`. It does not change Redis, RabbitMQ, Kafka or Console events. See [Hide the user id in traces](/docs/guides/send-traces-to-logfire-langsmith#hide-the-user-id-in-traces).
+- **`user_id_mode`** changes how `user_id` appears on OTEL spans: `"raw"` (default, unchanged), `"hash"` or `"mask"`. It does not change Redis, RabbitMQ, Kafka or Console events. See [Hide the user id in traces](/docs/guides/send-traces#hide-the-user-id-in-traces).
 
 ## Where each sink is configured
 

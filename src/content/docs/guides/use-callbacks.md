@@ -5,18 +5,13 @@ section: "Build agents"
 group: "Control flow"
 order: 270
 label: "Use callbacks and hooks"
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
 Callbacks and hooks let you observe and control graph execution at critical points. 10xGraph provides two levels: **invocation-level callbacks** that fire on every LLM, tool, or MCP call, and **graph-level lifecycle hooks** that fire at structural events like start, end, error, interrupt, and checkpoint. Use them for logging, metrics, tracing, validation, and compliance.
 
-## Goal
-
-By the end of this guide, you will understand when to use callbacks vs lifecycle hooks, have two working examples, and know how to integrate them into your graph.
-
 ## Prerequisites
 
-- Python 3.12+
 - A compiled 10xGraph agent or graph from `/docs/guides/build-a-graph`
 - `pip install "10xgraph[google-genai]"` (or your provider)
 
@@ -34,8 +29,10 @@ Use these for input/output validation, prompt injection protection, logging at i
 - `on_graph_end`: Record metrics, send notifications, or finalize after successful completion.
 - `on_graph_error`: Alert systems or mask sensitive data when the graph fails.
 - `on_interrupt` / `on_resume`: Update external task queues or validate approval data.
-- `on_checkpoint`: Redact sensitive data or replicate state before persistence.
+- `on_checkpoint`: Redact or change state and messages before they are saved.
 - `on_state_update`: Observe every node transition (most granular).
+
+Signatures and return values are in [Lifecycle callbacks](/docs/reference/python/lifecycle-callbacks).
 
 Use lifecycle hooks for observability, compliance, state persistence policy, and human-in-the-loop coordination.
 
@@ -85,6 +82,8 @@ class PromptGuardCallback(BeforeInvokeCallback):
 cbm.register_before_invoke(InvocationType.AI, PromptGuardCallback())
 ```
 
+To block a tool call by policy, raise `ToolDenied` from a `before_invoke` callback for `InvocationType.TOOL` or `InvocationType.MCP`; the model gets a denied result instead of an error it would retry. See [Raise ToolDenied from your own callback](/docs/security/zero-trust-agents#raise-tooldenied-from-your-own-callback).
+
 ### After-invoke: log or modify output
 
 Inspect or transform outputs after the LLM/tool returns:
@@ -126,7 +125,7 @@ class FallbackOnLLMError(OnErrorCallback):
                 "I'm busy. Please try again in a moment.",
                 role="assistant"
             )
-        # Return None to re-raise the error
+        # Return None to re-raise; any value that is not a Message is ignored
         return None
 
 cbm.register_on_error(InvocationType.AI, FallbackOnLLMError())
@@ -200,14 +199,6 @@ result = await app.ainvoke(
 print(f"Final messages: {len(result['messages'])}")
 ```
 
-**Expected output:**
-```
-[START] thread=user_123 trace=a1b2c3d4-...
-[AUDIT] node=agent type=ai function=Agent
-[END] trace=a1b2c3d4-... steps=1 messages=2 duration=0.45s
-Final messages: 2
-```
-
 ## Complete example: compliance audit trail
 
 This example builds a graph that logs every operation and redacts sensitive data before checkpoint:
@@ -273,28 +264,19 @@ result = await app.ainvoke(
 )
 ```
 
+The hook edits the text blocks in place, so the messages in the live state are redacted too and the model sees the redacted text on later turns.
+
 ## Common errors and fixes
 
 | Error | Cause | Fix |
 |---|---|---|
 | `callbacks never fire` | `callback_manager` not passed to `compile()`. | Use `graph.compile(callback_manager=cbm)` explicitly. |
 | `KeyError` or `TypeError` in a before_invoke callback | `input_data` is a dict, not a message list. AI calls get `{"state", "config"}`; tool calls get the tool arguments. | Read `input_data["state"].context` for messages. |
-| `on_error callback changes return type` | An `on_error` callback returned something other than a `Message` or `None`. | Non-`Message` values are ignored with a warning. Return a `Message` to recover, or `None` to re-raise. |
-| `lifecycle hook never fires` | Hook registered after `compile()`. | Register hooks before calling `compile(callback_manager=cbm)`. |
+| `on_error callback changes return type` | An `on_error` callback returned something other than a `Message`. | Non-`Message` values are ignored with a warning. Return a `Message` to recover, or `None` to re-raise. |
 | `on_graph_error doesn't suppress error` | Hooks cannot suppress graph errors. | Use `on_error` callbacks for invocation-level recovery. |
 | `callback blocks the graph` | A callback does slow synchronous work. | Class-based callbacks must define `async def __call__`; avoid blocking I/O inside them. |
 
 ## Variations and options
-
-### Multiple callbacks of the same type
-
-Register several callbacks; they execute in order:
-
-```python
-cbm.register_before_invoke(InvocationType.AI, GuardCallback())
-cbm.register_before_invoke(InvocationType.AI, LoggingCallback())
-# Both fire before every LLM call, in order
-```
 
 ### Selective callback registration
 
@@ -326,28 +308,14 @@ class SimpleValidator(BaseValidator):
 cbm.register_input_validator(SimpleValidator())
 ```
 
-### Combining callbacks and lifecycle hooks
-
-Use callbacks for invocation-level logic and lifecycle hooks for graph-level coordination:
-
-```python
-# Callbacks log each LLM call
-cbm.register_after_invoke(InvocationType.AI, AuditLogCallback())
-
-# Hooks correlate all calls in one run
-cbm.register_lifecycle_hook(ComplianceHook())
-
-app = graph.compile(callback_manager=cbm)
-```
-
 ## Run it in production
 
-Each compiled graph has its own `CallbackManager` (since 1.1.0), so hooks and validators you register on one graph do not run for another. Pass the same `callback_manager` to `compile()` to share one. Hooks run on every request, so keep them fast and do not put secrets in logged payloads. See the [Security model](/docs/production/security-model).
+A graph compiled without `callback_manager` gets its own new `CallbackManager`, so hooks you register on one graph do not run for another. Pass the same `callback_manager` to `compile()` to share one. Hooks run on every request, so keep them fast and do not put secrets in logged payloads. See the [Security model](/docs/production/security-model).
 
 ## Related pages
 
-- [Concepts: Callbacks and Command](/docs/concepts/callbacks-and-command): understand when to use callbacks vs conditional edges
+- [Callbacks and Command](/docs/concepts/callbacks-and-command)
 - [Reference: Callback Manager](/docs/reference/python/callback-manager): full API
 - [Reference: Lifecycle Callbacks](/docs/reference/python/lifecycle-callbacks): all hook signatures and patterns
-- [Guides: Add human approval](/docs/guides/add-human-approval): use lifecycle hooks for interrupt/resume workflows
-- [Guides: Protect against prompt injection](/docs/guides/protect-against-prompt-injection): validate input with callbacks
+- [Add human approval](/docs/guides/add-human-approval)
+- [Zero-trust agents](/docs/security/zero-trust-agents#toolguard): ToolGuard and ToolDenied

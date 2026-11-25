@@ -179,7 +179,7 @@ This endpoint is a development tool built for the playground's Run trace page. T
 
 The TypeScript client wraps this endpoint as `client.observability(threadId, runId?)`.
 
-For per-node spans sent to any OTLP endpoint, see [Send traces to an OTLP endpoint](/docs/guides/send-traces-to-otlp). For Prometheus and Grafana, see [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana). For per-node spans sent to Logfire, LangSmith or Arize Phoenix, see [Send traces to Logfire or LangSmith](/docs/guides/send-traces-to-logfire-langsmith) and [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix).
+For spans sent to an OTLP endpoint, Phoenix, Logfire or LangSmith, see [Send AI traces](/docs/guides/send-traces). For Prometheus and Grafana, see [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana).
 
 ## What is in your traces
 
@@ -187,8 +187,7 @@ Spans carry `user_id`, `thread_id` and `run_id`. Set `"observability": {"user_id
 
 ## Related docs
 
-- [Send traces to Logfire or LangSmith](/docs/guides/send-traces-to-logfire-langsmith)
-- [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix)
+- [Send AI traces](/docs/guides/send-traces)
 - [Authentication and authorization](/docs/server/auth)
 - [Production checklist](/docs/server/production-checklist)
 - [Logging utilities reference](/docs/reference/python/runtime-utilities)

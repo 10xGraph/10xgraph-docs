@@ -5,16 +5,12 @@ section: "Security and access"
 group: "Identity and roles"
 order: 30
 label: "Call services as the user"
-updated: "2026-11-11"
+updated: "2026-11-26"
 faq:
   - q: "Can I forward the user's token to my MCP server?"
     a: "Only if that server accepts the same token, meaning the token was issued for it. Sending a token to a server it was not issued for is token passthrough, which the MCP spec forbids. Use forward_credential for that one case, and a token exchange, a service token or a self-issued token otherwise."
   - q: "Does the credential reach logs, events or checkpoints?"
     a: "No. The credential lives in the run config only. Config copies that leave the run (publisher events, callbacks, traces) go through public_config, which drops it. It is never sent in MCP _meta and never given to background tasks."
-  - q: "Why do tool lists have to be the same for every user?"
-    a: "ToolNode caches the MCP tool list once and shares it across all users. The listing runs mcp_auth with whichever run asks first, so a server that returns a different list per user would show one user's tools to everyone."
-  - q: "Which MCP transports support mcp_auth?"
-    a: "Streamable HTTP and SSE. Stdio and in-memory transports cannot carry HTTP headers and are refused. mcp_auth also needs fastmcp 4.1.7 or later."
 ---
 
 An agent often has to call another service on behalf of the person who started the run: an internal API, an MCP server, a data service. This guide shows how to hand your code the caller's identity and credential at the right moment, and which authentication pattern to build with it.
@@ -39,10 +35,6 @@ The credential stays inside the run. It is not written to logs, publisher events
 **1. Forward the user's token.** Token passthrough is forbidden by the MCP spec: a server must only accept tokens issued for itself. The only safe case is your own server that accepts the same token. `forward_credential` exists for that case and nothing else.
 
 **2. M2M token plus asserted identity.** Your app authenticates to the server with its own service token, set on the transport with `auth=`. The user comes along as data: `pass_user_info_to_mcp=True` sends the caller in the MCP request metadata, and the server reads `ctx.request_context.meta["user"]`. This metadata is unsigned, so the server cannot verify it. Use this pattern only for a trusted internal server; anything that can reach the endpoint can claim any user. For per-user or per-tenant access, use pattern 3 or 4 so the server verifies a token. See [Use MCP tools](/docs/guides/use-mcp#tell-the-mcp-server-who-is-calling).
-
-**3. Self-issued delegation token.** Your app signs a short-lived token for the user (5 minutes, one audience) and the service verifies it with your public key. The service gets a real, expiring, user-scoped credential without an IdP round trip.
-
-**4. Token exchange.** Your app sends the user's token to the IdP and gets back a token for the target audience, as in [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693). The service sees a token the IdP issued for it, with the user as subject.
 
 ## Wiring
 
@@ -255,3 +247,4 @@ The default returns the verified bearer token. See [API authentication](/docs/se
 - [Authorization scopes](/docs/guides/authorization-scopes): Read the caller and check permissions in tools and nodes.
 - [API authentication](/docs/server/auth): Configure `auth`, roles and `BaseAuth`.
 - [Run background jobs](/docs/server/background-tasks): Why jobs get user data and no credential.
+- [Zero-trust agents](/docs/security/zero-trust-agents): `ToolGuard` to require a permission before a tool uses the credential.

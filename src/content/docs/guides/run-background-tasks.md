@@ -4,48 +4,15 @@ description: Launch fire-and-forget async tasks from a node without blocking the
 section: "Background jobs"
 order: 30
 label: "In-process tasks"
-updated: "2026-10-27"
+updated: "2026-11-26"
 faq:
-  - q: When should I use background tasks instead of just returning from my node?
-    a: Use background tasks when the operation is not critical to the current response (e.g., notifications, webhooks, logging). If the operation's result is needed by the user or later in the graph, process it synchronously instead.
-  - q: How long will a background task run if I don't set a timeout?
-    a: Without a timeout, the task runs until completion or the process shuts down. Always set a timeout for I/O operations to prevent hanging tasks from leaking resources.
   - q: What happens to background tasks when the graph shuts down?
-    a: Closing the compiled graph with `aclose()` cancels outstanding background tasks, then waits up to `shutdown_timeout` (default 30 seconds) for the cancellations to finish. To let tasks finish instead, call `await task_manager.wait_for_all(timeout=...)` before closing.
+    a: "`aclose()` lets outstanding background tasks finish within what is left of `shutdown_timeout` (default 30 seconds), then cancels the ones still running. Call `await task_manager.wait_for_all(timeout=...)` first if a task needs longer."
 ---
 
 > This guide covers the in-process `BackgroundTaskManager`. For durable tasks that run in a separate worker, survive restarts and can be scheduled, see [Background tasks with a worker](/docs/server/background-tasks).
 
-Some operations should not block the agent's response. Sending notifications, writing to a slow store, triggering webhooks, or updating a database are good candidates to run in the background. `BackgroundTaskManager` launches these tasks asynchronously from inside any node function, returning control to the caller immediately.
-
-## When to use background tasks
-
-Background tasks are ideal for fire-and-forget operations that do not affect the current response:
-
-- Sending notifications (email, SMS, push notifications) after a successful action
-- Logging to external systems or audit trails
-- Triggering webhooks for downstream subscribers
-- Uploading large files to storage (S3, GCS, etc.)
-- Writing to a slow or non-critical database
-- Cleanup or maintenance tasks (clearing old files, archiving data)
-- Metrics and analytics reporting
-
-The key characteristic: the user or the next graph step does not need to wait for the task to finish.
-
-## When NOT to use background tasks
-
-Do not use background tasks when:
-
-- The result is needed by the current response or later steps in the graph
-- The operation affects data the agent depends on (e.g., updating a vector store the agent queries)
-- You need to know if the task succeeded before proceeding
-- The operation is critical and failure should block the entire flow
-
-In these cases, process the work synchronously in your node before returning state.
-
-## Prerequisites
-
-You have a working graph. The `tenxgraph` package is installed. `BackgroundTaskManager` is automatically available in every node via dependency injection; no extra configuration is needed.
+`BackgroundTaskManager` starts work from inside a node without holding up the response: notifications, webhooks, slow writes that nothing later in the run reads. If the response or a later node needs the result, or a failure must stop the run, do the work in the node instead.
 
 ## Quick start
 
@@ -91,7 +58,7 @@ graph.add_edge("MAIN", END)
 app = graph.compile()
 ```
 
-The graph returns the response to the caller immediately. The `send_notification` coroutine continues running in the background and completes up to 10 seconds later.
+`ainvoke` and `astream` return without waiting for the task, which keeps running for up to 10 seconds. Sync `invoke` and `stream` wait for background tasks (up to `shutdown_timeout`) before they return, because their event loop ends with the call.
 
 ## Verify it worked
 
@@ -134,22 +101,7 @@ If the task exceeds `timeout`, it is cancelled and a warning is logged. The canc
 
 ## Track task status
 
-Query the task manager to monitor running tasks:
-
-```python
-# How many tasks are still running?
-count = task_manager.get_task_count()
-
-# Detailed information for all active tasks
-for info in task_manager.get_task_info():
-    print(f"Task: {info['name']}")
-    print(f"  Age: {info['age_seconds']:.1f}s")
-    print(f"  Timeout: {info['timeout']}s")
-    print(f"  Done: {info['done']}")
-    print(f"  Cancelled: {info['cancelled']}")
-```
-
-This is useful for monitoring, debugging, and understanding load on background task execution.
+`task_manager.get_task_count()` returns the number of running tasks, and `get_task_info()` a dict per task (`name`, `age_seconds`, `timeout`, `context`, `done`, `cancelled`). See [get_task_info](/docs/reference/python/background-tasks#get_task_info).
 
 ## Wait for all tasks before shutdown
 
@@ -180,7 +132,7 @@ app = graph.compile(shutdown_timeout=30.0)
 await app.aclose()
 ```
 
-`aclose()` calls the task manager's `shutdown()`, which cancels all outstanding tasks and then waits up to the timeout for the cancellations to settle. Tasks still running after that are force-cancelled. It does not wait for tasks to finish their work, so if a task must complete, call `wait_for_all()` first.
+`aclose()` calls the task manager's `shutdown()` with what is left of `shutdown_timeout`: running tasks get that long to finish, and the rest are cancelled. If a task must complete and may take longer, call `wait_for_all()` first. See [Graceful shutdown](/docs/guides/graceful-shutdown).
 
 ## Common errors
 
@@ -188,7 +140,7 @@ await app.aclose()
 |---|---|---|
 | `task_manager` is `None` | Not injected or node outside compiled graph. | Ensure the parameter default is `Inject[BackgroundTaskManager]` and the node is inside a compiled graph. |
 | Task never runs, or a `TypeError` | Coroutine function passed instead of coroutine object. | Pass the result of calling the function: `create_task(send_notification(...))` not `create_task(send_notification)`. |
-| Background tasks are cut off at exit | `aclose()` cancels pending tasks. | Call `await task_manager.wait_for_all(timeout=...)` before `aclose()` if they must finish. |
+| Background tasks are cut off at exit | `aclose()` cancels tasks still running when its budget ends, and a process that exits without `aclose()` drops them. | Call `await task_manager.wait_for_all(timeout=...)` before `aclose()` if they must finish. |
 | Timeout warnings in logs | Task takes longer than the `timeout`. | Increase the timeout value if the external service is expected to be slow, or investigate why the service is slow. |
 | Task dropped, queue full | 1000 or more tasks in flight (backpressure). `create_task` returns `None` and logs a warning. | Reduce the rate at which you create background tasks, or handle backpressure upstream. |
 
@@ -198,7 +150,5 @@ Background tasks live in the worker process that started them, so a restart or a
 
 ## Related pages
 
-- [Stream a graph](/docs/guides/stream-graph) to understand real-time streaming, an alternative when you need incremental updates.
-- [Graceful shutdown](/docs/guides/graceful-shutdown) for production-grade shutdown patterns.
 - [Dependency injection](/docs/guides/use-dependency-injection) to learn about other injectable parameters available in nodes.
 - [Production checklist](/docs/server/production-checklist) for shutdown timeout settings in production.

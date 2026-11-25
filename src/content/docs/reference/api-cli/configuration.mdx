@@ -174,13 +174,13 @@ The destinations below are AI tracing (observability) publishers. They receive g
 | Key | Type | Default | Purpose |
 |---|---|---|---|
 | `observability.level` | string | `full` | `spans`, `standard` or `full`. `full` (default) sends prompts, completions, tool I/O and graph state to the trace backend and may record PII. `standard` drops prompts, completions and tool I/O but keeps graph state on node spans. `spans` is timing and structure only. If the graph already has an observability publisher, the server reuses it and ignores this block, level included |
-| `observability.user_id_mode` | string | `raw` | How traces carry the user id: `raw`, `hash` or `mask`. See [Hide the user id in traces](/docs/guides/send-traces-to-logfire-langsmith#hide-the-user-id-in-traces) |
+| `observability.user_id_mode` | string | `raw` | How traces carry the user id: `raw`, `hash` or `mask`. See [Hide the user id in traces](/docs/guides/send-traces#hide-the-user-id-in-traces) |
 | `observability.logfire` | object | none | Keys include `enabled`, `service_name`, `send_to_logfire`, `console` |
 | `observability.langsmith` | object | none | Keys include `enabled`, `project`, `endpoint` |
-| `observability.otlp.enabled` | boolean | `false` | Send AI traces to any OTLP HTTP endpoint. See [Send traces to an OTLP endpoint](/docs/guides/send-traces-to-otlp) |
+| `observability.otlp.enabled` | boolean | `false` | Send AI traces to any OTLP HTTP endpoint. See [Send AI traces](/docs/guides/send-traces#send-to-an-otlp-endpoint) |
 | `observability.otlp.endpoint` | string or null | `null` | OTLP HTTP base URL, `/v1/traces` appended. With `null`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` must be set |
 | `observability.otlp.use_metrics_endpoint` | boolean | `false` | Use the metrics OTLP endpoint (`metrics.otlp.endpoint`, else the standard OTLP env variables) as the trace endpoint. Needs `metrics` enabled with `export: "otlp"` |
-| `observability.phoenix` | object | none | Keys include `enabled`, `project`, `endpoint`. See [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix) |
+| `observability.phoenix` | object | none | Keys include `enabled`, `project`, `endpoint`. See [Send AI traces](/docs/guides/send-traces#send-to-arize-phoenix) |
 
 OTLP auth headers come from `OTEL_EXPORTER_OTLP_HEADERS` in the environment. Tokens stay in the environment: `LOGFIRE_TOKEN`, `LANGSMITH_API_KEY` and `PHOENIX_API_KEY` are never read from the file. Phoenix also reads `PHOENIX_COLLECTOR_ENDPOINT` and `PHOENIX_PROJECT` (or `PHOENIX_PROJECT_NAME`) when `endpoint` or `project` is not set. With `user_id_mode` set to `hash`, `TENXGRAPH_TRACE_USER_ID_KEY` (also from the environment) makes the hash keyed. See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
 

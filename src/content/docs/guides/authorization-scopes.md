@@ -4,7 +4,7 @@ description: "Read the caller's identity and check permissions inside graph node
 order: 20
 group: "Identity and roles"
 section: "Security and access"
-updated: "2026-11-08"
+updated: "2026-11-26"
 label: "Permissions in tools"
 faq:
   - question: "What is the difference between identity and permissions?"
@@ -52,6 +52,8 @@ The identity also reads like a dict: `identity.get("email")`, `identity["user_id
 
 With auth off, `get_identity(config)` returns `None`.
 
+For the framework's own storage (checkpointer, store, files) you do not filter by hand. Each query already filters by the caller's reach, see [Multi-tenant data](/docs/guides/multi-tenant-data).
+
 ## Check a permission
 
 Use `identity.can(...)` or the helper `can(config, ...)` to gate operations:
@@ -71,17 +73,7 @@ def create_memory(text: str, *, config):
     return f"Memory created: {text}"
 ```
 
-The permission string is always `resource:action`. The registry the server knows:
-
-| Resource | Actions |
-|---|---|
-| `graph` | `read`, `invoke`, `stream`, `stop`, `fix` |
-| `threads` | `read`, `write`, `delete` |
-| `store` | `read`, `write`, `delete` |
-| `files` | `read`, `upload`, `delete` |
-| `config` | `read` |
-| `tasks` | `trigger`, `read`, `cancel` |
-| `admin` | `read`, `write` |
+Permissions are `resource:action` strings. The full list is in [Permissions](/docs/reference/api-cli/auth#permissions).
 
 `resource:*` matches every action of a resource and `*` matches everything. `admin:read` and `admin:write` guard no built-in route, so they are free for your own checks.
 
@@ -94,7 +86,7 @@ Permissions guard API routes: a caller needs `graph:invoke` to start a run, and 
 - `config`: the run config. `get_identity(config)` returns the `Identity`, and `can(config, "resource:action")` checks one permission.
 - `state`, `tool_call_id`, `store`, `checkpointer` and the other injectable names listed in the [tools reference](/docs/reference/python/tools#per-tool-access-control).
 
-Permission names are exact strings, but the server only accepts names from its registry in a role or a `permissions_claim`. To gate a tool, use a registry name such as `admin:write`, or check a role or claim directly:
+To require a permission per tool, use `ToolGuard`: `ToolGuard(permissions={"refund_order": "tools:refund_order"})` denies the call unless the caller holds `tools:refund_order` (or `tools:*`), and roles can grant `tools:<name>` permissions. See [ToolGuard](/docs/security/zero-trust-agents#toolguard). For a rule ToolGuard cannot express, check the identity in the tool itself:
 
 ```python
 from tenxgraph.core.authz import get_identity
@@ -124,95 +116,13 @@ Keep in mind:
 - With no identity (direct SDK calls, or an API server with `"auth": null`), `can()` returns `True`. A tool that must never run without auth should check `get_identity(config) is None` itself and refuse.
 - With roles configured, a caller who holds no role has an empty `permissions` set, so `can()` is `False` for everything. Give such users a `default_role`.
 
-You can apply the same check to every tool in one place with a `before_invoke` callback on `InvocationType.TOOL`: `context.function_name` is the tool name and `context.metadata["config"]` is the run config. Raise from the callback to block the call, or keep a dict that maps tool names to required permissions. See [Use callbacks](/docs/guides/use-callbacks).
+For your own policy across every tool, raise `ToolDenied` from a `before_invoke` callback; see [Raise ToolDenied from your own callback](/docs/security/zero-trust-agents#raise-tooldenied-from-your-own-callback).
 
-## Read caller identity inside tools and nodes
+## Reach in your own storage
 
-The `user_id` tells you who made the request. Use it to log actions or associate resources with owners:
-
-```python
-from tenxgraph.core.authz import get_identity
-from tenxgraph.utils import tool
-
-@tool
-def my_notes(*, config):
-    """List the caller's notes."""
-    identity = get_identity(config)
-    if identity is None:
-        return []
-    return find_notes_for(identity.user_id, identity.tenant)  # your own storage
-```
-
-For the framework's own storage (checkpointer, store, files) you do not filter by hand. Each query already filters by the caller's reach, see [Multi-tenant data](/docs/guides/multi-tenant-data).
-
-## Reach and shared data
-
-`identity.reach` is what the storage layer uses to filter every query:
-
-| Reach | Storage returns |
-|---|---|
-| `own` | Rows of this `user_id` within their tenant. |
-| `tenant` | Rows of every user with the same tenant values. |
-| `all` | Every row. |
-
-Reach widens reads, lists, deletes and stop. Runs and state or message writes always stay on the caller's own threads. Shared data written under a `__system__:<name>` owner (agent memory, RAG knowledge bases) is pinned to that owner on every reach, so a wider reach never reads other users' rows through a shared-data query.
+Reach (`own`, `tenant`, `all`) is explained in [Tenancy and access](/docs/concepts/tenancy-and-access#roles-permissions-and-reach).
 
 Call `owner_filter(config, tenant_columns)` and `can_reach(config, user_id, tenant)` from `tenxgraph.core.authz` if you write your own storage and want to follow the same rules. `owner_filter` returns the column filters a query must apply, or `None` when there is no identity.
-
-## Example: a tool set with role checks
-
-```python
-from tenxgraph.core.authz import can, get_identity
-from tenxgraph.core.state import ToolResult
-from tenxgraph.prebuilt.agent import ReactAgent
-from tenxgraph.utils import tool
-
-# Stand-in storage layer for the example; use your own database.
-NOTES: dict[str, list[str]] = {}
-
-
-@tool
-def list_notes(*, config) -> str:
-    """List notes belonging to the current user."""
-    identity = get_identity(config)
-    if identity is None:
-        return "Error: no identity"
-    notes = NOTES.get(identity.user_id, [])
-    return f"Found {len(notes)} notes for {identity.user_id}"
-
-
-@tool
-def create_note(text: str, *, config) -> str | ToolResult:
-    """Create a note, only for callers with store:write."""
-    if not can(config, "store:write"):
-        return ToolResult(message="Missing permission: store:write.", is_error=True)
-    identity = get_identity(config)
-    user_id = identity.user_id if identity else "anonymous"
-    NOTES.setdefault(user_id, []).append(text)
-    return f"Note created for {user_id}"
-
-
-@tool
-def export_data(format: str, *, config) -> str | ToolResult:
-    """Export data, only for callers with admin:read."""
-    if not can(config, "admin:read"):
-        return ToolResult(message="Missing permission: admin:read.", is_error=True)
-    return f"Exported {format}"
-
-
-agent = ReactAgent(
-    model="gemini/gemini-2.5-flash",
-    tools=[list_notes, create_note, export_data],
-)
-compiled = agent.compile()
-```
-
-Install with `pip install "10xgraph[google-genai]"`. Over the API server:
-
-1. The caller authenticates (JWT or a custom `BaseAuth`).
-2. The server resolves the `Identity` and `authorize` allows `graph:invoke`.
-3. Your graph runs with the identity in `config["user"]`.
-4. Each tool calls `get_identity()` or `can()`. A refusal returns a `ToolResult` with `is_error=True`, which the model can relay to the user.
 
 ## Direct SDK calls
 
@@ -229,7 +139,7 @@ identity = Identity(
     reach=Reach.OWN,
 )
 
-result = compiled.invoke(
+result = app.invoke(
     {"messages": [Message.text_message("List my notes")]},
     config={"user": identity, "thread_id": "session-1"},
 )
@@ -237,27 +147,16 @@ result = compiled.invoke(
 
 `config["user"]` also takes a dict that validates into an `Identity`. An unknown key raises. With `permissions` left as `None` the identity is unrestricted. Without any `user`, `get_identity()` returns `None` and there are no checks.
 
-## How the API server fills the identity
-
-For every route, the `RequirePermission` dependency does this once per request:
-
-1. **Authenticate.** The bearer token (JWT or a custom `BaseAuth`) is verified and decoded to claims. A failure is 401.
-2. **Resolve.** The claims become an `Identity`: roles, permissions, tenant values and reach, with token `scope` claims narrowing the permissions. A missing tenant claim or a malformed roles or permissions claim is 401.
-3. **Check for revocation and reserved ids.** A revoked token is 401. A `__system__` user id is 401.
-4. **Authorize.** `BaseAuth.authorize(identity, "resource:action", resource)` decides. A refusal is 403.
-5. **Place in config.** Every service copies the identity into `config["user"]`, so it reaches your code. Clients cannot set `user`.
-
-This flow is in `tenxgraph_api/src/app/core/auth/permissions.py`. For configuration, see [API authentication](/docs/server/auth).
-
 ## Common errors and fixes
 
-**Tool result "Missing permission: store:write"**
+**A tool refuses with a missing permission**
 
 The caller does not hold the permission. This happens when:
 
 - The caller's role does not include it, or the caller holds no role and `default_role` is not set.
 - A token `scope` or `scopes` claim narrows the permissions below it.
 - The token's `permissions_claim` does not list it.
+- The tool is behind a `ToolGuard` rule and no role grants `tools:<name>` (the default set has no tool permissions).
 
 Fix: check `auth.roles`, `default_role` and the token claims. `GET /v1/me` shows the roles, permissions and reach the server resolved for a token.
 
@@ -274,6 +173,6 @@ The thread is outside the caller's reach: another user's thread, or another tena
 - [API authentication](/docs/server/auth): Configure roles, reach and custom `authorize` on the API server.
 - [Calling services as the user](/docs/guides/call-services-as-the-user): Use the caller's credential for downstream calls.
 - [Multi-tenant data](/docs/guides/multi-tenant-data): Tenant columns and how reach filters storage.
-- [Protect against prompt injection](/docs/guides/protect-against-prompt-injection): Additional safety patterns for input validation.
+- [Zero-trust agents](/docs/security/zero-trust-agents): `ToolGuard`, `ToolDenied` and tool approval.
 - [Use dependency injection](/docs/guides/use-dependency-injection): Access config and other dependencies in nodes and tools.
-- [Security and validators](/docs/concepts/security-and-validators): Design patterns for secure agent systems.
+- [Tenancy and access](/docs/concepts/tenancy-and-access): roles, permissions and reach.

@@ -5,25 +5,15 @@ section: "Build agents"
 group: "Context and dependencies"
 order: 240
 label: Dependency injection
-updated: "2026-10-27"
+updated: "2026-11-26"
 faq:
   - q: "Do I need to use dependency injection?"
     a: "No, but it beats passing everything through config. Use it when you want to inject stateful services like databases, clients, or loggers. For simple values, config works fine."
-  - q: "What happens if I don't declare an injectable parameter?"
-    a: "If you don't declare it, the framework won't pass it. Tool functions get tool_call_id, state, config, and emit automatically only if they declare them as parameters."
   - q: "Can I change the container after compile()?"
-    a: "No. The container is frozen when you call compile(). Create a new container and pass it to StateGraph() if you need different bindings."
+    a: "Bind everything before compile(): compile() checks every binding then. To run with other bindings, build the graph with its own container, StateGraph(container=InjectQ())."
 ---
 
-Dependency injection in 10xGraph solves the problem of threading stateful services (databases, API clients, loggers) through your node and tool functions without polluting signatures or relying on globals. Any function registered as a node or tool can declare services as parameters with `Inject[Type]` as the default value, and the InjectQ container resolves and injects those dependencies automatically at runtime.
-
-This guide walks you through binding services, injecting them into nodes and tools, and managing custom containers for tests and scoped execution.
-
-## Why dependency injection matters
-
-Without DI, you would pass every service through `config` or store it as a global variable. Both approaches become unwieldy at scale. Config dictionaries become dumping grounds for untyped values, and globals make testing harder because services persist across test boundaries.
-
-DI inverts the problem: services are bound once in a container, and functions declare the types they need. The framework wires them in at call time, without requiring explicit passing. Tools automatically receive `tool_call_id`, `state`, `config`, and `emit` from the runtime. Any other service comes from the container.
+Bind a service in the InjectQ container and declare it as `param: Service = Inject[Service]` in a node or tool; the container fills it at call time. Why DI and how containers are scoped are in [Dependency injection](/docs/concepts/dependency-injection).
 
 ## Built-in injectable parameters
 
@@ -53,9 +43,9 @@ Additionally, after `compile()`, these bindings are available for dependency inj
 | `BaseMediaStore` | `BaseMediaStore` | Media storage (if provided at compile time) |
 | `get_node(name)` | factory | Returns the node by name from the graph |
 | `get_entry_point_node()` | factory | Returns the entry-point node |
-| `generated_id_type` | `str` | The ID type (e.g. "ulid", "uuid") |
+| `generated_id` / `generated_id_type` | factory / `str` | Kept for code that injects them by key; core reads only `BaseIDGenerator` |
 
-You can register additional custom bindings before or after creating the StateGraph.
+Add your own bindings before `compile()`.
 
 ## Step 1: Access the container and register a service
 
@@ -69,7 +59,7 @@ class DatabaseClient:
     def __init__(self, dsn: str):
         self.dsn = dsn
 
-    def query(self, sql: str) -> list:
+    def query(self, sql: str, *params) -> list:
         # In a real app, execute SQL here
         return []
 
@@ -93,8 +83,6 @@ import uuid
 container.bind_factory("request_id", lambda: str(uuid.uuid4()))
 ```
 
-Once bound, these services are available to every node and tool in the graph.
-
 ## Step 2: Inject into a node function
 
 Node functions receive `state` and `config` automatically. Declare any additional services with `Inject[Type]` as the parameter default:
@@ -114,23 +102,13 @@ def query_database(
     return Message.text_message(content, role="assistant")
 ```
 
-The framework automatically calls `query_database(state, config, db=<resolved_instance>)` at runtime. You never pass `db` manually. When you add this node to the graph, the DI system handles the wiring:
-
-```python
-from tenxgraph.core.graph import StateGraph
-
-graph = StateGraph()
-graph.add_node("query", query_database)
-```
-
 ## Step 3: Inject into a tool function
 
 Tool functions work the same way. Declare `tool_call_id`, `state`, `config`, and `emit` as plain parameters (they are filled by the runtime). Declare any other services with `Inject[Type]`:
 
 ```python
 from injectq import Inject
-from tenxgraph.core.state import AgentState, Message
-from tenxgraph.core.state.message_block import ToolResultBlock
+from tenxgraph.core.state import AgentState
 
 def search_products(
     query: str,
@@ -141,12 +119,10 @@ def search_products(
     config: dict = None,
     # --- DI-injected parameters ---
     db: DatabaseClient = Inject[DatabaseClient],
-) -> Message:
+) -> str:
     """Search for products in the database."""
-    results = db.query(f"SELECT * FROM products WHERE name LIKE '%{query}%' LIMIT {limit}")
-    return Message.tool_message(
-        content=[ToolResultBlock(call_id=tool_call_id, output=str(results))],
-    )
+    results = db.query("SELECT * FROM products WHERE name LIKE $1 LIMIT $2", f"%{query}%", limit)
+    return str(results)
 ```
 
 The LLM only sees `query` and `limit` in the tool schema. The framework-provided and DI-injected parameters are invisible to the model and resolved internally.
@@ -197,7 +173,7 @@ def my_node(
     return []
 ```
 
-`fresh()` returns an explicitly passed argument unchanged. If the dependency is not bound, it returns `None`, so optional services are handled gracefully.
+`fresh()` returns an explicitly passed argument unchanged. An unbound abstract service (a store, a publisher) resolves to `None`; an unbound concrete class is built by injectq.
 
 ## Step 6: Read values from the container inside a node
 
@@ -238,7 +214,6 @@ This example needs a provider extra, for example `pip install "10xgraph[openai]"
 from injectq import Inject, InjectQ
 from tenxgraph.core import Agent, StateGraph, ToolNode
 from tenxgraph.core.state import AgentState, Message
-from tenxgraph.core.state.message_block import ToolResultBlock
 from tenxgraph.storage.checkpointer import InMemoryCheckpointer
 from tenxgraph.utils.constants import END
 
@@ -255,14 +230,10 @@ container.bind_instance(UserRepository, UserRepository())
 # Tool that uses the injected repository
 def get_user_info(
     user_id: str,
-    tool_call_id: str = "",
     repo: UserRepository = Inject[UserRepository],
-) -> Message:
+) -> str:
     """Get information about a user."""
-    user = repo.get_user(user_id)
-    return Message.tool_message(
-        content=[ToolResultBlock(call_id=tool_call_id, output=str(user))],
-    )
+    return str(repo.get_user(user_id))
 
 # Node that also uses the injected repository
 def log_request(
@@ -315,49 +286,14 @@ Request from: Alice (pro plan)
 
 ## Common patterns and errors
 
-**Pattern: Inject a scoped service per invocation.** Use `fresh()` to always get a new instance from the container, rather than the cached version:
-
-```python
-from tenxgraph.storage.store.base_store import BaseStore
-from tenxgraph.utils.injection import fresh
-
-def my_node(state, config, store: BaseStore = Inject[BaseStore]):
-    store = fresh(store)
-    # Uses the store bound to the active container
-    return []
-```
-
-**Error: "Missing required parameter" or "Required injectable parameter not found".** A tool or node declared a parameter with no default that neither the runtime nor the container provides. Bind the service before the graph runs, or give the parameter an `Inject[...]` default:
-
-```python
-# Wrong: UserRepository is not bound
-container = InjectQ.get_instance()
-graph = StateGraph()
-graph.add_node("query", my_node_using_repository)  # Will fail if UserRepository is not bound
-
-# Right: Bind first, then add the node
-container.bind_instance(UserRepository, UserRepository())
-graph = StateGraph()
-graph.add_node("query", my_node_using_repository)
-```
-
-**Bindings after `compile()`.** The container is compiled (frozen) at the end of `graph.compile()`. Add your own bindings before calling it, or create a new container and pass it to `StateGraph(container=...)`.
-
-## What you learned
-
-- Dependency injection avoids globals and reduces parameter passing in signatures.
-- Tool functions automatically receive `tool_call_id`, `state`, `config`, and `emit`; nodes receive `state` and `config`.
-- Declare `param: Service = Inject[Service]` to inject custom services into nodes and tools.
-- Use `container.bind_instance(Type, instance)` to register a singleton or `bind_factory(name, callable)` for a function.
-- Pass `StateGraph(container=container)` to use a custom, scoped container for testing.
-- Use `fresh()` to resolve a dependency anew on each call, bypassing the cache.
+**Bind before `compile()`.** `compile()` builds every resolver and fails at once on a binding it cannot resolve, so a broken binding shows up at startup instead of mid-run.
 
 ## Run it in production
 
-Take `user_id`, tenant and role from the authenticated identity the server injects, not from request state or message text. Register shared resources such as database pools once through `injectq` in `10xgraph.json`. See [Configure the server](/docs/server/configure) and the [Security model](/docs/production/security-model).
+Take `user_id`, tenant and role from the authenticated identity the server injects, not from request state or message text. Point `injectq` in `10xgraph.json` at your container; the server refuses to start when it differs from the graph's container. See [Configure the server](/docs/server/configure) and the [Security model](/docs/production/security-model).
 
 ## Next steps
 
 - [Build a graph](/docs/guides/build-a-graph) to see how DI fits into the full graph lifecycle.
 - [Use the @tool decorator](/docs/guides/use-tool-decorator) to add metadata alongside injection.
-- [Dependency injection concept](/docs/concepts/dependency-injection) explains the why and tradeoffs in more detail.
+- [Dependency injection](/docs/concepts/dependency-injection)

@@ -1,42 +1,15 @@
 ---
-title: Emit Tool Progress Updates
+title: Emit tool progress updates
 description: Learn how to send live progress, errors, and status updates from tools during streaming execution.
 section: "Build agents"
 group: "Tools and MCP"
 order: 220
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
-
-## Overview
 
 When your tools perform long-running tasks (like API calls, file processing, or multi-step operations), you can use `StreamEmitter` to send **live progress updates** to the frontend during streaming execution. This gives users visibility into what the tool is doing and can provide a better UX for slow operations.
 
-### Key Concepts
-
-- **StreamEmitter** is injected into tools **only during streaming** (`app.stream()` / `app.astream()`)
-- During normal execution (`app.invoke()` / `app.ainvoke()`), tools receive `emit=None`
-- Updates are sent to the same stream output that the frontend consumes
-- No external publisher setup required, works with the built-in streaming pipeline
-
----
-
-## When to Use StreamEmitter
-
-Use `StreamEmitter` when:
-
-**Do use for:**
-- Long-running operations (API calls, file processing, database queries)
-- Retries with multiple attempts (show which attempt is running)
-- Multi-step processes (report progress per step)
-- External service calls with timeout risk
-- Batch processing (show item count progress)
-
-**Do not use for:**
-- Fast operations that complete in under 100 ms (overhead not worth it)
-- Simple tool results that don't require intermediate feedback
-- Non-streaming execution paths (emit is None anyway, so safe to call but won't do anything)
-
----
+`emit` is injected only while streaming; under `invoke()` it is `None`, so always check `if emit:`. Progress chunks are `message` events with `status` `tool_progress` and reach the client at every granularity.
 
 ## Setup: Declare emit Parameter
 
@@ -63,15 +36,12 @@ def my_tool(
 - **Type hint:** `StreamEmitter | None` tells type checkers it's optional
 - **Always check:** Always do `if emit:` before calling emit methods (it's `None` during non-streaming)
 
----
-
 ## Example 1: Simple Progress Updates
 
 **Scenario:** Fetching data from an external API with a known delay.
 
 ```python
 import time
-import requests
 from tenxgraph.core.state.stream_emitter import StreamEmitter
 
 def fetch_weather(location: str, emit: StreamEmitter | None = None) -> str:
@@ -101,70 +71,9 @@ def fetch_weather(location: str, emit: StreamEmitter | None = None) -> str:
 3. Finally: "Weather data ready"
 4. Tool returns the actual result
 
-**What happens during invoke():**
-- All `if emit:` blocks are skipped (emit is None)
-- Only the final result is returned
+`emit.error(message, data=...)` sends a `tool_failed` error chunk and `emit.message(...)` a plain message; see the [StreamEmitter reference](/docs/reference/python/stream-emitter#methods).
 
----
-
-## Example 2: Retry Logic with Attempt Tracking
-
-**Scenario:** An API call that might fail temporarily; retry with feedback.
-
-```python
-import requests
-from tenxgraph.core.state.stream_emitter import StreamEmitter
-
-def call_external_service(
-    endpoint: str,
-    emit: StreamEmitter | None = None,
-) -> str:
-    """Call an external service with retries and progress updates."""
-    
-    max_retries = 3
-    
-    for attempt in range(max_retries):
-        try:
-            if emit and attempt > 0:
-                # Report retry attempt
-                emit.progress(
-                    f"Retry attempt {attempt} of {max_retries - 1}",
-                    data={
-                        "attempt": attempt,
-                        "max_attempts": max_retries - 1,
-                    }
-                )
-            
-            if emit and attempt == 0:
-                emit.progress(f"Calling {endpoint}...")
-            
-            # Actual API call
-            response = requests.get(endpoint, timeout=5)
-            response.raise_for_status()
-            
-            return response.json()
-        
-        except requests.RequestException as e:
-            if attempt == max_retries - 1:
-                # Final attempt failed
-                if emit:
-                    emit.error(
-                        f"Service unreachable after {max_retries} attempts: {e}",
-                        data={"final_attempt": True}
-                    )
-                raise
-            # Try again in next loop iteration
-```
-
-**Frontend sees:**
-1. "Calling `https://api.10xgraph.com`..."
-2. After timeout: "Retry attempt 1 of 2"
-3. After another timeout: "Retry attempt 2 of 2"
-4. If still failing: "Service unreachable after 3 attempts: ..."
-
-**Key insight:** Retries are now visible to the user instead of hanging silently.
-
----
+For batch work, emit every N items, not on every item; progress chunks reach the client, so never put secrets in them.
 
 ## Full Graph Example
 
@@ -181,7 +90,6 @@ import time
 # Define tool with StreamEmitter
 def get_weather(
     location: str,
-    tool_call_id: str | None = None,
     emit: StreamEmitter | None = None,
 ) -> str:
     """Get weather for a location with streaming progress."""
@@ -230,7 +138,7 @@ app = graph.compile(checkpointer=checkpointer)
 
 # Stream with progress updates
 inp = {"messages": [Message.text_message("What's the weather in Paris?")]}
-config = {"thread_id": "user_123", "is_stream": True}
+config = {"thread_id": "user_123"}
 
 print("Streaming response with progress updates:")
 for chunk in app.stream(inp, config=config):
@@ -241,49 +149,12 @@ for chunk in app.stream(inp, config=config):
         print(chunk)
 ```
 
----
+## See also
 
-## Best Practices
-
-### Do
-
-1. **Check before emitting:** Always do `if emit:` before calling emit methods
-2. **Use meaningful messages:** Messages should tell users what's happening
-3. **Add metadata:** Include `data` for important metrics (attempt numbers, percentages, etc.)
-4. **Report milestones:** Emit at meaningful progress points, not every step
-5. **Throttle batch work:** Emit every N items, not on every item
-
-### Do not
-
-1. **Don't emit too frequently:** Thousands of updates per second will slow down streaming
-2. **Don't rely on emit:** Tool should always return a valid result regardless
-3. **Don't emit sensitive data:** Progress chunks are exposed to frontend; sanitize if needed
-4. **Don't use for critical flow:** Emit is informational only; never branch on it
-
-### Performance Tips
-
-```python
-# Bad: Emits 1000 times per second
-for item in items:
-    if emit:
-        emit.progress(f"Processing {item}")
-    process(item)
-
-# Good: Emits once per batch
-for i, item in enumerate(items):
-    if (i + 1) % 100 == 0 and emit:
-        emit.progress(f"Processed {i + 1} of {len(items)}")
-    process(item)
-```
-
----
-
-## See Also
-
-- [StreamEmitter Reference](/docs/reference/python/stream-emitter), Complete API documentation
-- [Streaming Architecture](/docs/concepts/streaming), How streaming chunks and granularity work
-- [Dependency Injection](/docs/concepts/dependency-injection), How parameters like `emit` and `state` are injected
-- [Example: react_stream/stream_sync.py](https://github.com/10xGraph/10xGraph/blob/main/examples/react_stream/stream_sync.py), Full working example in the repository
+- [StreamEmitter Reference](/docs/reference/python/stream-emitter): Complete API documentation
+- [Streaming Architecture](/docs/concepts/streaming): How streaming chunks and granularity work
+- [Dependency Injection](/docs/concepts/dependency-injection): How parameters like `emit` and `state` are injected
+- [Example: streaming/stream_agent.py](https://github.com/10xGraph/10xGraph/blob/main/examples/streaming/stream_agent.py): a working example in the repository
 
 ## Run it in production
 

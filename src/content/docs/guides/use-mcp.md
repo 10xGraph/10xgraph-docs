@@ -5,19 +5,13 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 210
 label: MCP tools
-updated: "2026-10-29"
+updated: "2026-11-26"
 faq:
-  - q: "Can I use MCP tools without a local Python function?"
-    a: "Yes. Pass an empty list to ToolNode(tools=[]) and provide the MCP client. The graph will offer only the MCP server's tools."
   - q: "Do MCP tools run in parallel like local tools?"
     a: "Yes. The LLM can request multiple MCP tools in one turn, and ToolNode executes them concurrently."
-  - q: "How do I test MCP tools without a real server?"
-    a: "Use MockMCPClient from tenxgraph.qa.testing. It simulates an MCP client and tracks tool calls for assertions."
 ---
 
-10xGraph integrates with [Model Context Protocol (MCP)](https://modelcontextprotocol.io) servers, allowing your agents to call tools exposed by remote MCP servers alongside local Python functions. The Model Context Protocol is an open standard for LLM tool integration, maintained by Anthropic, letting you compose tools from multiple sources seamlessly.
-
-This guide covers connecting an MCP server, invoking its tools from a graph, testing with mock clients, and mixing MCP tools with local tools. After completing it, your agent will be able to execute both local and remote tools in the same workflow.
+10xGraph agents can call tools from [Model Context Protocol (MCP)](https://modelcontextprotocol.io) servers alongside local Python functions.
 
 ## Prerequisites
 
@@ -27,7 +21,7 @@ Install the MCP extra to add fastmcp and mcp libraries:
 pip install "10xgraph[mcp,openai]"
 ```
 
-The samples use `gpt-4o` and need `OPENAI_API_KEY`. The final example uses Google and needs `pip install "10xgraph[mcp,google-genai]"`.
+The samples use `gpt-4o` and need `OPENAI_API_KEY`.
 
 ## Step 1: Create an MCP client
 
@@ -80,7 +74,7 @@ client = Client("https://my-mcp-server.example.com/mcp")
 
 ## Step 2: Wire the MCP client into ToolNode
 
-Create a `ToolNode` and pass the MCP client. The `ToolNode` queries the client for available tools each time the Agent prepares its tool list before calling the LLM. If the server cannot be reached, it offers no MCP tools for that call.
+Create a `ToolNode` and pass the MCP client. The `ToolNode` lists the server's tools on the first model call and caches the list (see [Tune how a ToolNode uses an MCP server](#tune-how-a-toolnode-uses-an-mcp-server)). If the server cannot be reached, it offers no MCP tools for that call and lists again on the next one.
 
 ```python
 from tenxgraph.core.graph import ToolNode
@@ -90,8 +84,6 @@ tool_node = ToolNode(
     client=client,
 )
 ```
-
-The first argument `tools` is a list of local Python functions (or empty if you have none). The `client` is the MCP client created in the previous step.
 
 ## Step 3: Build and wire the graph
 
@@ -136,7 +128,7 @@ result = app.invoke(
     {"messages": [Message.text_message("List the latest commits in owner/repo-name.")]},
     config={"thread_id": "mcp-demo-1"},
 )
-print(result["messages"][-1].content)
+print(result["messages"][-1].text())
 ```
 
 Verify that the agent used the MCP tools by checking the message history for `ToolCallBlock` and `ToolResultBlock` entries.
@@ -162,7 +154,7 @@ tool_node = ToolNode(
 )
 ```
 
-When the LLM requests a tool, `ToolNode` runs it on the MCP client if the name is one of the MCP tools it listed, otherwise it runs the local function. A local function and an MCP tool must not share a name. `ToolNode` raises `ValueError` when an MCP tool has the same name as a local or remote tool, so rename one of them.
+When the model calls a tool, `ToolNode` runs it on the MCP server if the server listed that name, otherwise it runs the local function. An MCP tool with the same name as a local or remote tool raises `ValueError`; rename one or set `mcp_prefix`.
 
 ## Tell the MCP server who is calling
 
@@ -173,8 +165,6 @@ Many MCP servers need to know who is calling them (for access control, logging, 
 | What is sent | The caller as unsigned request metadata (`meta["user"]`) | HTTP headers from your function, such as a short-lived signed token |
 | Can the server verify it | No | Yes, if the token is signed and the server checks it |
 | Use it for | A trusted internal server inside a network boundary you control, or identity that is informational only | A server that enforces per-user or per-tenant access |
-
-The metadata is not signed. Anything that can reach the MCP endpoint can send `meta={"user": ...}` and claim any user, so a server must not use it for access control unless it already trusts the caller. When the server enforces per-user or per-tenant access, use `mcp_auth` with a short-lived token the server verifies, for example a JWT that names the user and names the agent as the actor. See [Authenticate each call with `mcp_auth`](#authenticate-each-call-with-mcp_auth).
 
 In both cases, never add `user`, `user_id`, `org_id` or tenant arguments to MCP tools: arguments are chosen by the model and can be forged.
 
@@ -216,12 +206,10 @@ result = app.invoke(
     {"messages": [Message.text_message("Do something.")]},
     config={
         "thread_id": "mcp-auth-1",
-        "user": {"id": "user-123", "name": "Alice", "roles": ["admin"]},
+        "user": {"user_id": "user-123", "roles": ["admin"]},
     },
 )
 ```
-
-`pass_user_info_to_mcp` never sends the user's credential, and the metadata is unsigned, so the server cannot verify it. Use it only for a trusted internal server or where the identity is informational. A server that enforces per-user or per-tenant access should use `mcp_auth` instead.
 
 ## Authenticate each call with `mcp_auth`
 
@@ -295,16 +283,11 @@ The Agent will only see MCP tools that share at least one of the specified tags.
 
 ## Testing MCP tools without a server
 
-To test your graph with MCP tools without running an actual MCP server, use `MockMCPClient` from `tenxgraph.qa.testing`. It simulates tool execution and tracks calls for assertions:
+Pass a `MockMCPClient` from `tenxgraph.qa.testing` where you would pass the `fastmcp.Client`:
 
 ```python
-import pytest
 from tenxgraph.qa.testing import MockMCPClient
-from tenxgraph.core.graph import ToolNode, StateGraph, Agent
-from tenxgraph.core.state import Message
-from tenxgraph.utils import END
 
-# Set up mock client
 mock_client = MockMCPClient()
 mock_client.add_tool(
     name="search",
@@ -312,57 +295,13 @@ mock_client.add_tool(
     parameters={"query": {"type": "string"}},
     handler=lambda query: f"Results for: {query}",
 )
-
-# Create ToolNode with mock client
 tool_node = ToolNode(tools=[], client=mock_client)
 
-# Build graph (same as before)
-agent = Agent(
-    model="gpt-4o",
-    system_prompt=[{"role": "system", "content": "You are helpful."}],
-    tool_node=tool_node,
-)
-
-def should_use_tools(state) -> str:
-    last = state.context[-1] if state.context else None
-    if last and last.role == "assistant" and getattr(last, "tools_calls", None):
-        return "tools"
-    return END
-
-graph = StateGraph()
-graph.add_node("agent", agent)
-graph.add_node("tools", tool_node)
-graph.add_conditional_edges("agent", should_use_tools, {"tools": "tools", END: END})
-graph.add_edge("tools", "agent")
-graph.set_entry_point("agent")
-
-app = graph.compile()
-
-# Test the graph
-result = app.invoke(
-    {"messages": [Message.text_message("Search for AI trends.")]},
-    config={"thread_id": "test-1"},
-)
-
-# Verify the tool was called
+# build and run the graph as in Step 3, then:
 mock_client.assert_called("search")
-assert mock_client.call_count("search") == 1
-
-# Check the arguments
-call = mock_client.get_last_call("search")
-assert "AI trends" in call["arguments"]["query"]
 ```
 
-`MockMCPClient` provides helper methods for testing:
-- `add_tool(name, description, parameters, handler)`: Register a mock tool
-- `was_called(name)`: Check if a tool was invoked
-- `call_count(name)`: Get the number of times a tool was called
-- `get_calls(name)`: Get all calls to a tool
-- `get_last_call(name)`: Get the most recent call with its arguments
-- `assert_called(name)`: Assert a tool was called (raises if not)
-- `assert_called_with(name, **args)`: Assert a tool was called with specific arguments
-- `reset()`: Clear call history but keep tool registrations
-- `clear()`: Remove all tools and call history
+Pair it with `TestAgent` so the test makes no model call. The call-tracking methods are in [MockMCPClient](/docs/testing/unit-tests#mockmcpclient).
 
 ## Using ReactAgent with MCP
 
@@ -379,81 +318,6 @@ agent = ReactAgent(
 )
 app = agent.compile()
 ```
-
-Invoke it the same way as the manual graph:
-
-```python
-result = app.invoke(
-    {"messages": [Message.text_message("Search for the latest news.")]},
-    config={"thread_id": "react-mcp-1"},
-)
-```
-
-## Complete example: GitHub MCP integration
-
-This example builds a complete agent that uses the GitHub MCP server to read repository information:
-
-```python
-import os
-from fastmcp import Client
-from tenxgraph.core.graph import StateGraph, Agent, ToolNode
-from tenxgraph.core.state import AgentState, Message
-from tenxgraph.storage.checkpointer import InMemoryCheckpointer
-from tenxgraph.utils import END
-
-# Configure the GitHub MCP server
-mcp_config = {
-    "mcpServers": {
-        "github": {
-            "url": "https://api.githubcopilot.com/mcp/",
-            "headers": {"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}"},
-            "transport": "streamable-http",
-        },
-    }
-}
-
-client = Client(mcp_config)
-tool_node = ToolNode(tools=[], client=client)
-
-agent = Agent(
-    model="gemini-2.0-flash",
-    provider="google",
-    system_prompt=[{"role": "system", "content": "You are a helpful GitHub assistant."}],
-    tool_node=tool_node,
-    trim_context=True,
-)
-
-def should_use_tools(state: AgentState) -> str:
-    last = state.context[-1] if state.context else None
-    if last and last.role == "assistant" and getattr(last, "tools_calls", None):
-        return "tools"
-    return END
-
-graph = StateGraph()
-graph.add_node("agent", agent)
-graph.add_node("tools", tool_node)
-graph.add_conditional_edges("agent", should_use_tools, {"tools": "tools", END: END})
-graph.add_edge("tools", "agent")
-graph.set_entry_point("agent")
-
-app = graph.compile(checkpointer=InMemoryCheckpointer())
-
-result = app.invoke(
-    {"messages": [Message.text_message("List the latest commits in the 10xgraph repo.")]},
-    config={"thread_id": "github-1", "recursion_limit": 10},
-)
-print(result["messages"][-1].content)
-```
-
-## What you learned
-
-- Install `pip install "10xgraph[mcp]"` to enable MCP support.
-- Create an MCP client with `fastmcp.Client(config_dict)`, `Client(stdio_command)`, or `Client(http_url)`.
-- Pass the client to `ToolNode(tools=[], client=client)` to offer MCP tools to your agent.
-- Mix local and MCP tools in the same `ToolNode`; the runtime routes each call appropriately.
-- Tell an MCP server who is calling with `mcp_auth=` (a short-lived signed token the server verifies) when it enforces per-user or per-tenant access. `pass_user_info_to_mcp=True` sends unsigned metadata, so use it only for a trusted internal server.
-- Filter MCP tools by tag with `tools_tags` on the `Agent`.
-- Test MCP tools without a real server using `MockMCPClient`.
 
 ## Run it in production
 

@@ -51,7 +51,7 @@ Read [Models](/docs/integrations/models) first. Then:
 ### I want to observe and debug in production
 
 - [Publishers guide](/docs/guides/use-publishers): emit events to Redis, Kafka, RabbitMQ, or composite publishers.
-- [Traces guide](/docs/guides/send-traces-to-logfire-langsmith): send traces to Logfire or LangSmith for inspection. See also [Arize Phoenix](/docs/guides/send-traces-to-phoenix), [any OTLP endpoint](/docs/guides/send-traces-to-otlp) and [Prometheus and Grafana metrics](/docs/guides/metrics-prometheus-grafana).
+- [Traces guide](/docs/guides/send-traces): send AI traces to an OTLP endpoint, Arize Phoenix, Logfire or LangSmith. See also [Prometheus and Grafana metrics](/docs/guides/metrics-prometheus-grafana).
 - [Observability reference](/docs/server/observability): logs, metrics, OTEL, and secret redaction on the API server.
 
 ### I'm building Claude Code skills

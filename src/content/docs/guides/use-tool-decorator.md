@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 160
 label: "@tool decorator"
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
 The `@tool` decorator marks a Python function as an agent tool and attaches metadata that 10xGraph uses to build the schema the LLM sees, control tool visibility across agents, and inject context at runtime. Every tool is a regular Python function; the decorator adds no runtime behavior, only metadata that the `ToolNode` reads at schema-generation time.
@@ -27,34 +27,6 @@ The `ToolNode` converts your function's type hints and docstring into an OpenAI-
 **The description** comes from the function's docstring (or the `description` arg). The LLM uses this to decide when and how to call the tool, so be specific: instead of "Fetch data," say "Fetch historical stock prices for a ticker symbol over a date range."
 
 **Injected parameters** like `tool_call_id`, `state`, `emit`, `config`, and others are excluded from the schema automatically. You declare them in your function signature to receive them at runtime, but the LLM never sees them.
-
-Here is a tool the LLM sees:
-
-```python
-@tool(
-    description="Search the internet and return the top results with titles and summaries.",
-)
-def search_web(
-    query: str,
-    limit: int = 10,
-) -> str:
-    """Search for query and return results."""
-    # LLM receives schema: name="search_web", description="...", parameters with query (required string) and limit (optional int, default 10).
-    return f"Top {limit} results for {query}"
-```
-
-To access the request context inside the tool, for example, to know which user called it, ask for injected parameters:
-
-```python
-@tool(description="Search the web as the authenticated user.")
-def search_web(
-    query: str,
-    config: dict = None,  # Injected at runtime
-) -> str:
-    # config is NOT in the schema the LLM sees. The ToolNode fills it with the run config.
-    user_id = (config or {}).get("user_id")
-    return f"Search for {query} as user {user_id}"
-```
 
 ---
 
@@ -87,7 +59,6 @@ def get_weather(city: str, units: str = "celsius") -> str:
     return f"Weather in {city}: 22°C"
 ```
 
-The LLM calls this tool as `get_weather`, the function name. To expose a different name, rename the function.
 
 ---
 
@@ -133,12 +104,6 @@ admin_agent = Agent(
     model="gpt-4o",
     tool_node=tool_node,
     tools_tags={"search", "admin"},  # web_search, internal_search, and run_query visible
-)
-
-# This agent sees all tools (no tools_tags filter)
-full_agent = Agent(
-    model="gpt-4o",
-    tool_node=tool_node,
 )
 ```
 
@@ -188,115 +153,37 @@ def search_kb(
     return f"Results: {results}"
 ```
 
-Pass the injected values at runtime via the config:
-
-```python
-from tenxgraph.core.graph import CompiledGraph
-
-result = compiled_graph.invoke(
-    {"messages": [...]},
-    config={"user_id": "user_123", "thread_id": "t1"},
-)
-```
-
 The `emit` parameter is only available during streaming (via `astream()` or `stream()`). During `invoke()` or `ainvoke()`, `emit` is `None`. Always check: `if emit: emit.progress(...)`.
 
 ---
 
 ## Handle and report tool errors
 
-When a tool raises an exception, the `ToolNode` catches it and returns a `ToolResultBlock` with the error. The LLM receives the error message and can decide to retry, ask for clarification, or take a different path.
+When a tool raises, the `ToolNode` catches the exception and the model gets a failed tool result. The text is generic, `Tool 'divide' failed with an internal error (reference 1a2b3c4d).`, and the full error is in the server log under the same reference, because an exception can carry paths, DSNs or SQL. Only an argument that does not fit your type hints reaches the model in full. To let the model read a reason and try again, return it:
 
 ```python
 @tool(description="Divide two numbers.")
-def divide(a: float, b: float) -> float:
+def divide(a: float, b: float) -> float | str:
     """Divide a by b."""
     if b == 0:
-        raise ValueError("Division by zero")
+        return "Error: b must not be zero. Ask the user for another number."
     return a / b
 ```
 
-When the LLM calls `divide(10, 0)`, the `ToolNode` catches the `ValueError`, wraps it in a `ToolResultBlock`, and the LLM sees the error message and can retry with different inputs. The error is not surfaced to the user; the run continues with the error message in the conversation.
-
-For custom error messages, raise a descriptive exception:
-
-```python
-import httpx
-
-@tool(description="Fetch a web page.")
-async def fetch_url(url: str) -> str:
-    """Fetch the HTML of a URL."""
-    if not url.startswith("http"):
-        raise ValueError(f"Invalid URL: {url}. Must start with 'http' or 'https'.")
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, timeout=5)
-            response.raise_for_status()
-            return response.text[:5000]
-        except httpx.TimeoutException:
-            raise TimeoutError(f"Request to {url} timed out after 5 seconds")
-        except httpx.HTTPError as e:
-            raise RuntimeError(f"Failed to fetch {url}: {e}")
-```
-
-The LLM will see clear, actionable error messages and can adjust its approach.
+To block a call by policy, raise `ToolDenied`; see [Raise ToolDenied from your own callback](/docs/security/zero-trust-agents#raise-tooldenied-from-your-own-callback). More in [Tool failures and bad tool arguments](/docs/concepts/errors-and-limits#tool-failures-and-bad-tool-arguments).
 
 ---
 
 ## Support both sync and async tools
 
-The `@tool` decorator works on both sync and async functions. The `ToolNode` handles both transparently. Use async for I/O-bound operations (network requests, database queries) and sync for CPU-bound or simple tasks.
-
-**Sync tool:**
-
-```python
-@tool(description="Calculate the sum of two numbers.")
-def add(a: int, b: int) -> int:
-    """Add a and b."""
-    return a + b
-```
-
-**Async tool:**
-
-```python
-import httpx
-
-@tool(
-    description="Fetch the current weather.",
-    tags=["web", "network"],
-)
-async def fetch_weather(city: str) -> str:
-    """Fetch weather from an API."""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"https://api.weather.example.com/weather?city={city}",
-            timeout=5,
-        )
-        response.raise_for_status()
-        return response.text
-```
-
-When the `ToolNode` calls async tools, it runs them in the asyncio event loop. Sync tools are run via `asyncio.to_thread` so they do not block the event loop. For this reason, async tools are preferred for I/O.
+`@tool` works on sync and async functions. Async tools run on the event loop; sync tools run in a worker thread (`asyncio.to_thread`), so they do not block it. Prefer async for I/O.
 
 ---
 
 ## Annotate capabilities and metadata
 
-Use `capabilities` to document what permissions or side effects the tool has. This is informational only; 10xGraph does not enforce it at runtime. Use it for auditing or policy checks.
+`capabilities` and `metadata` are labels for your own auditing or policy code; 10xGraph does not enforce them:
 
-```python
-@tool(
-    description="Send an email to a user.",
-    capabilities=["network_access", "external_communication", "sends_email"],
-)
-async def send_email(to: str, subject: str, body: str) -> str:
-    """Send an email."""
-    # ... send email ...
-    return "Email sent"
-```
-
-Use `metadata` for any application-specific fields:
 
 ```python
 @tool(
@@ -374,75 +261,9 @@ The schema you provide is sent to the LLM verbatim. The function's actual type a
 
 ---
 
-## Complete example: a multi-feature tool
-
-Here is a realistic tool that demonstrates multiple features:
-
-```python
-from tenxgraph.utils.decorators import tool
-from tenxgraph.core.state.stream_emitter import StreamEmitter
-
-@tool(
-    description="Search the product documentation for topics, how-tos, and API references.",
-    tags=["search", "documentation"],
-    capabilities=["read_files"],
-    metadata={"ratelimit": 20, "timeout_seconds": 10},
-)
-async def search_docs(
-    query: str,
-    limit: int = 5,
-    config: dict = None,
-    tool_call_id: str = None,
-    emit: StreamEmitter = None,
-) -> str:
-    """Search documentation."""
-    if emit:
-        emit.progress("Preparing search...", data={"query": query})
-    
-    try:
-        if not query or not query.strip():
-            raise ValueError("Query cannot be empty")
-        
-        if emit:
-            emit.progress(f"Searching for '{query}'...")
-        
-        # Simulate search
-        results = [f"Result {i+1}: {query}" for i in range(limit)]
-        
-        if emit:
-            emit.progress(f"Found {len(results)} results", data={"count": len(results)})
-        
-        return "\n".join(results)
-    
-    except Exception as e:
-        if emit:
-            emit.error(f"Search failed: {str(e)}")
-        raise RuntimeError(f"Documentation search failed: {str(e)}")
-```
-
-This tool:
-- Has a clear name and description for the LLM.
-- Is tagged so agents can choose to include or exclude it.
-- Documents its capabilities and metadata.
-- Is async for I/O efficiency.
-- Accepts optional injected parameters (`config`, `tool_call_id`, `emit`).
-- Emits progress updates during streaming.
-- Validates input and raises descriptive errors.
-
----
-
-## What you learned
-
-- The `@tool` decorator attaches metadata that 10xGraph uses to build the LLM schema and control tool behavior.
-- Parameter types are automatically converted to JSON schema; complex types need `@tool(parameters=...)`.
-- Injected parameters like `state`, `emit`, `config` are available at runtime but excluded from the LLM schema.
-- Errors in tools are caught and reported to the LLM, which can retry or adjust its approach.
-- Tools can be sync or async; async is preferred for I/O operations.
-- Tags allow fine-grained control over which tools each agent can call.
-
 ## Run it in production
 
-The model sees only a generic failure message when a tool raises, with a reference ID that matches the full error in the server log; return a string if the model should read the message. Tools run in parallel up to a cap of 10 by default. See [Errors and limits](/docs/concepts/errors-and-limits) and [Production readiness](/docs/production).
+Tools run in parallel, up to 10 at a time by default. See [Errors and limits](/docs/concepts/errors-and-limits) and [Production readiness](/docs/production).
 
 ## Next steps
 

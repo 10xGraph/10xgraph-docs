@@ -5,12 +5,10 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 230
 label: "Harness recipes"
-updated: "2026-11-22"
+updated: "2026-11-26"
 ---
 
 These are patterns, not framework features. Each one is built from parts 10xGraph already has: a `ToolNode` subclass, a custom state field, `ToolResult` and a checkpointer. Copy the code and change it for your agent.
-
-The examples were run with a scripted model in place of a real one, except MCP, which was not run against a live server.
 
 ## Tool search for large tool sets
 
@@ -128,7 +126,7 @@ graph.set_entry_point("MAIN")
 app = graph.compile(checkpointer=InMemoryCheckpointer())
 ```
 
-With a scripted model that calls `search_tools`, then `load_tool`, then `click`, the tool list on the four model requests was: core tools only, core tools only, core tools plus `click`, core tools plus `click`. The loaded name is saved in the thread state, so it survives a restart when the checkpointer is durable.
+The loaded name is saved in the thread state, so it survives a restart when the checkpointer is durable.
 
 Things to know:
 
@@ -193,7 +191,7 @@ def read_result(ref: str, offset: int = 0, length: int = 2000) -> str:
 tools = ToolNode([fetch_logs, read_result])
 ```
 
-The model never sees a path. The reference is a random id that `read_result` checks against a fixed pattern before it builds the path, so a model cannot ask for `../secrets`. The functions above ran against a 68,889 character result and returned the preview and slices as shown.
+The model never sees a path. The reference is a random id that `read_result` checks against a fixed pattern before it builds the path, so a model cannot ask for `../secrets`.
 
 Things to know:
 
@@ -266,7 +264,7 @@ tools = ToolNode([add_todo, complete_todo, list_todos, save_note, read_notes])
 
 Build the graph with `StateGraph(WorkState)`. A tool replaces the whole field value, so each tool returns the old content plus its change.
 
-The fields are dicts and a list of ids, not a list of todo objects with a `done` flag. This is on purpose. The model often calls several tools in one step, and they run in parallel on separate copies of the state. Each copy is merged back with the field's reducer. Without a reducer the last write wins and a warning is logged, so one `add_todo` would disappear. With two separate fields, "add" and "complete" never write the same field, and the reducers merge two adds or two completes. In a run with two `add_todo`, two `save_note`, then two `complete_todo` calls in parallel, the final state held both todos, both notes and both done ids.
+The fields are dicts and a list of ids, not a list of todo objects with a `done` flag. This is on purpose. The model often calls several tools in one step, and they run in parallel on separate copies of the state. Each copy is merged back with the field's reducer. Without a reducer the last write wins and a warning is logged, so one `add_todo` would disappear. With two separate fields, "add" and "complete" never write the same field, and the reducers merge two adds or two completes.
 
 A reducer receives the current value and the branch's full new value, so it must merge whole values, as `merge_dicts` and `union` do.
 
@@ -276,7 +274,7 @@ One limit: a read tool such as `list_todos` called in the same parallel step as 
 
 For a run that takes many steps or minutes, use a checkpointer and a stable `thread_id`. The rest is the same call.
 
-- **Checkpointer and thread.** Compile with a checkpointer and pass `{"thread_id": ...}` on every call. State is saved after every completed node, so a crash replays at most one node. Pick the checkpointer in [Set up checkpointing](/docs/guides/set-up-checkpointing). Concurrent writers, the per-step save and the tool ledger are in [Durability and concurrency](/docs/guides/durability-and-concurrency).
+- **Checkpointer and thread.** Compile with a checkpointer and pass `{"thread_id": ...}` on every call. State is saved after every completed node, so a crash replays at most one node. Pick the checkpointer in [Set up checkpointing](/docs/guides/set-up-checkpointing). Concurrent writers and the per-step save are in [Durability and concurrency](/docs/guides/durability-and-concurrency); the tool ledger is in [Replay-safe tools](/docs/concepts/replay-safe-tools).
 - **Step limit.** `recursion_limit` in the run config is the maximum number of steps in one turn. The default is 25. A long agent needs a higher value. When the limit is hit, the call raises `GraphRecursionError` and the thread stays usable.
 - **Resume after a stop.** After a cancel, a shutdown or a crash, the thread is repaired on the next call. A new user message starts a new turn on the saved context. A call with no new input continues at the saved node. Details and limits are in [Graceful shutdown](/docs/guides/graceful-shutdown).
 

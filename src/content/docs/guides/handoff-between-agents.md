@@ -4,7 +4,7 @@ description: "Transfer control between agents with handoff tools and Command rou
 section: "Build agents"
 group: "Control flow"
 order: 250
-updated: "2026-11-22"
+updated: "2026-11-26"
 faq:
   - q: "When should I use this instead of SwarmAgent?"
     a: "Use manual handoff when you need full control over graph topology or custom routing logic. Use SwarmAgent when all agents are peers and you want automatic handoff tool injection."
@@ -13,10 +13,10 @@ faq:
   - q: "Can I put a compiled graph inside another graph as a node?"
     a: "No. 10xGraph does not support nested graphs. add_node raises ValueError: Invalid arguments for add_node when given a compiled graph. Wrap the sub-workflow as a tool: the tool runs it, keeps the full data in a custom state field and returns a short summary to the model."
   - q: "How do I prevent routing loops?"
-    a: "Ensure at least one agent has a conditional edge that routes to END when no handoff is called, breaking the cycle."
+    a: "Ensure at least one agent has a conditional edge that routes to END when no handoff is called, breaking the cycle. `recursion_limit` (default 25) stops a loop that slips through."
 ---
 
-In a multi-agent graph, agents often need to delegate tasks to specialists. 10xGraph provides two patterns to route control: the **handoff tool** convention, where handoff tools made with `create_handoff_tool` (named `transfer_to_<agent>`) intercept the LLM's tool calls and navigate the graph directly, and the **Command** mechanism, where a node function explicitly routes to another agent. Handoff tools keep the conversation history clean because the tool body never executes; Command routing gives you programmatic control over navigation and state updates.
+In a multi-agent graph, agents often need to delegate tasks to specialists. 10xGraph provides two patterns to route control: the **handoff tool** convention, where handoff tools made with `create_handoff_tool` (named `transfer_to_<agent>`) intercept the LLM's tool calls and navigate the graph directly, and the **Command** mechanism, where a node function explicitly routes to another agent. The handoff tool's body never runs; the call is answered with a short "Transferred to <agent>" tool result so the target never inherits an unanswered tool call. Command routing gives you programmatic control over navigation and state updates.
 
 ## When to use each pattern
 
@@ -24,15 +24,15 @@ In a multi-agent graph, agents often need to delegate tasks to specialists. 10xG
 
 **Command routing** works when a dedicated node (often a router or condition function) makes routing decisions based on message content or logic you define. Return `Command(goto="TARGET_NODE")` from any custom node function to navigate explicitly. This is useful when routing decisions come from parsing outputs, matching patterns, or applying complex rules that the LLM should not see.
 
-If your agents are all peers (equal, collaborative) and you want automatic handoff tool injection, consider `/docs/guides/prebuilt/swarm-agent` instead. If you have a supervisor that delegates to workers, use `/docs/guides/prebuilt/supervisor-team-agent`. Use manual handoff when you need full control over the graph topology or custom routing.
+If your agents are all peers (equal, collaborative) and you want automatic handoff tool injection, consider [SwarmAgent](/docs/guides/prebuilt/swarm-agent) instead. If you have a supervisor that delegates to workers, use [SupervisorTeamAgent](/docs/guides/prebuilt/supervisor-team-agent). Use manual handoff when you need full control over the graph topology or custom routing.
 
 **A sub-workflow as a tool** fits when one step is a workflow of its own and the model needs only its result. The tool runs it, keeps the full data in a custom state field and returns a short summary. See [Run a sub-workflow as a tool call](#run-a-sub-workflow-as-a-tool-call).
 
 ## How handoff tools work
 
-When you call `create_handoff_tool("researcher")`, it returns a function named `transfer_to_researcher` with metadata flags that tell the graph this is a handoff. When an agent's tool node receives this tool call, the node handler checks whether that name is a handoff tool registered on this `ToolNode`. If it is, the handler reads the target agent name stored on the tool, updates the routing, and skips the tool function body. A name that merely starts with `transfer_to_` is not enough: a call to a made-up `transfer_to_*` tool is an ordinary unknown tool call and gets a "Tool not found" result. So a model cannot steer the run to a node by inventing a call. A `Command(goto=...)` that names a node not in the graph raises `GraphError` with code `GRAPH_007`. The message history stays clean because no tool-result message is added.
+When you call `create_handoff_tool("researcher")`, it returns a function named `transfer_to_researcher` with metadata flags that tell the graph this is a handoff. When an agent's tool node receives this tool call, the node handler checks whether that name is a handoff tool registered on this `ToolNode`. If it is, the handler runs the message's other tool calls first, answers the handoff call with a "Transferred to <agent>" result (a second handoff in the same message gets a "Not run" result), and routes to the target without running the tool body. A name that merely starts with `transfer_to_` is not enough: a call to a made-up `transfer_to_*` tool is an ordinary unknown tool call and gets a "Tool not found" result. So a model cannot steer the run to a node by inventing a call. A `Command(goto=...)` that names a node not in the graph raises `GraphError` with code `GRAPH_007`. The target sees the other tools' results and an answered handoff call.
 
-```python
+```text
 Agent LLM thinks: "I need the researcher to investigate."
     ↓
 Agent calls tool: transfer_to_researcher
@@ -40,10 +40,8 @@ Agent calls tool: transfer_to_researcher
 Graph handler finds the name among the registered handoff tools
     ↓
 Graph routes to the node named "researcher"
-    (tool function never runs)
+    (tool body never runs; the call gets a "Transferred to researcher" result)
 ```
-
-The graph does the routing, not the tool function. This keeps the conversation clean and makes routing transparent to the LLM.
 
 ## Complete working example
 
@@ -55,16 +53,10 @@ from tenxgraph.core.state import AgentState
 from tenxgraph.prebuilt.tools import create_handoff_tool
 from tenxgraph.utils import END
 
-# ────────────────────────────────────────────────────────────────────────────
-# Helper: Check if the last message has tool calls
-# ────────────────────────────────────────────────────────────────────────────
 def has_tool_calls(state: AgentState) -> bool:
     """Return True if the last message contains tool calls."""
     return bool(state.context and state.context[-1].tools_calls)
 
-# ────────────────────────────────────────────────────────────────────────────
-# Tools: Handoff tools for each agent
-# ────────────────────────────────────────────────────────────────────────────
 triage_tools = ToolNode([
     create_handoff_tool("researcher", "Hand off to researcher for fact-finding."),
     create_handoff_tool("writer", "Hand off to writer for drafting."),
@@ -80,9 +72,6 @@ writer_tools = ToolNode([
     create_handoff_tool("researcher", "Ask researcher for more information."),
 ])
 
-# ────────────────────────────────────────────────────────────────────────────
-# Agents
-# ────────────────────────────────────────────────────────────────────────────
 triage_agent = Agent(
     model="gemini-2.5-flash",
     provider="google",
@@ -113,9 +102,6 @@ writer_agent = Agent(
     tool_node="writer_tools",
 )
 
-# ────────────────────────────────────────────────────────────────────────────
-# Graph
-# ────────────────────────────────────────────────────────────────────────────
 graph = StateGraph()
 
 # Add agent nodes
@@ -155,9 +141,6 @@ graph.add_conditional_edges(
 
 app = graph.compile()
 
-# ────────────────────────────────────────────────────────────────────────────
-# Run it
-# ────────────────────────────────────────────────────────────────────────────
 result = app.invoke({
     "messages": [Message.text_message("Find recent AI breakthroughs and write a summary article.")]
 })
@@ -293,75 +276,23 @@ Keep these limits in mind when the sub-workflow is a compiled graph. It runs as 
 
 If the specialists should talk to the user directly or take turns in one conversation, use Agent nodes and handoff tools in one graph, as in the examples above.
 
-## Routing topologies
-
-### Peer-to-peer
-
-All agents can call all others. Each agent has handoff tools for every peer:
-
-```
-Agent A ←→ Agent B
-  ↕         ↕
-Agent C ←→ Agent D
-```
-
-Use **SwarmAgent** to automate this: it generates all `transfer_to_*` tools and injects them.
-
-### Hub and spoke
-
-One central coordinator routes to specialist agents, and specialists return to the coordinator:
-
-```
-        ┌─ Researcher
-        │
-Triage ─┼─ Writer
-        │
-        └─ Analyst
-```
-
-Use **SupervisorTeamAgent** for this pattern: it generates a supervisor LLM that decides where to route.
-
-### Chain
-
-Agents form a linear sequence; each hands off to the next:
-
-```
-Investigator → Analyzer → Writer → Editor → END
-```
-
-Use manual handoff with conditional edges that route sequentially.
-
 ## Common errors and fixes
 
 | Error | Cause | Fix |
 |---|---|---|
-| Agent keeps calling `transfer_to_X` but never moves. | Target node name doesn't exist in the graph. | Verify the `agent_name` argument to `create_handoff_tool()` matches an `add_node()` call exactly (case-sensitive). |
+| `GraphError` `GRAPH_007` | A handoff or `Command(goto=...)` names a node that is not in the graph | Match `create_handoff_tool("name")` to an `add_node("name", ...)` exactly (case-sensitive) |
 | Handoff tool executes (logs show "should have been intercepted"). | Node handler is not the framework's built-in handler; you've replaced it with custom logic. | Use `Agent` and `ToolNode` directly; do not override node handlers. |
 | Routing loop: agents keep handing off to each other infinitely. | No base-case conditional edge to `END`. | Add `END` as an option from at least one agent's conditional edges. Ensure an agent can finish without calling a handoff. |
 | `Command.goto` is ignored. | `Command` returned from an `Agent` node instead of a custom function. | Return `Command` only from custom node functions, not from `Agent` instances. Agents return messages. |
-| Handoff to agent X works but state looks wrong. | State not passed through the handoff correctly. | The framework preserves `state.context` (messages) across handoffs. If you need custom state, subclass `AgentState` and use reducers. |
-
-## How to verify
-
-After building the graph, compile it and run with a simple input to trace the path:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-
-result = app.invoke({"messages": [Message.text_message("Your request")]})
-```
-
-The logs show which nodes execute in order, making it easy to confirm the routing is working.
 
 ## Run it in production
 
-Handoffs are decided inside the graph, and only a handoff tool registered on the `ToolNode` can move a run to another node, so a prompt-injected `transfer_to_*` call is an ordinary failed tool call. A caller can start a run at a chosen node with `current_node` only if you list it in `runs.state_keys`, which is empty by default; leave it off if your graph needs an entry guard. See the [Security model](/docs/production/security-model).
+Handoffs are decided inside the graph, and only a handoff tool registered on the `ToolNode` can move a run to another node, so a prompt-injected `transfer_to_*` call is an ordinary failed tool call. A caller cannot choose the starting node: `current_node` lives in `execution_meta`, which the server never accepts from a client. See the [Security model](/docs/production/security-model).
 
 ## Related pages
 
-- `/docs/guides/prebuilt/swarm-agent`: Automate peer-to-peer handoff for multi-agent teams.
-- `/docs/guides/prebuilt/supervisor-team-agent`: Use a supervisor LLM to route work to specialists.
-- `/docs/guides/build-a-graph`: Fundamentals of building graphs and routing.
-- `/docs/concepts/state-graph`: How StateGraph, nodes, and edges work.
-- `/docs/concepts/agents-and-tools`: Agent behavior and tool dispatch.
+- [SwarmAgent](/docs/guides/prebuilt/swarm-agent): Automate peer-to-peer handoff for multi-agent teams.
+- [SupervisorTeamAgent](/docs/guides/prebuilt/supervisor-team-agent): Use a supervisor LLM to route work to specialists.
+- [Build a graph](/docs/guides/build-a-graph): Fundamentals of building graphs and routing.
+- [State graph](/docs/concepts/state-graph): How StateGraph, nodes, and edges work.
+- [Agents and tools](/docs/concepts/agents-and-tools): Agent behavior and tool dispatch.

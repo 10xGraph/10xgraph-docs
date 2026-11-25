@@ -5,31 +5,14 @@ section: "Build agents"
 group: "Agents and graphs"
 order: 40
 label: Custom state
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
-Every 10xGraph agent runs within an `AgentState` instance that persists data across all nodes in the graph. By default, `AgentState` holds the message conversation history and execution metadata. You extend it by subclassing to add typed, persistent application fields, like user IDs, ticket numbers, sentiment scores, or any domain-specific data your agent needs. The graph threads the state through every node and saves it with the checkpointer.
-
-## Why custom state
-
-Custom state fields let you:
-- Track data that threads through the entire agent execution
-- Use placeholders in system prompts (`"Help user {user_id}"`) interpolated at runtime
-- Persist application context across multiple invocations via checkpointing
-- Structure decision-making (conditional edges read custom fields to route the graph)
-- Pass initial values into a run without rebuilding the graph
-
-Without custom state, you would store this data outside the graph, losing the automatic persistence and threading benefits of the framework.
+Subclass `AgentState` to add typed fields to a graph's state. The graph passes the state through every node and saves it with the checkpointer.
 
 ## Built-in fields
 
-`AgentState` provides three fields you can read and build on:
-
-| Field | Type | Description |
-|---|---|---|
-| `context` | `list[Message]` | The conversation history (new messages are appended with the `add_messages` reducer and deduplicated by `message_id`) |
-| `context_summary` | `str \| None` | Optional compressed summary of older messages |
-| `execution_meta` | `ExecutionState` | Internal metadata tracking node progress, interrupts, and step counts. Read-only for most use cases. |
+`AgentState` already has `context` (the messages), `context_summary` and `execution_meta`; see [State and messages](/docs/concepts/state-and-messages#agentstate).
 
 ---
 
@@ -40,7 +23,6 @@ Create a Pydantic model that extends `AgentState`:
 ```python
 from pydantic import Field
 from tenxgraph.core.state import AgentState
-
 
 class SupportTicketState(AgentState):
     """Custom state for a support agent."""
@@ -53,7 +35,7 @@ class SupportTicketState(AgentState):
     tags: list[str] = Field(default_factory=list)
 ```
 
-All Pydantic features work: type hints, validators, `default_factory`, optional fields, computed fields. The built-in fields (`context`, `context_summary`, `execution_meta`) are inherited automatically.
+Any Pydantic field works. Use `Field(default_factory=...)` for lists and dicts.
 
 ---
 
@@ -83,7 +65,6 @@ Node functions receive the current state (declare a `state` parameter). Change t
 ```python
 from tenxgraph.core.state import Message
 
-
 def classify_sentiment(state: SupportTicketState, config: dict) -> SupportTicketState:
     """Analyze the last user message and update sentiment."""
     last_user_msg = next(
@@ -102,7 +83,6 @@ def classify_sentiment(state: SupportTicketState, config: dict) -> SupportTicket
         state.sentiment = "neutral"
     return state
 
-
 def resolve_ticket(state: SupportTicketState, config: dict) -> SupportTicketState:
     """Mark the ticket resolved and append a closing message."""
     state.resolved = True
@@ -115,8 +95,6 @@ def resolve_ticket(state: SupportTicketState, config: dict) -> SupportTicketStat
     )
     return state
 ```
-
-When a node returns the state, the runtime keeps the new field values and records any new entries in `state.context` as new messages of the run.
 
 ---
 
@@ -176,17 +154,7 @@ Only keys that already exist as fields on your state class are applied; `context
 
 When you serve the graph with `10xgraph dev`, a client can set custom state fields on invoke, stream and WebSocket `initial_state`, with `PUT /v1/threads/{thread_id}/state` and in the AG-UI `state` field, but only the keys you list in `runs.state_keys` in `10xgraph.json`. The list is empty by default, so a client can set none until you allow some. A frontend can then send a selected ID straight into state without spending a model turn on it.
 
-The server limits what a client can write:
-
-| Client input | Result |
-|---|---|
-| Custom fields you defined on your state class | Accepted only if listed in `runs.state_keys`, and if the value matches the field type. An unlisted key returns 422. A wrong type returns 422 and names the field. |
-| `context_summary` or `execution_meta` | Always 422. These built-in fields are never client-writable. |
-| `current_node` | Accepted if it is listed in `runs.state_keys` and names a node in the graph. An unknown node returns 422. |
-| Messages in `context` | User messages only. Roles `assistant` and `system` return 422. A `tool` message is accepted only as `tool_result` blocks that answer a pending client tool call. |
-| `message_id` on a message | Ignored. The server generates the id. |
-
-To let clients set custom keys, list them in `runs.state_keys` in `10xgraph.json`. Any other key is refused with 422. `context` in `PUT` state is always allowed.
+Every rule for what a client may send is in [What the server accepts from clients](/docs/server/invoke-and-stream#what-the-server-accepts-from-clients).
 
 ```json
 {
@@ -216,7 +184,6 @@ from tenxgraph.core.state import AgentState, Message
 from tenxgraph.core.state.reducers import add_messages
 from pydantic import Field
 
-
 class PipelineState(AgentState):
     # A separate log of intermediate messages, also deduplicated by ID
     processing_log: Annotated[list[Message], add_messages] = Field(default_factory=list)
@@ -232,13 +199,10 @@ Replaces the entire message list with the new one. Use this when the latest writ
 from typing import Annotated
 from tenxgraph.core.state.reducers import replace_messages
 
-
 class SummarizedState(AgentState):
     # This field is always replaced, never appended
     summary_messages: Annotated[list[Message], replace_messages] = Field(default_factory=list)
 ```
-
-When the reducer runs, the old list is discarded and replaced by the new one.
 
 ### `append_items` (append objects with id deduplication)
 
@@ -249,19 +213,15 @@ from typing import Annotated
 from tenxgraph.core.state.reducers import append_items
 from pydantic import Field, BaseModel
 
-
 class ToolResult(BaseModel):
     id: str
     name: str
     value: str
 
-
 class ToolState(AgentState):
     # Append tool results, deduplicated by their .id
     tool_results: Annotated[list[ToolResult], append_items] = Field(default_factory=list)
 ```
-
-When the reducer runs, new items are appended. An item with an `.id` that already exists is skipped.
 
 ### `replace_value` (replace a value)
 
@@ -269,7 +229,6 @@ Returns the new value and ignores the old one. Use it to make last-write-wins ex
 
 ```python
 from tenxgraph.core.state.reducers import replace_value
-
 
 class MyState(AgentState):
     status: Annotated[str, replace_value] = "pending"
@@ -289,13 +248,10 @@ If a sequence is incomplete (tool call made but no final response yet), all mess
 ```python
 from tenxgraph.core.state.reducers import remove_tool_messages
 
-
 def prune(state: AgentState, config: dict) -> AgentState:
     state.context = remove_tool_messages(state.context)
     return state
 ```
-
-This is useful in long-running agents where you want to drop tool calls and results after the model has used them, reducing token usage on later calls.
 
 ---
 
@@ -309,14 +265,12 @@ from tenxgraph.core.graph import StateGraph, Agent
 from tenxgraph.core.state import AgentState, Message
 from tenxgraph.utils import END, ResponseGranularity
 
-
 # Define custom state
 class ResearchState(AgentState):
     research_topic: str = ""
     findings: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
     confidence: float = 0.0
-
 
 # Define a node that processes custom fields
 def extract_findings(state: ResearchState, config: dict) -> ResearchState:
@@ -336,7 +290,6 @@ def extract_findings(state: ResearchState, config: dict) -> ResearchState:
     state.findings = findings
     state.confidence = 0.85 if len(findings) > 2 else 0.5
     return state
-
 
 # Build the graph
 graph = StateGraph(ResearchState)
@@ -381,42 +334,7 @@ print("Confidence:", final.confidence)
 
 ---
 
-## How to verify it worked
-
-Invoke with `response_granularity=ResponseGranularity.FULL` so the result includes the final state, then check:
-
-1. **State is threaded:** custom fields hold the values you expect.
-
-```python
-state = result["state"]
-print(state.user_id)      # Should match what you passed
-print(state.sentiment)    # Should reflect updates from nodes
-print(len(state.context)) # Messages should be accumulated
-```
-
-2. **Checkpointing preserves state:** `compile()` uses an in-memory checkpointer by default, so invoking again with the same `thread_id` in the same process continues from the saved state.
-
-```python
-result2 = app.invoke(
-    {"messages": [Message.text_message("Follow-up question.")]},
-    config={"thread_id": "support-session-1"},
-    response_granularity=ResponseGranularity.FULL,
-)
-assert result2["state"].user_id == state.user_id
-```
-
----
-
 ## Common errors and fixes
-
-**Error: `AttributeError` or a Pydantic error mentioning a missing field**
-
-You accessed or assigned a field that is not defined in your state class. Add it:
-
-```python
-class SupportTicketState(AgentState):
-    my_field: str = ""  # Add the missing field
-```
 
 **My field in `"state"` was ignored.**
 
@@ -443,59 +361,12 @@ app = graph.compile(checkpointer=SqliteCheckpointer(db_path="./state.db"))
 
 ---
 
-## Variations and best practices
-
-**Typed reducers for custom types:** If your field is a list of domain objects, use `append_items`:
-
-```python
-from typing import Annotated
-from pydantic import BaseModel, Field
-from tenxgraph.core.state import AgentState
-from tenxgraph.core.state.reducers import append_items
-
-
-class Item(BaseModel):
-    id: str
-    name: str
-
-class MyState(AgentState):
-    items: Annotated[list[Item], append_items] = Field(default_factory=list)
-```
-
-**Combining multiple reducers:** You can have different fields with different reducers in the same state:
-
-```python
-from typing import Annotated
-from pydantic import BaseModel, Field
-from tenxgraph.core.state import AgentState, Message
-from tenxgraph.core.state.reducers import add_messages, replace_value, append_items
-
-
-class MultiReducerState(AgentState):
-    messages_log: Annotated[list[Message], add_messages] = Field(default_factory=list)
-    latest_status: Annotated[str, replace_value] = "pending"
-    collected_items: Annotated[list[Item], append_items] = Field(default_factory=list)
-```
-
-**Initializing with factory defaults:** For complex fields, use `Field(default_factory=...)`:
-
-```python
-class MyState(AgentState):
-    metadata: dict = Field(default_factory=dict)
-    tags: list[str] = Field(default_factory=list)
-```
-
-This ensures each graph instance gets its own dict/list, not a shared one (a common Python pitfall).
-
----
-
 ## Run it in production
 
-Over the API, callers can set the custom state fields you list in `runs.state_keys` in `10xgraph.json` (a frontend picker can send its selection straight into state). Clients can set no key until you list it. Built-in fields such as `context_summary` and `execution_meta` are never writable through the API, and identity must come from the authenticated user, never from state. See [Configure the server](/docs/server/configure) and [Invoke and stream](/docs/server/invoke-and-stream).
+Clients can set only the state keys you list in `runs.state_keys`, and identity must come from the authenticated user, never from state. See [Configure the server](/docs/server/configure).
 
 ## Next steps
 
 - [Build a graph](/docs/guides/build-a-graph) for the full workflow assembly guide
 - [Set up checkpointing](/docs/guides/set-up-checkpointing) to persist custom state across requests
-- [Use dependency injection](/docs/guides/use-dependency-injection) to pass runtime config into nodes
-- [State and messages (concept)](/docs/concepts/state-and-messages) for a deeper dive into message content blocks
+- [State and messages](/docs/concepts/state-and-messages)

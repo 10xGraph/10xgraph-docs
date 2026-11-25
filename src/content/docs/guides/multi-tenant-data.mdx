@@ -6,10 +6,10 @@ section: "Security and access"
 group: "Tenancy"
 order: 30
 label: Tenant isolation
-updated: "2026-11-08"
+updated: "2026-11-26"
 ---
 
-`PgCheckpointer` and `PgVectorStore` accept two kinds of columns you declare yourself. **Tenant columns** such as `org_id` and `project_id` isolate data the way `user_id` does. **Extra columns** such as `public_id` or `plan` are plain data you can read and filter. 10xGraph owns a few columns; the rest of the schema is yours. Nothing is created until you declare something.
+`PgCheckpointer` and `PgVectorStore` accept two kinds of columns you declare yourself, and `QdrantStore` accepts tenant columns. **Tenant columns** such as `org_id` and `project_id` isolate data the way `user_id` does. **Extra columns** such as `public_id` or `plan` are plain data you can read and filter. 10xGraph owns a few columns; the rest of the schema is yours. Nothing is created until you declare something.
 
 ## Tenant columns and extra columns
 
@@ -25,7 +25,7 @@ updated: "2026-11-08"
 
 Both options exist on `PgCheckpointer` (columns on the `threads` table) and `PgVectorStore` (columns on the memories table). Each declared column becomes a real column with a B-tree index.
 
-**Reserved names.** A tenant or extra column cannot be named `kind`, `tenant`, `roles`, `permissions`, `reach` or `claims`: those are fields of the `Identity` in `config["user"]` and carry authorization data, so declaring one raises `ValueError`. Built-in column names of the table (such as `user_id`, `created_at`, `memory_key`) are refused too. Pick another name, for example `org_role`.
+**Reserved names.** A tenant or extra column cannot be named `kind`, `tenant`, `roles`, `permissions`, `reach` or `claims`: those are fields of the `Identity` in `config["user"]` and carry authorization data, so declaring one raises `ValueError`. Built-in column names of the table (such as `user_id`, `created_at`, `memory_key`) are refused too. On the stores, `origin` and `expires_at` are refused as well (1.1 memory fields). Pick another name, for example `org_role`.
 
 A declaration is a list of names (each a `text` column), a mapping of name to type, or a mapping of name to `{"type": ..., "required": ...}`:
 
@@ -185,8 +185,9 @@ The API server runs the same check on a store bound with the `store` key in `10x
 
 Notes on each backend:
 
-- **`PgCheckpointer`** sets the values when a thread is created and never changes them. Every query that touches a thread (threads, states, messages, tool executions) is filtered through the thread row. Schema version 6 adds the columns to `threads` with `ADD COLUMN IF NOT EXISTS`, and a column you declare later is added on the next setup. `aget_thread_scope(thread_id)` returns `{"user_id": ..., "org_id": ...}` for a thread (all tenant columns), without scoping to the caller. `aget_thread_owner` is kept.
+- **`PgCheckpointer`** sets the values when a thread is created and never changes them. Every query that touches a thread (threads, states, messages, tool executions) is filtered through the thread row. A column you declare later is added on the next setup. `aget_thread_scope(thread_id)` returns `{"user_id": ..., "org_id": ...}` for a thread (all tenant columns), without scoping to the caller.
 - **`PgVectorStore`** adds missing columns on every `asetup()`. The tenant columns also join the unique `memory_key` index, so the same `user_id` in two tenants keeps separate memories for the same key. Shared data written under `system_user_id(name)` is shared only inside the caller's tenant values, on every reach.
+- **`QdrantStore(tenant_columns=...)`** stores the tenant values in the payload (never from caller metadata), gives each column a keyword payload index marked `is_tenant`, and filters every read, update, delete and search by the caller's reach, so reach `tenant` works there too. Points written before a column was declared have no value and stay invisible to reach `own` and `tenant`. `extra_columns` and `row_level_security` are Postgres only.
 - **`InMemoryCheckpointer` and `SqliteCheckpointer`** raise if you pass `tenant_columns`, `extra_columns` or `row_level_security`. Use `PgCheckpointer` for tenant data.
 
 ## Reach
@@ -213,22 +214,14 @@ Reach says which rows a caller's queries match. You set it per role in `auth.rol
 }
 ```
 
-| Caller | Reach | What they see |
-|---|---|---|
-| Super admin | `all` | Every thread and memory |
-| Org admin | `tenant` | All threads and memories with the caller's `org_id` and `project_id` |
-| User | `own` | Their own threads and memories |
-
 Rules to know:
 
-- **Reach widens reads, lists and deletes only.** Runs and state or message writes always stay `own`, admins included. Nobody runs inside another user's thread. Stop follows reach.
-- **Reach is never a fallback.** A role with a missing or unknown reach refuses to boot. A token cannot name its own reach.
 - **A picked column needs a value.** Reach `own` needs a value for every declared tenant column in `Identity.tenant`. A missing value raises, and the API answers 401 because the token lacks a tenant claim. The column is never dropped from the filter quietly.
 - **Reach `tenant` needs tenant columns.** `InMemoryCheckpointer` and `SqliteCheckpointer` declare none. On them a read, list or delete by a caller with reach `tenant` raises `ValueError`, so the request fails; it never falls back to `own`. Writes use `own` and still work. Use `PgCheckpointer` with tenant columns for any role with reach `tenant`.
 - **Reach `tenant` matches every declared tenant column.** All declared columns must equal the caller's values. A role cannot pick a subset.
-- **A foreign row is a 404.** A thread outside the caller's reach looks the same as a missing one.
 - **Store calls still carry a `user_id`.** Writes and `aforget_memory` always name an owner, whatever the reach is.
-- **Shared data stays shared inside the tenant.** Rows written under a `__system__:<name>` owner (agent memory, knowledge bases) are pinned to that owner on every reach, so a wider reach never reads other users' rows through a shared-data query.
+
+Reach in general (who may widen what, 404 for foreign rows) is in [Tenancy and access](/docs/concepts/tenancy-and-access).
 
 In core-only use, put the reach on the identity yourself:
 
@@ -270,7 +263,7 @@ Values: `text` takes a string (or an integer, sent as its decimal string); `inte
 | Backend | Built-in columns | Plus |
 |---|---|---|
 | Threads (`PgCheckpointer`, `GET /v1/threads`) | `thread_name`, `created_at`, `updated_at` | Your extra columns |
-| Memories (`PgVectorStore`) | `memory_type`, `category`, `thread_id`, `memory_key`, `created_at`, `updated_at` | Your extra columns |
+| Memories (`PgVectorStore`) | `memory_type`, `category`, `thread_id`, `memory_key`, `origin`, `expires_at`, `created_at`, `updated_at` | Your extra columns |
 
 On the store, a key that is not a column matches a top-level key of the JSONB `metadata` by equality, with `str`, `int`, `float` or `bool` values only.
 
@@ -339,7 +332,7 @@ Map each old `user_id` to its tenant in your own data. If your tenant column was
 
 <Callout type="warning" title="Deprecated: legacy key index handling">
 
-`adrop_legacy_key_index()` and the handling that keeps the pre-tenant `<table>_key_uq` index next to the new one are transitional and deprecated. They will be removed in the next breaking release (1.5 or 2.0). After that, setup replaces the old index directly, and the rollout below needs no extra step.
+`adrop_legacy_key_index()` and the handling that keeps the pre-tenant `<table>_key_uq` index next to the new one are transitional and deprecated. They will be removed in 2.0. After that, setup replaces the old index directly, and the rollout below needs no extra step.
 
 </Callout>
 
@@ -383,7 +376,7 @@ Deleting a thread, including by an org admin, releases the files the thread's ow
 `RAGAgent` forwards only `config["user"]` from the run config into the config it passes to `store.asearch`, so a store with tenant columns scopes knowledge-base searches to the caller's tenant. It pins the forwarded identity to the knowledge-base owner (`system_user_id("knowledge_base")` by default) with reach `own`, so a caller with reach `tenant` or `all` cannot widen a knowledge-base search to other users' rows. The tenant values are read from the run config only, never from state, messages or model output.
 
 - Documents written with tenant values are visible only inside that tenant.
-- To share one knowledge base across tenants, use a store without tenant columns, and compile with `allow_tenant_mismatch=True` when the checkpointer declares tenant columns.
+- To share one knowledge base across tenants, use a store without tenant columns. The knowledge-base store goes to `RAGAgent(store=...)`, not to `compile()`, so the compile-time tenant check does not apply to it.
 
 ## Contains search with `pg_trgm`
 

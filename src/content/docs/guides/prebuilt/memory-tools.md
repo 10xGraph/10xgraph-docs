@@ -6,7 +6,7 @@ section: "Build agents"
 group: "Tools and MCP"
 order: 200
 label: Memory Tools
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
 10xGraph memory tools give agents long-term memory: facts and preferences that persist across conversations and threads. Your agent can search what it has learned about users and save new observations. Both tools use semantic search, so the agent finds relevant information by meaning, not by keyword.
@@ -19,16 +19,16 @@ There is one way to turn memory on: pass `memory=MemoryConfig(...)` to the `Agen
 
 | Tool | When to use | Enabled by | Operations |
 |---|---|---|---|
-| `user_memory_tool` | Memory scoped to individual users | `MemoryConfig(user_memory=...)`; on by default | search, remember |
+| `user_memory_tool` | Memory scoped to individual users | `MemoryConfig(user_memory=...)`; on by default | search, remember, forget |
 | `agent_memory_tool` | Read-only, application-wide memory (for example a knowledge base or policies) | `MemoryConfig(agent_memory=AgentMemoryConfig(enabled=True, ...))` | search only |
 
-Both tools need a store (for example PgVectorStore or Qdrant) that supports semantic search. Pass it to `MemoryConfig(store=...)` or to `compile(store=...)`. The Agent registers the tools on its `ToolNode` only when `MemoryConfig.retrieval_mode` is `postload` (the default for `MemoryConfig`). With `preload`, there are no memory tools: the Agent searches once per invocation and adds the memories to the latest user message as a fenced block (see [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text)). With `no_retrieval`, the model has no memory tools and nothing is injected.
+Both tools need a store (for example PgVectorStore or Qdrant) that supports semantic search. Pass it to `MemoryConfig(store=...)` or to `compile(store=...)`. The Agent registers the tools on its `ToolNode` only when `MemoryConfig.retrieval_mode` is `postload` (the default for `MemoryConfig`). With `preload`, the Agent searches once per invocation and adds the memories to the latest user message as a fenced block (see [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text)); the model still gets `user_memory_tool`, with `remember` and `forget` only, and no `agent_memory_tool`. With `no_retrieval`, the model has no memory tools and nothing is injected.
 
 ## How memory works
 
 Writes run asynchronously in the background. When the agent calls `remember`, the tool returns `{"status": "scheduled", "action": "remember"}` immediately, and the write happens later without blocking the conversation. Searches flush any pending writes first, so results reflect the latest data.
 
-Deduplication is by similarity: if the new text is nearly identical to an existing memory (score 0.95 or higher), the write is skipped. The model never provides memory ids or keys.
+Deduplication is by similarity: if the new text is nearly identical to an existing memory (score 0.95 or higher), the write is skipped. The model never provides memory ids. For a fact that can change (an editor, a package manager), it may pass a short `memory_key` (at most 128 characters): remembering again with the same key replaces the old fact, and `forget` with that key deletes it under every memory type.
 
 Both tools return JSON. A search returns a list of results, for example `[{"id": "...", "content": "...", "score": 0.95, "memory_type": "episodic", "metadata": {}}]`. Errors look like `{"error": "..."}`, for example "user memory is disabled", "no user memory store configured" or "text is required".
 
@@ -36,21 +36,23 @@ Both tools return JSON. A search returns a list of results, for example `[{"id":
 
 ## `user_memory_tool`, user-scoped memory via Agent config
 
-When you enable user memory in an Agent, the `user_memory_tool` is registered automatically. You do not need to instantiate it yourself. The tool enforces one scope (one user) and one permission model: the LLM can search and write, but not update or delete. User memory is enabled by default in `MemoryConfig`.
+When you enable user memory in an Agent, the `user_memory_tool` is registered automatically. You do not need to instantiate it yourself. The tool enforces one scope (one user) and one permission model: the LLM can search, remember and forget by `memory_key`, but never edits a memory by id. User memory is enabled by default in `MemoryConfig`.
 
 ### Operations
 
 | Action | Required parameters | Description |
 |---|---|---|
 | `search` | `text` | Search for user-scoped memories. Returns up to `limit` results. |
-| `remember` | `text` | Save a new user fact or preference. Near-identical text is skipped by the similarity check. |
+| `remember` | `text`, optional `memory_key` | Save a user fact or preference. With a `memory_key`, replaces the fact saved earlier under that key. Near-identical text is skipped. |
+| `forget` | `memory_key` | Delete the facts saved under that key. |
 
 ### Parameters
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `action` | `str` | `"search"` | One of `search` or `remember`. |
+| `action` | `str` | `"search"` | One of `search`, `remember` or `forget`. |
 | `text` | `str` | `""` (required in practice) | For `search`, the query text. For `remember`, the text to save. Supports natural language. |
+| `memory_key` | `str` | `None` | Stable key for a fact that can change; required for `forget`. |
 | `memory_type` | `str` | inherited | Override the configured memory type (e.g. `"episodic"`, `"semantic"`). If not set, uses the type from `UserMemoryConfig`. |
 | `category` | `str` | inherited | Override the configured category. If not set, uses the category from `UserMemoryConfig`. |
 | `limit` | `int` | inherited | Override the configured result limit. If not set, uses the limit from `UserMemoryConfig`. |
@@ -65,6 +67,7 @@ from tenxgraph.prebuilt.agent import ReactAgent
 from tenxgraph.storage.store.memory_config import MemoryConfig, UserMemoryConfig
 from tenxgraph.storage import create_local_qdrant_store
 from tenxgraph.storage.store.embedding import OpenAIEmbedding
+from tenxgraph.core.state import Message
 
 store = create_local_qdrant_store(
     path="./memory_db",
@@ -91,7 +94,7 @@ agent = ReactAgent(
 app = agent.compile(store=store)
 ```
 
-Import `Message` from `tenxgraph.core.state` for the invoke call below. The `user_memory_tool` is now available to the LLM. It is scoped to the caller. With an authenticated identity (`config["user"]`, which the API server sets from the verified token), the identity's `user_id` always wins, and a `UserMemoryConfig(user_id=...)` value is ignored, so a fixed id never shares one user's memory with every caller. Without an identity (direct SDK use), `UserMemoryConfig(user_id=...)` replaces `config["user_id"]`, and otherwise the run config's `user_id` is used. User memory is always the caller's own, whatever their reach:
+The `user_memory_tool` is now available to the LLM. It is scoped to the caller. With an authenticated identity (`config["user"]`, which the API server sets from the verified token), the identity's `user_id` always wins, and a `UserMemoryConfig(user_id=...)` value is ignored, so a fixed id never shares one user's memory with every caller. Without an identity (direct SDK use), `UserMemoryConfig(user_id=...)` replaces `config["user_id"]`, and otherwise the run config's `user_id` is used. User memory is always the caller's own, whatever their reach:
 
 ```python
 result = await app.ainvoke(
@@ -183,52 +186,9 @@ result = await app.ainvoke(
 # "alice" does not matter here: agent memory is read as system_user_id("customer-support-v2").
 ```
 
----
+## Vector store
 
-## Setting up a vector store
-
-Both memory tools require a vector store that supports semantic search. 10xGraph supports several backends.
-
-**Qdrant (local or cloud):**
-
-```python
-from tenxgraph.storage import create_local_qdrant_store
-from tenxgraph.storage.store.embedding import OpenAIEmbedding
-
-store = create_local_qdrant_store(
-    path="./memory_db",
-    embedding=OpenAIEmbedding(model="text-embedding-3-small"),
-)
-```
-
-Qdrant works offline in local mode. For production, `QdrantStore` also accepts `host`/`port` or `url` and `api_key` for a server or Qdrant Cloud. Install with `pip install "10xgraph[qdrant]"` (needs `qdrant-client` 1.10.0 or newer, and Qdrant server 1.10 or newer for a server).
-
-**PgVectorStore (memory in the Postgres you already run):**
-
-```python
-from tenxgraph.storage.store import OpenAIEmbedding, PgVectorStore
-
-store = PgVectorStore(
-    embedding=OpenAIEmbedding(),
-    dsn="postgresql://user:pass@localhost:5432/app",
-)
-```
-
-`PgVectorStore` keeps memories in one Postgres table and supports `SIMILARITY`, `TEXT` and `HYBRID` search. Install with `pip install "10xgraph[pgvector]"` (needs PostgreSQL 14 or newer and the pgvector extension 0.7.0 or newer). See [How to use PgVectorStore](/docs/guides/use-pgvector-store).
-
-Choose the embedding model based on your provider and token budget. `OpenAIEmbedding` defaults to `text-embedding-3-small`, and its `model` argument selects another OpenAI embedding model.
-
----
-
-## Design patterns
-
-**Search before write:** Your system prompt should encourage the agent to search memory at the start of a conversation and write important facts at the end. This gives continuity across threads.
-
-**Scope memory by use case:** User memory (personal preferences, history) is separate from agent memory (policies, FAQs). Mix them when both types are relevant.
-
-**Background writes don't block:** Write operations return immediately. If the agent asks "did you save that?", you can safely say yes; the actual persistence happens asynchronously. Your system prompt can reinforce this behavior.
-
----
+Both tools need a store that supports semantic search. Setup for Qdrant and `PgVectorStore` is in [Use a memory store](/docs/guides/use-memory-store).
 
 ## Run it in production
 

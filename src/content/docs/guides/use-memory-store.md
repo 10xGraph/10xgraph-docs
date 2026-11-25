@@ -5,60 +5,17 @@ section: "Data and state"
 group: "Long-term memory"
 order: 30
 label: Memory store
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
-## What the memory store solves
-
-As your agent runs across many threads and user sessions, it accumulates conversation history in a checkpointer. But conversation history alone doesn't retain knowledge that should persist across all future interactions: user preferences, learned facts, domain expertise, or semantic relationships between entities.
-
-The memory store is a separate, persistent vector database that holds this long-term knowledge independently of any single thread or conversation. Unlike the checkpointer (which preserves conversation history per thread), the memory store is **global**: facts written to it are accessible in future conversations with the same user, across different topics, and over weeks or months.
-
-This guide shows you how to set up a memory store, integrate it with your agent, and use it to deliver personalized, contextually aware experiences.
-
-## Memory store vs. checkpointer
-
-These two components work together but serve different purposes:
-
-| Component | Scope | Lifetime | Use case |
-|---|---|---|---|
-| **Checkpointer** | Per-thread | Conversation duration | Remembers conversation history within a single chat session; enables resuming interrupted runs. |
-| **Memory store** | Global | Cross-thread, persistent | Stores user preferences, facts, and learned knowledge that should inform future conversations. |
-
-Example: a customer support agent uses the checkpointer to recall "we discussed issue X earlier in this chat," and the memory store to recall "this customer always prefers phone support over email."
+This guide sets up a long-term memory store, connects it to a graph and turns on agent memory with `MemoryConfig`. For what the store is and how it differs from the checkpointer, see [Long-term memory](/docs/concepts/memory-and-store).
 
 ---
 
-## Choosing a store implementation
 
-10xGraph provides two production-ready memory store implementations. Both implement the `BaseStore` interface and work with the same `MemoryConfig` API.
+## Choose a store
 
-### PgVectorStore
-
-**Best for:** Teams that already run Postgres for checkpoints and want one database for threads and memory, tenant isolation with your own columns, and hybrid (vector plus keyword) search.
-
-`PgVectorStore` keeps memories in one Postgres table next to the `PgCheckpointer` tables. It needs PostgreSQL 14 or newer and the pgvector extension 0.7.0 or newer.
-
-**Trade-offs:**
-- One database to back up, secure and operate
-- Search strategies `SIMILARITY`, `TEXT` and `HYBRID`, with `embedding=None` for a text-only store
-- Tenant and extra columns you declare, with safe filters on them
-- Vector search speed depends on your Postgres sizing
-
-### QdrantStore
-
-**Best for:** Self-hosted or cloud vector database deployments, full control over infrastructure, a dedicated vector service.
-
-Qdrant is an open-source, high-performance vector database optimized for similarity search. You can run it locally (file-backed), self-hosted (server), or on Qdrant Cloud.
-
-**Trade-offs:**
-- More operational overhead (Qdrant server management)
-- More flexible configuration (distance metrics, chunking)
-- Excellent performance at scale
-- No vendor lock-in
-- Supports `SIMILARITY` search only; `TEXT` and `HYBRID` raise
-
-Choose based on your infrastructure preferences. The two are interchangeable in your agent code.
+Both stores implement `BaseStore` and take the same `MemoryConfig`. Use `PgVectorStore` to keep memory in the Postgres you already run for checkpoints, with text and hybrid search and your own tenant columns. Use `QdrantStore` for a separate vector database (local file, server or Qdrant Cloud); it supports `SIMILARITY` search only, and `TEXT` and `HYBRID` raise.
 
 ---
 
@@ -137,7 +94,7 @@ Get your Qdrant Cloud URL and API key from the Qdrant Cloud dashboard.
 
 ### Factory functions
 
-The three factories above (`create_local_qdrant_store`, `create_remote_qdrant_store`, `create_cloud_qdrant_store`) all construct a `QdrantStore` internally. Use them for clarity and because they provide sensible defaults. If you need fine-grained control, construct `QdrantStore` directly:
+The three factories above (`create_local_qdrant_store`, `create_remote_qdrant_store`, `create_cloud_qdrant_store`) all construct a `QdrantStore` internally. If you need fine-grained control, construct `QdrantStore` directly:
 
 ```python
 from tenxgraph.storage.store import (
@@ -182,26 +139,9 @@ Use the same DSN as your `PgCheckpointer` to keep everything in one database. Pa
 
 ---
 
-## Embedding options
+## Embeddings
 
-`PgVectorStore` and `QdrantStore` need an embedding function to convert text to vectors (`PgVectorStore` can skip it with `embedding=None`). Choose based on your API keys and preferences.
-
-| Class | Provider | Model | Env var required |
-|---|---|---|---|
-| `OpenAIEmbedding` | OpenAI | `text-embedding-3-small` | `OPENAI_API_KEY` |
-| `GoogleEmbedding` | Google | `gemini-embedding-001` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
-
-```python
-from tenxgraph.storage.store import OpenAIEmbedding, GoogleEmbedding
-
-openai_embed = OpenAIEmbedding()
-google_embed = GoogleEmbedding()
-
-# Then pass to your store:
-# store = QdrantStore(embedding=openai_embed, path="./qdrant_data")
-```
-
-Pass `model=` and `api_key=` to either class to override the default model or the environment variable. Use the same embedding model for writing and searching a collection.
+`OpenAIEmbedding()` (default `text-embedding-3-small`, reads `OPENAI_API_KEY`) and `GoogleEmbedding()` (default `gemini-embedding-001`, reads `GOOGLE_API_KEY` or `GEMINI_API_KEY`) are built in. Pass `model=` or `api_key=` to override them, and `base_url=` for a compatible endpoint. Use the same model for writing and searching a collection. See [Embeddings](/docs/reference/python/memory-stores#embeddings).
 
 ---
 
@@ -267,62 +207,30 @@ agent = Agent(
 )
 ```
 
-The agent now gets a `user_memory_tool` it can call to search and save user facts, and a short memory instruction is added to its system prompt. With `ReadMode.PRELOAD` no tools are added, so no ToolNode is needed.
+The agent now gets a `user_memory_tool` it can call to search and save user facts, and a short memory instruction is added to its system prompt. With `ReadMode.PRELOAD` the search runs before the call, but the model still gets `user_memory_tool` to remember and forget, so it needs a ToolNode too. Only `ReadMode.NO_RETRIEVAL` adds no tools.
 
-### Full MemoryConfig reference
+### Configure each scope
 
-For finer control, configure each memory scope separately:
+Each scope takes its own settings, which win over the `MemoryConfig` values:
 
 ```python
-from tenxgraph.storage.store import (
-    MemoryConfig,
-    UserMemoryConfig,
-    AgentMemoryConfig,
-    ReadMode,
-)
+from tenxgraph.storage.store import AgentMemoryConfig, MemoryConfig, UserMemoryConfig
 
 memory = MemoryConfig(
-    store=store,                              # required: BaseStore instance
-    retrieval_mode=ReadMode.POSTLOAD,         # POSTLOAD (default) | PRELOAD | NO_RETRIEVAL
-    limit=5,                                  # max memories to retrieve per search
-    score_threshold=0.0,                      # minimum similarity score (must be >= 0)
-    max_tokens=None,                          # cap total tokens across all memories
-    inject_system_prompt=True,                # add memory instructions to the system prompt
-
-    user_memory=UserMemoryConfig(
-        enabled=True,
-        memory_type="semantic",               # EPISODIC | SEMANTIC | PROCEDURAL | ENTITY | RELATIONSHIP | DECLARATIVE | CUSTOM
-        category="preferences",               # arbitrary label for grouping
-        user_id=None,                         # override; falls back to config["user_id"]
-        limit=5,
-        score_threshold=0.6,
-    ),
-
-    agent_memory=AgentMemoryConfig(
-        enabled=False,                        # disabled by default
-        memory_type="semantic",
-        category="knowledge",
-        agent_id="my-agent",                  # groups memories by agent
-        app_id="my-app",                      # groups memories by application
-    ),
+    store=store,
+    user_memory=UserMemoryConfig(category="preferences", score_threshold=0.6),
+    agent_memory=AgentMemoryConfig(enabled=True, agent_id="support-bot"),
 )
-
 agent = Agent(model="gpt-4o", tool_node=ToolNode([]), memory=memory)
 ```
 
-### ReadMode: how the agent uses memories
+Every field and default is in the [MemoryConfig reference](/docs/reference/python/memory-stores#memoryconfig).
 
-| Mode | Behaviour |
-|---|---|
-| `ReadMode.POSTLOAD` (default) | Memories are fetched on-demand via injected tools that the LLM can call. The model decides **when** and **what** to retrieve. Gives the model more agency but requires the model to recognize when memories are relevant. |
-| `ReadMode.PRELOAD` | Memories are retrieved automatically once per invocation (not on every model call; a tool loop reuses the same block), using the latest user message as the query, and added to the latest user message as a fenced `<user_memories_...>` block for that request only (it is not saved in the thread). See [Why memories are not system text](/docs/concepts/memory-and-store#why-memories-are-not-system-text). The model always has relevant context but uses more tokens. No memory tools are exposed, so the model cannot save new memories in this mode. |
-| `ReadMode.NO_RETRIEVAL` | No automatic retrieval. |
+`retrieval_mode` picks when memories reach the model: `POSTLOAD` (default, the model searches with a tool), `PRELOAD` (searched once per invocation and added to the user message) or `NO_RETRIEVAL`. See [Retrieval modes](/docs/concepts/memory-and-store#retrieval-modes-when-do-memories-reach-the-llm).
 
-### UserMemoryConfig vs. AgentMemoryConfig
+### Seed shared agent memory
 
-- **AgentMemoryConfig data is shared.** It is always read under `system_user_id(agent_id)` (or `system_user_id(app_id)` when there is no `agent_id`), so seed it with `await store.astore({"user_id": system_user_id("my-agent")}, "...")` (`from tenxgraph.storage import system_user_id`). Enabling it with neither `agent_id` nor `app_id` raises `ValueError`.
-- **UserMemoryConfig:** Scoped to a single user (`user_id`). The agent can both **read and write** user memories. Use this for user preferences, learned facts about the user, and conversation summaries.
-- **AgentMemoryConfig:** Scoped to the agent/application. The agent can **only read** agent memories. Use this for shared domain knowledge, FAQs, and system facts that should not be modified by user interactions.
+`AgentMemoryConfig` data is shared. It is always read under `system_user_id(agent_id)` (or `system_user_id(app_id)` when there is no `agent_id`), so seed it with `await store.astore({"user_id": system_user_id("my-agent")}, "...")` (`from tenxgraph.storage import system_user_id`). Enabling it with neither `agent_id` nor `app_id` raises `ValueError`.
 
 ### Keep kinds of data in separate collections
 
@@ -334,38 +242,17 @@ AgentMemoryConfig(enabled=True, agent_id="support-bot", collection="agent_notes"
 
 For the precedence rules and a collection per company, see [Collections: keeping data apart](/docs/concepts/memory-and-store#collections-keeping-data-apart).
 
----
-
-## MemoryType and DistanceMetric enums
-
-When configuring `UserMemoryConfig` or `AgentMemoryConfig`, specify the `memory_type` to categorize what kind of knowledge you're storing. Similarly, `DistanceMetric` controls how vector similarity is calculated.
-
-### MemoryType values
+### Trusted-only retrieval and expiry
 
 ```python
-from tenxgraph.storage.store import MemoryType
+from datetime import timedelta
 
-MemoryType.EPISODIC       # Conversation events, session notes, "what happened"
-MemoryType.SEMANTIC       # Facts, user preferences, "what is true"
-MemoryType.PROCEDURAL     # How-to knowledge, step-by-step processes, "how to do it"
-MemoryType.ENTITY         # Information about people, places, organizations
-MemoryType.RELATIONSHIP   # How entities relate to each other
-MemoryType.DECLARATIVE    # Explicit stated facts and declarations
-MemoryType.CUSTOM         # Domain-specific memory types
+from tenxgraph.storage.store import TRUSTED_ORIGINS
+
+memory = MemoryConfig(store=store, origins=list(TRUSTED_ORIGINS), ttl=timedelta(days=90))
 ```
 
-### DistanceMetric values
-
-```python
-from tenxgraph.storage.store import DistanceMetric
-
-DistanceMetric.COSINE        # Default; best for text embeddings
-DistanceMetric.EUCLIDEAN     # Absolute vector distances; good for dense, normalized embeddings
-DistanceMetric.DOT_PRODUCT   # Normalized vectors in high-dimensional spaces
-DistanceMetric.MANHATTAN     # L1 distance; rarely used for embeddings
-```
-
-Use `DistanceMetric.COSINE` unless you have a specific reason to use another metric.
+`origins` reads back only memories written by the user or the system, not the ones the model saved itself. `ttl` expires what the model remembers after 90 days. See [Memory origin and expiry](/docs/concepts/memory-and-store#memory-origin-and-expiry).
 
 ---
 
@@ -460,7 +347,7 @@ async def main():
             "user_id": "customer-123",
         },
     )
-    print("Agent:", result1["messages"][-1].content[:200])
+    print("Agent:", result1["messages"][-1].text()[:200])
 
     # Second interaction: different thread, same user
     # The agent should remember the email preference without being told again
@@ -476,7 +363,7 @@ async def main():
             "user_id": "customer-123",              # <-- same user
         },
     )
-    print("Agent:", result2["messages"][-1].content[:200])
+    print("Agent:", result2["messages"][-1].text()[:200])
     print("\nThe agent should have remembered the email preference from session 1.")
 
 asyncio.run(main())
@@ -492,18 +379,7 @@ asyncio.run(main())
 
 After running your agent with `MemoryConfig`, check that memories were stored:
 
-1. **Check memory count:** Query the store directly to see how many memories are stored (stop the agent first, since local Qdrant allows one client per folder).
-
-```python
-# With Qdrant, you can inspect the collection
-import qdrant_client
-
-client = qdrant_client.QdrantClient(path="./qdrant_data")
-collection = client.get_collection(collection_name="agentflow_memories")
-print(f"Total vectors in store: {collection.points_count}")
-```
-
-2. **Search for a specific memory:** Verify that a memory you expect is retrievable.
+1. **Search for a specific memory:** Verify that a memory you expect is retrievable.
 
 ```python
 results = await store.asearch(
@@ -514,31 +390,6 @@ results = await store.asearch(
 for result in results:
     print(f"Score: {result.score:.2f}, Content: {result.content}")
 ```
-
----
-
-## Common decisions and patterns
-
-### When to use POSTLOAD vs. PRELOAD
-
-- **POSTLOAD (default):** Use when the model should decide whether memories are relevant. Better for reasoning; the model calls memory tools when it needs them. Best for most agents.
-- **PRELOAD:** Use when the model must always be aware of user context. Better for task-specific agents (e.g., a chatbot that always needs current preferences). Uses more tokens.
-
-### Should I use UserMemoryConfig, AgentMemoryConfig, or both?
-
-- **UserMemoryConfig only:** For user-centric systems (customer support, personal assistants, tutors). The agent learns and remembers about each user.
-- **AgentMemoryConfig only:** For knowledge-centric systems (FAQ bots, knowledge bases). The agent has read-only access to shared facts.
-- **Both:** Hybrid systems where the agent personalizes responses based on shared knowledge + user history. The agent reads both scopes but only writes to user memory.
-
-### Choosing memory_type
-
-Map your use case to a memory type:
-
-- **EPISODIC:** "Customer mentioned they work in finance", a specific event or conversation fact.
-- **SEMANTIC:** "Customer prefers email over phone", a persistent fact about preferences.
-- **PROCEDURAL:** "Steps to reset a password", domain processes.
-- **ENTITY:** "John Smith, VP of Engineering at Acme Corp", structured facts about people/organizations.
-- **DECLARATIVE:** "Our return policy is 30 days", company policies or rules.
 
 ---
 

@@ -5,16 +5,12 @@ section: "Data and state"
 group: "Threads and state"
 order: 10
 label: Set up checkpointing
-updated: "2026-11-10"
+updated: "2026-11-26"
 ---
 
-A checkpointer persists your graph state after every node so that multi-turn conversations can resume across separate requests, and interrupted executions can pick up where they left off. Without a checkpointer, every `invoke()` call starts fresh with an empty state. This guide shows you how to choose the right checkpointer for your deployment and configure it completely.
+A checkpointer persists your graph state after every node so that multi-turn conversations can resume across separate requests, and interrupted executions can pick up where they left off. This guide picks a checkpointer and configures it.
 
-## Why you need a checkpointer
-
-Graph state is in-memory by default. That is fine for testing or stateless APIs where each request stands alone, but breaks down as soon as you need memory across requests. A checkpointer writes the state to durable storage after each node, so the next `invoke()` on the same `thread_id` resumes from the last checkpoint instead of starting over.
-
-Three checkpointers ship with 10xGraph, each suited to a different scale:
+## Choose a checkpointer
 
 | Scenario | Use | Key feature |
 |---|---|---|
@@ -29,11 +25,11 @@ Three checkpointers ship with 10xGraph, each suited to a different scale:
 ### Example
 
 ```python
-from tenxgraph.core.graph import StateGraph
 from tenxgraph.storage.checkpointer import InMemoryCheckpointer
 from tenxgraph.core.state import Message
 
 checkpointer = InMemoryCheckpointer()
+# graph: a StateGraph built as in Build a graph
 app = graph.compile(checkpointer=checkpointer)
 
 # First turn
@@ -47,11 +43,10 @@ result = app.invoke(
     {"messages": [Message.text_message("What is my name?")]},
     config={"thread_id": "user-1"},
 )
-print(result["messages"][-1].content)
-# Output: "Your name is Alice."
+print(result["messages"][-1].text())  # Your name is Alice.
 ```
 
-The state dict lives in the process and is lost when the process exits. For persistence across restarts, use `SqliteCheckpointer` or `PgCheckpointer`.
+State lives in the process and is lost when it exits. `compile()` with no checkpointer uses this one and logs a WARNING.
 
 ## SqliteCheckpointer: client-side agents
 
@@ -92,24 +87,14 @@ async def main():
         {"messages": [Message.text_message("When is the deadline?")]},
         config={"thread_id": "project-1"},
     )
-    print(result["messages"][-1].content)
+    print(result["messages"][-1].text())
 
     await checkpointer.arelease()  # close the connection at shutdown
 
 asyncio.run(main())
 ```
 
-On POSIX systems, `SqliteCheckpointer` creates the database folder with mode `0700` and the file with `0600` before it connects, so only the owning user can read your threads. The `-wal` and `-shm` files take the mode of the database file. Existing files and folders keep their mode, and this has no effect on Windows.
-
 The `.db` file persists between process restarts, so each user's agent resumes all threads from disk. Pass `":memory:"` as the path for a temporary, in-memory database (useful in tests).
-
-### When to use
-
-Use `SqliteCheckpointer` when:
-
-- You are building a **client-side or desktop agent** (Tauri, Electron, PyInstaller, etc.) that ships a Python sidecar.
-- Each user has a **dedicated process** with their own database file.
-- You do not need to scale horizontally or share state across processes.
 
 `SqliteCheckpointer` also keeps the tool execution ledger, in the `af_tool_executions` table, and takes `record_tool_result=False` to turn it off. See [Replay-safe tools](/docs/concepts/replay-safe-tools).
 
@@ -117,7 +102,7 @@ Do not use it when multiple processes or users share one backend. SQLite seriali
 
 ## PgCheckpointer: production
 
-`PgCheckpointer` is a dual-layer checkpointer designed for production: Redis caches hot state in memory, and PostgreSQL provides durable persistence. Both are required. It is the only choice for multi-user, multi-process deployments and enables interrupt-and-resume workflows, optimistic concurrency control, and tool call idempotency.
+`PgCheckpointer` is a dual-layer checkpointer designed for production: Redis caches hot state in memory, and PostgreSQL provides durable persistence. Both are required. Use it when more than one process shares state.
 
 ### Install
 
@@ -138,38 +123,9 @@ checkpointer = PgCheckpointer(
 
 `PgCheckpointer` keys state by `user_id` as well as `thread_id`. If you omit `user_id` from the config, 10xGraph fills in `"anonymous"`, so pass a real one in multi-user apps.
 
-### Configuration reference
+### Configuration
 
-```python
-PgCheckpointer(
-    # PostgreSQL connection
-    postgres_dsn: str | None = None,        # DSN, or provide pg_pool below
-    pg_pool: Any | None = None,             # Existing asyncpg.Pool
-    pool_config: dict | None = None,        # Extra asyncpg.create_pool() kwargs
-
-    # Redis connection
-    redis_url: str | None = None,           # Redis URL, or provide redis below
-    redis: Any | None = None,               # Existing redis.asyncio.Redis
-    redis_pool: Any | None = None,          # Existing redis.asyncio.ConnectionPool
-    redis_pool_config: dict | None = None,  # Extra pool kwargs
-
-    # Schema
-    schema: str = "public",                 # PostgreSQL schema name
-
-    # Tuning (passed as **kwargs)
-    cache_ttl: int = 86400,                 # Redis cache TTL in seconds (default: 24h)
-    user_id_type: str = "string",           # Type for user_id column: "string" | "int" | "bigint"
-    id_type: str = "string",                # Deprecated: the thread_id / message_id type follows the id generator
-    state_history_limit: int = 20,          # How many prior state snapshots to keep per thread
-    enforce_user_isolation: bool = True,    # Scope state by user_id (multi-tenant safety)
-    release_resources: bool = False,        # Close pools/clients on release()
-    tenant_columns: Any = None,             # Columns on threads that isolate data, e.g. {"org_id": "uuid"}
-    extra_columns: Any = None,              # Your own data columns on threads, e.g. {"plan": "text"}
-    row_level_security: bool = False,       # Also enforce tenant columns with Postgres RLS
-    ddl_lock_timeout: float | None = 10.0,  # Seconds setup DDL waits for a table lock (None waits)
-    record_tool_result: bool = True,        # Record finished tool calls; False means a tool can run twice after a crash
-)
-```
+Every constructor option (`cache_ttl`, `state_history_limit`, `ddl_lock_timeout`, `record_tool_result` and the rest) is in [Checkpointers](/docs/reference/python/checkpointers#pgcheckpointer). `id_type` is deprecated: the id type follows the id generator.
 
 ### Schema setup
 
@@ -186,42 +142,20 @@ checkpointer = PgCheckpointer(
 
 asyncio.run(checkpointer.asetup())
 ```
+Each setup DDL statement waits at most `ddl_lock_timeout` seconds (default 10) for a table lock and then raises `SetupLockTimeoutError`; retry once the other transaction ends. Details are in [Multi-tenant data](/docs/guides/multi-tenant-data).
 
-In your own FastAPI lifespan handler:
-
-```python
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await checkpointer.asetup()
-    yield
-    # Optional: await checkpointer.arelease()
-
-app = FastAPI(lifespan=lifespan)
-```
 
 ### Check that the checkpointer is reachable
 
-Every checkpointer has `await checkpointer.aping()`. It returns when the backends answer and raises when they do not. For `PgCheckpointer` it runs `SELECT 1`, checks that the schema version is not older than the code expects, and pings Redis. It never creates the schema, so call `asetup()` first. The API server calls it at startup and on `/health/ready`. A custom `BaseCheckpointer` must implement it; see [Checkpointers](/docs/reference/python/checkpointers#aping).
+`await checkpointer.aping()` returns when the backends answer and raises when they do not. It never creates the schema, so call `asetup()` first. The server calls it at startup and on `/health/ready`. See [Checkpointers](/docs/reference/python/checkpointers#aping).
 
 Reference: [BaseCheckpointer](/docs/reference/python/checkpointers) · Source: [base_checkpointer.py](https://github.com/10xGraph/10xGraph/blob/main/tenxgraph/storage/checkpointer/base_checkpointer.py)
 
 ### Multi-user isolation
 
-By default, `PgCheckpointer` treats `user_id` as an **ownership boundary**. Threads, state, messages, and the [tool ledger](/docs/concepts/replay-safe-tools) are scoped to the authenticated user, so even if an attacker knows another user's `thread_id`, they cannot read, write, or delete it. This is critical in multi-tenant deployments.
+By default, `PgCheckpointer` treats `user_id` as an **ownership boundary**. Threads, state, messages, and the [tool ledger](/docs/concepts/replay-safe-tools) are scoped to the authenticated user, so even if an attacker knows another user's `thread_id`, they cannot read, write, or delete it.
 
-```python
-# Multi-tenant deployment (recommended default)
-checkpointer = PgCheckpointer(
-    postgres_dsn="...",
-    redis_url="...",
-    enforce_user_isolation=True,  # default
-)
-```
-
-If you run single-tenant (one user, or an internal service with no real user identity), you can disable it to skip the ownership check and save a database join per query:
+If you run single-tenant (one user, or an internal service with no real user identity), you can set `enforce_user_isolation=False` to skip the ownership check and save a database join per query:
 
 ```python
 # Single-tenant deployment
@@ -234,11 +168,9 @@ checkpointer = PgCheckpointer(
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Interaction with authentication</p>
 
-Isolation is only meaningful if a real `user_id` reaches the checkpointer. The API server derives `user_id` from the authenticated caller and falls back to `"anonymous"` when no auth is configured. To enable per-user isolation on the server, set [`"auth": "jwt"`](/docs/server/auth) (or another auth backend) in your `10xgraph.json`. The checkpointer's `enforce_user_isolation` and the server's permission checks (roles in the `auth` object, or your own `authorize`) are independent and complementary: the first controls *whose rows* a caller can touch; the second controls *whether* they may act at all. With auth on, the server scopes every thread query to the caller's reach regardless.
+Isolation is only meaningful if a real `user_id` reaches the checkpointer. The API server derives `user_id` from the authenticated caller and falls back to `"anonymous"` when no auth is configured. To enable per-user isolation on the server, set [`"auth": "jwt"`](/docs/server/auth) (or another auth backend) in your `10xgraph.json`. With auth on, the server scopes every thread query to the caller's reach regardless.
 
 </aside>
-
-`asetup()` waits at most `ddl_lock_timeout` seconds for a table lock on each DDL statement. If another transaction holds the table longer, it raises `tenxgraph.storage.columns.SetupLockTimeoutError` instead of hanging; retry once that transaction ends. Setup reads the catalog first and runs no DDL for what is already in place, so a restart takes no lock. Missing indexes on an existing table are built with `CREATE INDEX CONCURRENTLY`, and an invalid leftover index from a failed build is dropped and rebuilt on the next setup.
 
 ### Tenant and extra columns
 
@@ -256,11 +188,8 @@ checkpointer = PgCheckpointer(
 - **Tenant columns** isolate data like `user_id` does. The caller's reach (`own`, `tenant` or `all`, set by the caller's role) decides which of `user_id` and the tenant columns a thread must match. Required on thread creation by default; types are `text`, `bigint`, `integer` or `uuid`.
 - **Extra columns** carry your own data (any Postgres type) and can be filtered with `alist_threads(config, filters=...)` and `GET /v1/threads?filters=`.
 - Values are set when the thread is created, never change, and come **only from `config["user"]`**, which your auth class fills. Never read them from request config, metadata, state or model output.
-- Every query that touches a thread (threads, states, messages, tool executions) is filtered through the thread row. `aget_thread_scope(thread_id)` returns the thread's `user_id` and tenant values for reach checks.
-- `asetup()` adds the columns (schema version 6) and a B-tree index for each. Threads created before a tenant column existed hold `NULL` there and are hidden from callers whose reach filters on it until you backfill them.
 - Declare the same tenant columns on `PgVectorStore`. `compile()` refuses a mismatch under `MODE=production` unless you pass `allow_tenant_mismatch=True`.
 - `InMemoryCheckpointer` and `SqliteCheckpointer` raise if you pass these options.
-- The names `user_id`, `kind`, `tenant`, `roles`, `permissions`, `reach` and `claims` cannot be column names.
 
 Native row-level security, the full `BaseAuth` example, isolation scopes and the filter reference are in [Multi-tenant data](/docs/guides/multi-tenant-data).
 
@@ -268,21 +197,11 @@ Reference: [BaseAuth](/docs/reference/api-cli/auth) · Source: [base_auth.py](ht
 
 ### State history retention
 
-The checkpointer keeps multiple versioned snapshots of each thread's state to support debugging, manual recovery, and optimistic concurrency control. By default it retains the current state plus 19 prior snapshots (`state_history_limit: 20`) and prunes older rows on each write to keep the table bounded.
-
-```python
-checkpointer = PgCheckpointer(
-    postgres_dsn="...",
-    redis_url="...",
-    state_history_limit=20,  # keep this many versions per thread
-)
-```
-
-Higher values retain more audit trail but use more storage; `1` keeps only the current state; `0` or `None` disables pruning entirely (not recommended for long-running systems).
+`state_history_limit` (default 20) is how many state versions a thread keeps; older ones are pruned on each write.
 
 ### Tool results
 
-The checkpointer records every finished tool call in a ledger (the `tool_executions` table), so a run replayed after a crash, or resumed after a pause inside a tool node, does not run finished tools again. When a run finishes with status completed, the graph clears that thread's ledger in the background. Interrupts, stops, client-tool pauses, errors and cancels keep it, so a resume stays safe.
+Finished tool calls are kept in a ledger so a replay does not run them twice ([Replay-safe tools](/docs/concepts/replay-safe-tools)). Clear or prune it:
 
 ```python
 await checkpointer.aclear_tool_results(config)                         # one thread
@@ -304,8 +223,6 @@ from tenxgraph.core.state import Message
 checkpointer = PgCheckpointer(
     postgres_dsn=os.environ["DATABASE_URL"],
     redis_url=os.environ["REDIS_URL"],
-    state_history_limit=20,
-    enforce_user_isolation=True,
 )
 
 graph = StateGraph()
@@ -326,59 +243,10 @@ async def main():
         {"messages": [Message.text_message("When is it?")]},
         config={"thread_id": "alice-proj-1", "user_id": "alice"},
     )
-    print(result["messages"][-1].content)
+    print(result["messages"][-1].text())
 
 asyncio.run(main())
 ```
-
-Set the environment variables before starting:
-
-```bash
-export DATABASE_URL="postgresql://user:pass@localhost:5432/mydb"
-export REDIS_URL="redis://localhost:6379/0"
-python app.py
-```
-
-## Using with the API server
-
-When serving your graph via the API server, the checkpointer is part of your compiled graph, not configured via `10xgraph.json`. Build it in the module that `10xgraph.json`'s `agent` field points to:
-
-```python
-# graph.py
-from tenxgraph.storage.checkpointer import PgCheckpointer
-import os
-
-checkpointer = PgCheckpointer(
-    postgres_dsn=os.environ["DATABASE_URL"],
-    redis_url=os.environ["REDIS_URL"],
-)
-
-app = graph.compile(checkpointer=checkpointer)
-```
-
-```json
-{
-  "agent": "graph:app"
-}
-```
-
-The server loads the compiled `app` and uses its checkpointer for all requests.
-
-## Choosing a checkpointer: decision table
-
-`compile()` with no checkpointer falls back to `InMemoryCheckpointer` and logs a WARNING. A graph logs one WARNING per graph on its first run with no `user_id`. Behind the API server in production, or with `WEB_CONCURRENCY` above 1, an in-memory or SQLite checkpointer (or no Redis) also logs a WARNING that threads and limits are per process.
-
-Use this table to pick the right one for your scenario:
-
-| Scenario | Checkpointer | Why |
-|---|---|---|
-| Local development, testing | `InMemoryCheckpointer` | No setup, fast, suitable for short-lived processes |
-| Single-server stateless API (no resume needed) | `InMemoryCheckpointer` | State not required across requests |
-| Client-side / desktop agent (Tauri, Electron, CLI) | `SqliteCheckpointer` | Single `.db` file, no external databases, user has their own copy |
-| Dedicated process per user with own DB file | `SqliteCheckpointer` | Exactly one writer per database |
-| Production multi-turn chat API | `PgCheckpointer` | Horizontal scaling, multi-user, durable, concurrent-safe |
-| Interrupt-and-resume workflows | `PgCheckpointer` | Requires durable persistence and optimistic concurrency |
-| Multiple server instances on same database | `PgCheckpointer` | Only option for safe, horizontally scalable deployments |
 
 ## Verify it works
 
@@ -398,17 +266,15 @@ result2 = app.invoke(
 )
 
 # Verify the agent has memory
-assert "Alice" in result2["messages"][-1].content
+assert "Alice" in result2["messages"][-1].text()
 ```
 
 ## Run it in production
 
-The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. `10xgraph.json` has no `checkpointer` key; the server refuses to start when one is set. Use `PgCheckpointer` when you run more than one worker, since workers share state only through it. Run one graph per process or container; two graphs in one process each need their own `container=InjectQ()` and their own checkpointer instance; see [`compile`](/docs/reference/python/graph#compile). See [Scaling and reliability](/docs/production/scaling) and [Backup and restore](/docs/server/backup-and-restore).
+The server uses the checkpointer you pass to `graph.compile(checkpointer=...)`. `10xgraph.json` has no `checkpointer` key; the server refuses to start when one is set. `compile()` with no checkpointer falls back to `InMemoryCheckpointer` and logs a WARNING. A graph logs one WARNING per graph on its first run with no `user_id`. Behind the API server in production, or with `WEB_CONCURRENCY` above 1, an in-memory or SQLite checkpointer (or no Redis) also logs a WARNING that threads and limits are per process. Use `PgCheckpointer` when you run more than one worker, since workers share state only through it. Run one graph per process or container. See [Scaling and reliability](/docs/production/scaling) and [Backup and restore](/docs/server/backup-and-restore).
 
 ## Next steps
 
-This guide covers configuration only. For details on durability, concurrency, thread isolation, and the tool call idempotency ledger in `PgCheckpointer`, see [Durability and concurrency](/docs/guides/durability-and-concurrency).
-
-To learn how to resume interrupted executions with `interrupt()` and resume, see [Add human approval](/docs/guides/add-human-approval).
-
-For production hardening, including schema creation, backups, and scaling, see [Server production checklist](/docs/server/production-checklist).
+- [Durability and concurrency](/docs/guides/durability-and-concurrency): concurrency, history and the tool ledger.
+- [Add human approval](/docs/guides/add-human-approval): pause and resume.
+- [Server production checklist](/docs/server/production-checklist).

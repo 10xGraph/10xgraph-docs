@@ -5,27 +5,10 @@ section: "Build agents"
 group: "Streaming, media and realtime"
 order: 300
 label: Realtime audio (Gemini Live)
-updated: "2026-10-29"
+updated: "2026-11-26"
 ---
 
-The realtime subsystem adds live, audio-to-audio sessions to 10xGraph. Unlike `invoke` and `stream`, which traverse a turn-based super-step loop, a realtime graph is driven by a separate runtime: the provider owns the turn loop and 10xGraph wraps it.
-
-This guide covers:
-- Installing the `realtime` extra and required credentials
-- Building an `AudioAgent` and compiling it
-- Driving a session with `arealtime` and `LiveInputQueue`
-- Handling events: audio, transcripts, tool calls
-- Sending images and video frames
-- Using the API server WebSocket bridge
-
----
-
-## Prerequisites
-
-- `10xgraph` installed with the `realtime` extra (Python 3.12 or newer)
-- A Gemini API key (or Vertex AI credentials)
-
----
+This guide builds a live audio-to-audio agent with `AudioAgent` and Gemini Live. A realtime graph does not run through `invoke` or `stream`: the provider owns the turn loop and 10xGraph wraps it.
 
 ## Install
 
@@ -42,7 +25,7 @@ export GEMINI_API_KEY=your-api-key
 
 ```
 
-`GOOGLE_API_KEY` also works. The library reads no model variable; the model is the string you pass to `AudioAgent` and `RealtimeConfig`. The repo examples read an optional `GEMINI_LIVE_MODEL` variable and default to `gemini-3.8-live`. Check Google's docs for regional availability.
+`GOOGLE_API_KEY` also works. The model is the string you pass to `AudioAgent` and `RealtimeConfig`; the examples use `gemini-3.8-live`. Google renames Live models often, so check which one your key can use.
 
 For Vertex AI, pass `use_vertex_ai=True` to `AudioAgent(...)` and set `GOOGLE_CLOUD_PROJECT` (and optionally `GOOGLE_CLOUD_LOCATION`, default `us-central1`). Credentials come from Application Default Credentials. The `GOOGLE_GENAI_USE_VERTEXAI` variable is not used for realtime sessions.
 
@@ -119,7 +102,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`input.wav` must be mono 16-bit PCM at 16 kHz. The example in `examples/realtime/audio_agent_file.py` is the reference for this pattern.
+`input.wav` must be mono 16-bit PCM at 16 kHz. The example in `examples/realtime_audio/audio_agent_file.py` is the reference for this pattern.
 
 ---
 
@@ -150,14 +133,7 @@ app = AudioAgent(
 
 ### compile() parameters
 
-| Parameter | Type | Default | Notes |
-|---|---|---|---|
-| `checkpointer` | `BaseCheckpointer \| None` | `None` | Enables cross-session resume and transcript persistence. |
-| `store` | `BaseStore \| None` | `None` | Long-term memory store. |
-| `callback_manager` | `CallbackManager \| None` | `None` | Pass to receive lifecycle hooks. |
-| `shutdown_timeout` | `float` | `30.0` | Seconds to wait for graceful shutdown. |
-
-`compile()` does not accept `media_store`, `interrupt_before`, or `interrupt_after`. Realtime media (images, video) is sent frame-by-frame through `LiveInputQueue.send_image()` and is not stored at rest.
+`compile()` takes the same arguments as the other prebuilt agents, such as `checkpointer`, `store`, `callback_manager` and `shutdown_timeout`. A `media_store` raises `ValueError`: images and video go frame by frame through `LiveInputQueue.send_image()` and are never stored.
 
 ---
 
@@ -254,7 +230,7 @@ app = AudioAgent(
 ).compile()
 ```
 
-Tool events appear in the stream as `ToolCallEvent` (before execution) and `ToolResultEvent` (after). Sub-agents and handoff are not supported in v1.
+Tool events appear in the stream as `ToolCallEvent` (before execution) and `ToolResultEvent` (after). Handoff to other agents is not wired into realtime sessions.
 
 **A tool call runs once per thread.** If the provider re-sends a call after a reconnect, or a new session on the same thread repeats it, 10xGraph returns the recorded result instead of running the tool again. The key is the thread id, a hash of the tool name and arguments, and the provider's call id, and it needs a checkpointer on the session. This matters for tools with side effects such as payments or emails. See [Tool call deduplication](/docs/reference/python/realtime#tool-call-deduplication).
 
@@ -287,6 +263,8 @@ Send still images or video frames directly through the queue. Gemini Live accept
 ```python
 import time
 
+import cv2  # pip install opencv-python
+
 cap = cv2.VideoCapture(0)  # laptop camera
 while cap.isOpened():
     ret, frame = cap.read()
@@ -296,8 +274,6 @@ while cap.isOpened():
     queue.send_image(jpeg.tobytes())
     time.sleep(1.0)  # ~1 fps
 ```
-
-Image frames are not stored or persisted. On reconnect, only text transcripts are reseeded.
 
 ---
 
@@ -392,47 +368,18 @@ export GEMINI_API_KEY=...
 # WebSocket available at ws://localhost:8000/v1/graph/live
 ```
 
-### Protocol
-
-**Connection open**
-
-First frame from the client must be a JSON object. Present fields override the agent's build-time `RealtimeConfig` for this session:
-
-```json
-{"model": "gemini-3.8-live", "thread_id": "abc", "voice": "Puck"}
-```
-
-Two fields are limited by the server. `model` is honoured only when it is listed in `websocket.realtime_models` in `10xgraph.json`, and `tools_tags` can only narrow the agent's own tag filter. The live agent also refuses a tool call for any tool it did not advertise to the model in this session.
-
-**Upstream (client -> server)**
-
-| Frame | Content |
-|---|---|
-| Binary | PCM16 input audio at 16 kHz |
-| JSON text | `{"type": "text", "text": "..."}` - inject a text turn |
-| JSON text | `{"type": "activity_start"}` - manual VAD start |
-| JSON text | `{"type": "activity_end"}` - manual VAD end |
-| JSON text | `{"type": "close"}` - end the session |
-
-**Downstream (server -> client)**
-
-| Frame | Content |
-|---|---|
-| Binary | PCM16 model audio at 24 kHz (`audio_delta`) |
-| JSON text | All other events: transcripts, `turn_complete`, `interrupted`, `tool_call`, `tool_result`, `session_update`, `go_away`, `error` |
-
-Image/video input is SDK-only. The WebSocket bridge does not forward image frames.
+The init frame, the binary and JSON frames in each direction and the server limits on `model` and `tools_tags` are in [WebSockets: realtime audio](/docs/server/websockets#realtime-audio-v1graphlive). Image and video input is SDK-only: the bridge does not forward image frames.
 
 ---
 
 ## Live microphone example
 
-The `examples/realtime/audio_agent_mic.py` example shows full-duplex microphone input with speaker output and barge-in. Run it with:
+The `examples/realtime_audio/audio_agent_mic.py` example shows full-duplex microphone input with speaker output and barge-in. Run it with:
 
 ```bash
 pip install sounddevice
 export GEMINI_API_KEY=...
-python examples/realtime/audio_agent_mic.py
+python examples/realtime_audio/audio_agent_mic.py
 # say: "What's the weather in Tokyo?"   (Ctrl+C to stop)
 ```
 
@@ -443,18 +390,6 @@ python examples/realtime/audio_agent_mic.py
 - A graph containing a `LiveAgent` must use `arealtime()` or `realtime()`. Calling `invoke`, `ainvoke`, `stream`, or `astream` raises `RuntimeError`.
 - `arealtime()` requires a graph rooted at exactly one `LiveAgent`. Passing an ordinary graph raises. Passing a graph with more than one `LiveAgent` raises.
 - `realtime()` (sync) raises if called from inside a running event loop. Use `arealtime()` from async contexts.
-
----
-
-## What you learned
-
-- Install with `pip install "10xgraph[realtime]"` and set `GEMINI_API_KEY`.
-- `AudioAgent` builds a single realtime agent graph with `LiveAgent` as the root; compile it once and reuse.
-- Feed PCM16 audio (16 kHz) into a `LiveInputQueue`; read PCM16 audio (24 kHz) and all other events from `arealtime()`.
-- Tools, system prompts, skills, and memory work the same as `ReactAgent` but are fixed at connect time.
-- Checkpointing enables transcript persistence and cross-session resume.
-- Reconnection is automatic; configure backoff via `ReconnectConfig`.
-- `10xgraph dev` exposes `ws://.../v1/graph/live` when the graph uses `AudioAgent`.
 
 ## Run it in production
 

@@ -117,7 +117,7 @@ Private addresses and cloud-metadata addresses are refused whatever the policy s
 
 ## What this shows
 
-- Tool limits live in code the model cannot edit: a fixed file root, deny rules, a host list. See [File tools](/docs/guides/prebuilt/file-tools), [Web tools](/docs/guides/prebuilt/web-tools) and [Security and validators](/docs/concepts/security-and-validators).
+- Tool limits live in code the model cannot edit: a fixed file root, deny rules, a host list. See [Prebuilt tools](/docs/guides/prebuilt-tools) and [Security and validators](/docs/concepts/security-and-validators).
 - Private-network and metadata addresses are refused by default for both the web tool and customer-supplied media URLs. See [Media and files](/docs/concepts/media-and-files) and [Security model](/docs/production/security-model).
 - Honest limit: a public host is reachable by the prebuilt `fetch_url`. Restrict it with your own wrapper when the agent reads untrusted text. See [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 - Pair this with a regression test that fails if a tool call leaves the allow-list: [Security regression evals](/docs/examples/security-regression-evals).

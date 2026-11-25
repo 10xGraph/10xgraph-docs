@@ -5,7 +5,7 @@ section: "Build agents"
 group: "Agent Skills"
 order: 320
 label: Skills
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
 A skill is a folder of instructions, and optionally scripts, reference docs and data, that an agent loads only when a task needs it. 10xGraph follows the [Agent Skills specification](https://agentskills.io/specification), so the same folder works in 10xGraph, Claude Code, Codex and GitHub Copilot.
@@ -247,7 +247,4 @@ Skill text is added to the prompt as data and is not run through `str.format`, b
 
 ## Related
 
-- [Skills reference](/docs/reference/python/skills)
-- [Skills tutorial](/docs/examples/skills)
-- [Install the 10xGraph skill for coding assistants](/docs/integrations/coding-assistants)
-- [Callbacks](/docs/reference/python/callback-manager)
+A runnable example is in the [Skills tutorial](/docs/examples/skills).

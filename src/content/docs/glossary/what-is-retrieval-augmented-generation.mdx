@@ -58,7 +58,7 @@ The retrieval step turns a potentially infinite knowledge base into a focused, q
 
 ## Building a RAG agent with 10xGraph
 
-10xGraph ships a prebuilt `RAGAgent` that handles retrieval and generation. It adds the retrieved chunks to the request sent to the model in a fenced block marked as reference material, not instructions, and never saves them into the thread ([how and why](/docs/guides/prebuilt/rag-agent#why-the-documents-are-fenced)):
+10xGraph ships a prebuilt `RAGAgent` that handles retrieval and generation. It adds the retrieved chunks to the request sent to the model in a fenced block marked as reference material, not instructions, and never saves them into the thread ([how and why](/docs/guides/prebuilt/rag-agent#how-it-works)):
 
 ```python title="rag_agent.py"
 import asyncio
