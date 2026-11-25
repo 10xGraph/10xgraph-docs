@@ -31,7 +31,7 @@ Five scripts that send the events of a 10xGraph run to different places: your te
 - `CompositePublisher`: fans one event out to several publishers. A list passed as `publisher=` becomes one.
 - `OtelPublisher` and `ObservabilityLevel`: map events to OpenTelemetry spans at `SPANS`, `STANDARD` or `FULL` detail.
 - `RedisPublisher`, `KafkaPublisher`, `RabbitMQPublisher`: send JSON events to a broker from a config dict.
-- `LogfirePublisher`, `LangsmithPublisher`: `OtelPublisher` subclasses that configure their own exporter.
+- `LogfirePublisher`, `LangsmithPublisher`, `PhoenixPublisher`: `OtelPublisher` subclasses that configure their own exporter and add their backend's span keys.
 - `app.aclose()`: flushes background publish tasks and closes the publishers.
 
 ### Event types
@@ -167,7 +167,7 @@ Configure a `TracerProvider` as you would for any OpenTelemetry application. The
     agent = ReactAgent(model="gpt-5-mini", tools=[get_inventory], publisher=publisher)
 ```
 
-Pass the publisher when the graph is created. The library also exports `setup_tracing(graph)`, but in the current release it sets the publisher on a `StateGraph` after the graph's dependency container was already built, and no events reach it. Constructor injection works. `OtelPublisher` also accepts `user_id_mode="hash"` or `"mask"` to keep raw user ids off spans.
+Pass the publisher when the graph is created, with `StateGraph(publisher=...)` or the prebuilt agent's `publisher=` argument. A list of publishers becomes a `CompositePublisher`. `OtelPublisher` writes the OTEL GenAI `gen_ai.*` and `tenxgraph.*` attributes only; for Phoenix, LangSmith or Logfire keys use their own publishers. `OtelPublisher` also accepts `user_id_mode="hash"` or `"mask"` to keep raw user ids off spans.
 
 ### brokers.py
 
@@ -212,7 +212,7 @@ def build_publisher(backend: str) -> OtelPublisher:
     raise SystemExit("TRACE_BACKEND must be logfire or langsmith")
 ```
 
-`LogfirePublisher(service_name=...)` and `LangsmithPublisher(project=...)` call the backend setup in their constructors and then behave like `OtelPublisher`. Secrets come from `LOGFIRE_TOKEN` or `LANGSMITH_API_KEY`, never from code. `setup_observability(graph, config)` builds the same setup from a `10xgraph.json`-style `observability` block.
+`LogfirePublisher(service_name=...)`, `LangsmithPublisher(project=...)` and `PhoenixPublisher(project=...)` set up their backend's exporter in the constructor, behave like `OtelPublisher`, and add the keys their backend reads. Secrets come from `LOGFIRE_TOKEN`, `LANGSMITH_API_KEY` or `PHOENIX_API_KEY`, never from code. On the API server, the `observability` block of `10xgraph.json` does the same setup for one or several backends at once, and creates each span once. A list of tracing publishers creates one span per backend, so prefer the block for several backends. Combine one tracing publisher with event publishers (Redis, Kafka, RabbitMQ, console) in a list or a `CompositePublisher`.
 
 ## Full code
 
@@ -404,15 +404,13 @@ async def main() -> None:
     configure_tracer_provider()
 
     # SPANS    -> timing and structure only
-    # STANDARD -> adds token counts, model name, request parameters and graph state
-    # FULL     -> adds prompts, responses and tool I/O (the default). May contain personal data.
+    # STANDARD -> adds token counts, model name and request parameters
+    # FULL     -> adds prompts, responses and tool I/O (default). May contain personal data.
     publisher = OtelPublisher(level=ObservabilityLevel.STANDARD)
 
     # Pass the publisher when the graph is created: StateGraph(publisher=publisher), or
     # ReactAgent(publisher=publisher) as here. The publisher is bound into the dependency
-    # injection container at that moment. setup_tracing(graph) sets the publisher on an
-    # existing StateGraph afterwards, which does not reach that container in the current
-    # release, so this example avoids it.
+    # injection container at that moment.
     agent = ReactAgent(model="gpt-5-mini", tools=[get_inventory], publisher=publisher)
     app = agent.compile()
 

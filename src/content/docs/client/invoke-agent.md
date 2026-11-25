@@ -38,7 +38,7 @@ const response = await client.invoke([
 ]);
 ```
 
-The call blocks until the agent completes, including all tool calls. The return value is an `InvokeResult` containing the final `messages` array, `meta` (thread info), `all_messages` (every message across tool iterations), `iterations`, and optionally `state`, `context` and `summary` depending on `response_granularity`.
+The call blocks until the agent completes, including all tool calls. The return value is an `InvokeResult` containing the final `messages` array, `thread_id`, `run_id`, `meta` (thread info), `all_messages` (every message across tool iterations), `iterations`, and optionally `state`, `context` and `summary` depending on `response_granularity`.
 
 You can also provide a system prompt by creating a message with role `'system'`:
 

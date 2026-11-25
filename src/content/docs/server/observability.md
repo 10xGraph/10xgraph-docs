@@ -332,7 +332,7 @@ import os
 from tenxgraph.utils.logging import setup_structured_logging
 from tenxgraph.utils.metrics import setup_otel_metrics
 
-def setup_observability() -> None:
+def configure_telemetry() -> None:
     """Configure all observability surfaces at startup."""
     
     # Structured logging with secret redaction
@@ -350,10 +350,10 @@ def setup_observability() -> None:
     # (no code needed here; configure via SENTRY_DSN env var)
 
 # Call this at app startup:
-setup_observability()
+configure_telemetry()
 ```
 
-The API server does not call these functions for you. Put `setup_observability()` in the module your `10xgraph.json` `agent` key points to, so it runs when the graph is loaded at startup:
+The API server does not call these functions for you. Put `configure_telemetry()` in the module your `10xgraph.json` `agent` key points to, so it runs when the graph is loaded at startup:
 
 ```python
 import logging

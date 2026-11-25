@@ -65,8 +65,7 @@ With `remove_tool_msgs=True`, only completed tool sequences are removed: an assi
 
 | Method | Signature | Returns | Description |
 |---|---|---|---|
-| `trim_context` | `(state: S) -> S` | The same state with `context` replaced if trimming was needed | Synchronous trim. |
-| `atrim_context` | `async (state: S) -> S` | Same as above | Async version with the same logic. |
+| `trim_context` | `(state: S) -> S` | The same state with `context` replaced if trimming was needed | Synchronous trim. The agent runs it in a worker thread. |
 
 ### Example: trim without a model
 
@@ -144,12 +143,11 @@ The context is left unchanged when there is nothing older than `keep_recent` to 
 
 | Method | Signature | Returns | Description |
 |---|---|---|---|
-| `atrim_context` | `async (state: S) -> S` | The updated state | Checks thresholds, calls the LLM if needed, updates `context` and `context_summary`. |
-| `trim_context` | `(state: S) -> S` | The updated state | Calls `asyncio.run(self.atrim_context(state))`. |
+| `trim_context` | `async (state: S) -> S` | The updated state | Checks thresholds, calls the LLM if needed, updates `context` and `context_summary`. |
 
-<aside class="callout callout-warning" role="warning"><p class="callout-title">Do not call trim_context inside a running event loop</p>
+<aside class="callout callout-info" role="note"><p class="callout-title">trim_context is async here</p>
 
-`trim_context` uses `asyncio.run`, which raises `RuntimeError` when an event loop is already running. Inside async code and graph nodes, always use `await manager.atrim_context(state)`.
+In 1.1 `SummaryContextManager.trim_context` is an `async def`, so call it with `await manager.trim_context(state)`. In 1.0 the sync `trim_context` wrapped `atrim_context` with `asyncio.run`.
 
 </aside>
 
@@ -194,7 +192,7 @@ print(result["messages"][-1])
 
 ## `BaseContextManager`
 
-`BaseContextManager` is the abstract base class for custom strategies. It is generic over the state type, and a subclass must implement both `trim_context` and `atrim_context`, because both are abstract. Each receives the full state and returns it.
+`BaseContextManager` is the abstract base class for custom strategies. It is generic over the state type, and a subclass implements one method, `trim_context`. Write it as `async def` (recommended, since the engine is async) or as a plain `def`; the framework calls it through `call_sync_or_async`, so a sync version runs in a worker thread. It receives the full state and returns it.
 
 ```python
 # custom_context.py
@@ -207,29 +205,27 @@ class LastNMessages(BaseContextManager[AgentState]):
     def __init__(self, n: int = 20) -> None:
         self.n = n
 
-    def trim_context(self, state: AgentState) -> AgentState:
+    async def trim_context(self, state: AgentState) -> AgentState:
         state.context = state.context[-self.n :]
         return state
-
-    async def atrim_context(self, state: AgentState) -> AgentState:
-        return self.trim_context(state)
 ```
 
-### Abstract methods
+### Abstract method
 
 | Method | Signature | Description |
 |---|---|---|
-| `trim_context` | `(state: S) -> S` | Must implement. Trim or process `state.context` and return the state. |
-| `atrim_context` | `async (state: S) -> S` | Must implement. Async version. The agent calls this one. |
+| `trim_context` | `async (state: S) -> S` or `(state: S) -> S` | Must implement. Trim or process `state.context` and return the state. Sync or async. |
+
+`atrim_context` is deprecated and removed in 2.0. It emits a `DeprecationWarning` and returns the result of `trim_context`. Do not implement or call it.
 
 ## How context managers run in a graph
 
-An `Agent` node calls `await context_manager.atrim_context(state)` before it sends messages to the model, but only when the agent was created with `trim_context=True`. The default is `False`. If trimming is enabled and no manager is registered, the agent logs a warning and continues with the full context.
+An `Agent` node calls `context_manager.trim_context(state)` (awaited when async) before it sends messages to the model, but only when the agent was created with `trim_context=True`. The default is `False`. If trimming is enabled and no manager is registered, the agent logs a warning and continues with the full context.
 
 ```text
 StateGraph(context_manager=manager)
   -> Agent(trim_context=True)
-       -> manager.atrim_context(state)   # before each LLM call
+       -> manager.trim_context(state)    # before each LLM call
 ```
 
 The graph also runs the manager when it persists state at the end of a run, so the trimmed context is what the checkpointer stores. See [Set up checkpointing](/docs/guides/set-up-checkpointing) for how state is saved.
@@ -243,6 +239,7 @@ A node function can receive the registered manager through dependency injection.
 from injectq import Inject
 
 from tenxgraph.core.state import AgentState, BaseContextManager
+from tenxgraph.utils.callable_utils import call_sync_or_async
 
 
 async def my_node(
@@ -251,7 +248,7 @@ async def my_node(
 ) -> AgentState:
     # Trim explicitly before doing your own LLM call
     if ctx_mgr:
-        state = await ctx_mgr.atrim_context(state)
+        state = await call_sync_or_async(ctx_mgr.trim_context, state)
     return state
 ```
 
@@ -263,9 +260,9 @@ See [Dependency injection](/docs/concepts/dependency-injection) for the other in
 |---|---|---|
 | Context grows without limit | No manager was passed to `StateGraph`, or the `Agent` was created without `trim_context=True`. | Pass `context_manager=` to `StateGraph(...)` and set `trim_context=True` on the `Agent`. |
 | Log line "trim_context is enabled but no context manager is available" | `trim_context=True` but the graph has no manager. | Add `context_manager=MessageContextManager()` to `StateGraph`. |
-| `TypeError` when creating a custom manager | The subclass implements only one of `trim_context` and `atrim_context`; both are abstract. | Implement both. `atrim_context` can call `trim_context`. |
+| `TypeError` when creating a custom manager | The subclass does not implement `trim_context`, which is abstract. | Implement `trim_context`, as `async def` or `def`. |
 | System prompt disappears | The message role is not exactly `"system"`. | Create it with `role="system"`. The check is exact string equality. |
-| `RuntimeError: asyncio.run() cannot be called from a running event loop` | `SummaryContextManager.trim_context` was called from async code. | Use `await manager.atrim_context(state)`. |
+| `DeprecationWarning: atrim_context is deprecated` | Your code calls `atrim_context`. | Call `trim_context` instead (`await` it when the manager is async). |
 | Summaries are slow | Each summarization is an extra LLM call that blocks the node. | Use a smaller summarizer model, or raise `token_budget` or `max_messages` so it runs less often. |
 | Context never shrinks with `SummaryContextManager` | Both triggers are `None`, the context is not past a threshold, the summarizer failed, or it returned an empty string. | Set `max_messages` or `token_budget` and check the logs for "Summarisation LLM call failed". |
 | 400 "Invalid `signature` in `thinking` block" with Claude | Trimming or summarizing removed messages that Claude's signed thinking blocks were bound to. | Pass `thinking` with `block_binding` and the beta header to the `Agent`. See [Context managers and thinking signatures](/docs/integrations/anthropic#context-managers-and-thinking-signatures). |

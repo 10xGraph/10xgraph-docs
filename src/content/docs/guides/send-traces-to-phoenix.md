@@ -1,6 +1,6 @@
 ---
 title: Send traces to Arize Phoenix
-description: Send 10xGraph spans to Arize Phoenix over OpenTelemetry using a helper, a publisher, or API server configuration.
+description: Send 10xGraph spans to Arize Phoenix over OpenTelemetry using a publisher or API server configuration.
 section: "Observability"
 group: "Tracing"
 order: 40
@@ -30,28 +30,29 @@ docker run -p 6006:6006 -p 4317:4317 arizephoenix/phoenix:latest
 
 Open the UI at `http://localhost:6006`. Without Docker, run `pip install arize-phoenix && phoenix serve`. A local Phoenix needs no API key, and 10xGraph sends to `http://localhost:6006` by default.
 
-## Option 1: Use the helper
+## Option 1: Use the publisher in Python
 
-Call `setup_phoenix()` **before** `graph.compile()`:
+Pass `PhoenixPublisher` to the graph when you create it:
 
 ```python
 from tenxgraph.core.graph import StateGraph, Agent
-from tenxgraph.runtime.publisher import setup_phoenix, ObservabilityLevel
+from tenxgraph.runtime.publisher import PhoenixPublisher, ObservabilityLevel
 from tenxgraph.utils import END
 
-graph = StateGraph()
+publisher = PhoenixPublisher(project="my-agent", level=ObservabilityLevel.STANDARD)
+
+graph = StateGraph(publisher=publisher)
 graph.add_node("MAIN", Agent(model="gpt-4o"))
 graph.set_entry_point("MAIN")
 graph.add_edge("MAIN", END)
 
-setup_phoenix(graph, project="my-agent", level=ObservabilityLevel.STANDARD)
-
 app = graph.compile()
 ```
 
+`PhoenixPublisher` is an `OtelPublisher` subclass. It sets up the Phoenix exporter when you create it, and adds the OpenInference attributes Phoenix reads, such as `session.id` (the thread id), `user.id` and a `metadata` JSON with `thread_id` and `run_id`. A plain `OtelPublisher` does not write these keys.
+
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
-| `graph` | StateGraph or None | `None` | Graph to instrument. `None` configures the provider only (API server use). |
 | `api_key` | str | `PHOENIX_API_KEY` | Optional. Sent as `authorization: Bearer <key>`. |
 | `project` | str | None | Falls back to `PHOENIX_PROJECT`, then `PHOENIX_PROJECT_NAME`. See [Project names](#project-names). |
 | `endpoint` | str | `PHOENIX_COLLECTOR_ENDPOINT` | Base URL. Defaults to `http://localhost:6006`. `/v1/traces` is appended unless present. |
@@ -63,20 +64,16 @@ app = graph.compile()
 
 `FULL` (the default) records prompts, completions, tool input and output and the graph state, so message content reaches the trace backend. `STANDARD` drops prompts, completions and tool I/O but still records the graph state on node spans, which can contain the conversation. `SPANS` records timing and structure only. The examples on this page pass `STANDARD` explicitly; omit `level` to get `FULL`.
 
-## Option 2: Use the publisher
+## Option 2: Combine with event publishers
 
-To assign the publisher yourself, for example next to other publishers, use `PhoenixPublisher`. It is an `OtelPublisher` subclass and is assigned the same way as `LangsmithPublisher`:
+To use Phoenix next to Redis, Kafka, RabbitMQ or console publishers, put them in a list or a `CompositePublisher`:
 
 ```python
-from tenxgraph.runtime.publisher import PhoenixPublisher, ObservabilityLevel
+from tenxgraph.runtime.publisher import CompositePublisher, ConsolePublisher, PhoenixPublisher
 
-publisher = PhoenixPublisher(project="my-agent", level=ObservabilityLevel.STANDARD)
-graph._publisher = publisher
-
-app = graph.compile()
+publisher = CompositePublisher([PhoenixPublisher(project="my-agent"), ConsolePublisher({})])
+graph = StateGraph(publisher=publisher)
 ```
-
-It accepts `api_key`, `project`, `endpoint`, `level` and `tracer_provider`, as `setup_phoenix()` does.
 
 ## Option 3: Configure the API server
 
@@ -109,8 +106,7 @@ export PHOENIX_API_KEY="your-phoenix-api-key"
 Or pass them in code:
 
 ```python
-setup_phoenix(
-    graph,
+publisher = PhoenixPublisher(
     endpoint="https://app.phoenix.arize.com/s/<your-space>",
     api_key="your-phoenix-api-key",
 )
@@ -137,11 +133,11 @@ Any mix of `logfire`, `langsmith` and `phoenix` in the `observability` block sha
 }
 ```
 
-The same works in code with `setup_observability(graph, {...})`. With Logfire enabled, the Phoenix project is forwarded to Logfire's provider only on logfire 5 or newer. On older versions a warning is logged and spans go to Phoenix's default project; set `OTEL_RESOURCE_ATTRIBUTES` as shown above instead.
+In Python, prefer the `observability` block when you send to several backends: the API creates each span once and writes the keys of every enabled backend on it. A list of tracing publishers creates one span per backend. With Logfire enabled, the Phoenix project is forwarded to Logfire's provider only on logfire 5 or newer. On older versions a warning is logged and spans go to Phoenix's default project; set `OTEL_RESOURCE_ATTRIBUTES` as shown above instead.
 
 ## Troubleshooting
 
-**Nothing arrives in Phoenix.** Check that Phoenix is reachable at the endpoint (port 6006 for the default local setup) and that `setup_phoenix()` or the publisher ran before `graph.compile()`. Spans are exported in batches, so allow a few seconds, and make sure the process exits cleanly or stays alive long enough to flush.
+**Nothing arrives in Phoenix.** Check that Phoenix is reachable at the endpoint (port 6006 for the default local setup) and that the `PhoenixPublisher` was passed to `StateGraph(publisher=...)`. Spans are exported in batches, so allow a few seconds, and make sure the process exits cleanly or stays alive long enough to flush.
 
 **401 Unauthorized.** The API key is missing or wrong. Set `PHOENIX_API_KEY` or pass `api_key=`. Phoenix Cloud requires a key; a local Phoenix does not.
 

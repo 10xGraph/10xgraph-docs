@@ -1,6 +1,6 @@
 ---
 title: Send traces to Logfire and LangSmith
-description: Send 10xGraph spans to Pydantic Logfire or LangSmith over OpenTelemetry using helpers, publishers, or configuration.
+description: Send 10xGraph spans to Pydantic Logfire or LangSmith over OpenTelemetry using publishers or configuration.
 section: "Observability"
 group: "Tracing"
 order: 50
@@ -8,7 +8,7 @@ label: Logfire and LangSmith tracing
 updated: "2026-10-27"
 ---
 
-[Pydantic Logfire](https://pydantic.dev/logfire) and [LangSmith](https://docs.langchain.com/langsmith/) are production-grade observability platforms for monitoring AI applications. Both implement OpenTelemetry, the industry-standard protocol for distributed tracing. 10xGraph automatically instruments your graphs with spans at every layer, graph execution, node transitions, LLM invocations, token usage, and tool execution, including GenAI semantic conventions (`gen_ai.usage.input_tokens`, `gen_ai.request.model`, `session.id`, and more). The `OtelPublisher` routes these spans through an OpenTelemetry `TracerProvider` to your chosen backend. You need only configure which exporter to use; no vendor-specific instrumentation is required.
+[Pydantic Logfire](https://pydantic.dev/logfire) and [LangSmith](https://docs.langchain.com/langsmith/) are production-grade observability platforms for monitoring AI applications. Both implement OpenTelemetry, the industry-standard protocol for distributed tracing. 10xGraph automatically instruments your graphs with spans at every layer, graph execution, node transitions, LLM invocations, token usage, and tool execution, including GenAI semantic conventions (`gen_ai.usage.input_tokens`, `gen_ai.request.model`, and more). `LogfirePublisher` and `LangsmithPublisher` route these spans through an OpenTelemetry `TracerProvider` to your chosen backend and add the keys that backend reads (`logfire.msg` for Logfire, `langsmith.*` for LangSmith). No vendor-specific instrumentation is required.
 
 Using Arize Phoenix? See [Send traces to Arize Phoenix](/docs/guides/send-traces-to-phoenix). Using a collector, Tempo or Jaeger? See [Send traces to an OTLP endpoint](/docs/guides/send-traces-to-otlp). For request and task metrics, see [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana).
 
@@ -34,96 +34,49 @@ export LOGFIRE_TOKEN="your-logfire-write-token"       # Logfire
 export LANGSMITH_API_KEY="your-langsmith-api-key"     # LangSmith
 ```
 
-Both setup helpers and the API server configuration read from these variables when credentials are not passed explicitly.
+Both publishers and the API server configuration read from these variables when credentials are not passed explicitly.
 
-## Option 1: Configure Logfire with a Python helper
+## Option 1: Logfire publisher
 
-For development and local testing, use the `setup_logfire()` helper to configure the OpenTelemetry `TracerProvider` and attach tracing to your graph. Call it **before** `graph.compile()`:
+Pass `LogfirePublisher` to the graph when you create it:
 
 ```python
 from tenxgraph.core.graph import StateGraph, Agent
-from tenxgraph.runtime.publisher import setup_logfire, ObservabilityLevel
+from tenxgraph.runtime.publisher import LogfirePublisher, ObservabilityLevel
 from tenxgraph.utils import END
 
-# Build the graph
-graph = StateGraph()
+publisher = LogfirePublisher(service_name="my-agent", level=ObservabilityLevel.STANDARD)
+
+graph = StateGraph(publisher=publisher)
 graph.add_node("MAIN", Agent(model="gpt-4o"))
 graph.set_entry_point("MAIN")
 graph.add_edge("MAIN", END)
 
-# Configure Logfire and instrument the graph before compile()
-setup_logfire(
-    graph,
-    service_name="my-agent",
-    level=ObservabilityLevel.STANDARD,
-)
-
 app = graph.compile()
 ```
 
-`setup_logfire()` calls `logfire.configure(...)` internally to install the global `TracerProvider`, then attaches the `OtelPublisher` to emit spans into it.
+`LogfirePublisher` is an `OtelPublisher` subclass. It calls `logfire.configure(...)` when you create it, which installs the global `TracerProvider`, and it adds `logfire.msg` to each span.
 
-### Options for setup_logfire
+### Options for LogfirePublisher
 
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
-| `graph` | StateGraph or None | `None` | The graph to instrument. Leave as `None` to configure providers only (API server use case). |
 | `token` | str | `LOGFIRE_TOKEN` | Logfire write token. Falls back to the env var if not passed. |
 | `service_name` | str | None | Service name shown in the Logfire UI. |
 | `send_to_logfire` | bool | `True` | Set `False` to emit to console only (for local testing). |
 | `console` | bool or ConsoleOptions | None | Control local console output. Pass `False` to silence it. |
 | `level` | ObservabilityLevel | `FULL` | Verbosity: `SPANS` (timing only), `STANDARD` (tokens, model, params, graph state), or `FULL` (adds prompt/completion text and tool I/O). See details below. |
-| `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See [Hide the user id in traces](#hide-the-user-id-in-traces). |
 | `additional_span_processors` | list | None | Extra `SpanProcessor`s attached alongside the Logfire one. |
+| `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See [Hide the user id in traces](#hide-the-user-id-in-traces). |
 | `**configure_kwargs` | dict | - | Extra keyword arguments passed to `logfire.configure()` (e.g., `environment="staging"`). |
 
-## Option 2: Configure LangSmith with a Python helper
-
-Similarly, use `setup_langsmith()` to attach LangSmith tracing:
-
-```python
-from tenxgraph.runtime.publisher import setup_langsmith, ObservabilityLevel
-
-setup_langsmith(
-    graph,
-    project="my-agent",              # Sent as the Langsmith-Project header
-    level=ObservabilityLevel.STANDARD,
-)
-
-app = graph.compile()
-```
-
-For deployments in other regions, pass the full OTEL endpoint (10xGraph appends `/v1/traces` automatically):
-
-```python
-setup_langsmith(
-    graph,
-    project="my-agent",
-    endpoint="https://eu.api.smith.langchain.com/otel",
-)
-```
-
-### Options for setup_langsmith
-
-| Parameter | Type | Default | Notes |
-|---|---|---|---|
-| `graph` | StateGraph or None | `None` | The graph to instrument. Leave as `None` to configure providers only. |
-| `api_key` | str | `LANGSMITH_API_KEY` | LangSmith API key. Falls back to env var if not passed. |
-| `project` | str | None | LangSmith project name, sent as the `Langsmith-Project` header. |
-| `endpoint` | str | `https://api.smith.langchain.com/otel` | Base OTEL endpoint URL. `/v1/traces` is appended automatically. Override for regional deployments. |
-| `level` | ObservabilityLevel | `FULL` | Verbosity: `SPANS`, `STANDARD`, or `FULL`. See details below. |
-| `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See [Hide the user id in traces](#hide-the-user-id-in-traces). |
-| `tracer_provider` | TracerProvider | None | Existing `TracerProvider` to attach to. Creates a new global one if not supplied. |
-
-## Option 3: Use a publisher object
-
-If you prefer to work with publisher objects, for example, to compose multiple publishers with `CompositePublisher`, instantiate `LogfirePublisher` or `LangsmithPublisher` and pass it to your graph:
+## Option 2: LangSmith publisher
 
 ```python
 from tenxgraph.runtime.publisher import LangsmithPublisher, ObservabilityLevel
 
 publisher = LangsmithPublisher(
-    project="my-agent",
+    project="my-agent",              # Sent as the Langsmith-Project header
     level=ObservabilityLevel.STANDARD,
 )
 
@@ -132,31 +85,38 @@ graph = StateGraph(publisher=publisher)
 app = graph.compile()
 ```
 
-`LogfirePublisher` accepts the keyword arguments of `setup_logfire()` except `graph`; `LangsmithPublisher` accepts those of `setup_langsmith()` except `graph`. Both are subclasses of `OtelPublisher` and configure the `TracerProvider` on construction.
-
-## Option 4: Enable both Logfire and LangSmith at once
-
-The `setup_observability()` helper reads a config dict and enables either or both backends, ensuring they share a single `TracerProvider`:
+`LangsmithPublisher` adds the `langsmith.*` keys to each span. For deployments in other regions, pass the full OTEL endpoint (10xGraph appends `/v1/traces` automatically):
 
 ```python
-from tenxgraph.runtime.publisher import setup_observability
-
-setup_observability(graph, {
-    "level": "standard",
-    "logfire": {
-        "enabled": True,
-        "service_name": "my-agent",
-    },
-    "langsmith": {
-        "enabled": True,
-        "project": "my-agent",
-    },
-})
-
-app = graph.compile()
+publisher = LangsmithPublisher(
+    project="my-agent",
+    endpoint="https://eu.api.smith.langchain.com/otel",
+)
 ```
 
-When both are enabled, the LangSmith span processor is passed to Logfire via `additional_span_processors`, so they share the same `TracerProvider` and there is no duplication.
+### Options for LangsmithPublisher
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| `api_key` | str | `LANGSMITH_API_KEY` | LangSmith API key. Falls back to env var if not passed. |
+| `project` | str | None | LangSmith project name, sent as the `Langsmith-Project` header. |
+| `endpoint` | str | `https://api.smith.langchain.com/otel` | Base OTEL endpoint URL. `/v1/traces` is appended automatically. Override for regional deployments. |
+| `level` | ObservabilityLevel | `FULL` | Verbosity: `SPANS`, `STANDARD`, or `FULL`. See details below. |
+| `tracer_provider` | TracerProvider | None | Existing `TracerProvider` to attach to. Creates a new global one if not supplied. |
+| `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. See [Hide the user id in traces](#hide-the-user-id-in-traces). |
+
+## Option 3: Several backends at once
+
+For Logfire and LangSmith together, use the `observability` block of `10xgraph.json` (see [Serve with declarative configuration](#serve-with-declarative-configuration)). There the server creates each span once, shares one `TracerProvider`, and writes the keys of every enabled backend on that span.
+
+In Python, `StateGraph(publisher=[LogfirePublisher(...), LangsmithPublisher(...)])` (or a `CompositePublisher`) works, but each publisher creates its own span, so every span is built once per backend. Prefer the `observability` block when you want more than one tracing backend. To combine one tracing publisher with event publishers such as Redis or Kafka, use a list or `CompositePublisher`:
+
+```python
+from tenxgraph.runtime.publisher import CompositePublisher, ConsolePublisher, LogfirePublisher
+
+publisher = CompositePublisher([LogfirePublisher(service_name="my-agent"), ConsolePublisher({})])
+graph = StateGraph(publisher=publisher)
+```
 
 ## Understanding observability levels
 
@@ -183,16 +143,16 @@ Spans always carry `user_id`, `thread_id` and `run_id`. By default the user id i
 Plain SHA-256 of a short id, such as an email or a small integer, can be recovered by guessing. Set the environment variable `TENXGRAPH_TRACE_USER_ID_KEY` and `hash` uses HMAC-SHA256 with that key instead.
 
 ```python
-setup_logfire(graph, service_name="my-agent", user_id_mode="hash")
+publisher = LogfirePublisher(service_name="my-agent", user_id_mode="hash")
 ```
 
-`OtelPublisher(level=..., user_id_mode="hash")`, `setup_tracing(...)`, `setup_langsmith(...)` and `setup_observability(graph, {"user_id_mode": "hash", ...})` take the same option. An invalid value raises `ValueError`.
+`OtelPublisher`, `PhoenixPublisher`, `LangsmithPublisher` and `LogfirePublisher` take the same option, and so does `observability.user_id_mode` in `10xgraph.json`. An invalid value raises `ValueError`.
 
 This changes spans only. Redis, RabbitMQ, Kafka and Console events keep the raw id. Prompts and tool I/O still appear at `FULL`. See [What is in your traces and events](/docs/concepts/events-and-observability#what-is-in-your-traces-and-events).
 
 ## Serve with declarative configuration
 
-When serving a graph through the 10xGraph API server using `10xgraph dev`, you do not call setup functions yourself. Instead, add an `observability` block to your `10xgraph.json` config file, and the server wires everything up during startup:
+When serving a graph through the 10xGraph API server using `10xgraph dev`, you do not create a publisher yourself. Instead, add an `observability` block to your `10xgraph.json` config file, and the server wires everything up during startup:
 
 ```json
 {
@@ -231,14 +191,15 @@ When `send_to_logfire=False` or during local testing, you can verify tracing is 
 import logfire
 from tenxgraph.core.state import Message
 
-setup_logfire(
-    graph,
+publisher = LogfirePublisher(
     service_name="my-agent",
     send_to_logfire=False,
     console=logfire.ConsoleOptions(),  # Print spans to the console
     level=ObservabilityLevel.STANDARD,
 )
 
+graph = StateGraph(publisher=publisher)
+# ... add nodes and edges ...
 app = graph.compile()
 app.invoke(
     {"messages": [Message.text_message("Hello")]},
@@ -286,7 +247,7 @@ export LANGSMITH_API_KEY="your-api-key"
 Or pass it explicitly:
 
 ```python
-setup_langsmith(graph, api_key="your-api-key", project="my-agent")
+LangsmithPublisher(api_key="your-api-key", project="my-agent")
 ```
 
 **Spans do not appear in Logfire or LangSmith**

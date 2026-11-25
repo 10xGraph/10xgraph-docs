@@ -399,13 +399,13 @@ No code changes needed. The API server automatically:
 The span tree is:
 
 ```
-tenxgraph.graph      ← one per invoke/stream
-  tenxgraph.node     ← one per node (e.g. MAIN, TOOL)
-    tenxgraph.llm    ← one per LLM call (tokens, model, finish)
-    tenxgraph.tool   ← one per tool call (name, type)
+invoke_agent 10xgraph   ← one per invoke/stream
+  MAIN, TOOL            ← one per node, named after the node
+    chat {model}        ← one per LLM call (tokens, model, finish)
+    execute_tool {tool} ← one per tool call (name, type)
 ```
 
-The `tenxgraph.graph` span carries `thread_id` as `session.id`, so tools like Langfuse group multi-turn conversations automatically.
+The graph span carries `tenxgraph.graph.thread_id`, `tenxgraph.graph.run_id` and `tenxgraph.graph.user_id`. This legacy path writes the basic attributes only (OTEL GenAI `gen_ai.*` and `tenxgraph.*`). For Phoenix keys such as `session.id`, use `PhoenixPublisher` or the `phoenix` block of the `observability` setting in `10xgraph.json`.
 
 **Install:**
 

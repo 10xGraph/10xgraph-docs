@@ -203,7 +203,7 @@ class ImportanceContextManager(BaseContextManager):
     def __init__(self, max_messages: int = 10):
         self.max_messages = max_messages
 
-    def trim_context(self, state: AgentState) -> AgentState:
+    async def trim_context(self, state: AgentState) -> AgentState:
         messages = state.context
         # Separate system and important messages from regular ones
         system = [m for m in messages if m.role == "system"]
@@ -215,9 +215,6 @@ class ImportanceContextManager(BaseContextManager):
 
         state.context = system + kept
         return state
-
-    async def atrim_context(self, state: AgentState) -> AgentState:
-        return self.trim_context(state)
 ```
 
 Register it the same way:
@@ -226,7 +223,7 @@ Register it the same way:
 graph = StateGraph(context_manager=ImportanceContextManager(max_messages=10))
 ```
 
-Both `trim_context` and `atrim_context` methods must be implemented. If your logic is synchronous, you can run the sync method in the async version and return the result.
+A custom manager implements only `trim_context`. Write it as `async def` (recommended, the engine is async) or as a plain `def`; a sync version runs in a worker thread. `atrim_context` is deprecated and removed in 2.0.
 
 ## Verify trimming
 

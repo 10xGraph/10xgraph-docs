@@ -10,7 +10,8 @@ label: Upgrade to 1.1
 
 1.1 keeps the 1.0 public API (see [Stability](/docs/project/stability)). Nothing you call is
 removed in this release: things are deprecated, and they keep working until 2.0. One unfinished
-batch feature and the `10xgraph revoke` command are the only exceptions, listed under Removed. Some behavior does change without a
+batch feature, the `10xgraph revoke` command and the tracing `setup_*` helpers are the only
+exceptions, listed under Removed. Some behavior does change without a
 code change on your side. Read the behavior changes first.
 
 This page covers `10xgraph` 1.0 and `10xgraph-api` 1.0. The 1.1 entries below come from the
@@ -72,6 +73,20 @@ These work differently after the upgrade, with no code change. Check each one ag
   - A node that returns an unsupported value fails with `NODE_001` under `astream` too.
   - An `on_error` callback recovers a node only when it returns a `Message`.
   - A node may return a `dict` as a partial state update. Returning `None` means no change.
+- **Tracing publishers write only their own keys.** `OtelPublisher` writes the OTEL GenAI
+  `gen_ai.*` keys and the `tenxgraph.*` keys (thread id, run id, user id, node, tool, usage),
+  span names, status and errors. It no longer writes OpenInference, `langsmith.*` or
+  `logfire.msg` keys. `PhoenixPublisher` adds the OpenInference keys (`session.id` is the thread
+  id, `user.id`, and a `metadata` JSON with `thread_id` and `run_id`). `LangsmithPublisher` adds
+  `langsmith.*` and `LogfirePublisher` adds `logfire.msg`. All three take `user_id_mode`. To
+  add the keys of another backend, subclass `OtelPublisher` and override
+  `span_attributes(role, phase, name, event, attrs)`. If you sent a plain `OtelPublisher` to
+  Phoenix, switch to `PhoenixPublisher`.
+- **Several tracing publishers.** `StateGraph(publisher=[...])` and `CompositePublisher` still
+  work, but every tracing publisher creates its own span, so each span is built once per backend.
+  For several tracing backends at once, use the API `observability` block. A list or
+  `CompositePublisher` is how you combine one tracing publisher with event publishers (Redis,
+  Kafka, RabbitMQ, console).
 - **Events.**
   - Tool END and ERROR events carry `data["status"]` (`"success"` or `"error"`) and
     `data["duration_ms"]`. `ToolResultEvent` has the same two fields.
@@ -133,6 +148,10 @@ These work differently after the upgrade, with no code change. Check each one ag
   on its own. During a rolling deploy, 1.0 processes keep working but do not hide expired rows
   and do not write `origin`. See [Schema version 3](/docs/guides/use-pgvector-store#schema-version-3).
 
+- **`SummaryContextManager.trim_context` is async.** It was a sync method wrapping `asyncio.run`;
+  it is now `async def`, so call it with `await`. `atrim_context` still works but is deprecated
+  (see Deprecations). `MessageContextManager.trim_context` stays sync.
+
 ### API
 
 - **`"id_generator": "uuid"` maps to `DefaultIDGenerator`**, so it stays valid and does not warn.
@@ -169,6 +188,16 @@ These work differently after the upgrade, with no code change. Check each one ag
   - Inline media in a run is checked like an upload: quota, file signature and size limits. A
     refused run answers 422 on invoke and stream.
   - An upload with an empty or `..` name is stored as `unnamed` (it was `file`).
+- **Tracing keys on the server.** With several backends enabled in the `observability` block
+  (`phoenix`, `langsmith`, `logfire`, `otlp`), the server creates one span and writes the keys of
+  every enabled backend on it. `otlp` alone writes the basic attributes only. The legacy
+  `OTEL_ENABLED` path uses a plain `OtelPublisher`, so it no longer writes OpenInference,
+  `langsmith.*` or `logfire.msg` keys. For Phoenix, use the `phoenix` block of `observability`.
+- **Invoke returns the ids.** `POST /v1/graph/invoke` returns `thread_id` and `run_id` at the top
+  level of `data`, with the same names every stream event carries. `data.meta`
+  (`is_new_thread`, `thread_id`) is unchanged. The client's `invoke()` result has `thread_id`
+  (falling back to `meta.thread_id` on a server older than 1.1) and `run_id`. Read `thread_id`
+  instead of `meta.thread_id`.
 - **Requires injectq `>=0.7.0,<0.8`**, now a direct dependency. A container workaround and the
   `current_container()` helper are removed.
 - **CLI.** Every command finds `10xgraph.json` (or `agentflow.json`) in the current or nearest
@@ -185,6 +214,7 @@ Each one still works and emits a `DeprecationWarning`. All are removed in 2.0.
 |---|---|
 | `UUIDGenerator` (now a subclass of `DefaultIDGenerator`) | `DefaultIDGenerator` |
 | `AsyncIDGenerator` | Subclass `BaseIDGenerator` with your own `async def generate()` |
+| `BaseContextManager.atrim_context` | Call `trim_context`. A custom manager now implements only `trim_context`, sync or async |
 | `id_type` argument of `PgCheckpointer` | Drop it. The id type follows the id generator |
 | `safe_calculator` | Write your own `@tool` or use an MCP server |
 | `fetch_url`, `create_fetch_url` | Write your own `@tool` or use an MCP server |
@@ -201,6 +231,12 @@ Setting a config field above to a non-default value warns. The `ImageHandling` a
 `make_agent_memory_tool` and `make_user_memory_tool` are not deprecated.
 
 ### Removed
+
+`setup_phoenix`, `setup_langsmith`, `setup_logfire`, `setup_otlp`, `setup_observability` and
+`setup_tracing` are removed without a deprecation period. Pass the publisher when you create the
+graph instead: `StateGraph(publisher=PhoenixPublisher(...))`, or `LangsmithPublisher`,
+`LogfirePublisher` or `OtelPublisher`. On the API server, use the `observability` block in
+`10xgraph.json`.
 
 `AnthropicBatch`, `OpenAIBatch` and `BatchResult` (`tenxgraph.core.llm`) are removed without a
 deprecation period. They were standalone wrappers that no part of the graph runtime used, and

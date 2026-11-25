@@ -24,36 +24,47 @@ pip install '10xgraph[otlp]'
 
 The `otlp` extra installs the OpenTelemetry API, the SDK and the OTLP HTTP exporter. `10xgraph[observability]` includes it.
 
-## Use the helper
+## Use it in Python
 
-Call `setup_otlp()` **before** `graph.compile()`:
+In Python you set up the OpenTelemetry `TracerProvider` and exporter yourself, then pass an `OtelPublisher` to the graph when you create it:
 
 ```python
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
 from tenxgraph.core.graph import StateGraph, Agent
-from tenxgraph.runtime.publisher import setup_otlp, ObservabilityLevel
+from tenxgraph.runtime.publisher import ObservabilityLevel, OtelPublisher
 from tenxgraph.utils import END
 
-graph = StateGraph()
+provider = TracerProvider()
+provider.add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint="http://collector:4318/v1/traces"))
+)
+trace.set_tracer_provider(provider)
+
+graph = StateGraph(publisher=OtelPublisher(level=ObservabilityLevel.STANDARD))
 graph.add_node("MAIN", Agent(model="gpt-4o"))
 graph.set_entry_point("MAIN")
 graph.add_edge("MAIN", END)
 
-setup_otlp(graph, endpoint="http://collector:4318", level=ObservabilityLevel.STANDARD)
-
 app = graph.compile()
 ```
 
+`OtelPublisher` takes these arguments:
+
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
-| `graph` | StateGraph or None | `None` | Graph to instrument. `None` configures the provider only (API server use). |
-| `endpoint` | str | `None` | OTLP HTTP base URL. `/v1/traces` is appended unless present. When omitted, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` must be set. |
+| `tracer` | Tracer | None | Use this tracer. With `None`, the global `TracerProvider` is used. |
 | `level` | ObservabilityLevel | `FULL` | `SPANS`, `STANDARD` or `FULL`. See below. |
-| `tracer_provider` | TracerProvider | None | Attach to your own provider instead of creating one. |
 | `user_id_mode` | str | `"raw"` | `"raw"`, `"hash"` or `"mask"`. |
+
+`OtelPublisher` writes the basic attributes only: the OpenTelemetry GenAI `gen_ai.*` keys and the `tenxgraph.*` keys (thread id, run id, user id, node, tool and usage). It writes no Phoenix, LangSmith or Logfire keys.
 
 `FULL` (the default) records prompts, completions, tool input and output and the graph state, so message content reaches the collector and whatever stores traces behind it. `STANDARD` drops prompts, completions and tool I/O but still records the graph state on node spans, which can contain the conversation. `SPANS` records timing and structure only. The example above passes `STANDARD` explicitly; omit `level` to get `FULL`.
 
-`setup_otlp()` raises `ValueError` when it has no endpoint and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is unset. `OTEL_EXPORTER_OTLP_ENDPOINT` is not used as a fallback, because it often points at a gRPC port (4317), which this HTTP exporter cannot use.
+To add the keys of your own backend, subclass `OtelPublisher` and override `span_attributes(role, phase, name, event, attrs)`. It runs once after a span starts and once before it ends, and returns `attrs` with your keys added.
 
 ## Authentication headers
 
@@ -110,7 +121,7 @@ AI tracing carries graph, node, LLM and tool spans only. Spans for HTTP requests
 
 ## Combine with other destinations
 
-`logfire`, `langsmith`, `phoenix` and `otlp` in the `observability` block share one `TracerProvider`. In code, use `setup_observability(graph, {...})` with an `"otlp"` entry.
+`logfire`, `langsmith`, `phoenix` and `otlp` in the `observability` block share one `TracerProvider`. With `otlp` alone the spans carry the basic attributes only. With other backends enabled, the server creates each span once and writes the keys of every enabled backend on it. See [Send traces to Phoenix](/docs/guides/send-traces-to-phoenix).
 
 ## Troubleshooting
 
@@ -118,6 +129,6 @@ AI tracing carries graph, node, LLM and tool spans only. Spans for HTTP requests
 
 **401 or 403.** Set `OTEL_EXPORTER_OTLP_HEADERS` with the credentials your backend expects.
 
-**ValueError: OTLP tracing needs an endpoint.** Pass `endpoint=` or set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`.
+**Server log: OTLP tracing needs an endpoint.** Set `observability.otlp.endpoint` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`.
 
 **ImportError for opentelemetry-exporter-otlp-proto-http.** Run `pip install '10xgraph[otlp]'`.

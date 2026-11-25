@@ -7,7 +7,7 @@ group: "Platform"
 section: Concepts
 faq:
   - q: "How do I export events to LangSmith or Logfire?"
-    a: "Enable `langsmith` or `logfire` in the `observability` block of `10xgraph.json`, or call `setup_langsmith()` or `setup_logfire()` from Python before `compile()`. Set `LANGSMITH_API_KEY` or `LOGFIRE_TOKEN` in the environment."
+    a: "Enable `langsmith` or `logfire` in the `observability` block of `10xgraph.json`, or pass a `LangsmithPublisher` or `LogfirePublisher` to `StateGraph(publisher=...)`. Set `LANGSMITH_API_KEY` or `LOGFIRE_TOKEN` in the environment."
   - q: "What is the difference between metrics and tracing?"
     a: "Metrics are aggregated counters and histograms (message count, latency percentiles), dimensioned, dashboarded data. Tracing captures individual request flows as spans with attributes and hierarchy, useful for debugging. 10xGraph emits both."
   - q: "Can I publish events to multiple backends at once?"
@@ -111,7 +111,7 @@ In Python, pass a publisher (or a list of publishers) to the `StateGraph` constr
 graph = StateGraph(AgentState, publisher=redis_publisher)
 ```
 
-The API server's `10xgraph.json` has an `observability` block for the OTEL-based backends only (Logfire and LangSmith). Console, Redis, Kafka and RabbitMQ publishers are not configured there; create them in your graph module.
+The API server's `10xgraph.json` has an `observability` block for the OTEL-based backends only (Phoenix, Logfire, LangSmith and OTLP). Console, Redis, Kafka and RabbitMQ publishers are not configured there; create them in your graph module.
 
 ```json
 {
@@ -124,9 +124,11 @@ The API server's `10xgraph.json` has an `observability` block for the OTEL-based
 }
 ```
 
-Secrets stay in the environment: set `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY`. The `level` value is one of `spans`, `standard` or `full` and falls back to `full` if unrecognized. `full` is the default and sends message content and graph state to the trace backend; set `standard` or `spans` to send less (see [Observability levels](#observability-levels)).
+Secrets stay in the environment: set `LOGFIRE_TOKEN` and `LANGSMITH_API_KEY`. With several backends enabled, the server creates each span once and writes the keys each backend reads (OpenInference for Phoenix, `langsmith.*`, `logfire.msg`). `otlp` alone gets the basic attributes only. The `level` value is one of `spans`, `standard` or `full` and falls back to `full` if unrecognized. `full` is the default and sends message content and graph state to the trace backend; set `standard` or `spans` to send less (see [Observability levels](#observability-levels)).
 
 If the graph already has an observability publisher (for example a `PhoenixPublisher` passed to the graph or agent), the API server reuses it, logs a warning and does not apply the `observability` block, including its `level`.
+
+In Python, a list of tracing publishers (or a `CompositePublisher` of them) works, but every tracing publisher creates its own span, so each span is built once per backend. For several tracing backends at once, prefer the `observability` block. A list or `CompositePublisher` is the way to combine one tracing publisher with event publishers (Redis, Kafka, RabbitMQ, console).
 
 ## Publishers, AI tracing and metrics
 
@@ -251,7 +253,7 @@ graph = StateGraph(AgentState, publisher=publisher)
 compiled = graph.compile()
 ```
 
-Or call `setup_tracing(graph, level=ObservabilityLevel.STANDARD)` before `compile()`. In `10xgraph.json`, the `observability.level` key sets the level for the backends in that block.
+In `10xgraph.json`, the `observability.level` key sets the level for the backends in that block.
 
 ### Distributed tracing
 
@@ -282,9 +284,10 @@ Here is a reference table of where each piece is configured:
 | Redis | - | `RedisPublisher({"url": ...})` | - |
 | Kafka | - | `KafkaPublisher({"bootstrap_servers": ...})` | - |
 | RabbitMQ | - | `RabbitMQPublisher({"url": ...})` | - |
-| OTEL tracing | standard OTEL SDK variables | `OtelPublisher(level=..., user_id_mode=...)`, `setup_tracing(graph)` | `observability.level`, `observability.user_id_mode` |
-| LangSmith | `LANGSMITH_API_KEY` | `setup_langsmith(graph)` | `observability.langsmith.enabled` |
-| Logfire | `LOGFIRE_TOKEN` | `setup_logfire(graph)` | `observability.logfire.enabled` |
+| OTEL tracing | standard OTEL SDK variables | `OtelPublisher(level=..., user_id_mode=...)` | `observability.level`, `observability.user_id_mode` |
+| LangSmith | `LANGSMITH_API_KEY` | `LangsmithPublisher(...)` | `observability.langsmith.enabled` |
+| Logfire | `LOGFIRE_TOKEN` | `LogfirePublisher(...)` | `observability.logfire.enabled` |
+| Phoenix | `PHOENIX_API_KEY` | `PhoenixPublisher(...)` | `observability.phoenix.enabled` |
 | Metrics | - | `setup_otel_metrics()` | - |
 
 ## Publishing events from custom nodes

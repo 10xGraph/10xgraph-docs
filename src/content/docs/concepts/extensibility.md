@@ -55,7 +55,7 @@ flowchart TB
 | ABC | File | What you override |
 |---|---|---|
 | `BaseAgent` | `tenxgraph/core/graph/base_agent.py` | `execute()`, `_call_llm()` |
-| `BaseContextManager` | `tenxgraph/core/state/base_context.py` | `trim_context()`, `atrim_context()` |
+| `BaseContextManager` | `tenxgraph/core/state/base_context.py` | `trim_context()` (sync or async) |
 | `BaseCheckpointer` | `tenxgraph/storage/checkpointer/base_checkpointer.py` | Async state, cache, message and thread methods, and `aping()` |
 | `BaseStore` | `tenxgraph/storage/store/base_store.py` | `astore()`, `asearch()`, `aget()`, `aget_all()`, `aupdate()`, `adelete()`, `aforget_memory()` |
 | `BaseEmbedding` | `tenxgraph/storage/store/embedding/base_embedding.py` | `aembed()`, `aembed_batch()`, `dimension` |
@@ -246,20 +246,17 @@ class MyProviderConverter(BaseConverter):
 
 ### BaseContextManager: custom context trimming
 
-Context grows as the conversation continues. You extend `BaseContextManager` when the built-in trimming strategies (keep last N messages, remove old messages) do not fit your use case. Examples: keep messages tagged as important, prioritize system context, or drop messages matching a pattern.
+You implement one method, `trim_context`, as `async def` (recommended) or `def`. Context grows as the conversation continues. You extend `BaseContextManager` when the built-in trimming strategies (keep last N messages, remove old messages) do not fit your use case. Examples: keep messages tagged as important, prioritize system context, or drop messages matching a pattern.
 
 ```python
 from tenxgraph.core.state.base_context import BaseContextManager
 from tenxgraph.core.state import AgentState
 
 class PriorityContextManager(BaseContextManager):
-    def trim_context(self, state: AgentState) -> AgentState:
+    async def trim_context(self, state: AgentState) -> AgentState:
         # keep system message + last N turns + any pinned messages
         ...
         return state
-
-    async def atrim_context(self, state: AgentState) -> AgentState:
-        return self.trim_context(state)
 
 graph = StateGraph(state=MyState(), context_manager=PriorityContextManager())
 ```
