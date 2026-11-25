@@ -4,10 +4,10 @@ description: "Pause graph execution from inside a node or tool to request human 
 order: 70
 group: "Foundations"
 section: Concepts
-updated: "2026-10-27"
+updated: "2026-11-25"
 ---
 
-Human-in-the-loop patterns pause a graph mid-execution to collect human input: an approval, a correction, a choice, or confirmation. 10xGraph provides two complementary interrupt mechanisms: the `interrupt()` function for pauses inside your code, and `interrupt_before`/`interrupt_after` for pauses at fixed node boundaries.
+Human-in-the-loop patterns pause a graph mid-execution to collect human input: an approval, a correction, a choice, or confirmation. 10xGraph provides two interrupt mechanisms: the `interrupt()` function for pauses inside your code, and `interrupt_before`/`interrupt_after` for pauses at fixed node boundaries.
 
 ## The interrupt() function for decisions inside code
 
@@ -111,31 +111,15 @@ In a `ToolNode` running parallel tools, tool calls that already completed on the
 When `interrupt()` is called, the graph saves the pause as part of the thread's checkpoint:
 
 - **`interrupted_node`**: The node that was running.
-- **`interrupt_reason`**: The reason passed to `interrupt()` or `INTERRUPT_REASON` ("interrupt").
+- **`interrupt_reason`**: Always `"interrupt"` (`INTERRUPT_REASON`). The `reason` you passed is inside `interrupt_data`.
 - **`interrupt_data`**: A JSON-serialized `Interrupt` object with the id, message, value, reason, schema, and tool_call_id.
 - **`status`**: Set to `ExecutionStatus.INTERRUPTED_BEFORE` (the node will re-run when resumed).
 
-This state is durable: if your server crashes after the pause but before resume, the checkpoint persists the request and thread data. On recovery, `pending_interrupt(state)` retrieves it, and resuming works as normal.
+The pause is part of the saved state, so it survives a restart when the checkpointer is durable.
 
 ## Resume: how it works
 
-Resuming is an `invoke()` or `stream()` call with a `resume` key in the input instead of `messages`:
-
-```python
-# Pause on first run
-result = await graph.ainvoke(
-    {"messages": [Message.text_message("Refund?")]},
-    config={"thread_id": "order-42"}
-)
-
-# Resume on second run
-result = await graph.ainvoke(
-    {"resume": {"approved": True}},
-    config={"thread_id": "order-42"}
-)
-```
-
-Sending `messages` without `resume` to a paused thread raises a `ValueError`. Sending `resume` to a thread not paused at an `interrupt()` raises a `ValueError`.
+Resuming is an `invoke()` or `stream()` call with a `resume` key in the input instead of `messages`, as in the first example on this page.
 
 On resume, the graph:
 1. Loads the checkpointed thread.
@@ -172,7 +156,7 @@ Four errors can reject a resume or the input meant for a paused thread. Nothing 
 | `NothingToResumeError` | `INTERRUPT_003` | A `resume` was sent to a thread that is not paused at an `interrupt()`. |
 | `InterruptPendingError` | `INTERRUPT_004` | A plain new message was sent to a thread that is paused at an `interrupt()`. Resume it with a `resume` value. |
 
-A resume of `None` (a cancel) is never checked against the schema.
+A resume of `None` (a cancel) is never checked against the schema. To let a user cancel, accept a cancel option in `response_schema` or send `{"resume": null}`.
 
 ### The schema subset
 
@@ -184,20 +168,6 @@ The check uses a small built-in validator, so no JSON Schema library is needed. 
 - `items`, as a single schema
 
 Any other keyword (`oneOf`, `pattern`, `minimum` and so on) is ignored. A schema that uses only those keywords is checked only for the ones above.
-
-## Sending new messages to a paused thread
-
-A thread paused by `interrupt()` needs a `resume` value. Sending `messages` without `resume` raises a `ValueError`:
-
-```python
-# This raises ValueError
-await graph.ainvoke(
-    {"messages": [Message.text_message("Actually, never mind")]},
-    config={"thread_id": "order-42"}  # order-42 is paused at interrupt()
-)
-```
-
-This design prevents confusion: a paused thread is not listening for new input; it is waiting for an answer to a specific question. If you need to accept a cancellation message, include that option in the response schema and let the client send it as a resume value.
 
 ## Fixed-point interrupts with interrupt_before and interrupt_after
 
@@ -225,8 +195,6 @@ The `Interrupt` class represents a pending pause:
 ```python
 from tenxgraph.utils import Interrupt
 
-# You typically do not construct Interrupt directly; the interrupt() function does.
-# But you may inspect it:
 request = pending_interrupt(state)
 print(request.id)            # Unique pause id
 print(request.node)          # Node that paused
@@ -237,156 +205,11 @@ print(request.response_schema)  # JSON Schema for validation
 print(request.tool_call_id)  # Set if interrupt() ran inside a tool
 ```
 
-`GraphInterrupt` is a `BaseException` subclass raised by `interrupt()` to stop the graph:
+`GraphInterrupt` is a `BaseException` subclass raised by `interrupt()` to stop the graph. It derives from `BaseException` (not `Exception`) so tool and node error handlers that catch `except Exception` pass it through untouched, preventing false "tool error" reports.
 
-```python
-from tenxgraph.utils import GraphInterrupt
+## Over the API
 
-# You normally do not catch it; the graph engine handles it.
-# But if you need to suppress it for testing, it is an exception:
-try:
-    await my_node()
-except GraphInterrupt as e:
-    # e.interrupt is the Interrupt object
-    print(e.interrupt.message)
-```
-
-It derives from `BaseException` (not `Exception`) so tool and node error handlers that catch `except Exception` pass it through untouched, preventing false "tool error" reports.
-
-## How the API server exposes interrupts
-
-The REST API exposes interrupts through the same checkpoint/resume flow. Send `resume` instead of `messages` to `/v1/graph/invoke` or `/v1/graph/stream`; `thread_id` goes in `config`. The first request leaves `thread_id` out, so the server starts a thread and returns its id in `data.thread_id`. The resume sends that id back (shown as `THREAD_ID` below).
-
-**At `/v1/graph/invoke` (REST):**
-
-```bash
-# First request pauses at interrupt()
-curl -X POST http://localhost:8000/v1/graph/invoke \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [{"role": "user", "content": [{"type": "text", "text": "Refund my order"}]}],
-    "response_granularity": "full"
-  }'
-
-# With "response_granularity": "full", the response "state" carries the pause
-{
-  "messages": [...],
-  "state": {
-    "execution_meta": {
-      "interrupt_reason": "interrupt",
-      "interrupt_data": {
-        "interrupt": {
-          "id": "int_abc123...",
-          "node": "refund_tool",
-          "message": "Approve a refund of $150?",
-          "reason": "tool_approval",
-          "value": {"amount": 150},
-          "response_schema": {...},
-          "tool_call_id": null
-        }
-      }
-    }
-  },
-  ...
-}
-
-# Resume with the approval
-curl -X POST http://localhost:8000/v1/graph/invoke \
-  -H "Content-Type: application/json" \
-  -d '{
-    "resume": {"approved": true},
-    "config": {"thread_id": "THREAD_ID"}
-  }'
-```
-
-**At `/v1/graph/stream` (NDJSON streaming):**
-
-Streaming sends an `updates` event when the graph pauses. The same `resume` field resumes the thread:
-
-```json
-{"event": "updates", "data": {"status": "interrupted", "node": "refund_tool", "interrupt": {...}}}
-```
-
-### Get the interrupt id and bind the resume
-
-The pending interrupt lives in the thread state at `execution_meta.interrupt_data.interrupt`, and its `id` is the value to send back. Read it from the response state (with `"response_granularity": "full"`) or from the `interrupt` payload of the `interrupted` update. On AG-UI, the interrupt event carries the same id.
-
-Send it as `interrupt_id` next to `resume`:
-
-```bash
-curl -X POST http://localhost:8000/v1/graph/invoke \
-  -H "Content-Type: application/json" \
-  -d '{
-    "resume": {"approved": true},
-    "interrupt_id": "int_abc123...",
-    "config": {"thread_id": "THREAD_ID"}
-  }'
-```
-
-`interrupt_id` is accepted on `/v1/graph/invoke`, `/v1/graph/stream` and the WebSocket. The server returns:
-
-- **409** if the thread is not paused, or is paused at a different interrupt. This is checked before anything runs.
-- **422** if the answer fails the interrupt's `response_schema`.
-
-On stream and WebSocket, both arrive as an error chunk instead of an HTTP status. The server passes the id to core as `resume_interrupt_id`. See [Invoke and stream over REST](/docs/server/invoke-and-stream) for the error format.
-
-For UI integration, see [Add human approval](/docs/guides/add-human-approval).
-
-## Common patterns
-
-**Tool approval:** Ask the user to approve a tool call before it runs.
-
-```python
-async def sensitive_tool(query: str) -> str:
-    decision = interrupt(
-        {"query": query},
-        message=f"Run sensitive query: {query}?",
-        reason="tool_approval",
-    )
-    if not decision:
-        return "Query cancelled"
-    return run_query(query)
-```
-
-**Multi-step confirmation:** Break a process into steps and ask for approval at each.
-
-```python
-async def complex_task() -> str:
-    plan = interrupt(
-        {"options": ["A", "B", "C"]},
-        message="Which approach?",
-        reason="choice",
-        response_schema={
-            "type": "object",
-            "properties": {"choice": {"type": "string", "enum": ["A", "B", "C"]}}
-        }
-    )
-    approach = plan["choice"]
-    
-    result = execute(approach)
-    
-    if result["needs_review"]:
-        approval = interrupt(
-            {"result": result},
-            message="Approve the result?",
-            reason="approval"
-        )
-        if not approval:
-            return "Result rejected"
-    
-    return "Task complete"
-```
-
-**Escalation:** Stop the graph and hand off to a human for a decision that the agent cannot make.
-
-```python
-if situation == "unusual":
-    human_input = interrupt(
-        {"situation": situation_details},
-        message="Escalated to human review. Please provide guidance.",
-        reason="escalation"
-    )
-```
+Send `resume` instead of `messages` to `/v1/graph/invoke`, `/v1/graph/stream` or the WebSocket, with the thread id in `config`. Send the pending interrupt's id as `interrupt_id` to bind the answer; the server passes it to core as `resume_interrupt_id`. A mismatch or a thread that is not paused answers 409, a schema failure 422 (an error chunk on stream and WebSocket). On a stream the pause arrives as an `updates` chunk with `"status": "interrupted"` at every granularity. See [Add human approval](/docs/guides/add-human-approval#using-interrupt-over-the-rest-api).
 
 ## When to use interrupt() vs interrupt_before/after vs callbacks
 
@@ -396,15 +219,13 @@ if situation == "unusual":
 | `interrupt_before` / `interrupt_after` | You always pause at fixed node boundaries. | "Every time this approval node runs, pause." |
 | Callbacks (not interrupts) | You want to observe or modify execution without pausing. | "Log every node execution" or "validate input before running." |
 
-See [`guides/add-human-approval`](/docs/guides/add-human-approval) for task-focused guidance on setting up approval workflows.
+For a per-tool approval gate without writing `interrupt()` yourself, use `ToolGuard(approval={"tool_name"})`; see [Human approval](/docs/security/zero-trust-agents#human-approval).
 
 ## Who can resume
 
-Over the API, only the thread's owner can resume a paused run, whatever their role or reach. The resume value therefore comes from the requester, not from a separate approver. Do not use it as authorization for something the requester must not approve themselves, and do not keep approval decisions in thread state, which clients can set through `initial_state` or `PUT` with `threads:write`. For a support or manager approval, store the decision in your own system from a call that checks the approver's role and tenant, and let the paused run read it. See [Who is allowed to approve](/docs/guides/add-human-approval#who-is-allowed-to-approve).
+Over the API only the thread's owner can resume, so the resume value is the requester's own answer, not an approval by someone else. See [Who is allowed to approve](/docs/guides/add-human-approval#who-is-allowed-to-approve).
 
 ## Limitations and gotchas
 
-- **Requires checkpointing:** Interrupts must save the thread state, so a checkpointer is required. `compile()` creates an `InMemoryCheckpointer` by default, but for production use a durable one like `PgCheckpointer`.
-- **Replay safety:** Interrupted nodes re-run from the start. Tool results in a `ToolNode` are memoized from the ledger, but other side effects run twice; move them after `interrupt()`.
+- **Requires checkpointing:** Interrupts must save the thread state, so a checkpointer is required. `compile()` creates an `InMemoryCheckpointer` by default, which loses the pause on restart; use `PgCheckpointer` in production.
 - **Serialization:** The Interrupt object is JSON-serialized in the checkpoint. Custom Python objects in `value` or `response_schema` must be JSON-serializable.
-- **Fixed-point pauses:** `interrupt_before` and `interrupt_after` pauses are not reported by `pending_interrupt()` and are not resumed with `resume`.

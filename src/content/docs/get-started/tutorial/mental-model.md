@@ -6,7 +6,7 @@ section: "Get started"
 group: "Tutorial"
 order: 51
 label: Mental Model
-updated: "2026-10-08"
+updated: "2026-11-25"
 faq:
   - q: "What is the difference between a message and a message role?"
     a: "A message is one unit of communication, made of content blocks. Its role says who sent it: user, assistant, system or tool."
@@ -88,7 +88,7 @@ class SupportState(AgentState):
 
 ### Node
 
-A node is a function that takes the state and returns work to add to it. Most nodes return a `Message`. Nodes are where your logic lives: calling a model, running a tool, validating input.
+A node is a function that takes the state and returns work to add to it: usually a `Message`, or a `dict` of state fields to update (`None` means no change). Nodes are where your logic lives: calling a model, running a tool, validating input.
 
 ```python
 from tenxgraph.core.state import AgentState, Message
@@ -188,7 +188,7 @@ An `Agent` is a regular node that does more work internally. You build the full 
 
 A thread is one conversation, identified by a `thread_id` in the run config. With a checkpointer attached at compile time, the graph saves state under that ID after each run. Invoking again with the same `thread_id` loads the saved state and continues. A different `thread_id` starts a fresh conversation.
 
-If you omit `thread_id`, the runtime generates a random one, so that run cannot be resumed. You set up persistence in [step 3](/docs/get-started/tutorial/threads-and-memory).
+You set up persistence in [step 3](/docs/get-started/tutorial/threads-and-memory).
 
 ## How the concepts fit together
 
@@ -210,21 +210,7 @@ One run proceeds like this:
 3. The entry point node runs and returns a message, which is appended to `context`.
 4. The graph follows the outgoing edge. For a conditional edge, the router reads the state and picks the next node.
 5. The tool node appends tool results to `context`, and control returns to the agent, which sees them and calls the model again.
-6. When a router returns `END`, the run finishes and the result is returned. The checkpointer saves the final state under the thread.
-
-## When to use a graph
-
-Use a graph when your workflow has more than one step, loops, branches, or needs to survive restarts. For a single model call with no tools or memory, calling the provider SDK directly is simpler. For the common tool-calling pattern, the prebuilt `ReactAgent` assembles this graph for you, and step 2 shows both forms so you can pick.
-
-## What you learned
-
-- A message has a role and content blocks.
-- State (`AgentState`) holds `context`, `context_summary` and `execution_meta`, and you extend it by subclassing.
-- A node is a function from state to a message or update.
-- Edges are unconditional or routed by a function; `END` finishes the run.
-- A `StateGraph` compiles into a runnable `CompiledGraph`.
-- An `Agent` is a model-backed node, and a `ToolNode` runs its tool calls.
-- A thread is a conversation identified by `thread_id`.
+6. When a router returns `END`, the run finishes and the result is returned. With a checkpointer, the state is saved under the thread after each step.
 
 ## Next step
 

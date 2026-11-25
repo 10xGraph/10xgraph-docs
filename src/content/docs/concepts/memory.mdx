@@ -5,7 +5,7 @@ description: The internal mechanisms of PgCheckpointer's two-layer storage model
 section: Concepts
 order: 110
 group: "Memory and reliability"
-updated: "2026-10-27"
+updated: "2026-11-25"
 faq:
   - q: What happens when the Redis cache expires or Redis restarts?
     a: Nothing is lost. PostgreSQL holds the authoritative state, so the next read misses the cache, loads the latest version from PostgreSQL and writes it back to Redis. The cache TTL defaults to 86400 seconds (24 hours).
@@ -15,7 +15,7 @@ faq:
     a: PgCheckpointer uses optimistic concurrency control. Each write performs a version check. If another run committed a new version since this run started, the write fails with StaleStateError and the cache is invalidated to prevent the thread from staying stuck on stale data.
 ---
 
-`PgCheckpointer` implements a two-layer storage model: a **durable layer** in PostgreSQL with full versioned history, and a **hot cache layer** in Redis with TTL-controlled entries. Understanding how state flows through these layers is essential for production deployment and debugging concurrency issues.
+`PgCheckpointer` keeps thread state in two layers: a durable, versioned layer in PostgreSQL and a hot cache in Redis with a TTL.
 
 > This page is about thread state (the checkpointer). For facts that last across threads, see [Long-term memory](/docs/concepts/memory-and-store). For how threads and checkpointers work from the outside, see [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
 
@@ -23,10 +23,10 @@ faq:
 
 | Layer | Purpose | Lifetime | Guarantees |
 |---|---|---|---|
-| Hot cache | Fast reads, reduces Postgres load | TTL (default 86400 seconds / 24 hours) | Best-effort; failures are silent |
+| Hot cache | Fast reads, reduces Postgres load | TTL (default 86400 seconds / 24 hours) | Best-effort; failures are logged, never raised |
 | Durable storage | Persistent, versioned history | Until thread is deleted | Atomic, transactional, authoritative |
 
-PostgreSQL is the source of truth. Redis is expendable: if it crashes or the cache entry expires, the next read simply falls back to Postgres. Conversely, losing the Redis cache does not lose data.
+PostgreSQL is the source of truth. Redis is expendable: if it crashes or the cache entry expires, the next read simply falls back to Postgres.
 
 ## The write path: durable first, then cache
 
@@ -51,15 +51,11 @@ After PostgreSQL commits, the graph loop writes the same state to Redis under th
 
 If the Redis write fails, the failure is logged and ignored. The durable state is safe in PostgreSQL, and the next read will fall back to Postgres and refresh the cache.
 
-### Write sequence guarantees
-
-The PostgreSQL-first ordering ensures the cache never holds state that is not durable. If a crash occurs between the Postgres commit and the Redis write, the Redis cache remains stale (or empty), but the durable state is safe. The next read will detect the cache miss and fetch from Postgres.
-
 ## The read path: cache-aware with atomic fallback
 
 At the start of a run, the graph calls `PgCheckpointer.aget_state_cache()` (falling back to `aget_state()`) to retrieve the thread's latest state:
 
-1. **Redis hit**: Read `state_cache:{thread_id}:{user_id}` from Redis. Extract the embedded version number (stored as `__checkpoint_version__` in the cached JSON). Restore it into `config['_checkpoint_version']` so a subsequent write can use it for the version check. Return the deserialized state.
+1. **Redis hit**: Read `state_cache:{thread_id}:{user_id}` from Redis and compare its embedded version (`__checkpoint_version__`) with the thread's current version in Postgres (one small `MAX(version)` read). If they match, restore it into `config['_checkpoint_version']` and return the state; if not, drop the cache entry and read from Postgres.
 
 2. **Redis miss or error**: Execute a Postgres read:
    - Query `SELECT version, state_data FROM states WHERE thread_id = ? ORDER BY version DESC, state_id DESC LIMIT 1`, scoped to the owning user through the `threads` table when isolation is active
@@ -71,7 +67,7 @@ At the start of a run, the graph calls `PgCheckpointer.aget_state_cache()` (fall
 
 4. **Cache refreshed on miss**: If the Postgres read succeeded, immediately write the result back to the Redis cache (with TTL) so the next call to this thread hits the cache.
 
-This two-stage read minimizes Postgres load in the common case (cache hits) while guaranteeing correctness (the version from either cache or Postgres is used for the next write's compare-and-swap).
+A cache hit skips loading and decoding the full state from Postgres.
 
 ## Versions and optimistic concurrency control
 
@@ -90,38 +86,9 @@ The check runs inside the transaction, after the thread row is locked and before
 
 This prevents lost updates: each run's writes are serialized by version number, and concurrent runs that started from the same version cannot both commit.
 
-### Example: three concurrent runs
-
-```
-Run A          Run B          Run C
-├─ Read @ v=0
-├─ Read @ v=0
-│  ├─ Read @ v=0
-│  │  ├─ Execute (A)
-│  │  ├─ Write → v=1 ✓
-│  │  └─ Cache v=1
-│  ├─ Execute (B)
-│  ├─ Write expected v=0, found v=1 → StaleStateError
-│  └─ Cache invalidated
-├─ Execute (C)
-└─ Write expected v=0, found v=1 → StaleStateError
-   └─ Cache invalidated
-```
-
-Run A succeeds. Runs B and C both fail because they started from v=0 but A already advanced to v=1. Their cache entries are dropped so they do not poison the next read. The calling code can retry them if needed.
-
 ## History pruning and bounded growth
 
-By default, `PgCheckpointer` keeps 20 state snapshots per thread (`state_history_limit=20`). After each successful write, older rows are deleted:
-
-```python
-# Pseudocode from _write_state_row()
-new_version = current_version + 1
-INSERT INTO states (thread_id, version, state_data, meta) VALUES (...)
-DELETE FROM states
-  WHERE thread_id = ?
-  AND version <= (new_version - state_history_limit)
-```
+`PgCheckpointer` keeps the newest `state_history_limit` snapshots per thread (default 20) and deletes older ones in the same statement as each insert.
 
 This prevents the `states` table from growing indefinitely. The 20-row window is enough for debugging the recent execution history but not an audit log. If you need to preserve all history, export it before it is pruned, or increase `state_history_limit` (at the cost of more Postgres storage).
 
@@ -149,40 +116,6 @@ By default, `enforce_user_isolation=True`. The `states` and `messages` tables ca
 
 For several organizations or projects in one database, declare `tenant_columns` (such as `org_id`) and `extra_columns` on `PgCheckpointer`. They are columns on `threads`, set once when the thread is created and read only from `config["user"]`. The same scoping then runs through the thread row, so a caller's reach can match on `org_id` and `project_id` as well as `user_id`. Threads created before you added a tenant column hold `NULL` there and are hidden from callers whose reach filters on it until you backfill them. See [Multi-tenant data](/docs/guides/multi-tenant-data).
 
-## Cache invalidation on conflict
-
-When a write fails the optimistic version check, `PgCheckpointer` immediately calls `_invalidate_state_cache()` to drop the cached entry:
-
-```python
-await self.redis.delete(self._get_thread_key(thread_id, user_id))
-```
-
-This prevents a poisoned cache: if Run A loses its race and reads the cached state that Run B wrote (which was built on a newer version), Run A's next write will again fail because it is trying to commit the older version. By dropping the cache, Run A's next read will fetch from Postgres and get the latest version, allowing it to retry successfully.
-
-## Storage configuration patterns
-
-### Development: InMemoryCheckpointer
-
-For local development and unit tests, use `InMemoryCheckpointer`. State lives in process memory; no Postgres or Redis required:
-
-```python
-from tenxgraph.storage.checkpointer import InMemoryCheckpointer
-checkpointer = InMemoryCheckpointer()
-```
-
-### Single-user: SqliteCheckpointer
-
-For client-side agents (desktop apps, CLIs, embedded systems), use `SqliteCheckpointer`. Durable state and messages live in a single SQLite file:
-
-```python
-from tenxgraph.storage.checkpointer import SqliteCheckpointer
-checkpointer = SqliteCheckpointer("./agent_state.db")
-```
-
-### Production: PgCheckpointer
-
-For multi-worker services, use `PgCheckpointer` with Postgres and Redis. See [Set up checkpointing](/docs/guides/set-up-checkpointing) for detailed configuration.
-
 ## Related concepts
 
 - **Durability and concurrency**: For handling StaleStateError, thread isolation, and optimistic concurrency patterns, see [Durability and concurrency](/docs/guides/durability-and-concurrency).
@@ -190,13 +123,4 @@ For multi-worker services, use `PgCheckpointer` with Postgres and Redis. See [Se
 - **Multi-tenant data**: Tenant and extra columns on `threads`, reach and filters, see [Multi-tenant data](/docs/guides/multi-tenant-data).
 - **Long-term memory**: The checkpointer is thread-scoped. For memories shared across threads, see [Long-term memory](/docs/concepts/memory-and-store).
 - **Replay-safe tools**: How the tool ledger uses durable writes to prevent tools from running twice on resume, see [Replay-safe tools](/docs/concepts/replay-safe-tools).
-
-## Related pages
-
-<CardGrid>
-
-<LinkCard title="Checkpointing and threads" href="/docs/concepts/checkpointing-and-threads" description="Thread lifecycle, the config dict, and checkpointer API reference." eyebrow="Concept" />
-<LinkCard title="Long-term memory" href="/docs/concepts/memory-and-store" description="Using stores for memories shared across threads." eyebrow="Concept" />
-<LinkCard title="Set up checkpointing" href="/docs/guides/set-up-checkpointing" description="How to configure and deploy PgCheckpointer in production." eyebrow="Guide" />
-<LinkCard title="Replay-safe tools" href="/docs/concepts/replay-safe-tools" description="How durable writes prevent tool replay on resume." eyebrow="Concept" />
-</CardGrid>
+- **Set up checkpointing**: Choosing and configuring a checkpointer, see [Set up checkpointing](/docs/guides/set-up-checkpointing).

@@ -26,7 +26,7 @@ The short version: you write the agents, tools and tasks, and the server owns th
 
 **Turn it on:** set `"auth": "jwt"` in `10xgraph.json` and export `JWT_SECRET_KEY` and `JWT_ALGORITHM`, or point `auth` at your own `BaseAuth` subclass. A token needs `exp` and a non-empty `user_id`, else the server answers 401. If you set `JWT_ISSUER` or `JWT_AUDIENCE`, `iss` and `aud` are required too. An HS-family secret shorter than 32 bytes stops the server at startup in production.
 
-**You still must:** switch it on, keep the signing secret in a secret store, and make your login service the only place that mints `user_id`. [Security in five minutes](/docs/get-started/security-in-five-minutes) walks through it.
+**You still must:** switch it on, keep the signing secret in a secret store, and make your login service the only place that mints `user_id`. [the quickstart auth section](/docs/get-started/first-agent walks through it.
 
 ## 2. Who owns what: reach and thread access
 

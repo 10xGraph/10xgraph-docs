@@ -38,7 +38,7 @@ const ROUTES: [id: string, name: string, blurb: string, steps: string[]][] = [
     'production', 'production/architecture', 'production/scaling', 'production/security-model', 'server/production-checklist',
     'server/configure', 'deploy', 'server/kubernetes', 'observability', 'guides/metrics-prometheus-grafana', 'guides/graceful-shutdown']],
   ['route-security', 'Security', 'Auth, roles, tenant isolation, rate limits, validators and the audit log.', [
-    'get-started/security-in-five-minutes', 'security', 'production/security-model', 'server/auth', 'concepts/tenancy-and-access',
+    'get-started/first-agent', 'security', 'production/security-model', 'server/auth', 'concepts/tenancy-and-access',
     'guides/authorization-scopes', 'server/rate-limiting', 'server/cors-and-security-headers',
     'guides/protect-against-prompt-injection', 'server/audit-log', 'production/control-mapping']],
 ];

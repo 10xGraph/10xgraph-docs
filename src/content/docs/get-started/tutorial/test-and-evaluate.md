@@ -2,7 +2,7 @@
 title: "Test and evaluate"
 seoTitle: "Test and evaluate a 10xGraph agent"
 description: "Write a unit test with a mocked model, then run a small evaluation set against your weather agent with the 10xgraph eval command."
-updated: "2026-10-27"
+updated: "2026-11-25"
 order: 110
 group: "Tutorial"
 section: "Get started"
@@ -141,39 +141,7 @@ async def test_tool_call():
     result.assert_contains("sunny")
 ```
 
-The `TestResult` assertions are `assert_contains`, `assert_not_contains`, `assert_equals`, `assert_tool_called`, `assert_tool_not_called`, `assert_message_count` and `assert_no_errors`. Each returns the result so you can chain them.
-
-### Isolate a node with TestContext
-
-`TestContext` is an optional helper that gives each test its own dependency container and in-memory store. Use `ctx.create_graph()` and `ctx.create_test_agent()` to keep tests from sharing state.
-
-```python
-# test_agent.py (additional test)
-from tenxgraph.qa.testing import TestContext
-
-
-@pytest.mark.asyncio
-async def test_with_context():
-    with TestContext() as ctx:
-        test_agent = ctx.create_test_agent(responses=["Test response from agent"])
-
-        graph = ctx.create_graph()
-        graph.add_node("MAIN", test_agent)
-        graph.set_entry_point("MAIN")
-        graph.add_edge("MAIN", END)
-
-        compiled = graph.compile()
-        await compiled.ainvoke(
-            {"messages": [Message.text_message("Test")]},
-            config={},
-        )
-
-        # TestAgent records how often it ran
-        test_agent.assert_called()
-        assert test_agent.call_count == 1
-```
-
-Run the whole file with `pytest test_agent.py -v`. All tests should pass without any API key set. For `MockToolRegistry`, `MockMCPClient` and `InMemoryStore`, see [Unit tests](/docs/testing/unit-tests).
+Run the whole file with `pytest test_agent.py -v`. All tests pass without an API key. For `TestContext`, `MockToolRegistry`, `MockMCPClient` and `InMemoryStore`, see [Unit tests](/docs/testing/unit-tests).
 
 ## Evaluate the agent on a dataset
 
@@ -261,38 +229,12 @@ Also viewable in the playground: Evals > Open report file (pick the JSON).
 
 Each case passes only when every criterion meets its threshold. Review the HTML report, or open the JSON file in the playground (Evals > Open report file) to see the conversation, tool calls and per-criterion scores of each failed case.
 
-| Flag | Short | Default | Purpose |
-|---|---|---|---|
-| `--output` | `-o` | `eval_reports` | Directory for reports |
-| `--no-report` | | off | Print the summary only |
-| `--threshold` | `-t` | none | Exit with an error if the overall pass rate is below this value (0.0 to 1.0) |
-| `--parallel` | `-p` | off | Run cases concurrently |
-| `--max-concurrency` | `-c` | 4 | Concurrent cases with `--parallel` |
-
 Add `--threshold 0.8` in CI so a drop in quality fails the build. To run evaluations from inside pytest instead, see [Evals in pytest](/docs/testing/evals-in-pytest).
-
-## When to use each approach
-
-Use both. They catch different failures, and the unit tests keep your feedback loop fast.
-
-- **Unit tests** cover graph structure, routing, tool wiring and error handling. They are free and deterministic, so run them on every commit.
-- **Evaluations** cover answer quality, tool choice and regressions after prompt or model changes. They cost API calls and vary slightly, so run them before a release or on a schedule.
-
-Do not use evaluations to test wiring bugs: a failing case does not tell you whether the cause is the graph or the model. Do not use `TestAgent` to judge answer quality: it only returns what you scripted.
-
-## What you learned
-
-- `TestAgent` replaces the model with scripted replies, and `QuickTest` builds common test graphs in one call.
-- `TestResult` assertions are chainable, and `TestContext` isolates each test.
-- An `EvalSet` of `EvalCase` objects plus an `EvalConfig` describes an evaluation, and `10xgraph eval` runs it against your real graph and writes reports.
-
-You have a tested, evaluated agent. If 10xGraph saved you time, a [star on GitHub](https://github.com/10xGraph/10xGraph) helps other developers find it.
 
 ## Next steps
 
 You have finished the tutorial track. Continue with:
 
 - [Testing](/docs/testing) for unit test patterns, criteria, presets and user simulation.
-- [Run the server](/docs/server/run-the-server) to serve the agent over HTTP with `10xgraph dev`.
 - [Production checklist](/docs/server/production-checklist) before you deploy.
 - [Prebuilt agents](/docs/guides/prebuilt-agents) and [Concepts](/docs/concepts) for the next level of detail.

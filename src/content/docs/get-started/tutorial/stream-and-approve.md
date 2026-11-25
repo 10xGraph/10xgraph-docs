@@ -5,7 +5,7 @@ order: 100
 group: "Tutorial"
 section: "Get started"
 label: Stream and approve
-updated: "2026-10-08"
+updated: "2026-11-25"
 faq:
   - q: "How do I pause a 10xGraph agent for human approval?"
     a: "Call interrupt() inside a tool or node. The graph saves its state and ends the run. Run the same thread again with {\"resume\": value} and interrupt() returns that value."
@@ -21,7 +21,7 @@ You pause an agent for human approval by calling `interrupt()` inside a tool, st
 
 You build a financial advisor agent with two tools: `check_balance` and `transfer_funds`. The transfer tool pauses the graph to ask for approval before it moves money. Your script streams the run, reads the approval request from the stream, then resumes the thread with a decision.
 
-This pattern suits any action you cannot undo: payments, deletions, outbound emails. It is not needed for read-only tools, where a pause only adds latency.
+This pattern suits any action you cannot undo: payments, deletions, outbound emails.
 
 ## Prerequisites
 
@@ -32,7 +32,7 @@ pip install "10xgraph[google-genai]"
 export GOOGLE_API_KEY=your-api-key
 ```
 
-You also need the hand-built graph from [Build a graph by hand](/docs/get-started/tutorial/build-a-graph) and the checkpointer from [Add memory with threads](/docs/get-started/tutorial/threads-and-memory). This step combines both.
+The code below is complete; it combines the graph from [Build a graph by hand](/docs/get-started/tutorial/build-a-graph) with the checkpointer from [Add memory with threads](/docs/get-started/tutorial/threads-and-memory).
 
 ## Build the agent with an approval tool
 
@@ -84,7 +84,7 @@ agent = Agent(
 
 
 def should_use_tools(state: AgentState) -> str:
-    """Route to TOOL when the assistant asked for tools, back to MAIN after a result."""
+    """Route to TOOL when the assistant asked for tools, else END."""
     if not state.context:
         return END
 
@@ -92,9 +92,6 @@ def should_use_tools(state: AgentState) -> str:
 
     if last_message.role == "assistant" and last_message.tools_calls:
         return "TOOL"
-
-    if last_message.role == "tool":
-        return "MAIN"
 
     return END
 
@@ -197,8 +194,6 @@ If the first run prints "finished without asking for approval", the model answer
 
 ## How it works
 
-The flow is stream, pause, resume. The first paragraph below is the short version, and the numbered steps explain what the graph does at each point.
-
 A pause is not an error. `interrupt()` stops the graph by raising `GraphInterrupt`, which derives from `BaseException` so your tools' `except Exception` blocks do not swallow it. The graph catches it, saves the state and ends the stream.
 
 1. **Run:** the agent asks for `transfer_funds`, and the `ToolNode` starts it.
@@ -217,20 +212,11 @@ The resumed tool starts from its first line, so anything before the `interrupt()
 |---|---|---|
 | `interrupt(value=None, *, message=None, reason="input_required", response_schema=None)` | `tenxgraph.utils` | Pauses the graph and returns the resume value on the next run, or `None` if the client cancelled. |
 | `pending_interrupt(state)` | `tenxgraph.utils` | Returns the `Interrupt` a paused state waits on, or `None`. Use it on a state from `invoke` or the checkpointer. |
-| `app.astream(input_data, config=None, response_granularity=ResponseGranularity.LOW)` | compiled graph | Async generator of `StreamChunk`. Chunks have `event`, `message`, `state`, `data`, `thread_id`, `run_id`. |
 | `{"resume": value}` | input to `astream`, `ainvoke`, `invoke` | Resumes a thread paused by `interrupt()`. The value goes back to the waiting call. |
-| `StreamEvent` | `tenxgraph.core.state` | Chunk types: `state`, `message`, `error`, `updates`. |
 
 Resuming a thread that is not paused at an `interrupt()` raises a `ValueError`.
 
 The same pause works without streaming. With `ainvoke(..., response_granularity=ResponseGranularity.FULL)` the result contains the state, and `pending_interrupt(result["state"])` returns the request. The full model, including `interrupt_before` and `interrupt_after`, is in [Interrupts](/docs/concepts/interrupts), and a task-focused version is in [Add human approval](/docs/guides/add-human-approval).
-
-## What you learned
-
-- `astream()` yields chunks as the graph runs, and an `interrupted` update chunk marks a pause.
-- `interrupt()` inside a tool pauses the run and saves state in the checkpointer.
-- `{"resume": decision}` on the same `thread_id` continues the run, and `interrupt()` returns the decision.
-- The paused tool re-runs from the start, so side effects belong after the call.
 
 ## Next step
 

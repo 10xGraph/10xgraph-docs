@@ -6,7 +6,7 @@ section: Concepts
 order: 40
 group: "Foundations"
 label: Agents and Tools
-updated: "2026-10-08"
+updated: "2026-11-25"
 ---
 
 `Agent` and `ToolNode` are the two built-in node types that handle language model interaction. `Agent` sends the current state to a language model and appends its response. `ToolNode` executes the tool calls the model requested and runs them in parallel. Together they form the core of tool-using agents.
@@ -15,9 +15,7 @@ updated: "2026-10-08"
 
 You can wrap an LLM call in a plain graph node function, but `Agent` exists to handle the machinery that all language model nodes need: message formatting, provider detection, retry logic with backoff, fallback models when retries are exhausted, response parsing, system prompt templating with state interpolation, streaming, tool integration, skills, memory, multimodal content, and reasoning modes.
 
-Writing all of that by hand for each node is error-prone and verbose. An `Agent` node does it for you. Use `Agent` whenever a node needs to call an LLM. Use a plain function node only when you need custom logic that `Agent` does not support (custom model logic, external API calls, data processing, or routing decisions).
-
----
+Use `Agent` whenever a node calls an LLM; use a plain function node for everything else. See [Choosing a building block](/docs/concepts/choosing-a-building-block).
 
 ## Agent
 
@@ -29,126 +27,27 @@ Writing all of that by hand for each node is error-prone and verbose. An `Agent`
 from tenxgraph.core.graph import Agent
 
 agent = Agent(
-    # --- Required ---
-    model="gemini-2.5-flash",        # Any model name; no parsing needed
-    provider="google",               # "openai" | "google" | "anthropic"; auto-detected if omitted
-
-    # --- Output type ---
-    output_type="text",              # "text" | "image" | "video" | "audio"
-
-    # --- System prompt ---
-    system_prompt=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user",   "content": "Today is {date}."},  # state interpolation
-    ],
-
-    # --- Tool integration ---
-    tool_node=tool_node,             # ToolNode instance, or str name of a graph node
-
-    # --- Context management ---
-    trim_context=True,               # trim old messages to stay within token limits
-
-    # --- Reasoning ---
-    reasoning_config={"effort": "medium"},  # see Reasoning section below
-
-    # --- Retry & fallback ---
-    retry_config=True,               # True = default RetryConfig(3 retries, 1s delay)
-    fallback_models=["gpt-4o-mini"], # fallback when all retries exhausted
-
-    # --- Multimodal ---
-    multimodal_config=MultimodalConfig(...),
-
-    # --- Long-term memory ---
-    memory=MemoryConfig(...),
-
-    # --- Skills ---
-    skills=SkillConfig(...),
-
-    # --- Extra provider kwargs ---
-    temperature=0.7,
-    max_tokens=2048,
-    base_url="http://localhost:11434",  # for Ollama / openrouter / vllm
+    model="gemini-2.5-flash",   # provider is detected from the model name
+    system_prompt=[{"role": "system", "content": "You are a helpful assistant."}],
+    tool_node=tool_node,        # a ToolNode, or the name of a ToolNode graph node
 )
 ```
+
+Every other option (output type, reasoning, retries, fallback models, multimodal, memory, skills, provider kwargs such as `temperature` or `base_url`) is covered in [Configure Agent](/docs/guides/configure-agent).
+
+To give an agent [Agent Skills](https://agentskills.io/specification), pass `skills=SkillConfig(skills_dir=...)`; see [How to give an agent skills](/docs/guides/use-skills).
 
 ### System prompt interpolation
 
-The system prompt supports `{field_name}` placeholders. Fields are resolved against the current `AgentState` at runtime:
-
-```python
-class MyState(AgentState):
-    user_name: str = "Guest"
-    occasion: str = "casual"
-
-agent = Agent(
-    model="gpt-4o",
-    system_prompt=[
-        {"role": "system", "content": "You are helping {user_name} with {occasion} planning."}
-    ],
-)
-# At runtime the placeholder is replaced with state.user_name, state.occasion
-```
+The system prompt supports `{field_name}` placeholders. Fields are resolved against the current `AgentState` at runtime.
 
 A missing field stays as written and the rest is still filled. `extra_messages` text is filled the same way, which is the right place for values that change mid-conversation; see [prompt caching](/docs/guides/configure-agent#per-request-context-and-prompt-caching).
 
-### Skills
+### Retry, fallback and reasoning
 
-A skill is a folder with a `SKILL.md` (instructions plus a short description) and optional bundled files such as scripts and reference docs. Skills follow the [Agent Skills specification](https://agentskills.io/specification). With `skills=SkillConfig(skills_dir=...)`:
+Retries are on by default (`retry_config=True`) and `fallback_models` takes over when they are exhausted. A plain model string inherits the agent's provider; use a `(model, provider)` tuple for another provider. See [Retry and fallback behavior](/docs/concepts/errors-and-limits#retry-and-fallback-behavior).
 
-- The agent lists each skill's name and description in the system prompt.
-- The model calls `activate_skill` to load a skill's instructions only when a task matches the description.
-- The model calls `read_skill_resource` to read a bundled file when the instructions point to one.
-
-Unused skills cost only their one-line description. See [How to give an agent skills](/docs/guides/use-skills).
-
-### Retry and fallback
-
-```python
-from tenxgraph.core.graph.agent_internal.constants import RetryConfig
-
-agent = Agent(
-    model="gemini-2.5-flash",
-    # Custom retry: 5 attempts, 2 s initial delay, 2x backoff, 60 s max
-    retry_config=RetryConfig(
-        max_retries=5,
-        initial_delay=2.0,
-        backoff_factor=2.0,
-        max_delay=60.0,
-        retryable_status_codes=frozenset({429, 500, 502, 503, 529}),
-    ),
-    # Cross-provider fallback after all retries are exhausted
-    fallback_models=[
-        "gpt-4o-mini",                          # inherits agent's provider
-        ("gemini-2.0-flash", "google"),         # explicit (model, provider) tuple
-    ],
-)
-```
-
-### Reasoning config
-
-```python
-# OFF
-reasoning_config=None
-
-# On, lowest effort per provider (the default; Google thinking_budget=512)
-reasoning_config=True
-
-# Medium effort (Google thinking_budget=8192)
-reasoning_config={"effort": "medium"}
-
-# High effort, Google
-reasoning_config={"effort": "high"}          # translates to thinking_budget=24576
-
-# Google exact budget
-reasoning_config={"thinking_budget": 5000}
-
-# OpenAI with summary
-reasoning_config={"effort": "low", "summary": "auto"}
-```
-
-Default is `True`: thinking is **on by default** at each provider's lowest effort (OpenAI `"minimal"`, Anthropic `"low"`, Google `"low"`). Pass a dict for more.
-
----
+Reasoning is on by default at each provider's lowest effort; pass `reasoning_config=None` to turn it off or a dict for more. See [Reasoning configuration](/docs/guides/configure-agent#reasoning-configuration).
 
 ## ToolNode
 
@@ -170,13 +69,11 @@ def refund_order(order_id: str, amount: float) -> str:
 tool_node = ToolNode([lookup_order, refund_order])
 ```
 
-The function's **docstring** becomes the tool description shown to the model. **Type annotations** define the parameter schema. Both are required for good model behavior.
+The function's **docstring** becomes the tool description shown to the model. **Type annotations** define the parameter schema.
 
 ### Parallel tool dispatch
 
-When the model requests multiple tool calls, `ToolNode` executes them in parallel using `asyncio.gather`. This is faster than running them sequentially: if the model calls three tools that each take 2 seconds, parallel execution takes 2 seconds; sequential would take 6 seconds. All tool results are collected and appended to state together, so the next node in the graph sees them all at once.
-
-To opt out of parallelism and execute tools sequentially, you can iterate over tool calls and invoke them one at a time in your own node. In practice, parallelism is the right default.
+When the model requests several tool calls in one message, `ToolNode` runs them concurrently, each in its own task, at most 10 at a time (`DEFAULT_MAX_PARALLEL_TOOL_CALLS`). All results are appended to state together, so the next node sees them all. To run them one at a time, set `config["max_parallel_tool_calls"] = 1` (see [Parallel tool calls](/docs/concepts/errors-and-limits#parallel-tool-calls)).
 
 ### Adding tools after creation
 
@@ -206,6 +103,7 @@ Tool functions can declare special parameters that `ToolNode` injects automatica
 | `checkpointer` | `BaseCheckpointer` | The configured checkpointer |
 | `store` | `BaseStore` | The configured memory store |
 | `task_manager` | `BackgroundTaskManager` | Fire-and-forget task manager |
+| `credential` | `UserCredential \| None` | The caller's credential from `config["credential"]` |
 
 The full set is `INJECTABLE_PARAMS` in `tenxgraph/core/graph/tool_node/constants.py`. Services can also be injected with `Inject[...]` defaults; see [Dependency injection](/docs/concepts/dependency-injection).
 
@@ -223,123 +121,31 @@ def lookup_order(
     return f"Order {order_id}: shipped (requested by {user})"
 ```
 
-### Returning state updates from a tool
-
-Use `ToolResult` when a tool needs to update state fields **and** return a message to the model:
-
-```python
-from tenxgraph.core.state.tool_result import ToolResult
-
-class MyState(AgentState):
-    selected_city: str = ""
-
-def select_city(city: str) -> ToolResult:
-    """Set the currently selected city."""
-    return ToolResult(
-        message=f"City set to '{city}'.",
-        state={"selected_city": city},  # updates state.selected_city
-    )
-```
+To update state fields as well as answer the model, return a `ToolResult`; see [ToolResult](/docs/concepts/state-and-messages#toolresult-tools-that-update-state).
 
 ### MCP tools
 
 10xGraph supports the Model Context Protocol (MCP), allowing you to expose both local Python functions and MCP server tools through the same `ToolNode`. Install with `pip install "10xgraph[mcp]"`, create an MCP client (using fastmcp or another MCP SDK), and pass it to `ToolNode(client=...)`. The same parallel execution, error handling, and injectable parameters apply to MCP tools. To tell the server who is calling, use `mcp_auth=` (an async function returning headers, such as a short-lived signed token) when the server enforces per-user or per-tenant access, because the server can verify it. `pass_user_info_to_mcp=True` sends the caller as unsigned request metadata the server cannot verify, so use it only for a trusted internal server. For details, see [Using MCP](/docs/guides/use-mcp).
 
----
-
 ## Tool errors
 
-When a tool raises an exception, `ToolNode` catches it and returns the error as a `ToolResultBlock` with `is_error=True` and status `"failed"`. The error message is forwarded to the model so it can retry with different arguments or report the failure to the user.
+When a tool raises an exception, `ToolNode` catches it and returns a `ToolResultBlock` with `is_error=True` and status `"failed"`. The model gets only `Tool '<name>' failed with an internal error (reference <id>).`; the exception text stays in the server log under that reference. To give the model a reason it can act on, return `ToolResult(message=..., is_error=True)` instead of raising.
 
-This is the right default: a tool failure is not a graph failure. The model sees the error and decides what to do next. For details on exception taxonomy and handling, see [Errors and limits](/docs/concepts/errors-and-limits).
+The model sees the error and decides what to do next. For details on exception taxonomy and handling, see [Errors and limits](/docs/concepts/errors-and-limits).
 
-Tool errors are also published as events, so you can monitor and alert on them. Tool functions can also return a `ToolResult` with `is_error=True` to signal a business error (e.g., "insufficient permissions") rather than an exception.
-
----
+Every tool failure is also published as a `tool.failed` event. To block a tool by policy or require human approval, use `ToolGuard`; see [Zero-trust agents](/docs/security/zero-trust-agents#toolguard).
 
 ## The `@tool` decorator
 
-Use `@tool` to attach metadata to any function. Metadata does not change injection behavior. It enriches the schema the model receives:
-
-```python
-from tenxgraph.utils import tool
-
-@tool(
-    description="Search the web for up-to-date information on any topic.",
-    tags=["search", "web"],
-    provider="custom",
-    capabilities=["network_access"],
-    metadata={"rate_limit": 100, "timeout": 30},
-)
-async def web_search(query: str, max_results: int = 5) -> list[str]:
-    """Search the web."""
-    ...
-```
-
-The decorator stores metadata as private attributes (`_py_tool_description`, `_py_tool_tags`, …) which `ToolNode` reads when building the schema.
-
-You can also use it without arguments (the docstring becomes the description):
-
-```python
-@tool
-def multiply(x: int, y: int) -> int:
-    """Multiply two numbers."""
-    return x * y
-```
-
----
+Use `@tool` from `tenxgraph.utils` to set a tool's description, tags (for `Agent(tools_tags=...)`) or other metadata without changing the function. See [Use the tool decorator](/docs/guides/use-tool-decorator).
 
 ## The ReAct loop pattern
 
-The standard routing pattern for tool-using agents is a loop between `Agent` and `ToolNode`. The routing function inspects the last message to decide where to go next:
-
-```python
-from tenxgraph.core.state import AgentState
-from tenxgraph.utils import END
-
-def route(state: AgentState) -> str:
-    if not state.context:
-        return END
-    last = state.context[-1]
-    # Model wants to call a tool
-    if hasattr(last, "tools_calls") and last.tools_calls and last.role == "assistant":
-        return "TOOL"
-    # Tool result came back, so go back to agent for final answer
-    if last.role == "tool":
-        return "MAIN"
-    return END
-```
-
-```python
-from tenxgraph.core.graph import StateGraph, Agent, ToolNode
-from tenxgraph.utils import END
-
-tool_node = ToolNode([lookup_order, refund_order])
-agent = Agent(model="gemini-2.5-flash", provider="google", tool_node=tool_node)
-
-graph = StateGraph()
-graph.add_node("MAIN", agent)
-graph.add_node("TOOL", tool_node)
-graph.add_conditional_edges("MAIN", route, {"TOOL": "TOOL", END: END})
-graph.add_edge("TOOL", "MAIN")
-graph.set_entry_point("MAIN")
-
-app = graph.compile()
-```
-
-```mermaid
-flowchart LR
-  Start([START]) --> MAIN[Agent node]
-  MAIN -->|tool_calls present| TOOL[ToolNode]
-  TOOL -->|tool results| MAIN
-  MAIN -->|no tool_calls| End([END])
-```
-
----
+The standard wiring is a loop: the `Agent` node routes to the `ToolNode` while the last assistant message has `tools_calls`, and the `ToolNode` routes back to the agent. See [Wire an Agent node with a tool loop](/docs/concepts/choosing-a-building-block#wire-an-agent-node-with-a-tool-loop), or use `ReactAgent`, which builds it for you.
 
 ## Passing tool_node by name
 
-Instead of passing the `ToolNode` instance directly to `Agent`, you can pass a string that names an existing graph node. The agent resolves it at runtime via the DI container:
+Instead of passing the `ToolNode` instance directly to `Agent`, you can pass a string that names an existing graph node. The graph resolves it at `compile()`, which raises `GRAPH_005` when no node has that name and `GRAPH_006` when that node is not a `ToolNode`:
 
 ```python
 agent = Agent(
@@ -352,32 +158,6 @@ graph.add_node("TOOL", tool_node)
 ```
 
 This is useful when you want to share one `ToolNode` across multiple agents.
-
----
-
-## Execution methods compared
-
-| Method | Returns | Use when |
-|---|---|---|
-| `compiled.invoke(input, config)` | Result dict with `messages` (more keys via `response_granularity`) | You only need the end result |
-| `compiled.stream(input, config)` | Sync generator of `StreamChunk` | Sync context, real-time display |
-| `compiled.astream(input, config)` | Async generator of `StreamChunk` | Async context (FastAPI, WebSocket) |
-| `compiled.ainvoke(input, config)` | Awaitable result dict, same as `invoke` | Async context, no streaming needed |
-
-Use `ainvoke` and `astream` inside an async context. `invoke` and `stream` are sync wrappers. See [Streaming](/docs/concepts/streaming) for chunk fields and events.
-
-For prebuilt agents, callbacks, `Command`, validators and background tasks, see [Callbacks and Command](/docs/concepts/callbacks-and-command), [Choosing a building block](/docs/concepts/choosing-a-building-block), [Security and validators](/docs/concepts/security-and-validators) and [Context management](/docs/concepts/context-management).
-
----
-
-## What you learned
-
-- `Agent` exists to handle all LLM integration machinery (retry, fallback, system prompts, streaming, tools, skills, memory, reasoning) so you do not have to build it by hand.
-- `ToolNode` executes tool calls from the model in parallel, making multi-tool workflows faster than sequential execution.
-- Tools are ordinary Python functions with docstrings and type hints; MCP tools work the same way through the `client` parameter.
-- Tool errors are caught and returned to the model as failed results, not graph failures; the model decides what to do next.
-- `state`, `tool_call_id`, `config` and other services are injectable parameters that do not appear in the tool schema.
-- The ReAct loop uses a conditional edge to route between `Agent` and `ToolNode`.
 
 ## Related concepts
 

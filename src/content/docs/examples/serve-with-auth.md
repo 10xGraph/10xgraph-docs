@@ -167,7 +167,7 @@ docker compose up --build
 
 ## What this shows
 
-- Auth is on from the first command: the template writes `"auth": "jwt"` (default permissions, every user sees only their own data), and a request without a valid token never reaches your graph. To add roles and wider reach for admins, see [API authentication](/docs/server/auth). See [Security in five minutes](/docs/get-started/security-in-five-minutes).
+- Auth is on from the first command: the template writes `"auth": "jwt"` (default permissions, every user sees only their own data), and a request without a valid token never reaches your graph. To add roles and wider reach for admins, see [API authentication](/docs/server/auth). See [the quickstart auth section](/docs/get-started/first-agent.
 - Production mode refuses unsafe settings at start (wildcard origins and hosts, enabled docs). See [Production readiness](/docs/production) and [Security model](/docs/production/security-model).
 - The container is hardened by `10xgraph build`, not by your agent code. See [Production checklist](/docs/server/production-checklist) and [Architecture](/docs/production/architecture).
 - What you must still do: set auth (a server with `auth: null` in production starts open), replace the in-memory checkpointer, and put TLS in front. See [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).

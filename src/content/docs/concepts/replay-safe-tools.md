@@ -5,7 +5,7 @@ description: Replay-safe tools let a resumed 10xGraph run skip tool calls that a
 section: Concepts
 order: 140
 group: "Memory and reliability"
-updated: 2026-10-08
+updated: "2026-11-25"
 faq:
   - q: Does 10xGraph guarantee a tool runs exactly once?
     a: No. It guarantees that a tool call recorded in the checkpointer's ledger is not executed again. A crash in the short window after a tool finishes but before its record is written can still run it again, and a tool that crashes or times out before returning is not recorded. Pass your own idempotency key to the external service for those cases.
@@ -29,16 +29,14 @@ Agents call tools with side effects: refunds, emails, tickets, database writes. 
 4. The run resumes. The run loop saved the current node before it started, so it runs that node again from the top.
 5. Without protection, `refund_order` runs again and the customer is refunded twice.
 
-Charges, emails, and tickets have the same risk pattern. The [engineering blog post](/blog/your-agent-charged-the-card-twice) explores this in more detail.
-
 ## How does it work?
 
-The logic lives in `tenxgraph/core/graph/utils/invoke_node_handler.py`. Four steps ensure tools do not run twice:
+The logic lives in `tenxgraph/core/graph/utils/tool_runtime.py` and `tool_runner.py`. Four steps ensure tools do not run twice:
 
 1. **Node is persisted first.** The run loop records the current node before it runs and advances only after completion. A killed process re-runs the interrupted node on resume.
 2. **Each call gets a stable identity.** The ledger key combines the assistant message id (persisted and replayed) with the `tool_call_id`. Message id alone is stable across replays; tool call ids like `call_1` reuse on every turn. Together, the key stays unique and stable across restarts.
 3. **The ledger is checked before invoking.** If the checkpointer holds a recorded result for that key, 10xGraph returns it immediately without calling the tool.
-4. **Result is recorded immediately.** The record is written as soon as the tool returns, before the node completes. A crash later in the same node cannot re-fire it. Parallel tool calls in one node are tracked individually, so finished siblings are skipped on replay.
+4. **Result is recorded immediately.** The record is written as soon as the tool returns, before the node completes. A crash later in the same node cannot re-fire it. Parallel tool calls in one node are tracked individually, so finished siblings are skipped on replay. `invoke` and `stream` run the same tool runner, so both get this protection.
 
 ## What does it not guarantee?
 
@@ -49,14 +47,13 @@ This provides at-most-once protection for recorded calls, not a global exactly-o
 - **A failed record write.** If the checkpointer cannot store the record, 10xGraph logs an error but continues. A replay may then execute the call a second time.
 - **A failed ledger read.** If the ledger cannot be read, the tool runs again with a warning logged. 10xGraph treats an unreadable entry as "no record" because skipping a tool that never ran is worse.
 - **Timeouts.** A tool exceeding its timeout is cancelled and raises an error with nothing recorded. If the provider already acted, the call may run again.
-- **Streaming runs.** The ledger check also runs in the streaming tool path (`stream` and `astream`), so streamed runs get the same replay protection.
 - **Missing ids.** Without a `tool_call_id` or message id, no ledger key can be built and the tool is not protected.
 
 For these cases, always send an idempotency key to your payment or email provider. Derive it from stable inputs such as the order id, never from a random value generated inside the tool.
 
 ## How do I enable it?
 
-Replay safety requires two things: a checkpointer that implements the ledger, and a `thread_id` on every call. Without a checkpointer, tools behave as in any framework.
+Replay safety requires two things: a checkpointer that implements the ledger, and a `thread_id` on every call. `compile()` uses an `InMemoryCheckpointer` when you pass none, which protects replays inside one process only.
 
 | Checkpointer | Ledger | Survives a process restart |
 |---|---|---|
@@ -76,18 +73,15 @@ pip install "10xgraph[pg_checkpoint]"
 from tenxgraph.prebuilt.agent import ReactAgent
 from tenxgraph.storage.checkpointer import PgCheckpointer
 
-
 def lookup_order(order_id: str) -> dict:
     """Look up an order by id and return its status and total."""
     return {"order_id": order_id, "status": "delivered", "total": 59.0}
-
 
 def refund_order(order_id: str, amount: float) -> str:
     """Refund an order. Moves money, so it must not run twice for one request."""
     # Also pass an idempotency key to your payment provider, derived from
     # stable inputs, to cover the cases listed above.
     return f"Refunded {amount:.2f} for order {order_id}"
-
 
 checkpointer = PgCheckpointer(
     postgres_dsn="postgresql://user:password@db/tenxgraph",
@@ -137,7 +131,6 @@ from injectq.integrations.taskiq import InjectTaskiq
 from tenxgraph.storage.checkpointer import BaseCheckpointer
 from tenxgraph_api.jobs import broker
 
-
 @broker.task(schedule=[{"cron": "0 3 * * *"}])
 async def prune_tool_results(
     checkpointer: Annotated[BaseCheckpointer, InjectTaskiq(BaseCheckpointer)],
@@ -146,8 +139,6 @@ async def prune_tool_results(
 ```
 
 With `row_level_security=True` on `PgCheckpointer`, Postgres hides rows unless the tenant values are set, so a prune with the normal role sees nothing. Run it with a database role that bypasses RLS (a maintenance role). The checkpointer logs a warning when RLS is on and the role cannot see past it.
-
-Schema version 7 of `PgCheckpointer` adds an index on `tool_executions(created_at)` so the prune is cheap. `asetup()` applies it.
 
 ## Turn recording off
 
@@ -159,7 +150,6 @@ By default every finished tool call is recorded. Turn it off when a tool is safe
 
 ```python
 from tenxgraph.utils import tool
-
 
 @tool(record_tool_result=False)
 def get_weather(city: str) -> str:
@@ -181,5 +171,5 @@ Replay safety works alongside two other mechanisms that handle related failure m
 - [Your agent charged the card twice](/blog/your-agent-charged-the-card-twice), the engineering write-up.
 - [What is durable execution for AI agents?](/docs/glossary/what-is-durable-execution)
 - [What is an idempotent tool call?](/docs/glossary/what-is-an-idempotent-tool-call)
-- [Checkpointing](/docs/server/production-checklist) and [Memory: hot and cold](/docs/concepts/memory)
+- [Production checklist](/docs/server/production-checklist)
 - [Checkpointing and threads](/docs/concepts/checkpointing-and-threads)

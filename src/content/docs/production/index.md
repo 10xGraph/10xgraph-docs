@@ -46,5 +46,5 @@ What the server does not do for you (auth off, secrets, TLS, backups, prompt inj
 ## The path to production
 
 1. **Start from the Full setup.** Run `10xgraph init --mode full`. It scaffolds the graph, an auth class, evals and tests, and a `10xgraph.json` with auth and rate limiting.
-2. **Configure.** Set `auth`, pass a `PgCheckpointer` to `compile()`, set `MODE=production`, `ORIGINS`, `JWT_SECRET_KEY`, `DATABASE_URL` and `REDIS_URL`. Read [Security in five minutes](/docs/get-started/security-in-five-minutes), then the [security model](/docs/production/security-model), and test with [Test before production](/docs/testing/before-production).
+2. **Configure.** Set `auth`, pass a `PgCheckpointer` to `compile()`, set `MODE=production`, `ORIGINS`, `JWT_SECRET_KEY`, `DATABASE_URL` and `REDIS_URL`. Read [the quickstart auth section](/docs/get-started/first-agent#what-the-auth-setting-turned-on), then the [security model](/docs/production/security-model), and test with [Test before production](/docs/testing/before-production).
 3. **Build and deploy.** Run `10xgraph build --docker-compose --k8s`, then follow the [production checklist](/docs/server/production-checklist) and the [scaling guide](/docs/production/scaling). For how the pieces fit, see the [architecture](/docs/production/architecture).

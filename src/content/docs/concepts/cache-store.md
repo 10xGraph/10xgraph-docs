@@ -21,7 +21,7 @@ The API keeps everything it must share between its own processes in one object, 
 - **Idempotency**: the state the server uses to recognize a repeated request.
 - **Token revocation**: revoked tokens and users, checked on every permission check and during long sessions.
 - **Rate-limit counters**: one window per key (by IP, user or global).
-- **Background task state**: status records, cancel flags and schedules for the [worker](/docs/concepts/background-jobs).
+- **Background task state**: status records, cancel flags and schedules for the [worker](/docs/jobs).
 
 ## Memory, Redis or custom
 

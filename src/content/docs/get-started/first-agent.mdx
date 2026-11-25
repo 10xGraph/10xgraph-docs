@@ -4,20 +4,22 @@ seoTitle: "10xGraph quickstart: scaffold, serve, secure"
 description: Scaffold a support agent with 10xgraph init, chat with it in the playground, call the API with curl and TypeScript, turn on JWT auth and generate the Docker files.
 section: "Get started"
 order: 40
-updated: "2026-11-15"
+updated: "2026-11-25"
 faq:
   - q: Do I need ReactAgent, or should I write a StateGraph myself?
     a: Start with ReactAgent. The project that 10xgraph init writes uses it. It builds the standard reason-and-act graph for you (one agent node, one tool node, a conditional edge between them) and returns a normal compiled graph. Move to StateGraph when you need custom routing or several agents.
   - q: Can I use OpenAI or Anthropic instead of Google?
     a: Yes. Pick the provider at the init question (or pass --provider), install the matching extra and put the provider key in .env. Init writes the matching model and provider lines into graph/agent.py. The tools, the graph and the API server stay the same.
   - q: What does 10xgraph init create in Quick setup?
-    a: Six files. 10xgraph.json tells the server where your graph is, graph/agent.py holds the agent, .env.example lists the provider key to set, requirements.txt lists the packages the Docker image installs, graph/__init__.py makes graph a package, and .gitignore keeps .env out of git.
-  - q: Which Node.js version does the TypeScript client need?
-    a: Node.js 20 or newer. Install the client with npm and point TenxGraphClient at the baseUrl of your running 10xgraph dev server.
+    a: Seven files. 10xgraph.json tells the server where your graph is, AGENTS.md points coding agents to the 10xGraph docs, graph/agent.py holds the agent, .env.example lists the provider key to set, requirements.txt lists the packages the Docker image installs, graph/__init__.py makes graph a package, and .gitignore keeps .env out of git.
   - q: How do I authenticate the TypeScript client?
     a: Pass an auth option to the TenxGraphClient constructor, for example bearerAuth(token), and read the token from an environment variable. The client also exports basicAuth(username, password) and headerAuth(name, value).
   - q: Why does the second curl call remember the first one?
     a: Both calls send the same thread_id, and the compiled graph has a checkpointer. The checkpointer stores the conversation per thread, so the next call on that thread continues it.
+  - q: Which claims does a token need?
+    a: "`exp` and `user_id`. JwtAuth requires `exp` on every token, and rejects a token without `user_id` (or with one that is not a non-empty string or a whole number) with a 401. If you set `JWT_ISSUER` or `JWT_AUDIENCE`, `iss` and `aud` are required too."
+  - q: Why did user B get a 404 and not an empty thread?
+    a: Once auth is configured, every thread query is filtered by the caller. The first caller to run a thread becomes its owner, and to any other user the thread does not exist, so the server answers 404 before the request reaches the graph. See [authentication and authorization](/docs/server/auth).
 ---
 
 To build your first 10xGraph agent, scaffold a project with `10xgraph init`, give the agent two tools, and start it with `10xgraph dev`. You chat with it in the playground, call the API with curl, continue a thread, turn on JWT auth and watch a second user get `404` on the first user's thread, call it from TypeScript, and write the Dockerfile.
@@ -73,12 +75,13 @@ In Quick setup, init asks three questions: "Which setup?" (choose Quick), "What 
 10xgraph init --mode quick --name support-agent --provider google
 ```
 
-Init writes six files:
+Init writes seven files:
 
 ```text
 support-agent/
 ├── .env.example
 ├── .gitignore
+├── AGENTS.md
 ├── 10xgraph.json
 ├── requirements.txt
 └── graph/
@@ -103,7 +106,7 @@ support-agent/
 }
 ```
 
-The `agent` value `graph.agent:app` means the `app` variable in `graph/agent.py`. The server loads and compiles it once at startup. `env` names the file the server reads for environment variables, and `"auth": null` leaves the server open for now. `graph/agent.py` is a working `ReactAgent` with a sample weather tool, compiled with an `InMemoryCheckpointer`. Quick setup is the fastest path to a running agent. Full setup also adds storage, API security, evals and tests (see [Project structure](/docs/get-started/project-structure)).
+The `agent` value `graph.agent:app` means the `app` variable in `graph/agent.py`. The server loads and compiles it once at startup. `env` names the file the server reads for environment variables, and `"auth": null` leaves the server open for now. `graph/agent.py` is a working `ReactAgent` with a sample weather tool, compiled with an `InMemoryCheckpointer`. Full setup also adds storage, API security, evals and tests (see [Project structure](/docs/get-started/project-structure)).
 
 Init does not read your key. Copy `.env.example` to `.env` and fill in the key for your provider. The file lists one variable: `GOOGLE_API_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
 
@@ -248,6 +251,8 @@ The body is newline-delimited JSON, one chunk per line, not SSE. These are a few
 
 Tool activity arrives as ordinary `message` chunks, and a stream that finishes without an error ends with an `updates` chunk whose `data` is `{"status": "done"}`. See [Invoke and stream](/docs/server/invoke-and-stream) for every event type.
 
+The fields you can send to `/v1/graph/invoke` and `/v1/graph/stream`, the fields in `data`, and the message format are listed in the [graph endpoints reference](/docs/reference/rest-api/graph). `data` carries `thread_id` and `run_id`, and `data.meta` carries `is_new_thread`.
+
 ## Continue the thread and read it back
 
 Copy `data.thread_id` from the invoke response and send it as `config.thread_id` on the next request. The agent still has the order it looked up, so it can refund it:
@@ -352,11 +357,20 @@ curl -s -o /dev/null -w "%{http_code}\n" \
   http://127.0.0.1:8000/v1/threads/$THREAD_ID/messages
 ```
 
-The same request with `$ALICE_TOKEN` answers `200` with her messages. See [Security in five minutes](/docs/get-started/security-in-five-minutes) for what this one setting turned on and what it leaves to you.
+The same request with `$ALICE_TOKEN` answers `200` with her messages.
+
+## What the auth setting turned on
+
+- **Owner-only threads.** With `"auth": "jwt"` the default permission set applies and every caller reaches only their own data. The first caller to run a thread becomes its owner. Every route that touches a thread (invoke, stream, stop, and all thread reads and writes) reads it through the caller's scope first, so a foreign thread answers `404`. A `403` means the caller lacks a permission for the route.
+- **Per-user storage scope.** Threads and long-term memories are scoped to the calling `user_id`, which must come from your login service, never from the request body.
+- **Server-picked thread ids.** By default (`runs.thread_ids` is `server`) a client cannot invent a thread id.
+- **Reserved identities are refused.** A token whose `user_id` starts with `__system__:` is rejected.
+
+It does not make the server production-ready: threads still vanish on restart with `InMemoryCheckpointer`, and the secret store, a durable checkpointer, rate limits and CORS are on the [production checklist](/docs/server/production-checklist). The full reference is [Authentication and authorization](/docs/server/auth).
 
 ## Call it from TypeScript
 
-The 10xGraph client for TypeScript wraps the HTTP API with types and helper methods. It requires Node.js 20 or newer. Install it:
+The 10xGraph client for TypeScript wraps the HTTP API with types and helper methods. Install it:
 
 ```bash
 npm install 10xgraph-client
@@ -412,13 +426,9 @@ Then generate the files:
 
 It writes a `Dockerfile` and a `.dockerignore`. Add `--docker-compose` or `--k8s` for a `docker-compose.yml` or a `k8s.yaml`. The image runs Gunicorn in `MODE=production`, and `.dockerignore` leaves `.env` out, so pass the provider key and `JWT_SECRET_KEY` as environment variables when you run the container. The command also prints warnings that rate limiting and token revocation are off. See [Deploy with Docker and Kubernetes](/docs/server/deploy) for building, running and the release checklist.
 
-## Understanding the request and response
-
-The fields you can send to `/v1/graph/invoke` and `/v1/graph/stream`, the fields in `data`, and the message format are listed in the [graph endpoints reference](/docs/reference/rest-api/graph). `data` carries `thread_id` and `run_id`, and `data.meta` carries `is_new_thread`.
-
 <Callout type="note" title="InMemoryCheckpointer restarts with the server">
 
-`InMemoryCheckpointer` stores threads in the Python process and loses everything when the server stops. It is perfect for development and testing. For production or long-lived services, use a durable checkpointer like `SqliteCheckpointer` or `PgCheckpointer`. See [Set up checkpointing](/docs/guides/set-up-checkpointing).
+`InMemoryCheckpointer` stores threads in the Python process and loses everything when the server stops. Use a durable checkpointer such as `SqliteCheckpointer` or `PgCheckpointer` for anything that must survive a restart. See [Set up checkpointing](/docs/guides/set-up-checkpointing).
 
 </Callout>
 
@@ -428,19 +438,12 @@ The `refund_order` tool moves money. If a run is interrupted and later resumed, 
 
 </Callout>
 
-Your first agent is running, secured and ready to ship. If 10xGraph saved you time, a [star on GitHub](https://github.com/10xGraph/10xGraph) helps other developers find it.
-
 ## Next
 
 <CardGrid>
 
-<LinkCard title="Security in five minutes" href="/docs/get-started/security-in-five-minutes" description="What the JWT setting turned on, and what it does not do." eyebrow="Next" />
 <LinkCard title="Production readiness" href="/docs/production" description="What you get when you serve with 10xgraph-api, and what is still yours to configure." eyebrow="Production" />
 <LinkCard title="Production checklist" href="/docs/server/production-checklist" description="The settings to confirm before you deploy." eyebrow="Production" />
 <LinkCard title="Understand the mental model" href="/docs/get-started/tutorial/mental-model" description="Messages, state, nodes, edges, graphs, and threads: the core concepts." eyebrow="Tutorial" />
-<LinkCard title="Build a graph by hand" href="/docs/get-started/tutorial/build-a-graph" description="Create nodes and edges yourself to understand how ReactAgent works." eyebrow="Tutorial" />
-<LinkCard title="Project structure" href="/docs/get-started/project-structure" description="What 10xgraph init generates for Full setup." eyebrow="Get started" />
-<LinkCard title="Long-term memory" href="/docs/concepts/memory-and-store" description="Remember facts across conversations with the memory store." eyebrow="Concept" />
-<LinkCard title="Authentication reference" href="/docs/server/auth" description="JWT options, custom auth and scopes." eyebrow="How-to" />
 
 </CardGrid>

@@ -5,7 +5,7 @@ description: How 10xGraph turns a verified identity into roles, permissions and 
 section: Concepts
 group: "Platform"
 order: 180
-updated: "2026-11-10"
+updated: "2026-11-25"
 faq:
   - q: "Is 10xGraph multi-tenant by default?"
     a: "No. By default a caller reaches only their own data (reach own). To isolate organizations or projects, you declare tenant columns on the checkpointer and store and map tenant claims in auth. Isolation is then enforced for the columns you declare."
@@ -28,6 +28,9 @@ A role in `auth.roles` has a list of permissions and one reach.
 - **Permissions** name an action on a resource, such as `graph:invoke`, `threads:read`, `files:upload` or `tasks:trigger`. A missing permission answers 403. Without roles, every caller gets the default set (everything except `admin:*`) with reach `own`.
 - **Reach** is `own`, `tenant` or `all`. `own` is the caller's data only. `tenant` is every user who shares the caller's tenant values. `all` is everything. Reach is required on each role and never falls back to something wider.
 - Reach widens reads, lists and deletes. Runs and writes to state or messages stay on the caller's own threads, admins included.
+- A reach that is missing or unknown raises; it never widens silently.
+
+The full permission list is in [Server authentication and authorization](/docs/server/auth). Permissions are checked in three places: the API server rejects a call that lacks the route's permission (403), a node can call `tenxgraph.core.authz.can(config, "resource:action")`, and a tool can read the identity with `get_identity(config)` to enforce its own rules. With no identity in `config["user"]` (direct Python use, no API), `can()` returns `True` and the core applies no reach filter, so code without auth keeps working.
 
 ## Tenant claims and tenant columns
 

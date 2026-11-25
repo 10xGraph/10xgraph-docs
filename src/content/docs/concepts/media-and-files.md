@@ -6,7 +6,7 @@ section: Concepts
 order: 210
 group: "Platform"
 label: Media and Files
-updated: "2026-10-26"
+updated: "2026-11-25"
 faq:
   - q: "What's the difference between file_id, url, and data?"
     a: "file_id stores media in a backend store and references it by key (best for production); url points to external media the provider fetches; data embeds bytes inline as base64 (only for small payloads)."
@@ -20,7 +20,7 @@ faq:
 
 ## Why separate location from structure
 
-Messages in 10xGraph are lightweight: a message does not hold binary data directly. Instead, blocks (ImageBlock, AudioBlock, DocumentBlock) reference media via `MediaRef`, which specifies where the bytes actually live. This design buys three things: messages stay small and copy fast over the network, media can be deduplicated across runs on the same backend store, and different contexts (Python, REST API, TypeScript) handle media differently without changing your message structure.
+Messages in 10xGraph are lightweight: a message does not hold binary data directly. Instead, blocks (ImageBlock, AudioBlock, DocumentBlock) reference media via `MediaRef`, which specifies where the bytes actually live. Messages stay small, and the same message shape works from Python, the REST API and the TypeScript client.
 
 ## Content block types
 
@@ -34,11 +34,8 @@ All block types live in `tenxgraph.core.state`. Multimodal blocks (Image, Audio,
 | `VideoBlock` | Video referenced by MediaRef (MP4, WebM) |
 | `DocumentBlock` | Documents referenced by MediaRef, with optional extracted text (PDFs, Word, plain text) |
 | `DataBlock` | Any binary blob with a MIME type |
-| `ToolCallBlock` | Tool invocation request from the model |
-| `ToolResultBlock` | Result returned from a tool execution |
-| `ReasoningBlock` | Chain-of-thought reasoning traces |
-| `AnnotationBlock` | Citations and structured references |
-| `ErrorBlock` | Error information from failed operations |
+
+Other block types are listed in [State and messages](/docs/concepts/state-and-messages).
 
 ## MediaRef, how to reference media
 
@@ -57,24 +54,7 @@ MediaRef(kind="data", data_base64="iVBORw0KGg...", mime_type="image/png")
 MediaRef(kind="file_id", file_id="a1b2c3d4e5f6...", mime_type="image/png")
 ```
 
-### Full MediaRef fields
-
-```python
-class MediaRef(BaseModel):
-    kind: Literal["url", "file_id", "data"] = "url"
-    url: str | None = None              # http(s), data: URL, or graph://media/<key>
-    file_id: str | None = None          # storage key from MediaStore.store(), or a provider file ID
-    data_base64: str | None = None      # small payloads only
-    mime_type: str | None = None
-    size_bytes: int | None = None       # optional size hint
-    sha256: str | None = None           # optional checksum
-    filename: str | None = None         # original filename if applicable
-    # Media-specific metadata
-    width: int | None = None            # image width
-    height: int | None = None           # image height
-    duration_ms: int | None = None      # audio/video duration
-    page: int | None = None             # document page number
-```
+Besides `kind`, `url`, `file_id`, `data_base64` and `mime_type`, a `MediaRef` carries optional `size_bytes`, `sha256`, `filename`, `width`, `height`, `duration_ms` and `page`.
 
 ### When to use each kind
 
@@ -86,21 +66,9 @@ class MediaRef(BaseModel):
 
 ## MediaStore, persistent storage backends
 
-A `MediaStore` holds media bytes outside the message system. Each backend is a class implementing `BaseMediaStore`:
-
-```python
-class BaseMediaStore(ABC):
-    async def store(data: bytes, mime_type: str, metadata: dict | None) -> str
-    async def retrieve(storage_key: str) -> tuple[bytes, str]
-    async def delete(storage_key: str) -> bool
-    async def exists(storage_key: str) -> bool
-    async def get_metadata(storage_key: str) -> dict | None
-    async def update_metadata(storage_key: str, updates: dict) -> bool
-```
+A `MediaStore` holds media bytes outside the message system. Each backend implements `BaseMediaStore` (`store`, `retrieve`, `delete`, `exists`, `get_metadata`, `update_metadata`).
 
 `update_metadata` shallow-merges `updates` into the stored metadata (a value of `None` removes the key) and returns `False` when the object does not exist. The three built-in stores implement it. A custom store that does not override it raises `NotImplementedError`, and the API server then does not track which threads use a file.
-
-All methods are async; they are safe to call from agent nodes and tools via normal `await`.
 
 ### Available implementations
 
@@ -110,13 +78,11 @@ All methods are async; they are safe to call from agent nodes and tools via norm
 | `LocalFileMediaStore` | `tenxgraph.storage.media` | Development, single-server deployments |
 | `CloudMediaStore` | `tenxgraph.storage.media` | Production with S3 / GCS |
 
-**InMemoryMediaStore** stores files in RAM. Data is lost on process restart and is not shared across workers. Use it for testing and local development.
-
 **LocalFileMediaStore** shards files on disk under a base directory. Each file is stored as `{base_dir}/{key[:2]}/{key[2:4]}/{key}{ext}` with a `.meta.json` sidecar. The default `base_dir` is `./agentflow_media`. Suitable for single-server deployments or development environments with persistent storage.
 
 On POSIX systems, `LocalFileMediaStore` creates its directories with mode `0o700` and its data and sidecar files with `0o600`. The sidecar holds the owner id and the original filename. Existing files keep their mode, and a stricter process umask wins. Other OS users or services that read these files, such as a web server serving uploads, lose access.
 
-**CloudMediaStore** offloads to S3 or GCS via the cloud-storage-manager SDK. Requires the `cloud-storage` extra (`pip install "10xgraph[cloud-storage]"`). Generates signed URLs so providers can fetch media directly without re-downloading to your server. The right choice for distributed systems and production deployments.
+**CloudMediaStore** offloads to S3 or GCS via the cloud-storage-manager SDK. Requires the `cloud-storage` extra (`pip install "10xgraph[cloud-storage]"`). Generates signed URLs so providers can fetch media directly without re-downloading to your server.
 
 ## MultimodalConfig, opting an agent into media
 
@@ -133,7 +99,7 @@ agent = Agent(
 )
 ```
 
-`MultimodalConfig` is a Pydantic model with these fields and defaults: `max_image_size_mb` (10.0), `max_image_dimension` (2048) and `supported_image_types` (JPEG, PNG, WebP, GIF). `image_handling`, `document_handling` and `supported_doc_types` are deprecated: nothing reads them, setting one to a non-default value emits a `DeprecationWarning`, and they are removed in 2.0. In the core agent path, the presence of the config is what enables media; transport is chosen by the capability matrix below.
+`MultimodalConfig` is a Pydantic model with these fields and defaults: `max_image_size_mb` (10.0), `max_image_dimension` (2048), `max_image_pixels` (50,000,000) and `supported_image_types` (JPEG, PNG, WebP, GIF). `image_handling`, `document_handling` and `supported_doc_types` are deprecated: nothing reads them, setting one to a non-default value emits a `DeprecationWarning`, and they are removed in 2.0. In the core agent path, the presence of the config is what enables media; transport is chosen by the capability matrix below.
 
 ## Provider capability matrix and fallback
 
@@ -144,7 +110,7 @@ agent = Agent(
 3. **inline_bytes**: Embed as base64 data URI.
 4. **unsupported**: The provider does not support this media type.
 
-You do not manually manage this chain. The capability matrix lists a transport order per provider, model and media type, and the resolver tries each in turn, moving to the next when one fails.
+The capability matrix lists a transport order per provider, model and media type, and the resolver tries each in turn, moving to the next when one fails.
 
 ## Which URLs the server downloads
 
@@ -153,19 +119,6 @@ A `kind="url"` reference is untrusted when a client sends it. OpenAI and Anthrop
 The default policy allows `http` and `https` to public hosts, accepts `image/*` and `application/pdf` responses, and caps a download at 20 MiB and 10 seconds. Cloud metadata addresses, private addresses (unless you opt in for listed hosts), unchecked redirects and other schemes are always refused. Set your own policy with `StateGraph.compile(media_policy=...)`.
 
 A `gs://` URL is a special case. On Vertex AI it is read with the server's credentials, so the API rejects a client `gs://` URL unless its bucket is in `allowed_gcs_buckets`. The field list and a code example are in [Sending media from Python](/docs/guides/send-media#control-which-urls-the-server-downloads). The API server applies the policy before the run starts, as described in [Files and multimodal on the server](/docs/server/files-and-multimodal#external-media-urls).
-
-## Trade-offs and design decisions
-
-**Inline (base64) vs. URL vs. file_id:**
-- Inline is easiest to reason about (everything is in the message) but wastes bandwidth and memory for large or repeated files.
-- URL is fast if media is already hosted and the provider has network access, but introduces an external dependency.
-- file_id decouples the message from storage and enables deduplication, but requires infrastructure (a MediaStore backend).
-
-**Per-agent opt-in:**
-`multimodal_config` is per-agent, so a vision agent can receive media while a text-only agent in the same graph has it stripped.
-
-**Messages stay lightweight:**
-By never storing raw bytes in messages, 10xGraph keeps state snapshots small, thread history fast to retrieve, and checkpoints cheap to store. Media bytes live in specialized stores where they belong.
 
 ## Related pages
 

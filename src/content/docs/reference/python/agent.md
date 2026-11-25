@@ -218,7 +218,7 @@ agent = Agent(model="gpt-4o", retry_config=False)
 | `distributed_lease_seconds` | `300.0` | How long a slot is held before it counts as abandoned. A running call renews the lease every third of this time, so it only has to outlast a crashed process. |
 | `distributed_key_prefix` | `""` | Prefix for the Redis key. |
 
-See [Cap in-flight calls across processes](/docs/concepts/errors-and-limits#cap-in-flight-calls-across-processes).
+If the cap is set with neither a client nor a URL, 10xGraph logs a warning and the shared cap stays off. For a streaming call, the cap covers opening the stream, not reading it. Waiting for a free slot has no timeout of its own, so keep `distributed_lease_seconds` close to your real call time.
 
 When `circuit_breaker_enabled=True`, consecutive failures to a (provider, model) pair open its circuit, causing calls to skip it and try the next fallback for `circuit_breaker_reset_timeout` seconds. After the timeout, one trial is allowed; success closes the circuit.
 

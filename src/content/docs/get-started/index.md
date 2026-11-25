@@ -5,10 +5,10 @@ description: "10xGraph is open-source, self-hosted infrastructure for AI applica
 section: "Get started"
 order: 20
 label: Get Started
-updated: "2026-10-27"
+updated: "2026-11-25"
 ---
 
-10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. MIT licensed, by 10xScale. Formerly Agentflow. A tool that finished before a crash is not run twice on replay, with the exceptions listed under [limits](/docs/production/security-model#what-10xgraph-does-not-protect#tools-run-at-least-once). The [Platform overview](/docs/production) lists everything the server handles. This section takes you from an empty folder to a secured, running server.
+10xGraph is open-source, self-hosted infrastructure for AI applications. You write the agents, tools and tasks; 10xGraph runs them behind an API server with authentication, role-based access, tenant isolation, durable state in Postgres and Redis, background jobs, metrics and tracing, and generates Docker and Kubernetes deploy files. This section takes you from an empty folder to a secured, running server.
 
 ## How you work with 10xGraph
 
@@ -20,17 +20,12 @@ updated: "2026-10-27"
 
 Later, `10xgraph build` writes the Docker and Kubernetes files for deployment. Details are in [Playground](/docs/server/playground).
 
-## Secure by the third step
-
-The quickstart server starts open so you can try it, then turns on JWT near the end, and you watch the server return 401 without a token and 404 when a second user reads the first user's thread. With auth configured, the server also turns on owner-only thread access, so you do not write that code. [Security in five minutes](/docs/get-started/security-in-five-minutes) explains that step; it needs one config key and one environment variable.
-
-## The three-step path
+## The two-step path
 
 | Step | Time | What you get |
 |---|---|---|
 | 1. [Install](/docs/get-started/installation) | 5 min | The library, the API server and CLI, and the TypeScript client, with a provider key set |
 | 2. [Quickstart: first agent](/docs/get-started/first-agent) | 10 min | A support agent scaffolded with `10xgraph init`, tried in the playground, called from curl and TypeScript, with JWT on and Docker files written |
-| 3. [Security in five minutes](/docs/get-started/security-in-five-minutes) | 5 min | JWT auth on, two users, a 401 for no token and a 404 for someone else's thread |
 
 After that, read [Production readiness](/docs/production) for what the server gives you and what stays your job, then the [production checklist](/docs/server/production-checklist) before you deploy.
 
@@ -51,18 +46,20 @@ The tutorial builds one agent across several pages, so follow it in order. Skip 
 | [Tutorial: Threads and memory](/docs/get-started/tutorial/threads-and-memory) | 10 min | Persistent memory across invocations with checkpointers |
 | [Tutorial: Serve and inspect](/docs/get-started/tutorial/serve-and-inspect) | 10 min | The Swagger UI, the playground and reading thread state |
 | [Tutorial: Call from your app](/docs/get-started/tutorial/call-from-your-app) | 10 min | A front end with the TypeScript client, streaming and sessions |
+| [Tutorial: Stream and approve](/docs/get-started/tutorial/stream-and-approve) | 10 min | Streaming and pausing for human approval |
+| [Tutorial: Test and evaluate](/docs/get-started/tutorial/test-and-evaluate) | 10 min | Offline tests with `TestAgent` and an eval run |
 | [Project structure](/docs/get-started/project-structure) | 5 min | What the Full setup generates |
 
 ## Prerequisites
 
-To get started, you need:
+You need:
 
 - Python 3.12 or newer
 - An API key for one LLM provider: `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), or `ANTHROPIC_API_KEY`
-- Node 18 or newer and npm (optional, for the TypeScript client)
+- Node 20 or newer and npm (optional, for the TypeScript client)
 
 The next major section, [Concepts](/docs/concepts), explains how everything works under the hood. [Guides](/docs/guides) covers task-oriented recipes (add memory, use MCP, deploy to Kubernetes), and [API reference](/docs/reference) documents every class, function, and route.
 
 ## Rename note
 
-10xGraph was published under the name "Agentflow" until 2026. The Python library now imports from `tenxgraph` (for example `from tenxgraph.core.graph import StateGraph`), the PyPI package is `10xgraph`, and the command is `10xgraph`. The old `agentflow` imports still work as a deprecated alias until version 2.0. The old package name `10xscale-agentflow` is no longer updated; install `10xgraph` instead.
+10xGraph was called Agentflow. The old `agentflow` import and command still work until 2.0; see [Coming from agentflow](/docs/get-started/coming-from-agentflow).

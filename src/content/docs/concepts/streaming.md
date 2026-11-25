@@ -6,7 +6,7 @@ section: Concepts
 order: 90
 group: "Foundations"
 label: Streaming
-updated: "2026-10-08"
+updated: "2026-11-25"
 ---
 
 10xGraph provides three execution modes for agents: **invoke** to wait for the final result, **stream** (sync generator) for incremental chunks in blocking code, and **astream** (async generator) for incremental chunks in async contexts. Streaming is essential for chat and realtime UIs where users expect to see model output appear token by token and tool results arrive as they complete.
@@ -16,8 +16,6 @@ updated: "2026-10-08"
 ## Why stream
 
 Invoking a graph end-to-end blocks the caller until every node finishes. For interactive experiences, streaming reveals progress to the user while the graph is still running. The stream emits structured chunks as the model generates text, tools execute in parallel, and nodes complete. Your UI can show tokens as they arrive, tool calls as they're made, and state updates as they occur, rather than waiting for silence.
-
-Streaming also bounds memory and latency on long-running agents: you don't buffer a 50,000-token context in RAM before handing it back.
 
 ---
 
@@ -41,7 +39,7 @@ sequenceDiagram
   Graph-->>Client: StreamChunk (state)
 ```
 
-Use **invoke** or **ainvoke** when you need the full result before proceeding. Use **stream** or **astream** when the client should see partial responses immediately as they arrive.
+Use **invoke** or **ainvoke** when you need the full result before proceeding ([reference](/docs/reference/python/graph#invoke)). Use **stream** or **astream** when the client should see partial responses immediately as they arrive. `stream()` is the sync form of `astream()` for blocking code; it yields the same chunks.
 
 ---
 
@@ -70,45 +68,23 @@ The `event` field determines which of the four data fields is populated. Match o
 | `MESSAGE` | Model or tool output | `message` | Render text tokens, display tool calls |
 | `STATE` | State after a node's messages are added | `state` | Show execution progress, update context |
 | `ERROR` | Execution failed | `data` | Handle errors in the stream |
-| `UPDATES` | Custom node emission | `data` | Receive progress, metrics, or custom data from tools |
+| `UPDATES` | Progress notes (graph, node and tool status) and pause notices | `data` | Show progress; detect a pause (`data["status"] == "interrupted"`) |
 
 ---
 
 ## Response granularity
 
-Both `stream()` and `astream()` accept a `response_granularity` parameter that controls what state is included in each `StreamChunk`. This lets you tune the amount of data streamed: less granularity saves bandwidth and parsing; higher granularity gives the client a complete view of execution state:
+`response_granularity` decides which chunks a stream yields and which keys `invoke` returns:
 
 ```python
 from tenxgraph.utils import ResponseGranularity
 ```
 
-| Value | Includes | Use when |
+| Value | Stream yields | `invoke` returns |
 |---|---|---|
-| `LOW` (default) | Latest messages only | You only need the model's output, not internal state |
-| `PARTIAL` | Messages, context, summary | You need context to render memory or summaries alongside output |
-| `FULL` | Full state plus all messages | You're rebuilding the complete execution state on the client |
-
----
-
-## Synchronous streaming
-
-Use `stream()` from blocking code (non-async libraries, CLI scripts):
-
-```python
-from tenxgraph.core.state import Message
-from tenxgraph.utils import ResponseGranularity
-from tenxgraph.core.state.stream_chunks import StreamEvent
-
-for chunk in app.stream(
-    {"messages": [Message.text_message("Tell me a short story.")]},
-    config={"thread_id": "stream-1", "recursion_limit": 10},
-    response_granularity=ResponseGranularity.LOW,
-):
-    if chunk.event == StreamEvent.MESSAGE and chunk.message is not None:
-        print(chunk.message.text(), end="", flush=True)
-
-print()  # trailing newline
-```
+| `LOW` (default) | `MESSAGE` and `ERROR` chunks, plus pause notices | `messages`, `token_usage` |
+| `PARTIAL` | Adds `STATE` chunks | Adds `context`, `summary` |
+| `FULL` | Every chunk, including `UPDATES` progress and a final summary chunk | `messages`, `state`, `token_usage` |
 
 ---
 
@@ -126,7 +102,7 @@ async def main():
     inp = {"messages": [Message.text_message("Call get_weather for Tokyo.")]}
     config = {"thread_id": "astream-1", "recursion_limit": 10}
 
-    async for chunk in app.astream(inp, config, ResponseGranularity.LOW):
+    async for chunk in app.astream(inp, config, ResponseGranularity.PARTIAL):
         if chunk.event == StreamEvent.MESSAGE and chunk.message is not None:
             print(chunk.message.text(), end="", flush=True)
         elif chunk.event == StreamEvent.STATE and chunk.state is not None:
@@ -135,65 +111,16 @@ async def main():
 asyncio.run(main())
 ```
 
-### Handling all event types
-
-Use pattern matching to process each chunk type without repeated conditionals:
-
-```python
-async for chunk in app.astream(inp, config):
-    match chunk.event:
-        case StreamEvent.MESSAGE:
-            print("message:", chunk.message.text())
-        case StreamEvent.STATE:
-            print("state step:", chunk.state.execution_meta.step)
-        case StreamEvent.ERROR:
-            print("error:", chunk.data)
-        case StreamEvent.UPDATES:
-            print("custom update:", chunk.data)
-```
-
----
-
-## Non-streaming execution
-
-When you don't need incremental results, use `invoke()` or `ainvoke()` to run the graph to completion and return the final state dict:
-
-```python
-# Synchronous
-result = app.invoke(
-    {"messages": [Message.text_message("Hello!")]},
-    config={"thread_id": "t1"},
-    response_granularity=ResponseGranularity.LOW,
-)
-messages = result["messages"]   # list of Message
-
-# Asynchronous
-result = await app.ainvoke(
-    {"messages": [Message.text_message("Hello!")]},
-    config={"thread_id": "t1"},
-)
-```
-
-The returned dict keys depend on `response_granularity`:
-
-| Granularity | Keys returned |
-|---|---|
-| `LOW` | `messages` |
-| `PARTIAL` | `messages`, `context`, `summary` |
-| `FULL` | `messages`, `state` |
-
 ---
 
 ## Stopping a stream
 
-Request graceful cancellation of a running stream with `stop()` or `astop()`. The graph checks the stop flag after each node and exits cleanly. `astop()` itself returns a small status dict such as `{"ok": True, "running": True}`:
+Request graceful cancellation of a running stream with `stop()` or `astop()`. The run checks for a stop before and after each node, and every second while a node runs, then saves the thread as stopped. `astop()` returns a status dict such as `{"ok": True, "running": True}` (see [reference](/docs/reference/python/graph#stop--astop)):
 
 ```python
 # Stop from another coroutine or thread
 await app.astop({"thread_id": "stream-1"})
 ```
-
-The stopped stream does not emit further chunks after the cancellation takes effect.
 
 ---
 
@@ -203,13 +130,13 @@ Streaming is available over multiple transport layers. Choose based on your depl
 
 ### REST (NDJSON)
 
-The HTTP `/v1/graph/stream` endpoint streams responses as newline-delimited JSON (NDJSON), one `StreamChunk` per line. Use this when you need a simple HTTP transport that works with any HTTP client (curl, fetch, axios) and no bidirectional connection. Not ideal for high-frequency token streams due to HTTP framing overhead.
+The HTTP `/v1/graph/stream` endpoint streams responses as newline-delimited JSON (NDJSON), one `StreamChunk` per line. Use this when you need a simple HTTP transport that works with any HTTP client (curl, fetch, axios) and no bidirectional connection.
 
 See [Invoke and stream over REST](/docs/server/invoke-and-stream) for details and examples.
 
 ### WebSocket (turn-based)
 
-The WebSocket `/v1/graph/ws` endpoint streams individual `StreamChunk` frames over a persistent WebSocket connection. Use this for lower-latency bidirectional communication on one persistent connection. Suitable for most chat UIs.
+The WebSocket `/v1/graph/ws` endpoint streams individual `StreamChunk` frames over a persistent WebSocket connection. Use this for lower-latency bidirectional communication on one persistent connection.
 
 See [WebSocket streaming](/docs/server/websockets) for configuration, authentication, and close codes.
 
@@ -231,7 +158,7 @@ This transport is off unless `ag_ui.enabled` is set in your `10xgraph.json`, and
 
 From TypeScript, `TenxGraphClient.stream()` (HTTP) and `TenxGraphClient.wsStream()` (WebSocket) return async iterators of stream chunks, so you do not parse NDJSON or manage WebSocket frames yourself.
 
-See [Stream responses in TypeScript](/docs/client/stream-responses) for code examples and React integration patterns.
+See [Stream responses in TypeScript](/docs/client/stream-responses) for code examples.
 
 ---
 

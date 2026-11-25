@@ -1,7 +1,7 @@
 ---
 title: Coming from agentflow
 description: Migrate from the old Agentflow package, import, command, config and environment variable names to 10xGraph, step by step.
-updated: "2026-10-27"
+updated: "2026-11-25"
 order: 130
 group: "Next steps"
 section: "Get started"
@@ -14,11 +14,11 @@ faq:
     a: No. Both ship an agentflow module, so uninstall 10xscale-agentflow and 10xscale-agentflow-cli before installing 10xgraph and 10xgraph-api.
 ---
 
-10xGraph is the new name of Agentflow. The packages are now `10xgraph` (core) and `10xgraph-api` (server and CLI), imported as `tenxgraph` and `tenxgraph_api`, with the command `10xgraph` and the config file `10xgraph.json`. Old names still work until 2.0. This page walks through the rename.
+10xGraph is the new name of Agentflow. The packages are now `10xgraph` (core) and `10xgraph-api` (server and CLI), imported as `tenxgraph` and `tenxgraph_api`, with the command `10xgraph` and the config file `10xgraph.json`. Old names still work until 2.0 (the `agentflow` command prints a deprecation notice; `agentflow://media/` URIs still resolve).
 
 ## What changed
 
-Every old name has a new one, and the old one is a deprecated alias that is removed in 2.0. Use this table as a checklist for your project.
+Use this table as a checklist for your project.
 
 | Item | Old | New |
 |---|---|---|
@@ -139,24 +139,9 @@ python check_migration.py
 
 Seeing no deprecation warnings means all imports are migrated. If the server starts from your renamed `10xgraph.json`, the config rename worked.
 
-## Know what still works until 2.0
-
-The old names keep working so you can migrate in stages. They are all removed in 2.0.
-
-- `import agentflow` and `import agentflow_cli` resolve to the new modules and emit a deprecation warning.
-- The `agentflow` command prints a deprecation notice and runs the same command as `10xgraph`.
-- `agentflow.json` is loaded when no `10xgraph.json` exists.
-- `AGENTFLOW_*` CLI variables are used when the `TENXGRAPH_*` one is not set.
-- The `agentflow-bearer` WebSocket subprotocol is accepted.
-- `agentflow://media/` URIs and objects stored under the old media prefix still resolve. New media URIs are written as `graph://media/`.
-
 ## Runtime paths and names
 
-A few runtime locations moved. They are transparent in most projects, but know where they are if you script around them.
-
 The SQLite checkpointer stores its default database at `~/.10xgraph/checkpointer.db`. If `~/.10xgraph` does not exist and `~/.agentflow` does, it keeps using the old directory, so existing data is not orphaned. Setting an explicit path avoids the question.
-
-Logger names changed from `agentflow.*` to `tenxgraph.*`. If you configure logging by name, for example `logging.getLogger("agentflow.core")`, change it to `tenxgraph.core`.
 
 ## Fix common errors
 
@@ -167,10 +152,6 @@ You uninstalled the old package but some code still imports from it. Change thos
 ### The server cannot find its config file
 
 `10xgraph dev` looks for `10xgraph.json` in the working directory. Run it from the project root, or pass `--config` with the path.
-
-### Deprecation warnings keep appearing
-
-Something still imports `agentflow` or `agentflow_cli`, or you still run the `agentflow` command. Search your code, scripts, Dockerfiles and CI for the old names.
 
 ### A WebSocket client fails the handshake
 

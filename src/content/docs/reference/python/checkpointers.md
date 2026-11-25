@@ -297,6 +297,7 @@ app = graph.compile(checkpointer=checkpointer)
 
 ### Design notes
 
+- **Owner-only files.** `SqliteCheckpointer` creates its database directory with mode 0o700 and the database file with mode 0o600. SQLite gives the `-wal` and `-shm` files the database file's mode, so they are owner-only too. An existing directory or file keeps its mode. The local media store uses the same modes. Cloud object stores are not affected; use their own access controls.
 - **One file, no external services.** The realtime state cache lives in a separate SQLite table (`af_state_cache`) rather than Redis; durable state lives in `af_states`. Reads check the cache table first, then fall back to durable state. This is the same two-layer read path as `PgCheckpointer`, collapsed into one file.
 - **Custom state is preserved.** State is serialized with an embedded `__class_path__` and reconstructed into its exact `AgentState` subclass on read, matching `PgCheckpointer`.
 - **Concurrency.** A single persistent connection is opened lazily with `PRAGMA journal_mode=WAL`; writes are serialized behind an `asyncio.Lock`. Call `await checkpointer.arelease()` (or `checkpointer.release()`) at shutdown to close it.

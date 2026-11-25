@@ -6,10 +6,10 @@ group: "Tutorial"
 section: "Get started"
 order: 80
 label: Serve and inspect
-updated: "2026-10-27"
+updated: "2026-11-25"
 ---
 
-So far, you have built and tested an agent locally in Python. To use it from a web application or share it across a team, you need to expose it as an HTTP API. 10xGraph's API server turns your compiled graph into a production-ready FastAPI service in one command.
+So far, you have built and tested an agent locally in Python. To use it from a web application or share it across a team, you need to expose it as an HTTP API. The 10xGraph API server serves your compiled graph as a FastAPI app.
 
 In this step, you will start the API server from the agent and memory you built in step 3, test it with curl, read thread state over REST, and use the hosted playground for interactive testing.
 
@@ -29,7 +29,7 @@ mkdir tutorial-server && cd tutorial-server
 cp .env.example .env
 ```
 
-The server needs a graph compiled with a checkpointer and exposed as `app`. Replace the contents of `graph/agent.py` with the graph from step 3 in that form:
+The server needs a graph compiled with a checkpointer and exposed as `app`. Replace the contents of `graph/agent.py` with the weather graph from step 2, compiled with the checkpointer from step 3:
 
 ```python title="graph/agent.py"
 from dotenv import load_dotenv
@@ -68,8 +68,6 @@ def route(state: AgentState) -> str:
     last = state.context[-1]
     if hasattr(last, "tools_calls") and last.tools_calls and last.role == "assistant":
         return "TOOL"
-    if last.role == "tool":
-        return "MAIN"
     return END
 
 graph.add_conditional_edges("MAIN", route, {"TOOL": "TOOL", END: END})
@@ -89,11 +87,9 @@ From the folder containing `10xgraph.json`, run:
 10xgraph dev --no-open --host 127.0.0.1 --port 8000
 ```
 
-`10xgraph dev` is the development server: it reloads when your files change. `--no-open` starts the server without opening the hosted playground. For production, `10xgraph build` generates a Docker image that runs Gunicorn.
+`10xgraph dev` is the development server: it reloads when your files change. `--no-open` starts the server without opening the hosted playground. For production, `10xgraph build` writes a Dockerfile (and a compose file with `--docker-compose`).
 
 Uvicorn logs show the server listening on `http://127.0.0.1:8000`. The exact log lines vary by version.
-
-The server is now running. The API server loaded your graph module, compiled the graph once at startup, and is ready to handle requests.
 
 ## Explore the API in Swagger UI
 
@@ -152,6 +148,8 @@ curl -X POST http://127.0.0.1:8000/v1/graph/invoke \
 
 The agent remembers your first question because the checkpointer loaded the earlier messages.
 
+Full details are in the [API reference](/docs/reference/rest-api/graph).
+
 ## Stream responses with `stream`
 
 For real-time feedback, use `/v1/graph/stream`. The server sends one JSON object per line. Each object is a `StreamChunk` with an `event` field (`message`, `state`, `updates` or `error`):
@@ -175,7 +173,7 @@ Chunks with `"delta": true` are partial text. The streaming format is useful for
 
 ## Read thread state over REST
 
-You can inspect any thread you own without invoking the graph again. Use the thread id from step one in place of `THREAD_ID`. The `GET /v1/threads/{thread_id}/state` endpoint returns the saved state:
+You can inspect any thread you own without invoking the graph again. Use the thread id from the invoke response in place of `THREAD_ID`. The `GET /v1/threads/{thread_id}/state` endpoint returns the saved state:
 
 ```bash
 curl http://127.0.0.1:8000/v1/threads/THREAD_ID/state
@@ -197,8 +195,6 @@ Response:
 ```
 
 Custom fields from your `AgentState` subclass appear next to `context`. To list only the messages, call `GET /v1/threads/THREAD_ID/messages`.
-
-This endpoint does not run the graph; it only retrieves what the checkpointer saved. It is useful for debugging, auditing, or building a chat history UI without replaying the graph.
 
 ## Test interactively with the playground
 
@@ -226,55 +222,6 @@ What did I ask first?
 ```
 
 The last question tests memory. The playground keeps the same `thread_id` within a conversation, so the checkpointer restores context.
-
-When you stop the server (Ctrl+C), the playground loses its connection and shows an error until you restart.
-
-## Request/response flow
-
-Here is what happens when you call the API:
-
-```mermaid
-flowchart LR
-  Client["curl / app / playground"]
-  Server["FastAPI server"]
-  Config["10xgraph.json"]
-  Module["graph module"]
-  Graph["compiled graph + checkpointer"]
-  Response["JSON state"]
-
-  Client -->|POST /v1/graph/invoke| Server
-  Server -->|load| Config
-  Config -->|import| Module
-  Module -->|get app variable| Graph
-  Graph -->|invoke + checkpoint| Response
-  Response -->|return| Client
-```
-
-The server loads your config once at startup. For each request, it invokes the graph, passes the checkpointer, and returns the result as JSON.
-
-## Available endpoints
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/v1/graph/invoke` | POST | Invoke the graph, return final state |
-| `/v1/graph/stream` | POST | Invoke the graph, stream one JSON chunk per line |
-| `/v1/graph/stop` | POST | Stop a running graph |
-| `/v1/graph/fix` | POST | Remove unanswered tool calls from state |
-| `/v1/threads/{thread_id}/state` | GET | Read thread checkpoint |
-| `/v1/threads/{thread_id}/messages` | GET | List thread messages |
-| `/ping` | GET | Health check |
-| `/docs` | GET | Swagger UI (on by default; off in production unless `DOCS_PATH` is set) |
-
-Full details are in the [API reference](/docs/reference/rest-api/graph).
-
-## What you learned
-
-- `10xgraph dev` starts a FastAPI development server that loads your graph from `10xgraph.json`.
-- The `/v1/graph/invoke` endpoint runs the graph and returns the final messages.
-- The `/v1/graph/stream` endpoint sends one JSON chunk per line for real-time streaming.
-- Thread state is readable via `GET /v1/threads/{thread_id}/state` without replaying the graph.
-- The hosted playground (opened by `10xgraph dev`) provides a chat UI for testing without code.
-- The checkpointer saves state automatically; pass the `thread_id` the server returned to restore context across requests.
 
 ## Next step
 

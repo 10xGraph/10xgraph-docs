@@ -5,21 +5,19 @@ section: Concepts
 group: Foundations
 order: 50
 label: Choosing a building block
-updated: "2026-10-27"
+updated: "2026-11-25"
 faq:
   - q: When should I use a prebuilt agent instead of building my own graph?
     a: Use a prebuilt agent when your workflow matches one of its patterns (react loop, plan-act-reflect, RAG, structured output, supervisor, swarm, audio) and you do not need extra nodes or custom routing. Switch to an Agent node in your own StateGraph when you need nodes before or after the model, several agents, or non-standard edges.
   - q: Can I mix prebuilt agents, Agent nodes, and function nodes in one graph?
     a: You can mix Agent nodes and function nodes freely in one StateGraph. A prebuilt agent is already a complete graph with its own entry point, so it is used on its own rather than as a node.
-  - q: Does choosing a higher-level block cost performance?
-    a: No meaningful cost. A prebuilt agent builds the same kind of StateGraph you would write by hand, and function nodes add only the cost of your own code.
 ---
 
 Pick a prebuilt agent when your workflow is a standard pattern, an `Agent` node inside your own `StateGraph` when you need custom routing or extra steps around the model, and a plain function node for logic that does not call an LLM. This page compares the three and shows how to combine them.
 
 ## The three levels
 
-10xGraph offers three levels of abstraction, and each trades convenience for control. The table summarizes the differences so you can decide before reading the details.
+10xGraph offers three levels of abstraction, and each trades convenience for control.
 
 | Dimension | Prebuilt agent | `Agent` node in a graph | Function node |
 |---|---|---|---|
@@ -29,8 +27,6 @@ Pick a prebuilt agent when your workflow is a standard pattern, an `Agent` node 
 | Routing control | Limited to constructor options | Full | Full, including `Command(goto=...)` |
 | Dependency injection | Pass an InjectQ `container` to the constructor | Tools and other nodes can use `Inject[T]`; the `Agent` itself takes none | `Inject[T]` on any parameter |
 | Best for | Standard patterns, prototypes | Most production agents | Non-LLM steps, custom providers |
-
-Choosing too high a level forces a rewrite when you need custom routing. Choosing too low a level means you rebuild behavior that already exists. Match the level to the pattern you actually have.
 
 ## Prebuilt agents
 
@@ -56,11 +52,9 @@ The example creates a `ReactAgent` with one tool and runs it once. Install the p
 from tenxgraph.core.state import Message
 from tenxgraph.prebuilt import ReactAgent
 
-
 def get_weather(location: str) -> str:
     """Get the current weather for a location."""
     return f"The weather in {location} is sunny"
-
 
 # One constructor call plus compile() gives a runnable CompiledGraph.
 app = ReactAgent(
@@ -100,11 +94,9 @@ from tenxgraph.core.graph import Agent, StateGraph, ToolNode
 from tenxgraph.core.state import AgentState, Message
 from tenxgraph.utils import END
 
-
 def get_weather(location: str) -> str:
     """Get the current weather for a location."""
     return f"The weather in {location} is sunny"
-
 
 tool_node = ToolNode([get_weather])
 
@@ -115,14 +107,12 @@ agent = Agent(
     trim_context=True,
 )
 
-
 def should_use_tools(state: AgentState) -> str:
     """Route to the tool node when the last assistant message requests tools."""
     last = state.context[-1] if state.context else None
     if last and last.role == "assistant" and getattr(last, "tools_calls", None):
         return "TOOL"
     return END
-
 
 graph = StateGraph()
 graph.add_node("MAIN", agent)
@@ -149,16 +139,15 @@ A function node is a plain Python function, sync or async, registered with `add_
 
 Use function nodes for work that is not an LLM call: loading data, validating input, logging, calling external APIs, or routing. They can also wrap a model provider that `Agent` does not support.
 
-A node may return a `str`, a `Message`, a list of messages, an `AgentState`, or a `Command`. A `Command` combines a state update with `goto`, which names the next node and overrides the static edge. Returning a plain `dict` is not supported.
+A node may return a `str`, a `Message`, a list of messages, an `AgentState`, a `dict` of state field updates (the key `"messages"` appends messages), `None` (no change) or a `Command`. A `Command` combines a state update with `goto`, which names the next node and overrides the static edge.
 
-The signature below injects a service the same way the repository's `react-injection` example does. See [Use dependency injection](/docs/guides/use-dependency-injection) for what can be injected.
+The node below gets the store from the container. See [Use dependency injection](/docs/guides/use-dependency-injection) for what can be injected.
 
 ```python title="injected_node.py"
 from injectq import Inject
 
 from tenxgraph.core.state import AgentState
-from tenxgraph.storage.store.base_store import BaseStore
-
+from tenxgraph.storage.store import BaseStore
 
 async def load_context(
     state: AgentState,
@@ -169,7 +158,7 @@ async def load_context(
     return state
 ```
 
-## Combine all three levels
+## Combine function nodes and an Agent node
 
 Most production graphs mix function nodes and an `Agent` node. The example adds a guard before the model and an audit step after it. The guard uses `Command(goto=END)` to stop early on empty input.
 
@@ -178,11 +167,9 @@ from tenxgraph.core.graph import Agent, StateGraph, ToolNode
 from tenxgraph.core.state import AgentState, Message
 from tenxgraph.utils import END, Command
 
-
 def search_docs(query: str) -> str:
     """Search the documentation."""
     return f"Top result for {query}"
-
 
 # Function node 1: reject empty input before spending a model call.
 def guard_input(state: AgentState, config: dict) -> Command:
@@ -191,11 +178,9 @@ def guard_input(state: AgentState, config: dict) -> Command:
         return Command(update="Please send a question.", goto=END)
     return Command(goto="AGENT")
 
-
 # Agent node: owns the model call and the tool loop.
 tool_node = ToolNode([search_docs])
 agent = Agent(model="gpt-4o", tool_node=tool_node)
-
 
 def route(state: AgentState) -> str:
     last = state.context[-1] if state.context else None
@@ -203,12 +188,10 @@ def route(state: AgentState) -> str:
         return "TOOL"
     return "AUDIT"
 
-
 # Function node 2: log the final answer after the agent.
 def audit_response(state: AgentState, config: dict) -> AgentState:
     print(f"[{config['thread_id']}] {state.context[-1].text()}")
     return state
-
 
 graph = StateGraph()
 graph.add_node("GUARD", guard_input)
@@ -242,12 +225,9 @@ flowchart TD
     C --> E[Add function nodes for loading, routing, validation]
 ```
 
-## Prebuilt tools
-
-Tools are separate from agents. The package ships the memory tool factories (`make_user_memory_tool`, `make_agent_memory_tool`) and the handoff helpers (`create_handoff_tool`, `is_handoff_tool`), which you can pass to any `ToolNode` or `tools=` list. For everything else, write your own `@tool` (see [Use the tool decorator](/docs/guides/use-tool-decorator)) or connect an MCP server (see [Use MCP](/docs/guides/use-mcp)). The calculator, fetch, search and file tools are deprecated in 1.1.0 and removed in 2.0. The [prebuilt tools guide](/docs/guides/prebuilt-tools) covers each one.
-
 ## Related pages
 
+- [Prebuilt tools](/docs/guides/prebuilt-tools): memory and handoff tools you can add to any `ToolNode`.
 - [Prebuilt agents guide](/docs/guides/prebuilt-agents): overview and chooser for all prebuilt agents.
 - [Build a graph](/docs/guides/build-a-graph): construct, run and route a custom `StateGraph`.
 - [Configure Agent](/docs/guides/configure-agent): constructor options for the `Agent` node.

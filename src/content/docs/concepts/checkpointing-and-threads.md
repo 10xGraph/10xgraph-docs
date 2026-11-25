@@ -4,16 +4,10 @@ description: How checkpointers save and restore conversation state across calls 
 section: Concepts
 order: 100
 group: "Memory and reliability"
-updated: "2026-10-27"
+updated: "2026-11-25"
 ---
 
-A **checkpointer** saves state as the graph runs and reloads it at the start of the next call for the same **thread**. `compile()` creates an `InMemoryCheckpointer` when you pass none, so state persists within one process but is lost on restart. Pass a durable checkpointer for anything that must survive. This enables multi-turn conversations where the agent remembers what happened before.
-
-## Why checkpointing matters
-
-Agent conversations typically span multiple requests: a user sends a message, the agent responds, the user asks a follow-up, and so on. Without a checkpointer, each invoke call has no access to the history. With one, the agent can recall prior messages, carry forward context, and maintain coherence across turns. This is essential for any real application.
-
-Checkpointing also enables advanced workflows: pausing a run for human review (see [interrupts](/docs/concepts/interrupts)), replaying a conversation from a checkpoint, or auditing the exact state at each step.
+A **checkpointer** saves state as the graph runs and reloads it at the start of the next call for the same **thread**. `compile()` creates an `InMemoryCheckpointer` when you pass none, so state persists within one process but is lost on restart. Pass a durable checkpointer for anything that must survive.
 
 ## Threads and the config dict
 
@@ -43,7 +37,7 @@ flowchart LR
   SaveState --> Return["Return result to caller"]
 ```
 
-On the first invoke for a thread, a fresh `AgentState` is created. On subsequent invokes with the same `thread_id`, the prior state is loaded and the new input (e.g., a new user message) is merged in. After the graph finishes, the updated state is persisted. This happens automatically, you only pass the `thread_id` in the config.
+On the first invoke for a thread, a fresh `AgentState` is created. On subsequent invokes with the same `thread_id`, the prior state is loaded and the new input (e.g., a new user message) is merged in. After the graph finishes, the updated state is persisted.
 
 ## Attaching a checkpointer
 
@@ -75,30 +69,13 @@ res = app.invoke(
 )
 ```
 
-The checkpointer automatically loads the state from turn 1, appends the new message, runs the graph, and saves the result. You write no explicit load or save code.
-
 ## The three checkpointer implementations
-
-10xGraph provides three checkpointer implementations, each with different persistence and scaling characteristics.
 
 ### InMemoryCheckpointer
 
-`InMemoryCheckpointer` stores all state, messages, and metadata in Python dicts, protected by `asyncio.Lock` for thread safety. It is the simplest and fastest for a single process:
-
-```python
-from tenxgraph.storage.checkpointer import InMemoryCheckpointer
-
-checkpointer = InMemoryCheckpointer()
-app = graph.compile(checkpointer=checkpointer)
-```
+`InMemoryCheckpointer` keeps state, messages and metadata in process memory. `compile()` uses it when you pass no checkpointer.
 
 All data is lost when the process exits. Access is scoped by the caller's identity and reach only when `config["user"]` is set, as the API server does when auth is on.
-
-**Pros:** Zero setup, no external dependencies, fast for development.
-
-**Cons:** State lost on restart, cannot be shared across multiple workers or processes.
-
-**Best for:** development, unit tests, short-lived single-process deployments, prototyping.
 
 ### SqliteCheckpointer
 
@@ -114,11 +91,7 @@ app = graph.compile(checkpointer=checkpointer)
 
 Data survives process restarts because it is written to disk. However, SQLite serializes writes, only one writer can be active at a time, so it does not scale to multiple workers or servers.
 
-**Pros:** Durable, zero external dependencies (just a file), simple to deploy with a Python sidecar.
-
-**Cons:** Single-writer serialization, scoping by identity only when `config["user"]` is set, scales poorly across workers.
-
-**Best for:** client-side agents (desktop apps with Electron or Tauri), single-user CLI agents, edge deployments where each user has their own process and database.
+Use it for client-side agents (desktop apps, CLI agents) where each user has their own process and database file.
 
 Install the extra with:
 
@@ -145,14 +118,6 @@ app = graph.compile(checkpointer=checkpointer)
 
 On each read, the cache (Redis) is checked first. If missed, PostgreSQL is queried and the result is cached. Writes always go to both layers. The cache TTL (default 24 hours) is configurable with the `cache_ttl` keyword argument, in seconds.
 
-Why two layers? Postgres alone would be too slow for high-frequency reads (e.g., a user repeatedly invoking the same agent over microseconds). Redis caches hot threads, avoiding Postgres round-trips. Cold threads (those not accessed recently) are still available in Postgres.
-
-**Pros:** Durable, multi-worker and multi-tenant, cache layer for performance, handles concurrent writes gracefully.
-
-**Cons:** Requires Postgres and Redis, more complex setup, external dependencies.
-
-**Best for:** production multi-user SaaS, scaled-out deployments with multiple workers, any application needing durability and concurrency.
-
 Install with:
 
 ```bash
@@ -169,8 +134,6 @@ Every checkpointer also keeps a tool execution ledger: the result of each finish
 
 ## Trade-offs and decision guide
 
-Choosing the right checkpointer is a scaling decision:
-
 | Criterion | InMemoryCheckpointer | SqliteCheckpointer | PgCheckpointer |
 |---|---|---|---|
 | State survives restart | No | Yes | Yes |
@@ -182,7 +145,7 @@ Choosing the right checkpointer is a scaling decision:
 | Write throughput | Single-process | Single-writer | Multi-writer |
 | Best for | Dev, tests | Client-side sidecar | Production multi-user |
 
-**Start with InMemoryCheckpointer** while developing locally. When you need state to survive restarts, move to `SqliteCheckpointer` if you have a single process or a Python sidecar (e.g., desktop app). When you scale to multiple workers or need multi-tenant isolation, migrate to `PgCheckpointer`. The API is identical across all three, so this migration is straightforward.
+**Start with InMemoryCheckpointer** while developing locally. When you need state to survive restarts, move to `SqliteCheckpointer` if you have a single process or a Python sidecar (e.g., desktop app). When you scale to multiple workers or need multi-tenant isolation, migrate to `PgCheckpointer`.
 
 ## Checkpointing beyond the graph
 
@@ -190,21 +153,7 @@ Beyond automatic use during `invoke` and `stream`, you can interact with a check
 
 For API server users, thread data is also exposed over HTTP via the `/v1/threads` routes. See [server/invoke-and-stream](/docs/server/invoke-and-stream) and [reference/rest-api/threads](/docs/reference/rest-api/threads) for details.
 
-## Checkpointing and the API server
-
-When running your graph behind the 10xGraph API server, pass the checkpointer to `compile()` in the module that `agent` points at:
-
-```python
-# graph/react.py
-from tenxgraph.storage.checkpointer import PgCheckpointer
-
-checkpointer = PgCheckpointer(postgres_dsn="...", redis_url="...")
-# Create the schema once from an async context: await checkpointer.asetup()
-
-app = state_graph.compile(checkpointer=checkpointer)
-```
-
-The server uses the compiled graph's checkpointer for all requests. See [server/configure](/docs/server/configure) for details.
+Behind the API server, pass the checkpointer to `compile()` in the module that `agent` points at; the server uses it for every request (see [Configure the server](/docs/server/configure)).
 
 ## Related concepts
 

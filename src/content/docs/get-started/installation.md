@@ -4,7 +4,7 @@ seoTitle: Install 10xGraph (Python and TypeScript)
 description: Install 10xGraph and the API server with pip on Python 3.12 or newer, add provider extras and a checkpointer, verify the CLI, and install the TypeScript client.
 section: "Get started"
 order: 30
-updated: "2026-11-16"
+updated: "2026-11-25"
 faq:
   - q: "Which Python version does 10xGraph need?"
     a: "Python 3.12 or newer. Both the core package and the API package declare requires-python >=3.12, so pip refuses to install them on an older interpreter."
@@ -20,19 +20,17 @@ Install 10xGraph with `pip install 10xgraph` on Python 3.12 or newer, adding the
 
 ## What are the requirements?
 
-Start with Python 3.12 or newer and a package manager like pip or uv. You also need an API key from the LLM provider you plan to use, and PostgreSQL and Redis if you deploy to production.
-
 | Requirement | What it is | When you need it |
 |---|---|---|
 | Python | 3.12 or newer | Always, for the core framework and API server |
-| Node.js | 18 or newer | Only if building a TypeScript or JavaScript client application |
+| Node.js | 20 or newer | Only if building a TypeScript or JavaScript client application |
 | LLM API key | OpenAI, Google Gemini, or Anthropic | Always, to call a model from your agent |
 | PostgreSQL and Redis | For durable state | Production only; development uses in-memory state |
 | Virtual environment | venv or uv | Recommended; keeps dependencies isolated |
 
 ## How do I install the Python packages?
 
-Install `10xgraph` (the core framework) and `10xgraph-api` (the API server and CLI) in a Python virtual environment. A virtual environment ensures the `10xgraph` command and the libraries come from the same Python interpreter, avoiding version conflicts.
+Install `10xgraph` (the core framework) and `10xgraph-api` (the API server and CLI) in a Python virtual environment.
 
 Create the environment and activate it. With `pip`:
 
@@ -52,20 +50,11 @@ uv pip install 10xgraph 10xgraph-api
 
 `10xgraph` is the core orchestration engine. `10xgraph-api` adds a FastAPI server, a command-line tool, and a development playground.
 
-### Upgrading from the old names?
-
-If you previously installed `10xscale-agentflow` or `10xscale-agentflow-cli`, uninstall them first because the new packages also ship an `agentflow` alias module:
-
-```bash
-pip uninstall 10xscale-agentflow-cli 10xscale-agentflow
-pip install 10xgraph 10xgraph-api
-```
-
-Keeping both sets installed can leave you importing the wrong copy.
+Coming from `10xscale-agentflow`? Uninstall it first; see [Coming from agentflow](/docs/get-started/coming-from-agentflow).
 
 ## Which provider extra should I install?
 
-10xGraph does not include LLM provider SDKs by default. You must install the extra for the provider you use. Choose one based on which model you want to call:
+Install the extra for your model provider:
 
 | Provider | Extra | SDK it installs |
 |---|---|---|
@@ -112,9 +101,9 @@ Beyond model providers, optional extras unlock advanced features:
 
 `10xgraph-api` has its own extras. `pip install '10xgraph-api[metrics]'` adds the OpenTelemetry metrics SDK, the OTLP HTTP and Prometheus exporters and `prometheus-client`, for the `metrics` block. See [Metrics with Prometheus and Grafana](/docs/guides/metrics-prometheus-grafana).
 
-The `all` extra installs every other extra at once and is useful for local development and CI, but pin specific versions before shipping to production.
+The `all` extra installs every extra.
 
-Version pinning still matters. From 1.0 the public API is stable under a deprecation policy: breaking changes arrive only in a major release, after at least one minor release of deprecation. The three packages share major.minor, and patch versions are independent. Read the [changelog](/changelog) before upgrading, and see the [1.1 upgrade guide](/docs/project/upgrade-to-1.1) if you come from 1.0, or the [1.0 upgrade guide](/docs/project/upgrade-to-1.0) if you come from 0.x.
+Keep `10xgraph`, `10xgraph-api` and `10xgraph-client` on the same major.minor. Before upgrading, read the [changelog](/changelog) and the [1.1 upgrade guide](/docs/project/upgrade-to-1.1).
 
 ## How do I verify the installation?
 
@@ -178,13 +167,6 @@ The variables 10xGraph recognizes are:
 | Google Gemini | `GEMINI_API_KEY` (first choice) or `GOOGLE_API_KEY` |
 | Anthropic | `ANTHROPIC_API_KEY` |
 
-Never commit `.env` or API keys to version control. Use `.gitignore` to exclude it:
-
-```text title=".gitignore"
-.env
-.env.local
-```
-
 ## How do I install the TypeScript client?
 
 If you are building a JavaScript or TypeScript application that calls the 10xGraph API server, install the client SDK:
@@ -195,16 +177,11 @@ npm install 10xgraph-client
 
 The main class is `TenxGraphClient`, and the package requires Node.js 20 or newer. See the [client documentation](/docs/client) for usage.
 
-The client talks to a running 10xGraph API server (`10xgraph dev` locally) over HTTP, and you pass a thread ID to keep conversation history across runs. Use `10xgraph-api` 1.0 with client 1.0: the client authenticates WebSockets with the `10xgraph-bearer` subprotocol, which older servers do not accept. HTTP calls work with either. See the [Quickstart](/docs/get-started/first-agent) for a complete example.
+The client talks to a running 10xGraph API server (`10xgraph dev` locally) over HTTP, and you pass a thread ID to keep conversation history across runs. Use the same major.minor for `10xgraph-api` and `10xgraph-client` (for example 1.1 with 1.1). See the [Quickstart](/docs/get-started/first-agent) for a complete example.
 
 ## What if something goes wrong?
 
-If installation fails or the commands do not work, check these pages:
-
-- [Installation troubleshooting](/docs/troubleshooting/installation): pip errors, command not found, import errors, and environment variable issues
-- [Provider troubleshooting](/docs/troubleshooting/providers): model not found, auth failures, rate limit errors for your chosen provider
-- [API server troubleshooting](/docs/troubleshooting/api-server): server startup errors and runtime issues
-- [Error code reference](/docs/reference/error-codes): what each structured error code means
+If something fails, see [installation troubleshooting](/docs/troubleshooting/installation) and [provider troubleshooting](/docs/troubleshooting/providers).
 
 ## Next step
 

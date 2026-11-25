@@ -62,7 +62,7 @@ This check does not catch `auth: null`. A server with no auth starts open even i
 
 ## 5. Smoke-test the running server
 
-Run three requests against the server you just started. Replace the port and tokens with your own. For a full walkthrough with two users, see [Security in five minutes](/docs/get-started/security-in-five-minutes).
+Run three requests against the server you just started. Replace the port and tokens with your own. For a full walkthrough with two users, see [the quickstart auth section](/docs/get-started/first-agent.
 
 **Auth: a request without a token returns 401.**
 

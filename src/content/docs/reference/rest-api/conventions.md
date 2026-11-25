@@ -54,6 +54,8 @@ The same rule covers the WebSocket `config.thread_id`, the `thread_id` in the `/
 
 Client dicts and lists (`config`, `initial_state`, `resume`, `metadata`, `filters`, and the bodies of the store and checkpointer routes and WebSocket frames) are capped beside the nesting depth limit (64 levels by default, `MAX_NESTING_DEPTH`): at most 1000 keys per object, 10000 items per list and 200000 values in all. A body over a cap gets `422` `VALIDATION_ERROR`. The key, item and value caps are fixed and have no setting.
 
+Text that the model or a tool produces is cleaned instead of refused: NUL is removed and a lone surrogate is replaced by `?`. The server does not limit the length of a single string inside `config`, message `metadata` or a non-text block; only the whole-body cap `MAX_REQUEST_SIZE` (10 MB unless changed) bounds those. For tighter rules, lower it, restrict client input with `runs.config_keys` and `runs.state_keys`, or write an input validator (see [Writing a validator](/docs/concepts/security-and-validators#writing-a-validator)).
+
 Server-owned keys in a client `config` are dropped, not refused: `user`, `user_id`, `credential`, `remote_tools`, `ag_ui`, `file_tool_root`, `workspace_root`, `tool_timeout`, `node_timeout`, `max_parallel_tool_calls`, `collection`, and any key starting with `_`.
 
 ## Authentication

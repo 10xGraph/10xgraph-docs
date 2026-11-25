@@ -5,7 +5,7 @@ description: How StateGraph models an agent as nodes, edges and shared state, co
 section: Concepts
 order: 20
 group: "Foundations"
-updated: "2026-11-22"
+updated: "2026-11-25"
 faq:
   - q: What is the difference between StateGraph and ReactAgent?
     a: ReactAgent is a prebuilt that creates a StateGraph for you, with one agent node, one tool node and a conditional edge between them. Build a StateGraph yourself when you need your own nodes, routing or several agents.
@@ -60,21 +60,17 @@ from tenxgraph.core.state import AgentState, Message
 from tenxgraph.storage.checkpointer import InMemoryCheckpointer
 from tenxgraph.utils.constants import START, END
 
-
 def intake(state: AgentState, config: dict) -> str:
     """First node: log the intake and prepare for routing."""
     return "Ticket received and queued for triage."
-
 
 def handle_urgent(state: AgentState, config: dict) -> str:
     """Route path for urgent tickets: page on-call."""
     return "Escalating to on-call engineer. Incident ticket #12345."
 
-
 def route_to_backlog(state: AgentState, config: dict) -> str:
     """Route path for non-urgent: file in backlog."""
     return "Ticket filed in product backlog for Q4 planning."
-
 
 def decide_priority(state: AgentState) -> str:
     """Conditional function: returns the node name to visit next."""
@@ -85,7 +81,6 @@ def decide_priority(state: AgentState) -> str:
     
     text = user_messages[-1].text().lower()
     return "urgent" if "outage" in text or "down" in text else "backlog"
-
 
 # Build the graph structure
 graph = StateGraph()
@@ -125,7 +120,6 @@ print("Outcome:", result["messages"][-1].text())
 - `set_entry_point("intake")` adds an implicit edge from `START` to "intake", so the graph always begins there.
 - The conditional edge's routing function `decide_priority` inspects the state and returns a string key ("urgent" or "backlog"), not a node name. The `path_map` dict maps that key to the actual node name.
 - If you omit the `path_map`, the routing function must return the node name directly (e.g., return `"urgent"` instead of returning a key that the map looks up).
-- Both "urgent" and "backlog" end with `add_edge(..., END)`, so both paths terminate the graph.
 
 ## How does state work?
 
@@ -135,7 +129,6 @@ Add your own fields by subclassing, then pass an instance to the graph:
 
 ```python title="state.py"
 from tenxgraph.core.state import AgentState
-
 
 class TicketState(AgentState):
     customer_tier: str = "free"
@@ -149,15 +142,15 @@ graph = StateGraph(TicketState())
 
 ## What does compile() do?
 
-`compile()` validates the graph structure and returns a `CompiledGraph` object ready for execution. Compilation is where 10xGraph verifies that your graph is sound before you run it, catching structural errors early rather than during execution.
+`compile()` validates the graph structure and returns a `CompiledGraph` object ready for execution.
 
 Compilation performs several checks:
 
 - **Entry point validation**: Ensures you have called `set_entry_point()` or added an edge from `START` to a node. If not, raises `GraphError` with code `GRAPH_002`.
-- **Node reachability**: Detects orphaned nodes (nodes with no incoming or outgoing edges), which are typically a sign of incomplete routing logic. Raises `GraphError` with code `GRAPH_003`.
+- **Orphaned nodes**: A node that appears in no edge raises `GraphError` with code `GRAPH_003`.
 - **Edge target validation**: Confirms that every edge points to a node you have actually registered with `add_node()`, otherwise `GRAPH_004`.
 - **Interrupt node validation**: If you specified nodes to interrupt before or after, checks that they exist in the graph. Unknown names raise `GraphError` with code `GRAPH_004`, the same code as an edge that targets an unregistered node.
-- **Dependency resolution**: Binds checkpointers, stores, publishers, and other runtime services into a dependency container so they are available to nodes during execution.
+- **Dependency resolution**: Binds checkpointers, stores, publishers, and other runtime services into a dependency container so they are available to nodes during execution. It also builds every container resolver, so a binding that cannot be resolved fails at compile, and resolves `Agent(tool_node="NAME")` references (`GRAPH_005`, `GRAPH_006`).
 
 Once compiled, you can invoke the `CompiledGraph` many times with different inputs and thread ids without recompiling. Compile once at startup.
 
@@ -175,12 +168,6 @@ app = graph.compile(
 
 If you omit `checkpointer`, 10xGraph uses an `InMemoryCheckpointer` so the graph can always run. It keeps state only in process memory, so nothing survives a restart. See [Checkpointing and threads](/docs/concepts/checkpointing-and-threads) for durable options and [Interrupts](/docs/concepts/interrupts) for `interrupt_before` and `interrupt_after`.
 
-<Callout type="warning" title="Compile-time vs. runtime errors">
-
-Compilation catches structural problems (missing nodes, unreachable paths, bad entry points). It does not validate the correctness of your node functions or their logic. Runtime errors (your node function raises an exception, a tool fails, the LLM is unreachable) surface during execution, not at compile time.
-
-</Callout>
-
 ## Understanding recursion limits
 
 Every graph execution has a recursion limit: a maximum number of steps before 10xGraph forces the run to stop. The limit prevents infinite loops caused by faulty routing logic. The default limit is 25 steps per run.
@@ -197,32 +184,6 @@ result = app.invoke(
 ```
 
 If a run reaches the limit while the graph is still processing (the current node is not `END`), execution stops and raises `GraphRecursionError` with code `RECURSION_001`. The check runs after each node completes, when the step counter has reached the limit, so a run that needs exactly 25 steps also fails at the default. Its `context` holds `max_steps`, `current_step` and `current_node`. When streaming, an `error` chunk is yielded before the exception is raised. See [Errors and limits](/docs/concepts/errors-and-limits).
-
-**When to raise the limit:**
-
-- Your graph has legitimate multi-step workflows that need more than 25 steps (e.g., a research agent that iterates over multiple search queries and summaries).
-- You have a multi-agent graph where agents hand off to each other, multiplying the step count.
-
-**When the limit is a signal of a bug:**
-
-- A conditional edge always routes back to itself, creating a loop.
-- A tool node's routing logic does not properly transition to the next stage.
-- A node function returns an update that does not change the state, so the routing function sends it back to the same node.
-
-Fix the routing logic first. Only raise the limit if you have verified that the loop is intentional and necessary.
-
-```python title="loop_guard.py"
-from tenxgraph.core.state import AgentState
-
-
-# A routing function that loops back to "agent" unconditionally will hit the
-# recursion limit. Give it an exit condition based on state.
-def route(state: AgentState) -> str:
-    last = state.context[-1] if state.context else None
-    if last is not None and last.role == "assistant" and not last.tools_calls:
-        return "final"
-    return "agent"
-```
 
 <Callout type="tip" title="Monitoring recursion depth">
 
@@ -262,13 +223,7 @@ for chunk in app.stream(
         print("Step:", chunk.state.execution_meta.step)
 ```
 
-Each `StreamChunk` has:
-
-- `event`: `"message"`, `"state"` (after a node completes), `"updates"` (run status data) or `"error"`.
-- `message`: The message if `event == "message"`.
-- `state`: The state if `event == "state"`.
-
-`LOW` yields `message` and `error` chunks, `PARTIAL` adds `state`, and `FULL` adds `updates`. See [Streaming](/docs/concepts/streaming) for the full model.
+See [Streaming](/docs/concepts/streaming) for the chunk fields and what each granularity yields.
 
 ## What goes in the run config?
 
@@ -282,27 +237,7 @@ The config dict passed to `invoke()` and `stream()` controls how the graph execu
 | `run_id` | Optional unique identifier for this specific run. Used in logging and tracing. If not provided, one is generated. |
 | `model` | Name of a `model_registry` entry that an Agent node runs on for this run. No name means the Agent's default entry. See [Model registry](/docs/reference/python/agent#model-registry). |
 
-**response_granularity** determines what the result or each stream chunk contains:
-
-| Value | What you get |
-|---|---|
-| `LOW` (default) | Only messages from the state. Smallest payload. |
-| `PARTIAL` | Messages, context summary, and execution metadata. |
-| `FULL` | The complete state object. Useful for debugging or accessing all custom fields. |
-
-Pass `response_granularity` directly to `invoke()` or `stream()`, not in the config dict:
-
-```python
-from tenxgraph.core.state import Message
-from tenxgraph.utils.constants import ResponseGranularity
-
-input_data = {"messages": [Message.text_message("Checkout is down")]}
-result = app.invoke(
-    input_data,
-    config={"thread_id": "session-1", "recursion_limit": 50},
-    response_granularity=ResponseGranularity.FULL,
-)
-```
+`response_granularity` is a separate argument of `invoke()` and `stream()`, not a config key: `LOW` (default) returns messages, `PARTIAL` adds context summary and execution metadata, `FULL` returns the whole state.
 
 ## Related pages
 

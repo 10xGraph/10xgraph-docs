@@ -4,7 +4,7 @@ description: Route execution with conditional edges, Command, or callbacks. Vali
 section: Concepts
 order: 60
 group: "Foundations"
-updated: "2026-10-08"
+updated: "2026-11-25"
 faq:
   - q: "When should I use a conditional edge vs Command?"
     a: "Use conditional edges for stateless, deterministic branching. Use Command inside a node when routing depends on side effects (like an API call) or when you need to update state and jump together."
@@ -60,13 +60,11 @@ graph.add_conditional_edges("classifier", route_by_topic)
 graph.set_entry_point("classifier")
 ```
 
-Conditional edges are tested separately from nodes. The router function is stateless and pure: it takes state, returns a string, no side effects. The graph visualizer shows the edges on the diagram.
-
 Use conditional edges when the routing choice depends only on state that already exists. Do not use them for choices that require fresh API calls or database queries; put that logic in a node instead.
 
 ## Dynamic routing with Command
 
-`Command` is a return value that lets a node update state and choose the next node in one step. Inside the node, you have access to everything: state, config, side effects.
+`Command` is a return value that lets a node update state and choose the next node in one step.
 
 ```python
 from tenxgraph.utils import Command, END
@@ -92,8 +90,6 @@ Use Command when:
 - The routing decision depends on a side effect (API call, database query, file read).
 - You need to update state and route together as an atomic unit.
 - You are recovering from an error inside a node and need to jump to a recovery path.
-
-Do not use Command for every node. Use conditional edges for simple cases because they are faster to test and the graph structure is visible.
 
 ## Introspecting and transforming invocations with callbacks
 
@@ -138,6 +134,8 @@ async def clamp_search_query(context: CallbackContext, input_data: dict) -> dict
 
 callback_manager.register_before_invoke(InvocationType.TOOL, clamp_search_query)
 ```
+
+To block a tool call by policy, raise `ToolDenied` (`tenxgraph.core.exceptions`) from a `before_invoke` callback for `InvocationType.TOOL` or `InvocationType.MCP`; `on_error` does not run for it.
 
 Use `after_invoke` to log, cache, or transform the output before it is stored in state.
 
@@ -207,61 +205,18 @@ class MyHook(GraphLifecycleHook):
         print(f"Completed in {total_steps} steps")
         return None
 
-    async def on_graph_error(
-        self, context: GraphLifecycleContext, error: Exception,
-        partial_state: AgentState, messages: list[Message],
-        step: int, node_name: str
-    ) -> tuple[AgentState, str] | None:
-        """Alert on failures; mask sensitive data before persistence."""
-        print(f"Failed at node {node_name}: {error}")
-        return None
-
-    async def on_state_update(
-        self, context: GraphLifecycleContext, node_name: str,
-        old_state: AgentState, new_state: AgentState, step: int
-    ) -> AgentState | None:
-        """Observe each node transition."""
-        print(f"Step {step}: {node_name}")
-        return None
-
-    async def on_checkpoint(
-        self, context: GraphLifecycleContext, state: AgentState,
-        messages: list[Message], is_context_trimmed: bool
-    ) -> tuple[AgentState, list[Message]] | AgentState | None:
-        """Redact PII or replicate to cache before state is persisted."""
-        return None
-
 callback_manager = CallbackManager()
 callback_manager.register_lifecycle_hook(MyHook())
 app = graph.compile(callback_manager=callback_manager)
 ```
 
-### Lifecycle hook use cases
-
-- **Observability**: Start/stop OTEL spans, send metrics to Prometheus or Datadog.
-- **Human-in-the-loop**: React to interrupts, log approvals, coordinate resume workflows.
-- **Compliance**: Redact PII at checkpoint time, write audit logs, snapshot failures.
-- **Notifications**: Send Slack or email when the graph completes, fails, or needs approval.
-- **Debugging**: Observe state mutations per node, detect infinite loops, profile performance.
-
-### Lifecycle hooks vs callbacks
-
-| Aspect | CallbackManager | GraphLifecycleHook |
-|---|---|---|
-| Fires | Once per LLM/tool/MCP invocation | Once per graph lifecycle event |
-| Context | Function name, invocation type | Thread ID, run ID, entire state |
-| Use case | Transform/validate individual calls | Monitor/coordinate entire run |
-| Access to state | Limited (input/output of one call) | Full access to current state |
+Hooks also exist for errors, interrupts, resume, state updates, checkpoints and turns; see [Lifecycle hooks reference](/docs/reference/python/lifecycle-callbacks) for every signature.
 
 ## Guidelines and rules
 
 Keep callbacks and lifecycle hooks bounded. They run inside the execution loop; expensive operations block graph execution.
 
-Avoid global mutable request state. Use config metadata instead: pass values through `config` or store them in state.
-
 Return the expected shape from transforming callbacks. If `before_invoke` returns a list when a dict is expected, downstream code fails.
-
-Validate `Command` routes in tests. Missing node names or recursion loops are runtime failures.
 
 Use `on_error` in callbacks to recover from errors; do not suppress errors in lifecycle hooks. `on_graph_error` can change the persisted error snapshot, but the exception is always re-raised. For error recovery, use `on_error` callbacks or handle exceptions inside nodes.
 

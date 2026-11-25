@@ -6,12 +6,12 @@ section: Get started
 group: Tutorial
 order: 62
 label: Build a graph
-updated: "2026-10-08"
+updated: "2026-11-25"
 faq:
   - q: When should I use ReactAgent instead of building the graph by hand?
     a: Use ReactAgent when you want the standard loop where the model calls tools and then answers. Build by hand when you need custom routing, extra nodes or custom state fields.
   - q: What happens when a tool raises an exception?
-    a: ToolNode catches the exception and returns it to the model as a failed tool message. The model can retry, try another approach or explain the failure to the user.
+    a: ToolNode catches the exception and returns a failed tool message with a short reference id; the exception text stays in the server log. The model can retry, try another approach or explain the failure to the user.
   - q: Which API key do I need?
     a: Set the key for the provider your model name resolves to. Gemini models read GEMINI_API_KEY or GOOGLE_API_KEY, and OpenAI models read OPENAI_API_KEY.
 ---
@@ -22,7 +22,7 @@ You build a two-node graph by hand: an `Agent` node that calls the model and a `
 
 You build an agent that can call a `get_weather` function. The model decides when it needs the tool, the graph runs the tool, and the result goes back to the model so it can write the final answer.
 
-This is the same loop behind most tool-using agents, so building it once by hand makes every prebuilt agent easier to read. The graph looks like this:
+The graph looks like this:
 
 ```mermaid
 flowchart LR
@@ -53,8 +53,6 @@ def get_weather(location: str) -> str:
     # A real tool would call a weather API here.
     return f"The weather in {location} is sunny and 22 degrees C."
 ```
-
-The model sees the parameter name and type (`location: str`) and the description from the docstring. Keep both specific: vague docstrings lead to tools being called at the wrong time.
 
 ## Create the agent and the tool node
 
@@ -94,11 +92,7 @@ def should_use_tools(state: AgentState) -> str:
         return END
 
     last_message = state.context[-1]
-    if (
-        last_message.role == "assistant"
-        and hasattr(last_message, "tools_calls")
-        and last_message.tools_calls
-    ):
+    if last_message.role == "assistant" and last_message.tools_calls:
         return "TOOL"
 
     return END
@@ -203,19 +197,11 @@ You get the same kind of conversation with no routing code. See the [ReactAgent 
 
 Use `ReactAgent` for the standard loop and build by hand when the flow is specific to your product. Both produce a compiled graph that you run, serve and test the same way, so you can start with `ReactAgent` and switch later.
 
-| Situation | Use |
-|---|---|
-| Model calls tools, tools run, model answers | `ReactAgent` |
-| Default `AgentState` is enough | `ReactAgent` |
-| Custom routing, such as a validation or approval node between agent and tools | Hand-built graph |
-| Custom state fields | Hand-built graph |
-| Several agents with different roles in one graph | Hand-built graph, or a prebuilt multi-agent class |
-
 For help picking among all building blocks, see [Choosing a building block](/docs/concepts/choosing-a-building-block).
 
 ## Handle tool errors
 
-If a tool raises an exception, `ToolNode` catches it and returns a failed tool message instead of crashing the run. The model reads the error text on its next turn and can retry, try something else or tell the user.
+If a tool raises an exception, `ToolNode` catches it and returns a failed tool message instead of crashing the run. The model gets a generic failure with a reference id (the exception text stays in the server log) and can retry, try something else or tell the user.
 
 Make the tool fail some of the time to watch this happen:
 
@@ -230,15 +216,7 @@ def get_weather(location: str) -> str:
     return f"The weather in {location} is sunny and 22 degrees C."
 ```
 
-Swap this function into either version above and run it several times. On a failure the `tool` message contains the error text, and the next assistant message reacts to it. Do not rely on this for tools with side effects such as payments: make those tools idempotent or have them return a clear error string, because the model may retry.
-
-## What you learned
-
-- A tool is a Python function whose signature and docstring become the schema the model sees.
-- `ToolNode` runs the functions the model requests, in parallel when there are several.
-- A routing function passed to `add_conditional_edges` decides between `TOOL` and `END`, and a plain edge sends results back to `MAIN`.
-- `ReactAgent` builds the same loop for you, and a hand-built graph gives full control over routing and state.
-- Tool exceptions reach the model as failed tool messages, so the model can recover.
+Swap this function into either version above and run it several times. On a failure the `tool` message says the tool failed, and the next assistant message reacts to it. Do not rely on this for tools with side effects such as payments: make those tools idempotent or have them return a clear error string, because the model may retry.
 
 ## Next step
 

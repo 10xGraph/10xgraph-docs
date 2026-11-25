@@ -31,12 +31,12 @@ Decision rules:
 - You define tasks with `@broker.task`, where `broker` comes from `tenxgraph_api.jobs`.
 - The `worker` key in `10xgraph.json` sets the broker (Redis Streams, RabbitMQ or Kafka) and lists the task modules. With the `memory` broker, tasks run inside the API process.
 - `10xgraph dev` or the API starts and schedules tasks but does not run them. `10xgraph worker` runs them. Run exactly one `10xgraph scheduler`.
-- Start a task with `await my_task.kiq(...)` from Python, or over HTTP with `POST /v1/tasks/{name}` when the task is marked `http=True`.
+- Start a task with `await my_task.kiq(...)` from Python, or over HTTP when the task is marked `http=True`: `POST /v1/tasks/{name}` runs it now or schedules it, `GET /v1/tasks/{id}` reads status and progress, `PATCH` changes a schedule and `POST /v1/tasks/{id}/cancel` cancels. Callers set only the task's plain arguments; the server fills the run config. Permissions are `tasks:trigger`, `tasks:read` and `tasks:cancel`.
 - Status records, cancel flags and schedule records live in the [cache store](/docs/concepts/cache-store), so use `redis` there too.
 
 ## Identity in a run
 
-A task belongs to the user who started it. Reads and cancel follow the caller's reach, and anything outside it answers 404. When the worker picks up a run with auth on, it rebuilds the stored identity with the current `auth.roles` and calls `authorize(identity, "tasks:trigger", task_name)`. If that refuses, the run fails without executing. A task no user started runs as a named identity from `auth.system_identities`. Token expiry and revocation are not checked, because a queued run has no live token. See [Tenancy and access](/docs/concepts/tenancy-and-access).
+A task belongs to the user who started it. Reads and cancel follow the caller's reach, and anything outside it answers 404. Starting a task and changing a schedule stay on the caller's own data. When the worker picks up a run with auth on, it rebuilds the stored identity with the current `auth.roles` and calls `authorize(identity, "tasks:trigger", task_name)`. If that refuses, the run fails without executing. A task no user started runs as a named identity from `auth.system_identities`. Token expiry and revocation are not checked, because a queued run has no live token. See [Tenancy and access](/docs/concepts/tenancy-and-access).
 
 ## What survives a restart
 
@@ -50,7 +50,6 @@ A task belongs to the user who started it. Reads and cancel follow the caller's 
 
 ## Pages in this section
 
-- [How jobs work](/docs/concepts/background-jobs): the two models and identity per run.
 - [Worker and scheduler](/docs/server/background-tasks): install, configure, write tasks, schedules, HTTP routes, delivery guarantees.
 - [In-process tasks](/docs/guides/run-background-tasks): `BackgroundTaskManager` from a node.
 - [Scaling and reliability](/docs/production/scaling#job-workers): sizing the job worker tier.

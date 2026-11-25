@@ -1,6 +1,6 @@
 ---
 title: Deploy
-description: "Choose Docker Compose or Kubernetes, see what 10xgraph build generates, what to set before going live, how many replicas and workers to run, and where shutdown and ids fit."
+description: "Choose Docker Compose or Kubernetes, see what 10xgraph build generates, what to set before going live, and how many replicas and workers to run."
 section: "Deploy"
 order: 0
 updated: "2026-11-25"
