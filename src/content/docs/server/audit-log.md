@@ -129,6 +129,6 @@ A sink error never fails a request. The error is logged at ERROR and counted in 
 
 ## See also
 
-- [SOC 2 and ISO 27001 control mapping](/docs/production/control-mapping)
+- [SOC 2, ISO 27001 and GDPR control mapping](/docs/production/control-mapping)
 - [Observability](/docs/observability)
 - [Authentication and authorization](/docs/server/auth)
