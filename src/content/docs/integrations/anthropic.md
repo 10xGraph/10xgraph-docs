@@ -219,6 +219,10 @@ agent = Agent(
 
 10xGraph sends a setting only if the installed `anthropic` SDK defines it on the method being called. A name the SDK does not define is not sent, and a warning names the key and the provider. A new SDK parameter works after you upgrade the SDK, with no 10xGraph release. The check is by name only: if the SDK accepts the name but the API or model refuses the value, Anthropic returns its error as usual. See [`Agent` keyword arguments](/docs/reference/python/agent#provider-specific-settings).
 
+## Client certificate or proxy
+
+`http_client=` on `Agent(...)` passes your own async client to the Anthropic SDK. With the `anthropic` SDK 1.0 and later it must be an `httpx2.AsyncClient`. See [Use mutual TLS](/docs/security/use-mutual-tls#api-to-the-llm).
+
 ## Prompt caching
 
 Prompt caching is on by default. Each request carries a cache breakpoint on the last system block (or on the last tool when there is no system prompt), plus top-level automatic caching. The automatic marker caches the whole conversation so far and moves forward on every call, so a long thread keeps reusing its prefix.

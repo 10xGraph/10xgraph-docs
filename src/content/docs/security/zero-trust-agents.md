@@ -297,15 +297,14 @@ See [Authentication and roles](/docs/server/auth) for the role table and [Permis
 
 ## Transport: mTLS on each link
 
-TLS and mTLS end at your proxy or service mesh (nginx, Envoy, Istio, Linkerd). 10xGraph does not terminate TLS itself. For the links your app opens, each client takes the settings it needs:
+TLS and mTLS end at your proxy or service mesh (nginx, Envoy, Istio, Linkerd). 10xGraph does not terminate TLS itself. For the links your app opens, each client takes the settings it needs. [Use mutual TLS](/docs/security/use-mutual-tls) has a full, tested example for each link and the limits.
 
 | Link | How |
 |---|---|
 | Client to API | Ends at your proxy or mesh. A custom `BaseAuth` can read the client certificate identity from a header the proxy sets. Trust that header only when the API is reachable through the proxy alone. |
 | App to Postgres | `sslmode`, `sslrootcert`, `sslcert` and `sslkey` in the DSN, or your own asyncpg pool (`PgCheckpointer(pg_pool=...)`). |
 | App to Redis | A `rediss://` URL with certificate options in `redis_pool_config`, or your own pool (`redis_pool=...`). |
-| App to LLM (OpenAI, Anthropic) | `http_client=` on the `Agent` passes straight through to the provider SDK. |
-| App to LLM (Google) | The Google client takes `base_url` but no HTTP client. Use mesh mTLS for this hop. |
+| App to LLM (OpenAI, Anthropic, Google) | `http_client=` on the `Agent` passes straight through to the provider SDK, including Gemini on the Developer API and Vertex AI. |
 | App to MCP | `ToolNode(client=...)` takes your own fastmcp client and transport. |
 
 Postgres and Redis for `PgCheckpointer`:
@@ -355,7 +354,7 @@ agent = Agent(
 )
 ```
 
-The `http_client` type must match the installed SDK: the Anthropic SDK (1.0 and later) and openai 3.x take an `httpx2.AsyncClient`, openai 1.x and 2.x take an `httpx.AsyncClient`. The wrong one fails at request time.
+The `http_client` type must match the installed SDK: the Anthropic SDK (1.0 and later) and openai 3.x take an `httpx2.AsyncClient`, openai 1.x and 2.x take an `httpx.AsyncClient`, and google-genai 1.x and 2.x take an `httpx.AsyncClient` (3.x takes either). The wrong one fails at request time.
 
 ## PII is your job
 

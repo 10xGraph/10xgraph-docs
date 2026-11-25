@@ -72,6 +72,7 @@ def __init__(
 | `model_config_key` | `str` | `"model"` | The run config key that names the entry for a run. Used only with `model_registry`. |
 | `use_vertex_ai` | `bool` | `False` | (via kwargs) Google provider only. Route Gemini through Vertex AI instead of Gemini API. Defaults to true when `GOOGLE_GENAI_USE_VERTEXAI=true`. For Claude it selects the Vertex backend. |
 | `base_url` | `str \| None` | `None` | (via kwargs) Base URL for OpenAI-compatible APIs (Ollama, vLLM, OpenRouter, DeepSeek, etc.). |
+| `http_client` | `httpx2.AsyncClient \| httpx.AsyncClient \| None` | `None` | (via kwargs) Your own async HTTP client for the provider SDK, for example one with a client certificate (mTLS) or a proxy. OpenAI, Anthropic and Google (Gemini API and Vertex AI). Use `httpx2.AsyncClient` for openai 3.x and anthropic 1.x, `httpx.AsyncClient` for openai 1.x/2.x and google-genai 1.x/2.x (google-genai 3.x takes either). A fallback on the same provider reuses it. A `(model, provider)` fallback on another provider raises `ValueError`: use a `model_registry` entry with its own `http_client`. See [Use mutual TLS](/docs/security/use-mutual-tls#api-to-the-llm). |
 | `**kwargs` | any | none | Provider-specific settings, named as the provider SDK names them (`temperature`, `max_tokens`, `top_p`, `top_k`, `service_tier`, `cache_control`, `seed`, ...). Forwarded only when the SDK being called defines them. See [Provider-specific settings](#provider-specific-settings). |
 
 ### Provider-specific settings

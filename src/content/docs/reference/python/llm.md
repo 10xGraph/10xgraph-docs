@@ -176,10 +176,10 @@ Creates a native async SDK client for the given provider.
 |---|---|---|---|
 | `provider` | `str` | **required** | `"google"`, `"openai"`, or `"anthropic"`. Anything else raises `ValueError`. |
 | `use_vertex_ai` | `bool` | `False` | Google only. Builds a Vertex AI client from `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`. Has no effect on other providers. |
-| `base_url` | `str \| None` | `None` | OpenAI and Anthropic. Custom base URL, for example for OpenAI-compatible APIs such as Ollama or vLLM. Ignored for Google. |
+| `base_url` | `str \| None` | `None` | Custom base URL, for example for OpenAI-compatible APIs such as Ollama or vLLM. For Google it sets `HttpOptions.base_url`. |
 | `api_key` | `str \| None` | `None` | Explicit API key. Falls back to the provider's environment variable when omitted. |
 | `anthropic_backend` | `str \| None` | `None` | Anthropic only. Backend selector: `None` (Claude API), `"vertex"` (Anthropic on Vertex AI), or `"bedrock"` (Anthropic on AWS Bedrock). |
-| `**extra_kwargs` | any | none | Forwarded to the OpenAI or Anthropic SDK constructor. Only recognised constructor keys (for example `timeout`, `max_retries`, `default_headers`, `http_client`) are passed through; others are ignored. The Google client ignores them. |
+| `**extra_kwargs` | any | none | Forwarded to the OpenAI or Anthropic SDK constructor. Only recognised constructor keys (for example `timeout`, `max_retries`, `default_headers`, `http_client`) are passed through; others are ignored. The Google client reads only `timeout` and `http_client`. `http_client` is an `httpx2.AsyncClient` for openai 3.x and anthropic 1.x, an `httpx.AsyncClient` for google-genai 1.x and 2.x (3.x takes either). See [Use mutual TLS](/docs/security/use-mutual-tls#api-to-the-llm). |
 
 **Raises:** `ImportError` when the provider SDK is not installed, `ValueError` for an unsupported provider, an unsupported `anthropic_backend`, or missing required configuration (for example `GOOGLE_CLOUD_PROJECT` for Vertex AI, or no Gemini key for Google).
 

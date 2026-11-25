@@ -76,7 +76,7 @@ The server cannot do these for you.
 - **Tool-level authorization.** Routes are guarded by role permissions. Tools receive the verified identity in `config` and check access themselves, for example with `can()`.
 - **Prompt injection.** `register_default_validators` adds the prompt injection and message content validators (`10xgraph init --mode full` registers them), and an `after_invoke` callback checks tool, MCP and RAG output. See [Protect against prompt injection](/docs/guides/protect-against-prompt-injection).
 - **Backups and retention.** Back up PostgreSQL and decide how long threads live.
-- **TLS and mTLS.** They end at your proxy or mesh. Terminate them at your load balancer or ingress.
+- **TLS and mTLS.** They end at your proxy or mesh. Terminate them at your load balancer or ingress. See [Use mutual TLS](/docs/security/use-mutual-tls) for each link.
 
 The [limits page](/docs/production/limits) explains each of these and what to do.
 

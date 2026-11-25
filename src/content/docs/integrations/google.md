@@ -386,6 +386,10 @@ Gemini returns its error as usual.
 | kwarg | Type | Notes |
 |---
 
+## Client certificate or proxy
+
+Pass `http_client=` to `Agent(...)` to send Gemini requests through your own async httpx client, for example one with a client certificate (mTLS). It works on the Gemini Developer API and on Vertex AI. Use an `httpx.AsyncClient` with google-genai 1.x and 2.x. Version 3.x also takes an `httpx2.AsyncClient`. Another type raises a validation error when the Agent is built. `base_url` and an explicit `api_key` are honoured too. See [Use mutual TLS](/docs/security/use-mutual-tls#api-to-the-llm).
+
 ## Environment Variables
 
 | Variable | Required | Description |

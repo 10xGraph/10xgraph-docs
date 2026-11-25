@@ -350,7 +350,7 @@ value, or a name means something different on another provider (`service_tier`,
 
 Keys in `CALL_EXCLUDED_KWARGS` (`organization`, `project`, `timeout`, `max_retries`,
 `default_headers`, `default_query`, `http_client`, `api_key`, `base_url`) are stripped
-before the request is sent and must be passed to the client constructor instead.
+before the request is sent and must be passed to the client constructor instead. `http_client` must be an `httpx2.AsyncClient` with openai 3.x and an `httpx.AsyncClient` with openai 1.x and 2.x. See [Use mutual TLS](/docs/security/use-mutual-tls#api-to-the-llm).
 
 ---
 

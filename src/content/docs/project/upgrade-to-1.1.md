@@ -148,6 +148,11 @@ These work differently after the upgrade, with no code change. Check each one ag
   on its own. During a rolling deploy, 1.0 processes keep working but do not hide expired rows
   and do not write `origin`. See [Schema version 3](/docs/guides/use-pgvector-store#schema-version-3).
 
+- **A cross-provider fallback with `http_client` raises `ValueError`.** An Agent with `http_client`
+  refuses a `(model, provider)` fallback on another provider when it is built. That fallback was
+  handed the primary's client, built for another SDK and host, so it failed at call time or, with
+  Google, left without mTLS. A fallback on the same provider reuses the client. Give a fallback on
+  another provider its own client with a `model_registry` entry and name it in `fallback_models`.
 - **`SummaryContextManager.trim_context` is async.** It was a sync method wrapping `asyncio.run`;
   it is now `async def`, so call it with `await`. `atrim_context` still works but is deprecated
   (see Deprecations). `MessageContextManager.trim_context` stays sync.
@@ -267,6 +272,13 @@ cache store (`InjectQ.get_instance().get(BaseCacheStore)`) from your own code.
   reach `tenant` now works on Qdrant. Points written before a column was declared stay invisible
   to reach `own` and `tenant` until you backfill them.
 - **`base_url`** on `OpenAIEmbedding` and `GoogleEmbedding` for a custom endpoint.
+- **Gemini `http_client`.** `Agent(provider="google", http_client=...)` sends Gemini requests
+  through your own async httpx client, on the Gemini Developer API and on Vertex AI, so a client
+  certificate (mTLS) or a proxy works as for OpenAI and Anthropic. It must be an
+  `httpx.AsyncClient` with google-genai 1.x and 2.x; 3.x also takes an `httpx2.AsyncClient`. See
+  [Use mutual TLS](/docs/security/use-mutual-tls).
+- **`Agent(provider="google", api_key=...)` is honoured.** The Google client ignored it and read
+  only `GEMINI_API_KEY` and `GOOGLE_API_KEY`.
 - **`MessageNotFoundError`** from `tenxgraph.core.exceptions`.
 - **`BaseCheckpointer.declared_id_type`** is what a checkpointer declares for the id type check.
 - **Partial state updates.** A node can return a `dict` or `Command(update={...})`: each key
