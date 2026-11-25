@@ -369,7 +369,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
 
 ## Run it in production
 
-Tools that reach outside the process (`fetch_url`, file tools) are the ones to review before you expose an agent. Fix the file root in code with `create_file_tools`, and read what the server does and does not guard in the [Security model](/docs/production/security-model) and [What 10xGraph does not protect](/docs/production/limits).
+Tools that reach outside the process (`fetch_url`, file tools) are the ones to review before you expose an agent. Fix the file root in code with `create_file_tools`, and read what the server does and does not guard in the [Security model](/docs/production/security-model) and [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 
 ## Related pages
 

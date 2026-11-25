@@ -116,5 +116,5 @@ Call `POST /v1/graph/invoke` with `"response_granularity": "full"`. The first re
 
 - A person approves the exact amount before the side effect, and the approval is validated against a schema. See [Interrupts](/docs/concepts/interrupts).
 - A finished tool call is not run again on replay. See [Replay-safe tools](/docs/concepts/replay-safe-tools) and [Scaling and reliability](/docs/production/scaling).
-- The guarantee has stated limits, so the payment call also sends an idempotency key. See [What 10xGraph does not protect](/docs/production/limits).
+- The guarantee has stated limits, so the payment call also sends an idempotency key. See [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 - Use `PgCheckpointer` in production so the pause and the ledger survive a restart. See [Set up checkpointing](/docs/guides/set-up-checkpointing).

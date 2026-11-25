@@ -41,7 +41,7 @@ faq:
 
 For what the server enforces by default, see the [security model](/docs/production/security-model); for the request path, see [architecture](/docs/production/architecture).
 
-What the server does not do for you (auth off, secrets, TLS, backups, prompt injection) is listed in [What 10xGraph does not protect](/docs/production/limits).
+What the server does not do for you (auth off, secrets, TLS, backups, prompt injection) is listed in [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 
 ## The path to production
 

@@ -130,5 +130,5 @@ The identity must come from the token. Never take `user_id` from the request bod
 
 - Per-user thread isolation needs no code in the agent. See [Auth](/docs/server/auth) and [Security model](/docs/production/security-model).
 - Refusals happen before any model call, so a probing user costs you nothing. See [Architecture](/docs/production/architecture).
-- Honest limit: isolation is by owner id. It does not stop a user from sending prompts that try to make the model reveal data you gave it in the system prompt or through tools. See [What 10xGraph does not protect](/docs/production/limits).
+- Honest limit: isolation is by owner id. It does not stop a user from sending prompts that try to make the model reveal data you gave it in the system prompt or through tools. See [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 - The same behaviour applies to a resume: only the owner can answer a paused thread. See [Human approval over the API](/docs/examples/human-approval-over-api).

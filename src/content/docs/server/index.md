@@ -26,7 +26,7 @@ Running your graph behind `10xgraph-api` gives you these guarantees without code
 | Deploy files | `10xgraph build` writes a non-root Dockerfile and optional Compose and Kubernetes files. | [Deploy](/docs/server/deploy) |
 | Observability | Metrics (off until you configure `metrics`), JSON logs with `LOG_FORMAT=json`, an optional audit log, Sentry and OpenTelemetry hooks, and per-thread run traces in development. | [Observability](/docs/server/observability) |
 
-For the reasoning behind these and the limits of what the server protects, read [Production readiness](/docs/production), the [security model](/docs/production/security-model) and [what 10xGraph does not protect](/docs/production/limits).
+For the reasoning behind these and the limits of what the server protects, read [Production readiness](/docs/production), the [security model](/docs/production/security-model) and [what 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 
 ## API routes by function
 

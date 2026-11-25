@@ -482,7 +482,7 @@ result = await app.ainvoke(
 
 ## Run it in production
 
-Validators run inside your graph, so they apply to every request the server forwards. The server adds the boundary around them: authentication, request size limits and rate limiting, none of which a validator replaces. Input validators cover incoming messages and `after_invoke` callbacks cover tool, MCP and RAG output. See the [Security model](/docs/production/security-model) and [What 10xGraph does not protect](/docs/production/limits).
+Validators run inside your graph, so they apply to every request the server forwards. The server adds the boundary around them: authentication, request size limits and rate limiting, none of which a validator replaces. Input validators cover incoming messages and `after_invoke` callbacks cover tool, MCP and RAG output. See the [Security model](/docs/production/security-model) and [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 
 ## Related pages
 

@@ -605,7 +605,7 @@ Use evaluation sets to measure retrieval and generation quality. See `/docs/refe
 
 ## Run it in production
 
-Retrieved documents are untrusted input, and the server cannot tell a poisoned passage from a real one. For multi-tenant data, build the store per user with `store_config_builder` so one tenant's search never reads another's. See the [Security model](/docs/production/security-model) and [What 10xGraph does not protect](/docs/production/limits).
+Retrieved documents are untrusted input, and the server cannot tell a poisoned passage from a real one. For multi-tenant data, build the store per user with `store_config_builder` so one tenant's search never reads another's. See the [Security model](/docs/production/security-model) and [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 
 ## Related pages
 

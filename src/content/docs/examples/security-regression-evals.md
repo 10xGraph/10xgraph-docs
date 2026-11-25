@@ -166,5 +166,5 @@ Both were found while building this page, against the code in the repository at 
 
 - The agent's own tool allow-list is part of its tested behaviour, so a prompt or model change that breaks it fails the build. See [Test before production](/docs/testing/before-production) and [Run evaluations](/docs/testing/run-evals).
 - At run time the server also enforces what the model may do: tools the node does not have return not-found, handoffs must be registered, and a resume must match its interrupt. These evals check the model; the server checks the rest. See [Security model](/docs/production/security-model).
-- No test makes an agent injection-proof. A passing run says these inputs were handled, not that every input will be. See [What 10xGraph does not protect](/docs/production/limits).
+- No test makes an agent injection-proof. A passing run says these inputs were handled, not that every input will be. See [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 - For more criteria and case formats, see [Eval sets](/docs/testing/eval-sets) and [Criteria](/docs/testing/criteria).

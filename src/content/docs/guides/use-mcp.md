@@ -457,7 +457,7 @@ print(result["messages"][-1].content)
 
 ## Run it in production
 
-MCP servers run with whatever access you give them, and a tool name that clashes with another tool raises `ValueError` at setup. Pin and review the servers your graph connects to before exposing the agent. See the [Security model](/docs/production/security-model) and [What 10xGraph does not protect](/docs/production/limits).
+MCP servers run with whatever access you give them, and a tool name that clashes with another tool raises `ValueError` at setup. Pin and review the servers your graph connects to before exposing the agent. See the [Security model](/docs/production/security-model) and [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 
 ## Next steps
 

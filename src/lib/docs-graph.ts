@@ -35,7 +35,7 @@ const ROUTES: [id: string, name: string, blurb: string, steps: string[]][] = [
     'get-started/tutorial/mental-model', 'get-started/tutorial/build-a-graph', 'concepts/state-graph',
     'concepts/agents-and-tools', 'concepts/state-and-messages', 'concepts/serving-agents']],
   ['route-production', 'To production', 'What runs around your code, how to scale it, ship it and watch it.', [
-    'production', 'production/architecture', 'production/scaling', 'production/limits', 'server/production-checklist',
+    'production', 'production/architecture', 'production/scaling', 'production/security-model', 'server/production-checklist',
     'server/configure', 'deploy', 'server/kubernetes', 'observability', 'guides/metrics-prometheus-grafana', 'guides/graceful-shutdown']],
   ['route-security', 'Security', 'Auth, roles, tenant isolation, rate limits, validators and the audit log.', [
     'get-started/security-in-five-minutes', 'security', 'production/security-model', 'server/auth', 'concepts/tenancy-and-access',

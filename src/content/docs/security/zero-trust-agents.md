@@ -390,7 +390,7 @@ The table maps the controls of a typical zero-trust guide for AI agents to 10xGr
 | Sandboxed code execution | Connects to your sandbox through MCP or a provider tool | Run and isolate the sandbox |
 | Memory poisoning (provenance and expiry) | Each memory records its `origin`, optional `expires_at`, opt-in trusted-only retrieval and `adelete_expired()`. [Memory origin and expiry](/docs/concepts/memory-and-store#memory-origin-and-expiry) | Turn on trusted-only retrieval and a TTL, schedule the cleanup, review what the model wrote |
 
-For the SOC 2 and ISO 27001 view, see [Control mapping](/docs/production/control-mapping). For what the framework leaves out, see [What 10xGraph does not protect](/docs/production/limits).
+For the SOC 2 and ISO 27001 view, see [Control mapping](/docs/production/control-mapping). For what the framework leaves out, see [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 
 ## Related pages
 

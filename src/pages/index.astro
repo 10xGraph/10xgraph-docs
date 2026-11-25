@@ -332,7 +332,7 @@ agent = ReactAgent(
         <div class="tc skip"><code>charge_card</code><span>skipped · in ledger</span></div>
         <div class="tc ran"><code>send_receipt</code><span>ran · recorded</span></div>
       </div>
-      <div class="replay-foot">Requires a checkpointer. Ledger entries are keyed by the assistant message that issued the call plus the tool call id. A crash before a tool returns, or in the short gap before its record is written, can repeat that tool, so send an idempotency key derived from stable inputs to payment providers. <a href="/docs/production/limits">Limits</a></div>
+      <div class="replay-foot">Requires a checkpointer. Ledger entries are keyed by the assistant message that issued the call plus the tool call id. A crash before a tool returns, or in the short gap before its record is written, can repeat that tool, so send an idempotency key derived from stable inputs to payment providers. <a href="/docs/production/security-model#what-10xgraph-does-not-protect">Limits</a></div>
     </div>
         <ul class="pts c1">
       <li class="item"><h4>Tool ledger</h4><p>Each completed tool call is recorded as soon as it returns. Keys include the issuing message, so models that reuse ids like <code>call_1</code> never collide across turns.</p></li>

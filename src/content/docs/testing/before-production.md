@@ -58,7 +58,7 @@ Read the startup log. Examples of what the server refuses or changes:
 - Debug mode is off and the interactive docs paths are turned off.
 - With auth on, a setup whose checkpointer cannot resolve thread owners does not boot.
 
-This check does not catch `auth: null`. A server with no auth starts open even in production, and nothing refuses it. Confirm that auth is configured with the next step. See the [production checklist](/docs/server/production-checklist) and [what 10xGraph does not protect](/docs/production/limits).
+This check does not catch `auth: null`. A server with no auth starts open even in production, and nothing refuses it. Confirm that auth is configured with the next step. See the [production checklist](/docs/server/production-checklist) and [what 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect).
 
 ## 5. Smoke-test the running server
 

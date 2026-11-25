@@ -100,4 +100,4 @@ try {
 
 - [Production readiness](/docs/production): what you get when you serve with `10xgraph-api`.
 - [Production checklist](/docs/server/production-checklist): server-side settings to confirm before launch.
-- [What 10xGraph does not protect](/docs/production/limits): including running with `auth: null`.
+- [What 10xGraph does not protect](/docs/production/security-model#what-10xgraph-does-not-protect): including running with `auth: null`.

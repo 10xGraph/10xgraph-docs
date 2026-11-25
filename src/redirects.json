@@ -97,6 +97,7 @@
   "/docs/prebuild/tools/handoff": "/docs/guides/handoff-between-agents",
   "/docs/prebuild/tools/memory-tools": "/docs/guides/prebuilt/memory-tools",
   "/docs/prebuild/tools/web-tools": "/docs/guides/prebuilt/web-tools",
+  "/docs/production/limits": "/docs/production/security-model#what-10xgraph-does-not-protect",
   "/docs/providers": "/docs/integrations/models",
   "/docs/providers/anthropic": "/docs/integrations/anthropic",
   "/docs/providers/google": "/docs/integrations/google",
