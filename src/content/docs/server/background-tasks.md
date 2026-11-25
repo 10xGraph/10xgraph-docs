@@ -15,7 +15,7 @@ faq:
   - question: Can I schedule in my time zone?
     answer: "No. Schedules run in UTC only. A cron expression is always read as UTC, and a one-time `at` without an offset is UTC. Convert your local time to UTC before you send it."
   - question: Why does cancel not stop my running task?
-    answer: "Cancel is a signal. A queued task is not run, but a running task stops only when it checks `await ctx.cancelled()` and returns."
+    answer: "Cancel is a signal. A queued task is not run, but a running task stops only when it checks `await ctx.cancelled()` and returns. It then ends as `cancelled`."
 ---
 
 10xGraph runs durable background work on [TaskIQ](https://taskiq-python.github.io/). You write tasks with `@broker.task`, the API sends them, a `10xgraph worker` process runs them, and a `10xgraph scheduler` process fires scheduled ones. The worker loads your graph, checkpointer, store and cache store the same way the API does, so a task can inject and run the graph.
@@ -94,7 +94,7 @@ Tasks are TaskIQ tasks, so everything in TaskIQ works. What 10xGraph adds:
 - A `config` parameter gets the run config (`user_id`, `user` and `task_id`) only if you declare it. `user` is the caller's `Identity` as a dict. Pass it to `graph.ainvoke(..., config=config)` to run as the caller. Without a label it is `{"task_id": ...}` only.
 - Inject values with `InjectTaskiq`. Plain `Inject[...]` does not work in tasks.
 - Progress is TaskIQ's `ProgressTracker`.
-- `TaskCancelled` is the error a task cancelled before it started returns to the caller.
+- `TaskCancelled` is the error a task cancelled before it started returns to the caller. A running task can raise it to end as `cancelled` with an error result, or just return after `ctx.cancelled()`: it ends as `cancelled` with its return value.
 
 An argument typed as a pydantic model is not guaranteed to arrive as one. TaskIQ parses each argument against its type hint, and when parsing fails it logs a warning and passes the raw value (a dict) to your task, which then fails later, for example with `AttributeError`. Tip: call `Model.model_validate(arg)` at the top of the task to fail fast with a clear error.
 
@@ -184,7 +184,7 @@ Records saved by an older version still read, change and cancel, even if they wo
 
 ### What runs at start
 
-`10xgraph scheduler` runs nothing at start. An `every` schedule first runs one interval after the scheduler starts, and a cron schedule does not fire twice when the scheduler restarts inside its minute. A daily `every` job therefore does not rerun at each deploy. A schedule that you create while the scheduler is running runs when the scheduler first sees it. To run something at start, call the task once yourself.
+`10xgraph scheduler` runs nothing at start. An `every` schedule first runs one interval after the scheduler starts, plus up to the update interval (10 s by default, `--update-interval`) while the scheduler reads its schedules (a scheduler that waits as a standby sends nothing and keeps the run due, so it runs when the lease is taken), and a cron schedule does not fire twice when the scheduler restarts inside its minute. A daily `every` job therefore does not rerun at each deploy. A schedule that you create while the scheduler is running runs when the scheduler first sees it. To run something at start, call the task once yourself.
 
 ## Start a task over HTTP
 
@@ -303,7 +303,7 @@ With the `metrics` block in `10xgraph.json` enabled, the worker exports these me
 
 ## Cancel and progress
 
-`POST /v1/tasks/{id}/cancel` sets a flag. A queued task is then not run and ends as `cancelled`. A running task is not killed: it stops when it checks `await ctx.cancelled()` and returns, and then ends as `success` with whatever it returned. Check it between steps of long work. A task that is cancelled before it starts does not set up its dependencies.
+`POST /v1/tasks/{id}/cancel` sets a flag. A queued task is then not run and ends as `cancelled`. A running task is not killed: it stops when it checks `await ctx.cancelled()` and returns, and then ends as `cancelled` with whatever it returned as its result. Check it between steps of long work. A task that is cancelled before it starts does not set up its dependencies.
 
 Progress is what the task passes to `tracker.set_progress(state, meta)`. `GET /v1/tasks/{id}` shows it under `progress`, for example `{"state": "STARTED", "meta": {"step": 2}}`.
 
@@ -386,7 +386,7 @@ If you already set `REDIS_KEY_PREFIX` before this change, the stream, results, s
 2. Deploy the new version.
 3. Rename each existing HTTP schedule key (`schedule:cron`, `schedule:interval`, `schedule:time:*` and `schedule:data:*`) to `<prefix>:schedule:...` with Redis `RENAME`, or cancel the schedules and create them again.
 
-Results of runs that finished before the upgrade are no longer shown. Without a prefix, nothing changes. The core graph's own cache keys have their own `redis_key_prefix` option (see [Production checklist](/docs/server/production-checklist)).
+Results of runs that finished before the upgrade are no longer shown. Without a prefix, nothing changes. The core checkpointer's keys (state cache, stop requests, active-run markers) are not covered by `REDIS_KEY_PREFIX`: build `PgCheckpointer(..., redis_key_prefix="P:")` with the same value (see [Checkpointers](/docs/reference/python/checkpointers)). The server logs a WARNING at boot when the two differ.
 
 ### When Redis is down
 

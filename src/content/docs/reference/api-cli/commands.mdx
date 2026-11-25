@@ -159,7 +159,7 @@ Other options are passed to TaskIQ unchanged. These defaults are added unless yo
 | `worker` | `--wait-tasks-timeout` | `600` | Seconds to wait for running tasks after SIGTERM |
 | `worker` | `--shutdown-timeout` | `60` | Seconds for the shutdown hook (graph close, telemetry flush) |
 | `scheduler` | `--update-interval` | `10` | Seconds between reads of the schedule sources |
-| `scheduler` | `--skip-first-run` | on | Nothing runs at start; an `every` schedule first runs one interval later |
+| `scheduler` | `--skip-first-run` | on | Nothing runs at start; an `every` schedule first runs one interval later, plus up to the update interval |
 | `scheduler` | `--send-timeout` | `30` | A send that takes longer is logged and skipped |
 
 `worker` refuses `--use-process-pool`. Build files give the worker a 720 second kill grace (both waits plus 60 seconds). See [Run background tasks with a worker](/docs/server/background-tasks).

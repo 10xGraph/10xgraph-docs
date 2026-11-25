@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 40
 label: Tools
-updated: "2026-10-29"
+updated: "2026-11-26"
 ---
 
 ToolNode is a unified registry and executor for Python functions and MCP tools. It automatically generates JSON schemas from type annotations, executes tool calls in parallel, handles errors, and publishes events. Pair it with `Agent` to give LLMs access to callable tools, or use the utilities and decorators to define, inspect, and manage tool metadata.
@@ -368,9 +368,7 @@ else:
 
 ## Per-tool access control
 
-Permissions guard API routes. Inside a tool you have the run config, the authenticated identity and the authorization helpers, so you decide what each tool may do. A tool receives these by naming the parameter, and they are not shown to the model:
-
-`tool_call_id`, `state`, `config`, `emit`, `generated_id`, `context_manager`, `publisher`, `checkpointer`, `store`, `task_manager`.
+Permissions guard API routes. Inside a tool you have the run config, the authenticated identity and the authorization helpers, so you decide what each tool may do. A tool receives `tool_call_id`, `state`, `config`, `emit` and `credential` by naming the parameter, and they are not shown to the model. Services such as the store come from `Inject[...]` defaults; a plain parameter named like a service is hidden but not filled. See [Use dependency injection](/docs/guides/use-dependency-injection).
 
 ```python
 from tenxgraph.core.authz import can, get_identity

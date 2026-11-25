@@ -6,7 +6,7 @@ section: Concepts
 order: 40
 group: "Foundations"
 label: Agents and Tools
-updated: "2026-11-25"
+updated: "2026-11-26"
 ---
 
 `Agent` and `ToolNode` are the two built-in node types that handle language model interaction. `Agent` sends the current state to a language model and appends its response. `ToolNode` executes the tool calls the model requested and runs them in parallel. Together they form the core of tool-using agents.
@@ -89,7 +89,7 @@ tool_node.add_tool(search_db)
 
 ### Injectable parameters
 
-Tool functions can declare special parameters that `ToolNode` injects automatically. These are invisible to the model and do not appear in the tool schema:
+A tool function receives only these parameters by name. They are invisible to the model and do not appear in the tool schema:
 
 | Parameter | Type | What is injected |
 |---|---|---|
@@ -97,15 +97,9 @@ Tool functions can declare special parameters that `ToolNode` injects automatica
 | `tool_call_id` | `str \| None` | ID of this specific tool call |
 | `config` | `dict` | Current execution config (includes `thread_id`, `user_id`, etc.) |
 | `emit` | stream emitter | Emit custom stream chunks |
-| `generated_id` | `str` | A newly generated ID from the graph's ID generator |
-| `context_manager` | context manager | The configured message context manager |
-| `publisher` | `BasePublisher` | The graph's event publisher |
-| `checkpointer` | `BaseCheckpointer` | The configured checkpointer |
-| `store` | `BaseStore` | The configured memory store |
-| `task_manager` | `BackgroundTaskManager` | Fire-and-forget task manager |
 | `credential` | `UserCredential \| None` | The caller's credential from `config["credential"]` |
 
-The full set is `INJECTABLE_PARAMS` in `tenxgraph/core/graph/tool_node/constants.py`. Services can also be injected with `Inject[...]` defaults; see [Dependency injection](/docs/concepts/dependency-injection).
+Services (the store, checkpointer, publisher, context manager, task manager) come from the container: declare `store: BaseStore = Inject[BaseStore]` and resolve it with `fresh()`; see [Dependency injection](/docs/concepts/dependency-injection). A plain parameter named `store` or `checkpointer` is hidden from the model but not filled, so the call fails at run time.
 
 ```python
 from tenxgraph.core.state import AgentState

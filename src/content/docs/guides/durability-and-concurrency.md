@@ -24,7 +24,7 @@ This is what makes it safe to run several server instances or load-balanced work
 
 <aside class="callout callout-warning" role="warning"><p class="callout-title">Retrying on conflict</p>
 
-If you catch `StaleStateError`, you must reload the thread and retry. Retrying the same request with the same stale config will fail again. Best practice is to re-fetch the thread state and apply the user's request against the fresh state:
+You do not reload the thread by hand: a retry reads the latest state, because the version is tracked on an internal copy of `config`, never on the dict you pass. The failed attempt has already saved the user message to the thread (without a reply). Messages are saved by `message_id`, so build the input once and reuse the same `Message` on every retry. A new `Message` per retry (a new id) stores the user message twice. Over the API the server gives every client message a new id, so a client that retries after a conflict stores its message twice. The server's [one run per thread](/docs/server/invoke-and-stream#one-run-per-thread) lock keeps two API runs off one thread, so there the conflict only comes from a writer outside the API.
 
 ```python
 import asyncio
@@ -33,6 +33,7 @@ from tenxgraph.core.exceptions import StaleStateError
 
 
 async def safe_invoke(app, input_data, thread_id):
+    # input_data is built once by the caller, so every attempt sends the same message ids.
     config = {"thread_id": thread_id}
     max_retries = 3
     for attempt in range(max_retries):

@@ -160,21 +160,24 @@ app = graph.compile(
 )
 ```
 
-Inside your nodes and tools, access the store via dependency injection:
+Inside your nodes and tools, get the store with an `Inject[BaseStore]` default:
 
 ```python
+from injectq import Inject
 from tenxgraph.storage.store import BaseStore
 from tenxgraph.utils import tool
+from tenxgraph.utils.injection import fresh
 
 @tool
-async def my_tool(config: dict, store: BaseStore):
+async def my_tool(config: dict, store: BaseStore | None = Inject[BaseStore]):
     """Access memories within a tool."""
+    store = fresh(store)
     results = await store.asearch(config, "user preferences", limit=3)
     for result in results:
         print(result.content)
 ```
 
-The `store` and `config` parameters are injected by name and hidden from the model; no manual wiring needed. `asearch` takes the run `config` first (it carries `user_id`), then the query.
+`config` is filled by name. `store` is filled from the container, because only `state`, `config`, `tool_call_id`, `emit` and `credential` are filled by name. A plain `store` parameter is hidden from the model but not filled, so the call fails. Both are hidden from the model. `asearch` takes the run `config` first (it carries `user_id`), then the query.
 
 Every store call needs a non-empty `user_id` in `config`. A missing or blank one raises `ValueError`. Reads by an identity with reach `all` skip the user filter; writes and `aforget_memory` never do. For shared data with no user, use `system_user_id(name)` from `tenxgraph.storage`. See the [Memory stores reference](/docs/reference/python/memory-stores#the-user_id-rule-and-system_user_id).
 

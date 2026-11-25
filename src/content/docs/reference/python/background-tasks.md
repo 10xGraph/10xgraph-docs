@@ -5,7 +5,7 @@ section: Reference
 group: "Python library"
 order: 160
 label: Background Task Manager
-updated: "2026-10-08"
+updated: "2026-11-26"
 ---
 
 `BackgroundTaskManager` launches fire-and-forget async operations from inside a node without blocking the graph response. It tracks each task, applies an optional timeout, logs failures, caps the number of in-flight tasks, and cancels everything on shutdown. Use it for slow I/O such as webhook posts or telemetry flushes. For worked examples, see [Run background tasks](/docs/guides/run-background-tasks).
@@ -20,12 +20,14 @@ from tenxgraph.utils import BackgroundTaskManager
 
 ## Getting the instance
 
-`StateGraph` creates one `BackgroundTaskManager` and binds it in the dependency container, so you receive it by declaring a parameter annotated with the class in any node function:
+`StateGraph` creates one `BackgroundTaskManager` and binds it in the dependency container, so you receive it by declaring a parameter with an `Inject[BackgroundTaskManager]` default in any node function:
 
 ```python
 import asyncio
 
+from injectq import Inject
 from tenxgraph.utils.background_task_manager import BackgroundTaskManager
+from tenxgraph.utils.injection import fresh
 
 
 async def send_webhook(user_id: str | None) -> None:
@@ -36,8 +38,9 @@ async def send_webhook(user_id: str | None) -> None:
 async def my_node(
     state,
     config: dict,
-    task_manager: BackgroundTaskManager,  # injected by type annotation
+    task_manager: BackgroundTaskManager = Inject[BackgroundTaskManager],
 ):
+    task_manager = fresh(task_manager)
     # Fire and forget: the node returns without waiting for the webhook
     task_manager.create_task(
         send_webhook(config.get("user_id")),

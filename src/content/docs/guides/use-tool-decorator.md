@@ -111,7 +111,7 @@ admin_agent = Agent(
 
 ## Request runtime context with injected parameters
 
-Declare these optional parameters in your function signature to receive them at runtime. The `ToolNode` fills them automatically. They do **not** appear in the schema the LLM sees.
+A tool function receives only these parameters by name. They do **not** appear in the schema the LLM sees.
 
 | Parameter | Type | What it provides |
 |---|---|---|
@@ -119,12 +119,9 @@ Declare these optional parameters in your function signature to receive them at 
 | `state` | `AgentState` | Current graph state (read-only) |
 | `config` | `dict` | Run configuration: `user_id`, `thread_id`, `run_id` |
 | `emit` | `StreamEmitter` | Emit progress/error updates during streaming |
-| `generated_id` | `str` | Framework-generated identifier |
-| `context_manager` | `BaseContextManager` | Cross-node context operations |
-| `publisher` | `BasePublisher` | Publish events (logging, tracing) |
-| `checkpointer` | `BaseCheckpointer` | Access persisted state |
-| `store` | `BaseStore` | Access long-term memory |
-| `task_manager` | `BackgroundTaskManager` | Schedule background tasks |
+| `credential` | `UserCredential \| None` | The caller's credential from the run; see [Call services as the user](/docs/guides/call-services-as-the-user) |
+
+Everything else comes from the container through an `Inject[...]` default, such as `store: BaseStore = Inject[BaseStore]`. A plain parameter named `store`, `checkpointer`, `publisher`, `generated_id`, `context_manager` or `task_manager` is hidden from the model but not filled, so the call fails at run time. See [Use dependency injection](/docs/guides/use-dependency-injection).
 
 Example: access the calling user and current state, and emit progress:
 
@@ -151,6 +148,27 @@ def search_kb(
         emit.progress(f"Found {len(results)} results")
     
     return f"Results: {results}"
+```
+
+A service from the container, with `fresh()` to resolve it on each call:
+
+```python
+from injectq import Inject
+from tenxgraph.storage.store import BaseStore
+from tenxgraph.utils import tool
+from tenxgraph.utils.injection import fresh
+
+@tool(description="Recall what the user told us before.")
+async def recall(
+    query: str,
+    config: dict = None,  # filled by name
+    store: BaseStore | None = Inject[BaseStore],  # filled from the container
+) -> str:
+    store = fresh(store)  # None when no store was passed to compile()
+    if store is None:
+        return "No memory store is configured."
+    results = await store.asearch(config, query, limit=3)
+    return "; ".join(r.content for r in results)
 ```
 
 The `emit` parameter is only available during streaming (via `astream()` or `stream()`). During `invoke()` or `ainvoke()`, `emit` is `None`. Always check: `if emit: emit.progress(...)`.

@@ -40,8 +40,8 @@ from tenxgraph.utils.id_generator import (
 | `HexIDGenerator` | `STRING` | 32 hex characters | You want UUID-like randomness without hyphens. |
 | `ShortIDGenerator` | `STRING` | 8 alphanumeric characters | You want readable IDs for low volumes. |
 | `BigIntIDGenerator` | `BIGINT` | Nanosecond Unix time as an integer | You need time-ordered integers for a `bigint` column. |
-| `TimestampIDGenerator` | `INTEGER` | Microsecond Unix time as an integer | You need time-ordered integers that are shorter. |
-| `IntIDGenerator` | `INTEGER` | Random integer, 0 to 4,294,967,295 | You need compact IDs at very low volume. |
+| `TimestampIDGenerator` | `BIGINT` | Microsecond Unix time as an integer | You need time-ordered integers that are shorter. |
+| `IntIDGenerator` | `INTEGER` | Random integer, 0 to 2,147,483,647 (fits a signed 32-bit column) | You need compact IDs at very low volume. |
 
 ## `IDType`
 
@@ -182,14 +182,14 @@ graph = StateGraph(id_generator=TimestampIDGenerator())
 
 | Property | Value |
 |---|---|
-| `id_type` | `IDType.INTEGER` |
+| `id_type` | `IDType.BIGINT` |
 | `generate()` returns | `int` |
 
-The value exceeds 2^32, so it does not fit a 32-bit `integer` column. Use a `bigint` column.
+The value exceeds 2^31, so `PgCheckpointer` creates a 64-bit `bigint` column for it (1.1; before 1.1 it was declared `INTEGER` and could not be stored in Postgres).
 
 ### `IntIDGenerator`
 
-`IntIDGenerator` returns `secrets.randbits(32)`, a random integer from 0 to 4,294,967,295. Collisions become likely at moderate volume, so use it only for small, non-critical workloads.
+`IntIDGenerator` returns `secrets.randbits(31)`, a random integer from 0 to 2,147,483,647, so every id fits a signed 32-bit column. Collisions become likely at moderate volume, so use it only for small, non-critical workloads.
 
 ```python
 from tenxgraph import StateGraph

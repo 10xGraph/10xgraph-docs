@@ -15,24 +15,33 @@ faq:
 
 Bind a service in the InjectQ container and declare it as `param: Service = Inject[Service]` in a node or tool; the container fills it at call time. Why DI and how containers are scoped are in [Dependency injection](/docs/concepts/dependency-injection).
 
-## Built-in injectable parameters
+## What a tool or node receives
 
-Tool functions receive these parameters by name when they declare them. Node functions receive `state` and `config` by name; for anything else, declare an `Inject[Type]` default.
+A tool function receives only these parameters by name. They are hidden from the model's schema.
 
-| Parameter | Type | Purpose |
+| Parameter | Type | What it is |
 |---|---|---|
-| `tool_call_id` | `str` | Unique identifier for the current tool execution (tool functions only) |
-| `state` | `AgentState` | Current graph state for reading or modifying context (nodes and tools) |
-| `config` | `dict` | Execution configuration (thread_id, user_id, recursion_limit, etc.) (nodes and tools) |
-| `emit` | `StreamEmitter` | Publishes progress events during long operations (tool functions only) |
-| `generated_id` | `str` | A fresh ID generated on each call from the ID generator |
-| `checkpointer` | `BaseCheckpointer` | The checkpointer bound to the compiled graph |
-| `store` | `BaseStore` | The long-term memory store, if configured |
-| `publisher` | `BasePublisher` | The event publisher for the graph |
-| `context_manager` | `BaseContextManager` | Context manager for multi-node operations |
-| `task_manager` | `BackgroundTaskManager` | Background task manager for long-running work |
+| `tool_call_id` | `str` | Unique ID of this tool call |
+| `state` | `AgentState` | Current graph state |
+| `config` | `dict` | Run config: `thread_id`, `user_id`, `run_id` and more |
+| `emit` | `StreamEmitter` | Progress updates while streaming; `None` under `invoke()` |
+| `credential` | `UserCredential \| None` | The caller's credential from the run; see [Call services as the user](/docs/guides/call-services-as-the-user) |
 
-Additionally, after `compile()`, these bindings are available for dependency injection:
+A node function receives only `state` and `config` by name.
+
+Everything else comes from the container: declare `param: Service = Inject[Service]`. A plain parameter named `store`, `checkpointer`, `publisher`, `generated_id`, `context_manager` or `task_manager` is hidden from the model but not filled, so the call fails at run time. Declare it with an `Inject[...]` default instead.
+
+The graph binds these services, so you can request them by type:
+
+| Type | Purpose |
+|---|---|
+| `BaseCheckpointer` | The checkpointer bound to the compiled graph |
+| `BaseStore` | The long-term memory store, if configured |
+| `BasePublisher` | The event publisher for the graph, if configured |
+| `BaseContextManager` | The context manager, if configured |
+| `BackgroundTaskManager` | Background task manager for long-running work |
+
+After `compile()`, these bindings are also available:
 
 | Binding | Type | Purpose |
 |---|---|---|
@@ -43,7 +52,7 @@ Additionally, after `compile()`, these bindings are available for dependency inj
 | `BaseMediaStore` | `BaseMediaStore` | Media storage (if provided at compile time) |
 | `get_node(name)` | factory | Returns the node by name from the graph |
 | `get_entry_point_node()` | factory | Returns the entry-point node |
-| `generated_id` / `generated_id_type` | factory / `str` | Kept for code that injects them by key; core reads only `BaseIDGenerator` |
+| `"generated_id"` / `"generated_id_type"` | factory / `str` | Keys for `Inject["generated_id"]`; core reads only `BaseIDGenerator` |
 
 Add your own bindings before `compile()`.
 
@@ -104,28 +113,30 @@ def query_database(
 
 ## Step 3: Inject into a tool function
 
-Tool functions work the same way. Declare `tool_call_id`, `state`, `config`, and `emit` as plain parameters (they are filled by the runtime). Declare any other services with `Inject[Type]`:
+Tool functions work the same way. `tool_call_id`, `state`, `config` and `emit` are filled by name. Declare any service with an `Inject[Type]` default and resolve it with `fresh()`:
 
 ```python
 from injectq import Inject
 from tenxgraph.core.state import AgentState
+from tenxgraph.utils.injection import fresh
 
 def search_products(
     query: str,
     limit: int = 5,
-    # --- framework-provided parameters ---
+    # --- filled by name ---
     tool_call_id: str = "",
     state: AgentState = None,
     config: dict = None,
-    # --- DI-injected parameters ---
+    # --- filled from the container ---
     db: DatabaseClient = Inject[DatabaseClient],
 ) -> str:
     """Search for products in the database."""
+    db = fresh(db)
     results = db.query("SELECT * FROM products WHERE name LIKE $1 LIMIT $2", f"%{query}%", limit)
     return str(results)
 ```
 
-The LLM only sees `query` and `limit` in the tool schema. The framework-provided and DI-injected parameters are invisible to the model and resolved internally.
+The LLM only sees `query` and `limit` in the tool schema. A tool that declares `db: DatabaseClient` with no `Inject` default is not filled and fails at call time.
 
 ## Step 4: Create and use a scoped container
 

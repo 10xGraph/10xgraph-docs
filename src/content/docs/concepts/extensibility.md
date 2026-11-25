@@ -204,7 +204,7 @@ graph = StateGraph(state=MyState(), context_manager=PriorityContextManager())
 | `DefaultIDGenerator` | UUID v4 string (used when none is set) |
 | `UUIDGenerator` | Deprecated alias of `DefaultIDGenerator`, removed in 2.0 |
 | `BigIntIDGenerator` | Big integer |
-| `IntIDGenerator` | 32-bit random integer |
+| `IntIDGenerator` | Random integer that fits a signed 32-bit column |
 | `TimestampIDGenerator` | Integer of microseconds since the Unix epoch |
 | `HexIDGenerator` | Hex string |
 | `ShortIDGenerator` | 8-character alphanumeric string |
