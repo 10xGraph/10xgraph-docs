@@ -1,7 +1,7 @@
 ---
 title: Events and observability
 description: How 10xGraph emits structured events, publishes them to external systems, and exposes metrics and tracing for production monitoring.
-updated: "2026-11-25"
+updated: "2026-11-27"
 order: 190
 group: "Platform"
 section: Concepts
@@ -81,7 +81,7 @@ Event publishers receive these events. The name is in `metadata["event_name"]`. 
 | `run.completed` | The run finished without a pause or stop. | `data["messages"]`: the final messages. `metadata`: `time_taken`, `total_input_tokens`, `total_output_tokens`, `total_reasoning_tokens`, `total_tokens`, `step`, `current_node`, `total_messages`. | Yes | Empty |
 | `run.failed` | The run raised an error. Sent once. | `data["error"]`. `metadata`: `time_taken`, `step`, `current_node`. | Yes | Empty |
 | `run.interrupted` | The run paused: `interrupt_before`, `interrupt_after`, an `interrupt()` call or a client tool. | `data`: `interrupted_node`, `interrupt_type` (`"before"`, `"after"`, `"interrupt"` or `"remote_tool"`), and `interrupt` (id and value of the request) for `interrupt()`. | Yes | The interrupted node |
-| `run.stopped` | A stop request, or a cancelled run. | `data`: `interrupted_node`, `reason`. `metadata["interrupt_type"]` is `"stop"` or `"cancel"`. | Yes | Empty |
+| `run.stopped` | A stop request, or a cancelled run. A run cancelled after its last node finished is saved as completed and publishes no `run.stopped`. | `data`: `interrupted_node`, `reason`. `metadata["interrupt_type"]` is `"stop"` or `"cancel"`. | Yes | Empty |
 | `run.recovered` | A new run found a thread whose previous run died, and repaired it. Sent before the new run's `run.started`. | `data["dead_run_id"]`. | No | Empty |
 | `input.rejected` | An input validator refused the input, so the run never starts. | `data`: `error`, `rejected_count`. | No | Empty |
 

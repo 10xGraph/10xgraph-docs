@@ -5,7 +5,7 @@ section: "Data and state"
 group: "Threads and state"
 order: 20
 label: "Durability and concurrency"
-updated: "2026-11-26"
+updated: "2026-11-27"
 ---
 
 Several processes can advance the same thread. `PgCheckpointer` versions each thread's state so a stale writer fails instead of overwriting newer work, and saves after every step so a crash replays at most one node. This guide shows how to handle the conflict and tune the per-step save. Thread and user isolation and the state history limit are in [Set up checkpointing](/docs/guides/set-up-checkpointing); the tool ledger that stops a replayed tool from running twice is in [Replay-safe tools](/docs/concepts/replay-safe-tools).
@@ -24,7 +24,9 @@ This is what makes it safe to run several server instances or load-balanced work
 
 <aside class="callout callout-warning" role="warning"><p class="callout-title">Retrying on conflict</p>
 
-You do not reload the thread by hand: a retry reads the latest state, because the version is tracked on an internal copy of `config`, never on the dict you pass. The failed attempt has already saved the user message to the thread (without a reply). Messages are saved by `message_id`, so build the input once and reuse the same `Message` on every retry. A new `Message` per retry (a new id) stores the user message twice. Over the API the server gives every client message a new id, so a client that retries after a conflict stores its message twice. The server's [one run per thread](/docs/server/invoke-and-stream#one-run-per-thread) lock keeps two API runs off one thread, so there the conflict only comes from a writer outside the API.
+You do not reload the thread by hand: a retry reads the latest state, because the version is tracked on an internal copy of `config`, never on the dict you pass. The failed attempt has already saved the user message to the thread (without a reply). Messages are saved by `message_id`, so build the input once and reuse the same `Message` on every retry. A new `Message` per retry (a new id) stores the user message twice.
+
+Over the API a conflict answers `409` with `error` `state_conflict`. The server stores its own message ids, but it remembers the `message_id` you sent, so resend the same message with the same `message_id`: the run continues from where it stopped without saving the message again. The same works after a failed, cancelled or stopped run, or a server crash. Once the run completed, a resend gets `409` `MESSAGE_ALREADY_PROCESSED`. A message sent without a `message_id` (the TypeScript client sends none unless you set one) cannot be recognised and is stored twice. The server's [one run per thread](/docs/server/invoke-and-stream#one-run-per-thread) lock keeps two API runs off one thread, so there the conflict only comes from a writer outside the API.
 
 ```python
 import asyncio

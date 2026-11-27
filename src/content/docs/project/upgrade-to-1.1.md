@@ -6,7 +6,7 @@ description: What a 10xgraph 1.0 and 10xgraph-api 1.0 user must know before movi
 section: Project
 order: 19
 label: Upgrade to 1.1
-updated: "2026-11-26"
+updated: "2026-11-27"
 ---
 
 1.1 keeps the 1.0 public API (see [Stability](/docs/project/stability)). Nothing you call is
@@ -241,6 +241,13 @@ These work differently after the upgrade, with no code change. Check each one ag
   the shared container. An id from a path, body, WebSocket frame or AG-UI message is converted to
   the generator's type: `int` for Snowflake and the other integer generators (422 on a
   non-numeric value), `str` otherwise.
+- **A resent message is not stored twice.** Invoke, stream and the WebSocket keep the client's
+  `message_id` in `metadata["client_message_id"]` (the stored id is still the server's). A user
+  message whose id the thread already stores is a retry: if it is the latest user message and
+  its run did not finish (failed, `409 state_conflict`, cancelled, stopped, crashed), the run
+  continues from where it stopped without saving it again; if the run completed or the message is
+  older, the request gets `409` `MESSAGE_ALREADY_PROCESSED`; a thread paused for input gets `409`
+  (resume it instead).
 - **AG-UI message ids are server ids.** `POST /v1/ag-ui` no longer keeps the client's message
   ids. The client's id is stored in `metadata["client_message_id"]`, and a retry that resends it
   is not stored twice.

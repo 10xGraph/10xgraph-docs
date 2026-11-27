@@ -5,10 +5,10 @@ group: "Errors"
 section: Reference
 order: 570
 label: Error Codes
-updated: "2026-11-21"
+updated: "2026-11-27"
 faq:
   - q: "Which 10xGraph errors can I retry?"
-    a: "TransientStorageError (STORAGE_TRANSIENT_000) is retryable with backoff. StaleStateError (STORAGE_CONFLICT_000) is retryable after you reload the latest state. NodeTimeoutError is sometimes retryable, depending on whether the hang was transient."
+    a: "TransientStorageError (STORAGE_TRANSIENT_000) is retryable with backoff. StaleStateError (STORAGE_CONFLICT_000) is retryable: send the same message again, and the retry reads the latest state. NodeTimeoutError is sometimes retryable, depending on whether the hang was transient."
   - q: "Do all 10xGraph exceptions have an error code?"
     a: "No. GraphError, NodeError, GraphRecursionError, NodeTimeoutError, the storage errors and MetricsError carry an error_code. GraphStopRequested, UnsupportedMediaInputError and ValidationError do not."
   - q: "What HTTP status does the API server return for a 10xGraph error?"
@@ -93,7 +93,7 @@ Use this table to find an exception by its code prefix. Codes ending in `_000` a
 | `STORAGE_SERIALIZATION_000` | `SerializationError` | No | 500 |
 | `STORAGE_SCHEMA_000` | `SchemaVersionError` | No, needs migration | 422 |
 | `STORAGE_NOT_FOUND_000` | `ResourceNotFoundError` | No | 500 |
-| `STORAGE_CONFLICT_000` | `StaleStateError` | Yes, after reloading state | 500 |
+| `STORAGE_CONFLICT_000` | `StaleStateError` | Yes, retry the same message | 409 |
 | `METRICS_000` | `MetricsError` | No | 500 |
 | none | `UnsupportedMediaInputError` | No | not mapped by the server |
 | none | `ModelNotFoundError` | No, use a registered model name | 422 |
@@ -312,7 +312,7 @@ Start from what you see and jump to the code that explains it.
 | Intermittent connection errors under load | `STORAGE_TRANSIENT_000` | Retry with backoff, check connection pool limits |
 | Checkpoint fails to encode or decode | `STORAGE_SERIALIZATION_000` | Keep state to JSON-serializable types |
 | Errors after upgrading the package | `STORAGE_SCHEMA_000` | Migrate the database |
-| Concurrent writes to one thread fail | `STORAGE_CONFLICT_000` | Reload state and retry |
+| Concurrent writes to one thread fail | `STORAGE_CONFLICT_000` | Retry with the same message |
 | Resume rejected with a wrong-interrupt message | `INTERRUPT_001` | Read the pending interrupt and send its id |
 | Resume rejected for the answer's shape | `INTERRUPT_002` | Send a value that matches `response_schema` |
 | `resume` sent to a thread that is not paused | `INTERRUPT_003` | Send a normal message |
@@ -341,10 +341,11 @@ The server maps exceptions to responses in `tenxgraph_api/src/app/core/exception
 | Exception | Status |
 |---|---|
 | `ValidationError` (input validators), `SchemaVersionError` | 422 |
-| `GraphError`, `NodeError`, `GraphRecursionError`, `StorageError` (including `StaleStateError`, `ResourceNotFoundError`), `SerializationError`, `MetricsError` | 500 |
+| `GraphError`, `NodeError`, `GraphRecursionError`, `StorageError` (including `ResourceNotFoundError`), `SerializationError`, `MetricsError` | 500 |
 | `TransientStorageError` | 503 |
 | `InterruptMismatchError` and a resume `interrupt_id` that does not match | 409 |
 | `StoredNodeMissingError` | 409 |
+| `StaleStateError` | 409, body `{"error": "state_conflict", "detail": ..., "thread_id": ...}` |
 | `StateFormatVersionError` | 500 (message says to upgrade) |
 | `ResumeValidationError` | 422 |
 
@@ -355,6 +356,8 @@ A `429` is not a core exception either. The server returns it when the `rate_lim
 In production the message of a 5xx response is replaced by a generic text and the real error goes to the server log. Messages of 4xx `HTTPException` errors are kept. Handled 4xx errors are logged at `WARNING` with no traceback, and 5xx errors at `ERROR` with the traceback, so alert rules for 4xx traffic must match `WARNING`. A missing checkpointer answers `503` (`Checkpointer is not configured`), a thread state update with a bad `context` answers `422`, and a message id missing from a thread answers `404`.
 
 A `409` with the message `thread is busy` is not a core exception. The server returns it when another run is still active on the thread after 30 seconds. It uses the standard error body (`error.code` `HTTPException`), not the `state_conflict` shape.
+
+A `409` with `error.code` `MESSAGE_ALREADY_PROCESSED` is not a core exception either. The request resent a user message (same `message_id`) whose run already completed, or that is not the thread's latest user message. Send a new message with a new `message_id`, or resend with the same `Idempotency-Key` header to get the finished run's result. A resent latest message whose run did not finish (failed, `state_conflict`, cancelled, stopped or crashed) is not refused: the run continues from where it stopped without storing the message again.
 
 ## Structured error responses
 

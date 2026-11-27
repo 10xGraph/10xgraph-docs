@@ -6,7 +6,7 @@ section: Reference
 group: "REST API"
 order: 310
 label: Graph
-updated: "2026-11-25"
+updated: "2026-11-27"
 ---
 
 The graph endpoints run your compiled graph over HTTP and WebSocket: invoke it for a complete result, stream it chunk by chunk, stop or repair a thread, and inspect the graph's nodes, tools, and state schema.
@@ -76,7 +76,7 @@ Server-owned `config` keys (for example `user`, `user_id`, `remote_tools`, `coll
 - A state value whose type does not match the state field. The error names the field.
 - An `initial_state`, `config` or `resume` value nested deeper than 64 levels by default (`MAX_NESTING_DEPTH`). The answer is `422` with code `VALIDATION_ERROR`.
 
-Custom state fields are denied unless the operator lists them in `runs.state_keys` in `10xgraph.json`; only listed keys are accepted. The server replaces any `message_id` you send with its own. The same rules apply to `POST /v1/graph/stream` and the WebSocket.
+Custom state fields are denied unless the operator lists them in `runs.state_keys` in `10xgraph.json`; only listed keys are accepted. The server replaces any `message_id` you send with its own and keeps yours in the message's `metadata.client_message_id` (a `client_message_id` you write into `metadata` yourself is dropped; `"0"` or no id records none). A user message whose `message_id` the thread already stores is a retry. If it is the thread's latest user message and that run did not finish (it failed, conflicted, was cancelled, stopped, or the server crashed), the run continues from where it stopped without storing the message again; tools that already ran are not run again. If the run completed, or the message is not the latest user message, the request gets `409` `MESSAGE_ALREADY_PROCESSED`. If the thread is paused for input (`interrupt()`, a static interrupt or a client tool), it gets `409`: resume the thread instead. The same rules apply to `POST /v1/graph/stream` and the WebSocket.
 
 **Size limits.** At most 500 messages per request, 100 content blocks per message, and 1,000,000 characters of text in total across text blocks. A request over a limit gets `422` with a message that names the limit, in development and production alike. The limits are fixed and apply to invoke, stream and the WebSocket (`messages` and `tool_result`), and to `PUT /v1/threads/{id}/state` `context` and `POST /v1/threads/{id}/messages`. [AG-UI](/docs/reference/rest-api/ag-ui#request-size-limits) applies them to the trailing turn.
 
