@@ -6,10 +6,10 @@ section: Reference
 group: TypeScript client
 order: 530
 label: Memory
-updated: '2026-10-08'
+updated: "2026-11-26"
 ---
 
-The memory methods on `TenxGraphClient` store, search, read, update, delete and bulk-forget long-term memories on the server's configured store. Each memory has a type, a category and optional metadata, and you retrieve memories by similarity, time, relevance or a hybrid strategy. For a task-oriented walkthrough, see [Use the memory API](/docs/client/use-memory-api).
+The memory methods on `TenxGraphClient` store, search, read, update, delete and bulk-forget long-term memories on the server's configured store. Each memory has a type, a category and optional metadata, and you retrieve memories by similarity or, where the store supports it, a hybrid strategy. For a task-oriented walkthrough, see [Use the memory API](/docs/client/use-memory-api).
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Requires store</p>
 
@@ -17,7 +17,7 @@ The memory endpoints require the `store` field to be configured in `10xgraph.jso
 
 </aside>
 
-All endpoints live under the base path `/v1/store`. Every method also accepts store-level `config` and `options` objects that the server forwards to the store backend.
+All endpoints live under the base path `/v1/store`. Every method also accepts `config` and `options` objects. The server forwards only `infer` and `replace_metadata` from `options` and drops the rest, and it drops server-owned `config` keys such as `user`, `user_id`, `credential` and `collection` (`RESERVED_CONFIG_KEYS`).
 
 ---
 
@@ -48,10 +48,10 @@ import {
 | Value | Description |
 |---|---|
 | `'similarity'` | Vector similarity search. Default for most use cases. |
-| `'temporal'` | Retrieve memories in chronological order. |
-| `'relevance'` | Score memories by relevance to the query using the store's own model. |
-| `'hybrid'` | Combination of similarity and relevance. |
-| `'graph_traversal'` | Knowledge graph traversal for entity/relationship memories. |
+| `'hybrid'` | Similarity plus keyword search. `PgVectorStore` only. |
+| `'temporal'`, `'relevance'`, `'graph_traversal'` | In the enum, but no shipped store supports them: `PgVectorStore` refuses them and `QdrantStore` accepts only `'similarity'`. |
+
+`PgVectorStore` also supports a keyword-only `text` strategy, which the client enum does not list yet.
 
 ### `DistanceMetric`
 
@@ -90,7 +90,7 @@ console.log('Stored memory ID:', response.data.memory_id);
 | `category` | `string` | Yes | Arbitrary category string for grouping related memories. |
 | `metadata` | `Record<string, any>` | No | Optional key-value metadata stored alongside the memory. |
 | `config` | `Record<string, any>` | No | Optional store-level config (backend-specific). |
-| `options` | `Record<string, any>` | No | Optional store-level options (backend-specific). |
+| `options` | `Record<string, any>` | No | Optional store-level options (backend-specific). The server forwards only `infer` and `replace_metadata`. |
 
 ### `StoreMemoryResponse`
 
@@ -109,7 +109,7 @@ Save the `memory_id` to update or delete the memory later.
 
 ## `searchMemory(request)`
 
-Search for memories using vector similarity, temporal ordering, or a hybrid strategy.
+Search for memories by vector similarity, or a hybrid strategy where the store supports it.
 
 **Endpoint:** `POST /v1/store/search`
 
@@ -134,16 +134,16 @@ for (const result of response.data.results) {
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `query` | `string` | - | The search query, at most 8,000 characters. Converted to a vector embedding by the store backend. |
-| `memory_type` | `MemoryType` | `EPISODIC` | Filter by memory type. |
-| `category` | `string` | `''` | Filter by category. Empty string returns all categories. |
+| `memory_type` | `MemoryType` | none | Filter by memory type. Omitted from the request when unset, so no type filter applies. |
+| `category` | `string` | none | Filter by category. Omitted from the request when unset, so no category filter applies. |
 | `limit` | `number` | `10` | Maximum number of results to return. |
-| `score_threshold` | `number` | `0` | Minimum similarity score (0 to 1). Results below this threshold are excluded. |
+| `score_threshold` | `number` | none | Minimum similarity score. Results below this threshold are excluded. Omitted when unset. |
 | `filters` | `Filters` | `{}` | Filter by column: `{ col: value }` or `{ col: { op: value } }`. See [Filters](#filters). |
 | `retrieval_strategy` | `RetrievalStrategy` | `SIMILARITY` | Which retrieval algorithm to use. |
 | `distance_metric` | `DistanceMetric` | `COSINE` | Which distance metric to use for vector search. |
-| `max_tokens` | `number` | `4000` | Maximum total tokens to return across all results. |
+| `max_tokens` | `number` | `4000` | Maximum total tokens to return across all results. At most 16000; more answers 422. |
 | `config` | `Record<string, any>` | `{}` | Store-level config. |
-| `options` | `Record<string, any>` | `{}` | Store-level options. |
+| `options` | `Record<string, any>` | `{}` | Store-level options. The server forwards only `infer` and `replace_metadata`. |
 
 ### `SearchMemoryResponse`
 
@@ -215,7 +215,7 @@ await client.updateMemory(
 | `memoryId` | `string` | The memory ID. |
 | `content` | `string` | The new text content. Replaces the previous content. |
 | `options.config` | `Record<string, any>` | Optional store-level config. |
-| `options.options` | `Record<string, any>` | Optional store-level options. |
+| `options.options` | `Record<string, any>` | Optional store-level options. The server forwards only `infer` and `replace_metadata`. |
 | `options.metadata` | `Record<string, any>` | Updated metadata. Sent as `{}` when omitted. Whether it merges with or replaces existing metadata depends on the store backend. |
 
 ### `UpdateMemoryResponse`
@@ -249,7 +249,7 @@ console.log('Deleted:', response.data.success);
 |---|---|---|
 | `memoryId` | `string` | The memory ID. |
 | `options.config` | `Record<string, any>` | Optional store-level config. |
-| `options.options` | `Record<string, any>` | Optional store-level options. |
+| `options.options` | `Record<string, any>` | Optional store-level options. The server forwards only `infer` and `replace_metadata`. |
 
 ### `DeleteMemoryResponse`
 
@@ -289,11 +289,11 @@ if (response.data.has_more) {
 
 | Parameter | Type | Description |
 |---|---|---|
-| `options.limit` | `number` | Maximum number of memories to return. Default `100`. |
-| `options.offset` | `number` | Memories to skip, for paging. Pass `next_offset` from the previous page. Needs `10xgraph-api` with paging support. |
+| `options.limit` | `number` | Maximum number of memories to return. Default `100`, at most `1000`. |
+| `options.offset` | `number` | Memories to skip, for paging. Pass `next_offset` from the previous page. Needs `10xgraph-api` with paging support. At most 100000. |
 | `options.filters` | `Filters` | Filter by column. See [Filters](#filters). Omitted when empty. |
 | `options.config` | `Record<string, any>` | Optional store-level config. |
-| `options.options` | `Record<string, any>` | Optional store-level options. |
+| `options.options` | `Record<string, any>` | Optional store-level options. The server forwards only `infer` and `replace_metadata`. |
 
 ---
 
@@ -326,7 +326,7 @@ A failed `forgetMemories()` call throws a `TenxGraphError` subclass (for example
 | `options.category` | `string` | Filter by category. |
 | `options.filters` | `Filters` | Filter by column. See [Filters](#filters). |
 | `options.config` | `Record<string, any>` | Optional store-level config. |
-| `options.options` | `Record<string, any>` | Optional store-level options. |
+| `options.options` | `Record<string, any>` | Optional store-level options. The server forwards only `infer` and `replace_metadata`. |
 
 ### `ForgetMemoriesResponse`
 

@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 490
 label: "invoke()"
-updated: "2026-11-21"
+updated: "2026-11-26"
 faq:
   - q: "When should I use invoke() instead of stream()?"
     a: "Use invoke() when you need the complete answer before updating your UI or returning from a function. Use stream() when you want tokens or messages as they are produced."
@@ -39,6 +39,7 @@ invoke(
     interrupt_id?: string;
     response_granularity?: 'full' | 'partial' | 'low';
     onPartialResult?: InvokeCallback;
+    signal?: AbortSignal;
   }
 ): Promise<InvokeResult>
 ```
@@ -49,13 +50,11 @@ The first parameter carries the conversation input and the second tunes the run.
 
 ### messages
 
-`messages` is an array of `Message` objects. The last one is normally the user's input, and you can add a `system` message before it. Each message is serialised before sending. If `message_id` is `null` or `undefined`, the payload uses `"0"` and the server assigns a real id.
+`messages` is an array of `Message` objects. Send `user` messages only: a `system` or `assistant` message answers 422. Each message is serialised before sending. If `message_id` is `null` or `undefined`, the payload uses `"0"` and the server assigns a real id.
 
 ```ts
 import { Message } from '10xgraph-client';
 
-// A system message sets the persona, the user message is the input
-const systemMsg = Message.text_message('You are a concise assistant.', 'system');
 const userMsg = Message.text_message('What is 2 + 2?');
 ```
 
@@ -73,6 +72,7 @@ All options are optional. The defaults below are the values the client applies w
 | `interrupt_id` | `string` | none | The id of the interrupt `resume` answers. The client does not track ids: pass the one you got from the server (`execution_meta.interrupt_data.interrupt.id` in the thread state, or the `interrupt` object of the `interrupted` update). A mismatch fails with `ConflictError`. |
 | `response_granularity` | `'full' \| 'partial' \| 'low'` | `'full'` | How much data the server returns per request. See [Response granularity](#response-granularity). |
 | `onPartialResult` | `InvokeCallback` | none | Called after every request with that iteration's results. |
+| `signal` | `AbortSignal` | none | Abort to cancel the request; rejects with the signal's `AbortError`. |
 
 ## Return value
 
@@ -89,9 +89,9 @@ All options are optional. The defaults below are the values the client applies w
 | `meta` | `InvokeMetadata` | `thread_id` (string) and `is_new_thread` (boolean). Unchanged. |
 | `all_messages` | `Message[]` | Every message from every iteration, including your tool results. |
 | `iterations` | `number` | How many requests were made. |
-| `recursion_limit_reached` | `boolean` | `true` when `iterations` reached `recursion_limit`. |
+| `recursion_limit_reached` | `boolean` | `true` when the limit stopped the loop with tool calls pending. |
 
-`recursion_limit_reached` is computed from the iteration count, so it is also `true` when the final answer arrived exactly on the last allowed iteration. Check the last message for pending remote tool calls if you need to tell the two cases apart.
+`recursion_limit_reached` is `true` only when the limit stopped a loop that still had remote tool calls; the thread then waits for their results.
 
 Use `thread_id` to continue a conversation in a later call:
 
@@ -214,7 +214,7 @@ console.log(result.messages[0].content[0]);
 
 ### Chat on a persistent thread
 
-Reusing one `thread_id` makes the server load the saved state, so the agent remembers earlier turns. This needs a checkpointer on the server. Do not invent the id: the first call omits it and the server returns it. By default the server answers `403` for an id that does not exist.
+Reusing one `thread_id` makes the server load the saved state, so the agent remembers earlier turns. This needs a checkpointer on the server. Do not invent the id: the first call omits it and the server returns it. By default the server answers `404` for an id that does not exist.
 
 ```ts
 import { TenxGraphClient, Message } from '10xgraph-client';
@@ -259,7 +259,7 @@ A non-2xx response throws a subclass of `TenxGraphError`, chosen by status code.
 | `ValidationError` (422) | The server rejected the payload, for example an empty `messages` array. | Send at least one message and check `config`. |
 | `ConflictError` (409) | The thread is busy with another run (after the server waited 30 seconds), or `interrupt_id` does not match the open interrupt. | Wait and send again, set `on_busy: 'cancel'`, or fetch the current interrupt id. The client never retries it. |
 | `ServerError` (500, 502, 503, 504) | The graph failed or the server is unavailable. | Check the server logs, then retry. |
-| `Error: Request timeout after <n>ms` | One request exceeded the client `timeout` (default 300000 ms). | Raise `timeout` in the client config or shorten the graph. |
+| `RequestTimeoutError` (`Request timeout after <n>ms`) | One request exceeded the client `timeout` (default 300000 ms). | Raise `timeout` in the client config or shorten the graph. |
 | `recursion_limit_reached: true` | The loop used all allowed iterations. | Raise `recursion_limit` (the server cap is `runs.max_recursion_limit`, default 100), or check that tools return and do not loop. |
 
 ## Related pages

@@ -5,7 +5,7 @@ section: TypeScript client
 group: Features
 order: 90
 label: Graph utilities
-updated: "2026-11-21"
+updated: "2026-11-26"
 ---
 
 The `10xgraph-client` TypeScript client exposes utility methods for inspecting graph metadata, controlling execution, repairing state, and handling human-in-the-loop workflows. Use these methods to build observability dashboards, debugging tools, and approval interfaces.
@@ -58,33 +58,7 @@ console.log('Interrupt before:', g.info.interrupt_before);
 console.log('Interrupt after:', g.info.interrupt_after);
 ```
 
-### GraphResponse shape
-
-```ts
-interface GraphResponse {
-  data: {
-    info: {
-      node_count: number;
-      edge_count: number;
-      checkpointer: boolean;
-      checkpointer_type: string;
-      publisher: boolean;
-      store: boolean;
-      interrupt_before: string[];
-      interrupt_after: string[];
-      context_type: string;
-      id_generator: string;
-      id_type: string;
-      state_type: string;
-      state_fields: string[];
-      models?: Record<string, GraphModelChoice>; // names a run may pick, see the reference
-    };
-    nodes: Array<{ id: string; name: string }>;
-    edges: Array<{ id: string; source: string; target: string }>;
-  };
-  metadata: { request_id: string; timestamp: string; message: string };
-}
-```
+The full `GraphInfo` type is in [graph()](/docs/reference/client/graph#graph).
 
 ### Common use: health check at startup
 
@@ -117,30 +91,6 @@ for (const node of result.data.nodes) {
 }
 ```
 
-### GraphToolsResponse shape
-
-```ts
-type ToolSource = 'local' | 'mcp' | 'remote';
-
-interface GraphToolsResponse {
-  data: {
-    node_count: number;
-    tool_count: number;
-    nodes: Array<{
-      node_name: string;
-      tool_count: number;
-      tools: Array<{
-        name: string;
-        description: string;
-        source: ToolSource;
-        parameters: Record<string, any>;   // JSON Schema, OpenAI function-calling shape
-      }>;
-    }>;
-  };
-  metadata: { request_id: string; timestamp: string; message: string };
-}
-```
-
 | `source` | Meaning |
 |---|---|
 | `local` | A Python function registered on the tool node in your graph. |
@@ -165,21 +115,6 @@ if (!remote.includes('get_location')) {
 }
 ```
 
-### Use case: render a capability list in a UI
-
-```ts
-const { data } = await client.graphTools();
-
-const bySource = data.nodes
-  .flatMap(n => n.tools)
-  .reduce<Record<string, string[]>>((acc, t) => {
-    (acc[t.source] ??= []).push(t.name);
-    return acc;
-  }, {});
-
-// { local: ['search_docs'], mcp: ['create_issue', 'list_repos'], remote: ['get_location'] }
-```
-
 `graphTools()` returns an empty `nodes` array for a graph with no tool nodes. That is a valid graph, not an error.
 
 ---
@@ -199,47 +134,7 @@ for (const [field, def] of Object.entries(schema.properties)) {
 }
 ```
 
-### StateSchemaResponse shape
-
-```ts
-interface StateSchemaResponse {
-  data: {
-    title?: string;
-    description?: string;
-    type?: string;
-    properties: Record<string, FieldSchema>;
-    required?: string[];
-    $defs?: Record<string, any>;
-  };
-  metadata: { request_id: string; timestamp: string; message: string };
-}
-
-interface FieldSchema {
-  type?: string | string[];
-  description?: string;
-  default?: any;
-  items?: any;
-  properties?: Record<string, FieldSchema>;
-  required?: string[];
-  enum?: any[];
-  $ref?: string;
-  anyOf?: any[];
-  [key: string]: any;
-}
-```
-
-### Use case: generate a TypeScript interface at runtime
-
-```ts
-const result = await client.graphStateSchema();
-
-for (const [field, def] of Object.entries(result.data.properties)) {
-  const tsType = def.type === 'array'
-    ? `${(def.items as any)?.type ?? 'any'}[]`
-    : (def.type as string) ?? 'any';
-  console.log(`  ${field}: ${tsType};`);
-}
-```
+The response types are in [graphStateSchema()](/docs/reference/client/graph#graphstateschema).
 
 ### Use case: validate initial_state before invoking
 
@@ -247,7 +142,7 @@ for (const [field, def] of Object.entries(result.data.properties)) {
 const schema = (await client.graphStateSchema()).data;
 const required = schema.required ?? [];
 
-const initialState = { user_id: 'abc' };
+const initialState = { customer_tier: 'pro' };
 const missing = required.filter(f => !(f in initialState));
 
 if (missing.length > 0) {
@@ -257,7 +152,7 @@ if (missing.length > 0) {
 await client.invoke([Message.text_message('Hello')], { initial_state: initialState });
 ```
 
-The server accepts only keys listed in `runs.state_keys` in `10xgraph.json`, here `"runs": { "state_keys": ["user_id"] }`. Any other key gets `422`.
+The server accepts only keys listed in `runs.state_keys` in `10xgraph.json`, here `"runs": { "state_keys": ["customer_tier"] }`. Any other key gets `422`. Do not send identity such as a user id in state: the client controls it.
 
 ---
 
@@ -282,61 +177,7 @@ if (!run) {
 }
 ```
 
-### ObservabilityResponse shape
-
-```ts
-interface ObservabilityResponse {
-  data: {
-    thread_id: string;
-    run_count: number;
-    run_ids: string[];
-    run: ObsRun | null;     // the requested run, or the latest; null when nothing is recorded
-  };
-  metadata: { request_id: string; timestamp: string; message: string };
-}
-
-interface ObsRun {
-  run_id: string;
-  thread_id: string;
-  status: string;             // e.g. 'done', 'error'
-  started_at: number | null;  // UNIX seconds
-  finished_at: number | null;
-  duration_ms: number;
-  spans: ObsSpan[];
-  events: ObsEvent[];
-  usage: ObsTokenUsage;
-  llm_calls: number;
-  tool_calls: number;
-  iterations: number;
-}
-
-interface ObsSpan {
-  id: string;
-  name: string;
-  kind: 'root' | 'node' | 'llm' | 'tool';
-  parent: string | null;      // span id, or null for the root
-  start_ms: number;           // offset from the run start
-  duration_ms: number;
-  model?: string | null;      // set on 'llm' spans
-  input_tokens?: number | null;
-  output_tokens?: number | null;
-}
-
-interface ObsEvent {
-  id: string;
-  type: string;
-  node: string;
-  offset_ms: number;          // offset from the run start
-  summary: string;
-}
-
-interface ObsTokenUsage {
-  prompt_tokens: number;
-  completion_tokens: number;
-  reasoning_tokens: number;
-  total_tokens: number;
-}
-```
+The response types are in [observability()](/docs/reference/client/graph#observabilitythreadid-runid).
 
 A single run is returned per call, and omitting `runId` returns the **last** entry in `run_ids`. `run_ids` is ordered oldest first, so a run picker fetches the list once and then requests each run by id:
 
@@ -395,8 +236,6 @@ The server returns the result of the graph's stop request as `data`:
 | `running` | Whether the thread was running when the request arrived. |
 | `reason` | Set to `'not-running'` when the thread exists but was not running. |
 
-The exported `StopGraphResponse` TypeScript type declares `success`, `message`, `thread_id` and `stopped_at` instead. The server does not send those fields, so read `ok`, `running` and `reason`, and cast `result.data` to a type of your own (for example `result.data as unknown as { ok: boolean; running?: boolean; reason?: string }`) to get type checking.
-
 ### Stopping a stream in progress
 
 The most common pattern: a user clicks a stop button while a stream is running.
@@ -432,7 +271,7 @@ for await (const chunk of stream) {
 ### Notes
 
 - `stopGraph()` is a request, not a guarantee. The graph processes the flag between nodes, so it may produce one more response message before stopping.
-- After stopping, the thread state is preserved. The next `invoke()` or `stream()` call on the same `thread_id` starts from where execution was when the stop flag was checked.
+- After stopping, the thread state is preserved. A later call on the same `thread_id` with a new user message starts a new turn on the saved conversation; a call without new messages resumes at the saved node.
 - If the thread exists but is not running, the call returns `ok: true` with `running: false` and `reason: 'not-running'`. If the thread has no saved state, it returns `ok: false` with `reason: 'no-state'`. Stopping needs a checkpointer.
 
 ---
@@ -503,186 +342,59 @@ When nothing needs fixing, the call returns `removed_count: 0` and does not writ
 
 ---
 
-## Human-in-the-loop: checking and resuming after interrupts
+## Human-in-the-loop: detect and answer a pause
 
-Graph execution can be paused before or after designated nodes (`interrupt_before` / `interrupt_after`) for human review or approval. When the graph pauses, it saves the pause in the thread's `execution_meta` and stops. The client sees the pause in two places: the `updates` stream chunk, and the saved thread state.
-
-The fields of `execution_meta` on the wire are:
-
-| Field | Meaning |
-|---|---|
-| `status` | `running`, `interrupted_before`, `interrupted_after`, `completed` or `error`. |
-| `interrupted_node` | Name of the node the graph paused at. `null` when not paused. |
-| `interrupt_reason` | Text such as `interrupt_before: approve`. |
-| `interrupt_data` | Optional extra data attached to the pause. |
-| `current_node`, `step` | Execution progress. |
-
-The exported `AgentState` TypeScript class declares an `execution_meta.interrupt` object and an `is_interrupted` flag. The server does not send those, so read the fields above from `threadState()` (cast to a type of your own for type checking).
-
-### Detecting an interrupt in a stream
-
-The default `response_granularity` of `stream()` is `'low'`, which yields only `message` and `error` chunks. To see the pause as it happens, request `'full'`. The final `updates` chunk then carries `data.is_interrupted`:
+A run pauses before or after a node listed in `interrupt_before` / `interrupt_after`, or where graph code calls `interrupt()`. The pause arrives as an `updates` chunk at every `response_granularity`, so the default `'low'` shows it. Its `data.pause` is `'before'`, `'after'` or `'interrupt'` (a `'remote_tool'` pause is a client tool, which the client runs for you). `graph().data.info.interrupt_before` and `.interrupt_after` list the nodes that can pause.
 
 ```ts
-const stream = client.stream(
-  [Message.text_message('Proceed with the high-cost operation.')],
-  { response_granularity: 'full' } // no thread_id: the server starts a thread
-);
+import { Message, getInterrupt, type Interrupt } from '10xgraph-client';
 
 let threadId: string | undefined;
-for await (const chunk of stream) {
-  if (chunk.thread_id) threadId = chunk.thread_id; // keep it to resume later
-  if (chunk.event === 'updates' && chunk.data?.is_interrupted) {
-    console.log('Execution paused; the graph is waiting for approval.');
-    break;
-  }
+let interrupt: Interrupt | null = null;
+let pausedAtNode = false;
 
-  if (chunk.event === 'message' && chunk.message) {
-    console.log('Response:', chunk.message);
+for await (const chunk of client.stream([Message.text_message('Delete the old reports.')])) {
+  if (chunk.thread_id) threadId = chunk.thread_id;
+  interrupt = getInterrupt(chunk) ?? interrupt; // interrupt() pause: id, reason, value, response_schema
+  if (chunk.event === 'updates' && (chunk.data?.pause === 'before' || chunk.data?.pause === 'after')) {
+    pausedAtNode = true;
   }
 }
 ```
 
-### Resuming after human approval
+### Answer an interrupt() pause
 
-To resume after an interrupt, invoke the same thread again, with the `threadId` you read from the stream. The graph clears the pause, continues from the paused node, and keeps all prior state:
+Send `resume` with the interrupt's id and an empty `messages` array. `approveInterrupt()` and `rejectInterrupt()` build both fields:
 
 ```ts
-// User reviews the decision and approves
-const approval = await client.invoke(
-  [Message.text_message('Approved. Proceed.')],
-  { config: { thread_id: threadId } }
-);
+import { approveInterrupt, rejectInterrupt } from '10xgraph-client';
 
-console.log('Final result:', approval.messages[approval.messages.length - 1]);
+await client.invoke([], { config: { thread_id: threadId }, ...approveInterrupt(interrupt!, { approved: true }) });
+// or cancel: the code resumes with null, and response_schema is not checked
+await client.invoke([], { config: { thread_id: threadId }, ...rejectInterrupt(interrupt!) });
 ```
 
-### Querying interrupt status outside of streaming
+A thread that is not paused at that interrupt answers 409 (`ConflictError`). A value that fails the interrupt's `response_schema` answers 422 (`ValidationError`).
 
-Use `threadState()` to check whether a thread is currently paused. The state is at `data.state`:
+### Continue after an interrupt_before or interrupt_after pause
+
+These pauses take no resume value. Send the next user message on the same thread; the graph continues from the paused node with all prior state:
 
 ```ts
-const { data } = await client.threadState(threadId);
-const meta = data.state.execution_meta as unknown as {
-  status: string;
-  interrupted_node: string | null;
-  interrupt_reason: string | null;
-};
+await client.invoke([Message.text_message('Approved. Proceed.')], { config: { thread_id: threadId } });
+```
 
-if (meta.status.startsWith('interrupted')) {
-  console.log(`Thread paused at "${meta.interrupted_node}": ${meta.interrupt_reason}`);
-} else {
-  console.log('Thread is not paused.');
+### Check whether a thread is paused
+
+```ts
+const meta = (await client.threadState(threadId!)).data.state.execution_meta;
+
+if (meta.status?.startsWith('interrupted')) {
+  console.log(`Paused at "${meta.interrupted_node}": ${meta.interrupt_reason}`);
 }
 ```
 
-### Notes
-
-- Interrupts are only possible if the graph was compiled with `interrupt_before` or `interrupt_after`. Check `graph().data.info.interrupt_before` and `.interrupt_after` to see which nodes pause.
-- Interrupted state is saved by the checkpointer. With a durable checkpointer (such as Postgres or SQLite), it survives server restarts.
-- A pause raised by the Python `interrupt()` function is different: resuming it needs a `resume` value, which `invoke()`, `stream()` and `wsStream()` take as an option. See the next section.
-
-### Resuming an interrupt() pause
-
-Pass `resume` with the answer, and `interrupt_id` with the id of the interrupt you are answering. Read the id from the thread state, at `execution_meta.interrupt_data.interrupt.id`. The client does not track ids for you. Send an empty `messages` array:
-
-```ts
-const { data } = await client.threadState(threadId);
-const meta = data.state.execution_meta as unknown as {
-  interrupt_data?: { interrupt?: { id: string } };
-};
-const interruptId = meta.interrupt_data?.interrupt?.id;
-
-const result = await client.invoke([], {
-  config: { thread_id: threadId },
-  resume: { approved: true },
-  interrupt_id: interruptId,
-});
-```
-
-`interrupt_id` is optional. If the thread is not paused, or is paused at a different interrupt, the server answers 409 and the client throws `ConflictError`. If the answer fails the interrupt's `response_schema`, it throws `ValidationError` (422). Send `resume: null` to cancel.
-
----
-
-## Complete example: observability and approval dashboard
-
-This example brings together graph inspection, execution monitoring, and interrupt handling:
-
-```ts
-import { TenxGraphClient, Message } from '10xgraph-client';
-
-const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
-
-async function runWithApprovalGate(userMessage: string) {
-  // 1. Inspect the graph capabilities
-  const graphInfo = await client.graph();
-  console.log(`Graph: ${graphInfo.data.nodes.length} nodes, ` +
-    `checkpointer: ${graphInfo.data.info.checkpointer_type || 'none'}`);
-
-  const supportsApproval = graphInfo.data.info.interrupt_before.length > 0;
-  console.log(`Approval gates available: ${supportsApproval}`);
-
-  // 2. Stream the execution
-  // No thread_id: the server starts a thread and sends its id on each chunk
-  const stream = client.stream(
-    [Message.text_message(userMessage)],
-    { response_granularity: 'full' }
-  );
-
-  const finalMessages: Message[] = [];
-  let paused = false;
-  let threadId = '';
-
-  for await (const chunk of stream) {
-    if (chunk.thread_id) threadId = chunk.thread_id;
-    // Check for interrupt (approval gate paused execution)
-    if (chunk.event === 'updates' && chunk.data?.is_interrupted) {
-      paused = true;
-      break;
-    }
-
-    if (chunk.event === 'message' && chunk.message?.content) {
-      finalMessages.push(chunk.message);
-    }
-  }
-
-  // 3. If paused, show where, then observability, then resume
-  console.log(`\nExecuted on thread: ${threadId}`);
-  if (paused) {
-    const { data } = await client.threadState(threadId);
-    const meta = data.state.execution_meta as unknown as {
-      interrupted_node: string | null;
-      interrupt_reason: string | null;
-    };
-    console.log(`\nExecution paused at "${meta.interrupted_node}": ${meta.interrupt_reason}`);
-
-    const obs = await client.observability(threadId);
-
-    console.log(`\nObservability: ${obs.data.run?.llm_calls || 0} LLM calls, ` +
-      `${obs.data.run?.tool_calls || 0} tool calls, ` +
-      `${obs.data.run?.duration_ms || 0}ms total`);
-
-    console.log('\nWaiting for approval...');
-    // In a real app, this would be a user button click or external webhook
-    // For now, we simulate a 2-second approval delay
-    await new Promise(r => setTimeout(r, 2000));
-
-    console.log('Approval granted. Resuming...');
-    const resumed = await client.invoke(
-      [Message.text_message('Approved. Continue.')],
-      { config: { thread_id: threadId } }
-    );
-    finalMessages.push(...resumed.messages);
-  }
-
-  return finalMessages;
-}
-
-// Run the example
-runWithApprovalGate('Process this high-cost operation.')
-  .then(msgs => console.log(`\nFinal: ${msgs.length} messages in thread`))
-  .catch(console.error);
-```
+`status` is `running`, `interrupted_before`, `interrupted_after`, `completed` or `error`. A pause is saved by the checkpointer, so with a durable checkpointer it survives a server restart.
 
 ---
 
@@ -692,8 +404,7 @@ runWithApprovalGate('Process this high-cost operation.')
 |---|---|---|
 | `stopGraph` returns `ok: false` | The graph has no checkpointer (`reason: 'no-checkpointer'`) or the thread has no saved state (`reason: 'no-state'`). | Compile the graph with a checkpointer and verify the `threadId`. Use `threads()` to list threads. |
 | `fixGraph` returns `success: false` | The thread has no saved state. | Ensure the graph has a checkpointer and the thread has been invoked at least once. |
-| `403` error on `stopGraph` or `fixGraph` | Caller lacks permission to modify the thread. | Check the `AuthorizationBackend` configured on the server; the caller may have read-only access. |
+| `403` on `stopGraph` or `fixGraph` | The caller's role lacks the permission. | Check the roles in the server's `auth` config; `client.me()` shows what the token grants. |
+| `409` on `fixGraph` | A run is active on the thread. | Wait for it to end, or call `stopGraph()` first. |
 | `observability` returns `run: null` | No runs have been recorded for the thread, or telemetry is disabled. | Invoke the thread at least once to generate a run. Check the server's telemetry configuration. |
-| Stream never shows the interrupt even though `interrupt_before` is set | The default `'low'` granularity hides `updates` chunks, or the node is never reached. | Pass `response_granularity: 'full'`, or check `threadState()` after the stream. Verify `graph().data.info.interrupt_before` includes the node. |
-| `graphTools` returns empty `nodes` array | The graph has no `ToolNode`s. | Not an error if the agent doesn't need external tools. Add a `ToolNode` if you expect to see tools. |
-| `fixGraph` returns `removed_count: 0` | No unanswered tool calls or orphaned results found; nothing to repair. | No action needed. The thread can proceed with the next invoke. |
+| Stream never shows the pause even though `interrupt_before` is set | The node is never reached. | Check that `graph().data.info.interrupt_before` includes the node and that the run gets there. |

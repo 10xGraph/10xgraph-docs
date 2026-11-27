@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 480
 label: "Message"
-updated: "2026-10-08"
+updated: "2026-11-26"
 ---
 
 `Message` is the data model the 10xGraph TypeScript client uses for every message in a conversation: user input, assistant replies, system prompts, tool calls and tool results. Each message holds a role and an array of typed content blocks. This page lists the class, its factory methods and every block type.
@@ -89,6 +89,8 @@ const systemMsg = Message.text_message(
   'system'
 );
 ```
+
+A `system` message is for building state or tests; the API refuses `system` and `assistant` messages sent by a client (422).
 
 **Parameters:**
 
@@ -602,14 +604,8 @@ const multimodal = new Message('user', [
   ),
 ]);
 
-// 3. System prompt
-const system = Message.text_message(
-  'You are a helpful assistant. Be concise.',
-  'system'
-);
-
-// 4. Send them to the agent
-const result = await client.invoke([system, greeting]);
+// 3. Send it to the agent (clients send user messages only; the system prompt lives in the agent)
+const result = await client.invoke([greeting]);
 console.log(result.messages);
 ```
 

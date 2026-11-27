@@ -6,7 +6,7 @@ section: "TypeScript client"
 group: "Frameworks"
 order: 120
 label: with Next.js
-updated: "2026-10-27"
+updated: "2026-11-26"
 faq:
   - question: "Do I need to expose my 10xGraph bearer token in the browser?"
     answer: "No. Always proxy requests through a Next.js route handler or Server Action. The route handler runs on the server, where it can safely hold your token."
@@ -16,37 +16,11 @@ faq:
     answer: "Long-lived HTTP connections for agent streams benefit from Node's socket handling. Edge runtime has strict timeout limits and may not support streaming in all configurations."
 ---
 
-This page shows how to call a 10xGraph server from Next.js without putting the server secret in the browser. The typed TypeScript client is built for this pattern, letting you securely stream agent responses to React components without exposing credentials to the browser.
+This page shows how to call a 10xGraph server from Next.js without putting the server secret in the browser.
 
 ## Architecture
 
 In this setup, your browser never talks directly to the 10xGraph API. Instead, Next.js acts as a secure proxy: it validates the user, holds the API key, and streams responses back to the client.
-
-```
-┌─────────────────────┐
-│   Next.js (client)  │
-│  ┌───────────────┐  │
-│  │  React (UI)   │  │ ← renders streaming chunks
-│  └───────┬───────┘  │
-│          │          │
-│  ┌───────▼────────┐ │
-│  │ Route Handler  │ │ ← keeps API key, proxies requests
-│  └───────┬────────┘ │
-│          │          │
-└──────────┼──────────┘
-           │
-    ╔──────▼────────╗
-    │ 10xGraph API  │
-    │  (runs in     │
-    │  separate     │
-    │  deployment)  │
-    ╚──────┬────────╝
-           │
-    ┌──────▼────────┐
-    │ Postgres      │
-    │ + Redis       │
-    └───────────────┘
-```
 
 ## Installation
 
@@ -56,15 +30,11 @@ Install the 10xGraph TypeScript client.
 npm install 10xgraph-client
 ```
 
-Ensure your Next.js project has `Node >= 18` for global `fetch` support, or configure your `.npmrc` to include a polyfill.
+The client needs Node 20 or newer.
 
 ## Route handler proxy with streaming
 
 The recommended pattern for chat-like UIs is a Next.js route handler that streams responses. The route handler runs on the Node runtime, which maintains long-lived HTTP connections needed for agent streaming. It validates the user, safely holds the API key, and forwards requests to the 10xGraph API server.
-
-### Why not call the API directly from the browser?
-
-Calling the 10xGraph API directly from the browser would require embedding your API key in client-side code, which is a security risk. A compromised key allows anyone to invoke your graphs. The route handler pattern keeps the key on the server.
 
 ### Build the route handler
 
@@ -101,7 +71,7 @@ export async function POST(req: NextRequest) {
       // Omit thread_id to start a new thread. Do not make one up: the server
       // refuses ids it did not create.
       config: threadId ? { thread_id: threadId } : undefined,
-      recursion_limit: 25,
+      signal: req.signal, // the browser closing the request also cancels the upstream stream
     }
   );
 
@@ -143,7 +113,7 @@ export async function POST(req: NextRequest) {
 }
 ```
 
-The `recursion_limit` caps how many tool-execution rounds the client runs (default 25). The `thread_id` keeps conversation history on one thread. The first request leaves it out, and every chunk then carries the id the server picked, so the browser can send it back. Store the id next to your user record and check that it belongs to the signed-in user before you pass it on. The default `response_granularity` for `stream()` is `'low'`, which yields only `message` and `error` chunks. Pass `response_granularity: 'full'` if you also want `updates` chunks.
+The `thread_id` keeps conversation history on one thread. The first request leaves it out, and every chunk then carries the id the server picked, so the browser can send it back. Store the id next to your user record and check that it belongs to the signed-in user before you pass it on. The default `response_granularity` for `stream()` is `'low'`: `message` and `error` chunks plus pause updates. Pass `'full'` for every `updates` chunk.
 
 ## React streaming component
 
@@ -261,7 +231,7 @@ export function useAgentStream(): UseAgentStreamReturn {
               if (chunk.event === "message") {
                 setOutput((prev) => prev + extractText(chunk));
               } else if (chunk.event === "updates") {
-                // Lifecycle event, only sent with response_granularity: "full"
+                // Lifecycle or pause update
                 setStatus(String(chunk.data?.status ?? ""));
               } else if (chunk.event === "error") {
                 throw new Error(String(chunk.data?.reason ?? "Agent error"));
@@ -434,11 +404,11 @@ const result = await client.invoke(
 );
 ```
 
-This is the simplest and most common pattern. Use it if both Next.js and 10xGraph run in the same security domain or over HTTPS.
+With one server-held token, every user is the same identity to 10xGraph, so the server cannot keep users' threads apart. Your route must check that a `thread_id` belongs to the signed-in user before it forwards it. Prefer JWT forwarding when users must not see each other's threads.
 
 ### JWT forwarding
 
-For multi-tenant or isolated deployments, mint a short-lived JWT in Next.js and send it to 10xGraph:
+To let the server enforce ownership per user, mint a short-lived JWT per user in Next.js and send it to 10xGraph:
 
 ```tsx
 // The 10xGraph JWT auth rejects tokens without a user_id claim
@@ -469,23 +439,15 @@ Run the 10xGraph API server locally (`10xgraph dev --no-open`) and your Next.js 
 
 ### Streaming and function timeouts
 
-Vercel's serverless functions have a default 10-second timeout, which is too short for long-running agent streams. You have several options:
-
-1. **Increase the timeout** using `maxDuration` in your route:
+Serverless platforms cap how long a function may run, which can cut a long agent stream. Raise the cap, for example with `maxDuration` on Vercel:
 
 ```tsx
 export const maxDuration = 60; // 60 seconds
 ```
 
-2. **Deploy 10xGraph separately** (e.g., on AWS, Fly.io, or Railway) and Next.js to Vercel. This isolates the compute and lets you tune each independently.
-
-3. **Self-host both** on the same infrastructure (Docker, Kubernetes, VPS). Run `next start` and the production image from `10xgraph build` on the same machine.
-
-For non-streaming requests, Vercel's default timeout is usually fine.
-
 ### CORS and proxy headers
 
-If your 10xGraph API runs on a different origin (different domain or port), ensure CORS is configured. Set `ORIGINS` on the 10xGraph server:
+With the proxy pattern the browser never calls 10xGraph, so CORS does not apply. Set `ORIGINS` on the 10xGraph server only if the browser calls it directly:
 
 ```bash
 ORIGINS=https://my-next-app.vercel.app,http://localhost:3000
@@ -498,8 +460,6 @@ The proxy headers (like `X-Accel-Buffering: no`) tell proxies not to buffer the 
 **Browser EventSource does not support custom headers.** If you need to add an Authorization header to SSE, do not use the browser's `EventSource`. Instead, use `fetch` and manual parsing as shown in the hook above. For complex auth, consider the `@microsoft/fetch-event-source` library.
 
 **Edge runtime does not support long-lived streams.** Always set `runtime = "nodejs"` in your route handler. Edge runtime has strict timeout limits and may kill SSE connections.
-
-**Connection resets or hanging requests.** Ensure the 10xGraph server is running and reachable. Check your `TENXGRAPH_URL` and network connectivity. If the server is behind a proxy, verify proxy settings and timeout configurations.
 
 **Message type confusion.** After an SSE chunk crosses the network, the `Message` class methods are not available on plain JSON objects. Extract fields directly, as shown in the `extractText` function.
 

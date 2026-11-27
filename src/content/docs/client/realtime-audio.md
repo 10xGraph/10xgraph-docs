@@ -5,7 +5,7 @@ section: "TypeScript client"
 group: "Features"
 order: 100
 label: Realtime audio conversations
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
 `client.realtime()` opens a WebSocket connection that carries bidirectional PCM16 audio frames and JSON control events between your browser and a live agent. The API is transport only: it handles the audio bytes and event delivery, but leaves microphone capture and speaker playback to you. This guide covers both sides: building a mic capturer to send PCM16 at 16 kHz, a PCM16 player to receive audio at 24 kHz, managing the session lifecycle, and handling interrupts.
@@ -15,7 +15,7 @@ For the complete `RealtimeSession` API (every event type, reconnect behavior, in
 ## Prerequisites
 
 - A graph rooted at a `LiveAgent`. A turn-based graph rejects the connection: the server sends a fatal `error` event with `code: 'not_live'` and closes the socket with code `1008`. Check `info.is_realtime` from `client.graph()` before rendering an audio UI.
-- A configured `TenxGraphClient` instance. On Node 18 or 20, you must pass `webSocketImpl` (the `ws` package) in the client config; see [create-client](/docs/client/create-client) for details. Browsers ship WebSocket natively.
+- A configured `TenxGraphClient` instance. On Node 20, pass `webSocketImpl` (the `ws` package); see [Create the client](/docs/client/create-client#websocket-support-on-node-20).
 - A secure context. `getUserMedia` requires HTTPS or `localhost`. On `http://`, `getUserMedia` rejects immediately.
 
 ## The audio contract
@@ -88,7 +88,7 @@ Always construct the player inside a user gesture (click or tap). Browsers start
 
 ## Step 2: Capture the microphone as PCM16 at 16 kHz
 
-Request a 16 kHz `AudioContext` and the browser automatically resamples the microphone input to that rate. This saves you from writing a resampler. The sample rate must be exactly 16 kHz because the agent's speech-to-text model expects that bitrate. The code also enables echo cancellation and noise suppression to improve audio quality on the server side.
+Request a 16 kHz `AudioContext` and the browser automatically resamples the microphone input to that rate. This saves you from writing a resampler. The server expects 16 kHz input (`REALTIME_INPUT_SAMPLE_RATE`). The code also turns on echo cancellation and noise suppression.
 
 ```js
 export const createMicCapture = async (onFrame, sampleRate = 16000) => {
@@ -174,9 +174,11 @@ session.on('close', () => {
 await session.ready;
 ```
 
-Wait for `session.ready` to resolve before proceeding, which confirms the WebSocket is open and the init frame has been sent. `reconnect: { enabled: false }` makes a close permanent, suitable for a "Start / End" button UI. For long-lived assistants that should survive network hiccups, leave reconnect enabled (the default) so the session reopen with the same `thread_id` and resume from the checkpoint.
+Wait for `session.ready` to resolve before proceeding, which confirms the WebSocket is open and the init frame has been sent. `reconnect: { enabled: false }` makes a close permanent, suitable for a "Start / End" button UI. For long-lived assistants that should survive network hiccups, leave reconnect enabled (the default) so the session reopens with the same `thread_id` and resume from the checkpoint.
 
 The init `model` parameter is a per-session override, honoured only when the model is listed in the server's `websocket.realtime_models` setting. Any other value is ignored and the agent's own model is used. Live model availability varies by API key and region, so omit `model` unless you need to pick from that list.
+
+`voice`, `modalities` and `vad` in the init frame apply because the server's default `websocket.realtime_client_overrides` allows them. `system_prompt` applies only when the operator adds it there.
 
 ---
 
@@ -271,20 +273,20 @@ Not all agents are configured for realtime conversations. Before rendering an au
 
 ```ts
 const { info } = (await client.graph()).data;
-const liveCapable = Boolean((info as { is_realtime?: boolean }).is_realtime);
+const liveCapable = info.realtime_options != null; // null when the graph is not a live agent
 
 if (!liveCapable) {
   showNotice('This agent is not a realtime agent. Use the chat interface instead.');
 }
 ```
 
-If you skip this check and try to open a realtime session against a turn-based agent, the server sends a fatal `not_live` error event and closes the connection. The playground's **Live** page implements this gate (through its connection capabilities) to prevent users from seeing a broken interface.
+If you skip this check and try to open a realtime session against a turn-based agent, the server sends a fatal `not_live` error event and closes the connection.
 
 ---
 
 ## Reference implementation
 
-The 10xGraph playground (`agentflow-playground/`) includes a complete, production-ready implementation of realtime audio:
+The 10xGraph playground (`agentflow-playground/`) includes a working implementation of realtime audio:
 
 | File | Contains |
 |---|---|
@@ -307,21 +309,10 @@ To run it: `10xgraph dev` (starts the API server and opens the hosted playground
 | `getUserMedia` rejects immediately with a permission error. | The user denied the permission prompt, or the page is not on HTTPS or localhost. | Handle the rejection in a catch block, show the user a clear error message, and call `activityEnd()` to clean up the pending turn. |
 | Socket closes immediately after opening, error code `not_live`. | The graph is turn-based, not a live agent. | Check `info.is_realtime` before offering the audio UI. |
 | Live session fails even though the graph is a `LiveAgent`. | The live model is not available for your API key, region, or quota. | Omit the `model` field so the agent's own model is used, or pick one listed in `websocket.realtime_models`. |
-| `No WebSocket implementation available` error in Node.js. | Node 18 and 20 do not have a global `WebSocket` object. | Pass `webSocketImpl` in the `TenxGraphClient` config: `{ webSocketImpl: require('ws') }`. |
+| `No WebSocket implementation available` error in Node.js. | Node 20 has no global `WebSocket`. | `import WebSocket from 'ws'` and pass `{ webSocketImpl: WebSocket }` in the client config. |
 | Microphone indicator remains on after ending the session. | The `mic.stop()` method was not called or an exception prevented it from running. | Always call `stop()` in the "End" button handler and in a React `useEffect` cleanup. Wrap calls in try/catch or use optional chaining (`mic?.stop()`). |
 
 ---
-
-## Summary
-
-You now understand the full lifecycle of a realtime audio conversation:
-
-- **Sample rates are intentional.** Input at 16 kHz optimizes speech-to-text quality; output at 24 kHz is what the model produces. Using the browser's automatic resampling avoids decoder complexity.
-- **Playback scheduling prevents gaps.** Tracking the end time of the previous frame and scheduling the next one there keeps the audio stream seamless.
-- **Echo cancellation is essential.** Without it, the agent hears its own voice and loops. Always enable it in the `getUserMedia` constraints.
-- **Turn-taking has two modes.** Push-to-talk (manual `activityStart/activityEnd`) suits voice-assistant UIs. Hands-free (server VAD) suits always-listening assistants.
-- **Interruption and cleanup are critical.** The `interrupted` event requires clearing the audio queue. Cleanup on unmount and on error prevents resource leaks and privacy issues.
-- **Runtime checks prevent broken experiences.** Always verify `is_realtime` before offering the audio UI, and omit the `model` field unless you need one from `websocket.realtime_models`.
 
 ## Next steps
 

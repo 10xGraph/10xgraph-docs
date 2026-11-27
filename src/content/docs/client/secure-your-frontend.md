@@ -5,14 +5,14 @@ description: "How a browser app talks to a production 10xGraph server without a 
 section: "TypeScript client"
 group: "Basics"
 order: 15
-updated: "2026-11-10"
+updated: "2026-11-26"
 faq:
   - question: "Can I put the API token in a NEXT_PUBLIC variable?"
     answer: "No. NEXT_PUBLIC variables are written into the JavaScript bundle at build time, so every visitor can read them and they cannot hold a per-user value. Keep a shared token on a server, or issue each user a short-lived token at runtime after they log in."
   - question: "How does a browser authenticate a WebSocket?"
     answer: "Browsers cannot set headers on a WebSocket. The client sends the bearer token as the second entry of the Sec-WebSocket-Protocol list, after the 10xgraph-bearer sentinel. The token never goes in the URL."
   - question: "Does the client retry a 429 for me?"
-    answer: "No. It throws a plain TenxGraphError with statusCode 429 and does not keep the response headers, so the Retry-After value is not available as a field. Back off in your app."
+    answer: "No. It throws RateLimitError; wait retryAfterSeconds (when the server sent one) before you retry."
 ---
 
 A browser is an untrusted place. Anything you ship to it, including environment variables, can be read by the person using it. The server side of 10xGraph is built around that: the server checks every request against the caller's identity, and the client's job is to carry that identity safely. This page covers how to do that.
@@ -22,7 +22,7 @@ A browser is an untrusted place. Anything you ship to it, including environment 
 You do not need to rebuild these in your frontend. With `auth` configured and `MODE=production`, `10xgraph-api` does the following (details in the [security model](/docs/production/security-model)):
 
 - Rejects requests without valid credentials with `401`.
-- Lets a user reach only their own threads. A foreign `invoke` or `stream` is refused with `403` before it reaches the graph, and an id the server did not create is refused too (`runs.thread_ids` defaults to `server`).
+- Lets a user reach only their own threads. A foreign `invoke` or `stream` is refused with `404` before it reaches the graph, and an id the server did not create is refused too (`runs.thread_ids` defaults to `server`).
 - Applies the `rate_limit` window and a per-user cap on runs in flight with `429`.
 - Accepts a client message only with the `user` role, and a `tool` message only as the answer to a pending client tool call.
 
@@ -38,7 +38,7 @@ Your browser calls a route on your own backend. That route checks the user's ses
 
 ### Option B: short-lived tokens issued per user
 
-If the browser must call the 10xGraph server directly, for example to open a WebSocket, issue each user their own short-lived token from your login endpoint. With `"auth": "jwt"` the token carries a `user_id` claim, and the server derives ownership from it. Fetch the token at runtime after the user signs in, hold it in memory, and refresh it before it expires. See [Create and configure the client](/docs/client/create-client#token-rotation) for rotation. To cut a token off before it expires, configure `token_revocation` (see [auth](/docs/server/auth)).
+If the browser must call the 10xGraph server directly, for example to open a WebSocket, issue each user their own short-lived token from your login endpoint. With `"auth": "jwt"` the token carries a `user_id` claim, and the server derives ownership from it. Fetch the token at runtime after the user signs in, hold it in memory, and refresh it before it expires. Pass a function as `authToken`, or call `setAuthToken()`, to refresh it ([Create the client](/docs/client/create-client#change-the-token-at-runtime)). To cut a token off before it expires, configure `token_revocation` (see [auth](/docs/server/auth)).
 
 Never put a token in a `NEXT_PUBLIC_` variable. Those values are compiled into the bundle at build time, so every visitor gets the same one and anyone can read it.
 
@@ -48,8 +48,9 @@ Also set `ORIGINS` on the server to your exact frontend origins. With `MODE=prod
 
 A browser cannot set an `Authorization` header on a WebSocket. `wsStream()` therefore opens the socket with the subprotocol list `['10xgraph-bearer', '<token>']`. The server reads the token from the entry after the sentinel and echoes the sentinel back, which the browser requires to finish the handshake. The token is never placed in the URL, so it stays out of access logs.
 
-- This needs `10xgraph-api` 1.0. The client sends only the `10xgraph-bearer` sentinel.
+- Use a `10xgraph-api` with the same major.minor as the client.
 - On Node the client also sets an `Authorization` header.
+- With `auth` set to `basic` or `header`, nothing is sent on the socket; use a bearer token for `wsStream()` and `realtime()`.
 - The server re-checks revocation before every WebSocket run when `token_revocation` is configured.
 
 If the handshake fails, see [client troubleshooting](/docs/troubleshooting/client).
@@ -58,7 +59,7 @@ If the handshake fails, see [client troubleshooting](/docs/troubleshooting/clien
 
 [Client-side tools](/docs/client/remote-tools) keep the schema on the server and the implementation in the browser. That is useful, and it also means the result comes from a place the user controls. The server treats it that way: a `tool` message is accepted only as the answer to a remote tool call the graph has pending. A client cannot inject a tool result on its own, and it cannot send `assistant` or `system` messages.
 
-Still treat the result as untrusted data in your graph. Validate it before it drives a payment or a write, the same way you would validate a form field.
+Still treat the result as untrusted data in your graph. Validate it before it drives a payment or a write, the same way you would validate a form field. To refuse bad arguments in the browser too, register the tool with `registerTool({ name, handler, validate })`; see [Remote tools](/docs/client/remote-tools).
 
 ## Handling error responses
 
@@ -67,19 +68,20 @@ Each status maps to a class from `10xgraph-client`. Full table: [Handle errors](
 | Status | Class | What it means for your UI |
 |---|---|---|
 | `401` | `AuthenticationError` | Token missing, invalid, expired or revoked. Refresh the token once, then send the user to sign in. |
-| `403` | `PermissionError` | The scope is missing, or the `thread_id` belongs to another user or does not exist. Do not retry. For a new conversation, omit `thread_id` and use the id the server returns. |
+| `403` | `PermissionError` | The caller's role lacks the permission. Do not retry. |
+| `404` | `NotFoundError` | The `thread_id` does not exist or belongs to another user. For a new conversation, omit `thread_id` and use the id the server returns. |
 | `409` | `ConflictError` | The thread is busy with another run, or a resume's `interrupt_id` does not match. Wait and retry, or send `on_busy: 'cancel'` to stop the running turn first. The default `on_busy: 'wait'` holds the request up to 30 seconds before it answers `409`. |
-| `429` | `TenxGraphError` with `statusCode` 429 | The rate limit window is used up, or the user has too many runs in flight. |
+| `429` | `RateLimitError` | The rate limit window is used up, or the user has too many runs in flight. |
 
-For `429`, the client has no dedicated class and does not keep the `Retry-After` header. A rate-limit response ends its message with `Retry after <n>s.`, which you can parse. The run-cap response has no `Retry-After` header. Back off with a delay that grows each attempt and stop after a few tries. A working example is in [Rate limits (429)](/docs/client/error-handling#rate-limits-429).
+For `429`, wait `err.retryAfterSeconds` when it is set (the run cap sends none), then retry with a delay that grows each attempt, and stop after a few tries. Example: [Rate limits (429)](/docs/client/error-handling#rate-limits-429).
 
 ```ts
-import { TenxGraphError } from '10xgraph-client';
+import { RateLimitError } from '10xgraph-client';
 
 try {
   await client.invoke(messages, { config: { thread_id } });
 } catch (err) {
-  if (err instanceof TenxGraphError && err.statusCode === 429) {
+  if (err instanceof RateLimitError) {
     // wait, then retry with backoff; do not loop immediately
   } else {
     throw err;
@@ -92,8 +94,8 @@ try {
 - No token in any `NEXT_PUBLIC_` variable or committed file.
 - Browser calls go through your proxy, or use a short-lived per-user token fetched at runtime.
 - `ORIGINS` lists your real frontend origins.
-- WebSocket users run `10xgraph-api` 1.0.
-- Your UI handles `401`, `403`, `409` and `429` as above.
+- Client and server share the same major.minor version.
+- Your UI handles `401`, `403`, `404`, `409` and `429` as above.
 - You ran the [pre-production smoke tests](/docs/testing/before-production).
 
 ## Next steps

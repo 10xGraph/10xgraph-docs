@@ -5,7 +5,7 @@ section: TypeScript client
 group: Basics
 order: 30
 label: Invoke the agent
-updated: "2026-10-27"
+updated: "2026-11-26"
 faq:
   - question: How do I keep conversation history between calls?
     answer: Omit thread_id on the first call and read the id the server picked from result.thread_id. Pass that thread_id in the config object on later calls. The same thread_id replays messages in order and maintains state, so the agent has context from earlier turns.
@@ -15,7 +15,7 @@ faq:
     answer: Pass an onPartialResult callback to invoke(). It fires after each iteration, telling you if tool calls were made and when the run completes.
 ---
 
-`client.invoke()` sends a message to your agent and waits for the final response. It handles multiple tool calls automatically, returns full state information, and supports persistent threads so conversations can span multiple API calls. The call runs under the caller's identity, so a thread belongs to the user whose token sent it. This guide walks you through the core operations.
+`client.invoke()` sends messages to your agent and waits for the final result, running client-side tool rounds for you. The call runs under the caller's identity, so a thread belongs to the user whose token sent it.
 
 ## Prerequisites
 
@@ -40,42 +40,28 @@ const response = await client.invoke([
 
 The call blocks until the agent completes, including all tool calls. The return value is an `InvokeResult` containing the final `messages` array, `thread_id`, `run_id`, `meta` (thread info), `all_messages` (every message across tool iterations), `iterations`, and optionally `state`, `context` and `summary` depending on `response_granularity`.
 
-You can also provide a system prompt by creating a message with role `'system'`:
-
-```ts
-const response = await client.invoke([
-  Message.text_message('You are a helpful geography assistant.', 'system'),
-  Message.text_message('What is the capital of France?'),
-]);
-```
+The server accepts only `user` messages from a client; a `system` or `assistant` message answers 422. Set the system prompt in the agent on the server.
 
 ## Extract the response text
 
-The assistant's response is in `result.messages`. Find the last message with `role: 'assistant'`, then extract text from its `content` array:
+The reply is the last message of `result.messages`. `text()` joins its text blocks:
 
 ```ts
-const assistantMsg = [...response.messages].reverse().find(m => m.role === 'assistant');
-if (assistantMsg) {
-  const text = assistantMsg.content
-    .filter(block => block.type === 'text')
-    .map(block => (block as any).text)
-    .join('');
-  console.log(text);
-}
+console.log(response.messages.at(-1)?.text());
 ```
 
-For multimodal responses (images, audio, documents), the agent may include other block types. Check `block.type` to handle each one appropriately.
+For images, audio or documents in a reply, read each block's `type` in `content`.
 
 ## Keep conversation history with threads
 
-By default, each `invoke()` call without a `thread_id` starts a new thread. To keep conversation history, send the id of that thread back in the `config` object on later calls. The same thread replays all prior messages in order.
+By default, each `invoke()` call without a `thread_id` starts a new thread. To keep conversation history, send the id of that thread back in the `config` object on later calls.
 
 Do not invent the id. Omit `thread_id` on the first call. The server starts a thread and returns its id in `result.thread_id`:
 
 ```ts
 // First turn: no thread_id, so the server starts a new thread
 const first = await client.invoke([Message.text_message('Tell me about Paris.')]);
-console.log(first.messages[first.messages.length - 1].content);
+console.log(first.messages.at(-1)?.text());
 const threadId = first.thread_id;
 
 // Second turn: the agent sees the first message and response automatically
@@ -87,29 +73,18 @@ const second = await client.invoke(
 
 The result includes `result.thread_id` (the ID used), `result.run_id` and `result.meta.is_new_thread` (true when the server just started the thread).
 
-<aside class="callout callout-warning" role="note"><p class="callout-title">Unknown thread ids get 403</p>
-<p>By default the server only accepts the id of a thread that already exists. An id you made up answers <code>403</code>, the same as another user's thread. Store the id the server returns and reuse it. Operators can change this with <a href="/docs/reference/api-cli/configuration#thread_ids"><code>runs.thread_ids</code></a>.</p></aside>
+<aside class="callout callout-warning" role="note"><p class="callout-title">Unknown thread ids get 404</p>
+<p>By default the server only accepts the id of a thread that already exists. An id you made up answers <code>404</code>, the same as another user's thread. Store the id the server returns and reuse it. Operators can change this with <a href="/docs/reference/api-cli/configuration#thread_ids"><code>runs.thread_ids</code></a>.</p></aside>
 
 ## Control response size with granularity
 
-The `response_granularity` option tells the server how much data to include in the response:
+`response_granularity` sets how much comes back: `'low'` returns messages only, `'partial'` adds `context` and `summary`, and `'full'` adds `state`. `invoke()` defaults to `'full'`; pass `'low'` when your UI shows only messages:
 
 ```ts
-const response = await client.invoke(
-  [Message.text_message('Summarize this document.')],
-  {
-    response_granularity: 'low',  // Fastest, messages only
-  }
-);
+const response = await client.invoke([Message.text_message('Summarize this document.')], {
+  response_granularity: 'low',
+});
 ```
-
-| Level | Includes | Best for |
-|-------|----------|----------|
-| `'low'` | Latest messages only | Production chat, minimal latency |
-| `'partial'` | Messages + context + summary | Chats that show summaries or context |
-| `'full'` | Messages + state | Debugging, admin dashboards |
-
-In production, use `'low'` for the fastest response. Move to `'partial'` or `'full'` only if your UI needs the extra data. The `state` field of the result is only filled with `'full'`. The default for `invoke()` is `'full'`.
 
 ## Monitor progress with partial results
 
@@ -131,46 +106,33 @@ const response = await client.invoke(
 console.log(`Completed in ${response.iterations} steps.`);
 ```
 
-The `InvokePartialResult` gives you iteration count, whether tool calls were made, and whether the run is complete. This is useful for showing progress bars or logging in production.
+The `InvokePartialResult` gives you iteration count, whether tool calls were made, and whether the run is complete.
 
 ## Handle errors gracefully
 
-Network errors, authentication failures, and validation errors are thrown as exceptions. Catch `TenxGraphError` to handle specific HTTP status codes:
+Failures are thrown as `TenxGraphError` subclasses, including timeouts and network errors:
 
 ```ts
-import { TenxGraphError } from '10xgraph-client';
+import { AuthenticationError, NotFoundError, TenxGraphError } from '10xgraph-client';
 
 try {
-  const response = await client.invoke([
-    Message.text_message('What is the meaning of life?'),
-  ]);
-  displayResponse(response.messages);
+  const response = await client.invoke([Message.text_message('Hello')], {
+    config: threadId ? { thread_id: threadId } : undefined,
+  });
 } catch (err) {
-  if (err instanceof TenxGraphError) {
-    switch (err.statusCode) {
-      case 401:
-        // Auth failed: token invalid or expired
-        console.error('Not authenticated. Re-login.');
-        redirectToLogin();
-        break;
-      case 403:
-        // Auth succeeded but user lacks permission
-        console.error('Permission denied for this agent.');
-        break;
-      case 500:
-        console.error('Server error. Try again later.');
-        break;
-      default:
-        console.error(`HTTP ${err.statusCode}: ${err.message}`);
-    }
+  if (err instanceof AuthenticationError) {
+    redirectToLogin(); // token missing, expired or revoked
+  } else if (err instanceof NotFoundError) {
+    threadId = undefined; // unknown thread: the next call starts a new one
+  } else if (err instanceof TenxGraphError) {
+    console.error(`${err.statusCode} ${err.errorCode}: ${err.message}`);
   } else {
-    // Network error, timeout, etc.
-    console.error('Connection failed:', err);
+    throw err;
   }
 }
 ```
 
-See [Error handling](/docs/client/error-handling) for the full error type reference.
+Which errors to retry: [Handle errors](/docs/client/error-handling).
 
 ## Complete working example
 
@@ -202,16 +164,7 @@ async function askAgent(
       }
     );
 
-    const assistantMsg = [...result.messages].reverse().find(
-      m => m.role === 'assistant'
-    );
-    if (!assistantMsg) return null;
-
-    const text = assistantMsg.content
-      .filter(block => block.type === 'text')
-      .map(block => (block as any).text)
-      .join('');
-    return { text, threadId: result.thread_id };
+    return { text: result.messages.at(-1)?.text() ?? '', threadId: result.thread_id };
   } catch (err) {
     if (err instanceof TenxGraphError) {
       console.error(`Agent error [${err.statusCode}]: ${err.message}`);
@@ -232,29 +185,6 @@ async function askAgent(
   console.log('Agent:', second?.text);
 })();
 ```
-
-Compile the file to JavaScript with your usual TypeScript setup and run it with `node`.
-
-## Verify the setup
-
-If you see these errors, here are the fixes:
-
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `TypeError: Failed to fetch` | Server not running | Start it with `10xgraph dev` |
-| `TenxGraphError 401` | Token invalid or missing | Check `API_TOKEN` env var |
-| Empty messages array | Agent has no output | Check the agent code for issues |
-
-The agent should respond within seconds. If responses take too long, check the graph's tool calls and model configuration.
-
-## What you learned
-
-- Create messages with `Message.text_message()` and pass them to `client.invoke()`.
-- Extract text from the response by filtering for `role === 'assistant'` and `block.type === 'text'`.
-- Omit `thread_id` on the first call, then pass the returned `thread_id` in the config to continue the conversation.
-- Set `response_granularity` to 'low' for production, 'full' for debugging.
-- Monitor progress with `onPartialResult` callbacks for multi-step agent runs.
-- Catch `TenxGraphError` by status code to handle auth, permission, and server errors.
 
 ## Next steps
 

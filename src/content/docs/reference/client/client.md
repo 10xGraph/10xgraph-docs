@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 460
 label: "TenxGraphClient"
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
 `TenxGraphClient` is the main class of the `10xgraph-client` package. It wraps the 10xGraph REST and WebSocket endpoints in one typed object, so a TypeScript or JavaScript app can invoke, stream, manage threads, use memory and files, and run client-side tools without writing fetch code.
@@ -31,7 +31,7 @@ import { TenxGraphClient } from '10xgraph-client';
 
 ## Constructor
 
-The constructor takes one `TenxGraphConfig` object. Only `baseUrl` is required. All settings are fixed for the life of the instance, so create a new client to change a token or header.
+The constructor takes one `TenxGraphConfig` object. Only `baseUrl` is required. Settings are fixed for the life of the instance, except the bearer token: `setAuthToken()` replaces it and `clearAuth()` drops `authToken` and `auth`.
 
 ```ts
 new TenxGraphClient(config: TenxGraphConfig)
@@ -41,14 +41,14 @@ new TenxGraphClient(config: TenxGraphConfig)
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `baseUrl` | `string` | Yes | none | Full base URL of your 10xGraph API server, e.g. `http://localhost:8000`. A trailing slash is stripped when building WebSocket URLs, so avoid one. |
-| `authToken` | `string \| null` | No | `undefined` | Convenience shorthand for `Bearer` token auth. Equivalent to `auth: { type: 'bearer', token: '...' }`. If both `authToken` and `auth` are set, `auth` wins for HTTP and WebSocket requests. |
+| `baseUrl` | `string` | Yes | none | Full base URL of your 10xGraph API server, e.g. `http://localhost:8000`. Trailing slashes are stripped. |
+| `authToken` | `string \| null \| (() => string \| null \| undefined)` | No | `undefined` | Convenience shorthand for `Bearer` token auth. Equivalent to `auth: { type: 'bearer', token: '...' }`. If both `authToken` and `auth` are set, `auth` wins for HTTP and WebSocket requests. A function is called before every request, so a short-lived token can be refreshed. |
 | `auth` | `TenxGraphAuth \| null` | No | `undefined` | Structured auth configuration. See [Client auth](/docs/reference/client/auth) and the Authentication section below. |
 | `headers` | `HeadersInit` | No | `undefined` | Additional HTTP headers appended to every request. Use this for custom tracing headers or API gateway keys. |
 | `credentials` | `RequestCredentials` | No | `undefined` | The `credentials` option forwarded to the underlying `fetch` call (e.g. `'include'` for cookie-based sessions). |
 | `timeout` | `number` | No | `300000` | Per-request timeout in milliseconds (default 5 minutes). A falsy value such as `0` falls back to the default. Set a lower value in latency-sensitive UIs. |
 | `debug` | `boolean` | No | `false` | Enable verbose `console.debug` / `console.info` logging of every request and response. Useful during development; disable in production. |
-| `webSocketImpl` | `typeof WebSocket` | No | `undefined` | WebSocket implementation for `wsStream()` and `realtime()`. Browsers and Node 21+ have a global `WebSocket` and need nothing here; on Node 18/20 pass the [`ws`](https://www.npmjs.com/package/ws) package. |
+| `webSocketImpl` | `typeof WebSocket` | No | `undefined` | WebSocket implementation for `wsStream()` and `realtime()`. Browsers and Node 22 or later have a global `WebSocket` and need nothing here; on Node 20 pass the [`ws`](https://www.npmjs.com/package/ws) package. |
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Auth on WebSocket routes</p>
 
@@ -58,7 +58,7 @@ new TenxGraphClient(config: TenxGraphConfig)
 
 ### Create a client
 
-This example builds a client with bearer auth and a shorter timeout. Run it in Node 18+ or a browser.
+This example builds a client with bearer auth and a shorter timeout. Run it in Node 20 or later, or a browser.
 
 ```ts
 import { TenxGraphClient } from '10xgraph-client';
@@ -110,7 +110,7 @@ See [Graph](/docs/reference/client/graph) for full details on the graph-control 
 
 | Method | Returns | Description |
 |---|---|---|
-| `threads(request?)` | `Promise<ThreadsResponse>` | List threads. `request` is `{ search?, offset?, limit? }`. |
+| `threads(request?)` | `Promise<ThreadsResponse>` | List threads. `request` is `{ search?, offset?, limit?, filters? }`. |
 | `threadDetails(threadId)` | `Promise<ThreadDetailsResponse>` | Fetch metadata for a single thread. |
 | `threadState(threadId)` | `Promise<ThreadStateResponse>` | Fetch the full state snapshot for a thread. |
 | `updateThreadState(threadId, config, state)` | `Promise<UpdateThreadStateResponse>` | Write a new state snapshot for a thread. |
@@ -143,8 +143,9 @@ See [Memory](/docs/reference/client/memory) for full details.
 |---|---|---|
 | `uploadFile(file)` | `Promise<FileUploadResponse>` | Upload an image, audio, or document file. Returns `file_id` and access URL. |
 | `getFile(fileId)` | `Promise<Blob>` | Download a file by ID as a raw `Blob`. |
+| `listFiles(params?)` | `Promise<ListFilesResponse>` | List the caller's files with `limit` and `offset`; 501 when the store cannot list. |
 | `getFileInfo(fileId)` | `Promise<FileInfoResponse>` | Fetch metadata (MIME type, size, extracted text) for a stored file. |
-| `deleteFile(fileId)` | `Promise<DeleteFileResponse>` | Delete a file you uploaded. Needs the `files:delete` scope; 404 for a missing file or someone else's. |
+| `deleteFile(fileId)` | `Promise<DeleteFileResponse>` | Delete a file. Needs the `files:delete` permission; the uploader, or a caller whose reach covers the file, may delete it, else 404. |
 | `getFileAccessUrl(fileId)` | `Promise<FileAccessUrlResponse>` | Get the best access URL for a file (signed URL for cloud storage, or a direct API URL). |
 | `getMultimodalConfig()` | `Promise<MultimodalConfigResponse>` | Fetch the server's multimodal configuration (storage backend, max size, etc.). |
 
@@ -203,7 +204,7 @@ export class ToolExecutor {
 }
 ```
 
-`executeToolCalls` finds `remote_tool_call` blocks in the messages and runs each handler. It returns tool messages with status `completed`, or `failed` when the handler throws or the tool name is unknown. `all_tools()` returns the registered tools in OpenAI function format, filling missing parameter schemas with `{ type: 'object', properties: {}, required: [] }`.
+`executeToolCalls` finds `remote_tool_call` blocks in the messages and runs each handler. It returns tool messages with status `completed`, or `failed` when the handler throws, the tool name is unknown, the arguments are refused or too large, or a call id repeats. `all_tools()` returns the registered tools in OpenAI function format, filling missing parameter schemas with `{ type: 'object', properties: {}, required: [] }`.
 
 ### ToolRegistration
 
@@ -216,6 +217,8 @@ export interface ToolRegistration {
   description?: string;               // user-facing description
   parameters?: ToolParameter;         // JSON Schema for arguments
   handler: ToolHandler;               // async (args) => Promise<any>
+  validate?: (args: any) => boolean | void | Promise<boolean | void>; // false or throw refuses the call
+  maxArgsBytes?: number;              // default 1 MiB
 }
 ```
 
@@ -304,7 +307,7 @@ Every method throws an `TenxGraphError` (or a specific subclass) when the server
 |---|---|---|
 | `statusCode` | `number` | HTTP status code. |
 | `errorCode` | `string` | Machine-readable code from the server body. |
-| `requestId` | `string` | Server-generated request id, or `'unknown'` if the body could not be parsed. |
+| `requestId` | `string` | Server request id from the body or the `x-request-id` header, else `'unknown'`. |
 | `timestamp` | `string` | ISO timestamp of the failure. |
 | `details` | `ErrorDetail[]` | Field-level validation failures (empty if none). |
 | `endpoint` | `string \| undefined` | Endpoint that failed. |

@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 520
 label: Threads
-updated: "2026-10-28"
+updated: "2026-11-26"
 ---
 
 A thread is one conversation stored by the server's checkpointer: an ordered list of messages plus a state snapshot. The `TenxGraphClient` thread methods list threads, read and edit their state and messages, and delete them. They all call the `/v1/threads` routes and need a checkpointer on the server.
@@ -19,7 +19,7 @@ const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
 
 <aside class="callout callout-note" role="note"><p class="callout-title">A checkpointer is required</p>
 
-If the server was started without a checkpointer, every thread route returns HTTP 503 ("Checkpointer is not configured"). To create a thread from the client, call invoke or stream without a `thread_id`. The server picks the id and returns it as `thread_id` (invoke) or `chunk.thread_id` (stream). See [Invoke](/docs/reference/client/invoke) and [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
+`compile()` without a checkpointer uses an `InMemoryCheckpointer`, so threads live only in that process. A thread route answers 503 ("Checkpointer is not configured") only when no checkpointer is bound at all. To create a thread from the client, call invoke or stream without a `thread_id`. The server picks the id and returns it as `thread_id` (invoke) or `chunk.thread_id` (stream). See [Invoke](/docs/reference/client/invoke) and [Checkpointing and threads](/docs/concepts/checkpointing-and-threads).
 
 </aside>
 
@@ -49,7 +49,6 @@ Every response has the shape `{ data, metadata }`, where `metadata` is a `Respon
 ```ts
 client.threads(): Promise<ThreadsResponse>
 client.threads(request: ThreadsRequest): Promise<ThreadsResponse>
-client.threads(search?: string, offset?: number, limit?: number): Promise<ThreadsResponse>
 ```
 
 | Parameter | Type | Default | Description |
@@ -72,12 +71,13 @@ interface ThreadItem {
 }
 ```
 
+`response.data` also has `has_more`, `offset` and `limit`.
+
 ```ts
-// List threads three ways: defaults, request object, positional arguments
+// List threads with defaults, or with a request object
 const first = await client.threads();
 const searched = await client.threads({ search: 'paris', offset: 0, limit: 20 });
-const positional = await client.threads('paris', 0, 20);
-console.log(first.data.threads.length, searched.data.threads[0]?.thread_id, positional.metadata);
+console.log(first.data.threads.length, searched.data.threads[0]?.thread_id);
 
 // Filter by column. A bare value means equality; { op: value } picks an operator.
 const pro = await client.threads({
@@ -158,16 +158,15 @@ console.log(response.data.success);
 
 ## List and manage messages
 
-Messages are the thread's conversation history. You can read them with search and pagination, append messages without running the graph, and delete single messages.
+Messages are the thread's conversation history. You can read them with search and pagination, set feedback on one, and delete single messages.
 
 ### `threadMessages`
 
 ```ts
 client.threadMessages(threadId, request: { search?: string; offset?: number; limit?: number })
-client.threadMessages(threadId, search?: string, offset?: number, limit?: number)
 ```
 
-Both forms return `Promise<ThreadMessagesResponse>`, with the list at `response.data.messages`. `search`, `offset` and `limit` follow the same rules and defaults as `threads`.
+It returns `Promise<ThreadMessagesResponse>`, with the list at `response.data.messages`. `search`, `offset` and `limit` follow the same rules and defaults as `threads`.
 
 ```ts
 // Search a thread's messages, 50 at a time
@@ -322,7 +321,7 @@ await client.deleteThread('thread-123');
 
 | Status | Cause | Fix |
 |---|---|---|
-| 503 | The server has no checkpointer configured. | Configure a checkpointer on the server. |
+| 503 | No checkpointer is bound on the server. | Configure a checkpointer on the server. |
 | 422 | A validation rule above failed, or a message carries a tool call. | Check the IDs, pagination values and message content. |
 
 All of these surface as `TenxGraphError` with `statusCode` set. See [Errors](/docs/reference/client/errors).

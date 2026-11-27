@@ -4,27 +4,16 @@ description: "Store, search, and manage long-term memories across agent conversa
 section: "TypeScript client"
 group: "Features"
 order: 80
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
-The memory API lets you store facts, preferences, and conversation history that persists across threads and sessions. Agents can search this long-term context during conversation to provide personalized, informed responses. This guide shows you how to build agents that learn and remember.
+The memory API lets you store facts, preferences, and conversation history that persists across threads and sessions. Agents can search this long-term context during conversation to provide personalized, informed responses.
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Requires store</p>
 
 Memory operations require the `store` field configured in `10xgraph.json`. Without a store, the memory endpoints respond with HTTP 503 (`Store is not configured`).
 
 </aside>
-
-## Why memory matters
-
-Without memory, each thread starts fresh: the agent sees no history, no preferences, no facts about the user. With memory, you can:
-
-- Personalize responses based on learned user preferences.
-- Accumulate context that grows richer over time.
-- Build continuity across separate conversations and days.
-- Let agents refer to prior decisions and past interactions.
-
-The memory API handles the storage and retrieval; you control what to remember and how to use it.
 
 ## Prerequisites
 
@@ -57,7 +46,7 @@ The response includes `memory_id`, which you can use later to update or delete t
 
 ## Search memories to build context
 
-Vector similarity search finds memories that relate to your current query, even if the wording differs. This is the core value of the memory API: you ask a question, and the store returns relevant past facts.
+Vector similarity search finds memories that relate to your current query, even if the wording differs.
 
 ```ts
 import { MemoryType, RetrievalStrategy } from '10xgraph-client';
@@ -121,16 +110,12 @@ async function respondWithMemory(userQuestion: string) {
   threadId = response.thread_id;
 
   // 4. Store this interaction for future reference
-  const last = response.messages[response.messages.length - 1];
-  const answer = last.content
-    .filter((b) => b.type === 'text')
-    .map((b) => (b as { text: string }).text)
-    .join('');
+  const answer = response.messages.at(-1)?.text() ?? '';
   await client.storeMemory({
     content: `User asked: "${userQuestion}". Agent responded with: "${answer}"`,
     memory_type: MemoryType.EPISODIC,
     category: 'conversations',
-    metadata: { timestamp: new Date().toISOString(), thread_id: threadId },
+    metadata: { source: 'chat' },
   });
 
   return response;
@@ -142,8 +127,6 @@ console.log(result.messages);
 ```
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Text in the system prompt has the highest trust</p><p>This pattern puts memory text into the system prompt through <code>{memory_context}</code>, so the model gives it system rank. Stored memories can contain text from untrusted sources, so keep the wrapper above. The built-in preload mode avoids this by placing memories in the user message instead. See <a href="/docs/concepts/memory-and-store#why-memories-are-not-system-text">Why memories are not system text</a>.</p></aside>
-
-This pattern ensures every conversation is stored for learning, and every new question is informed by past context.
 
 ---
 
@@ -211,20 +194,13 @@ await client.updateMemory(
 
 ## Advanced search options
 
-The memory API supports multiple retrieval strategies and distance metrics. Most use cases work well with the defaults (similarity and cosine distance), but for specialized scenarios, you have options.
+Which retrieval strategies work depends on the store: `PgVectorStore` supports `similarity`, `hybrid` and `text`, and `QdrantStore` only `similarity`. The store refuses any other value.
 
 For detailed tables of retrieval strategies and distance metrics, see [memory reference](/docs/reference/client/memory#retrievalstrategy) and [distance metric reference](/docs/reference/client/memory#distancemetric).
 
 Common advanced patterns:
 
 ```ts
-// Temporal retrieval: get the most recent memories
-const recent = await client.searchMemory({
-  query: 'recent activity',
-  limit: 10,
-  retrieval_strategy: RetrievalStrategy.TEMPORAL,
-});
-
 // Hybrid search: combined retrieval approaches
 const hybrid = await client.searchMemory({
   query: 'user preferences',
@@ -293,18 +269,8 @@ await client.forgetMemories({
 | `TenxGraphError` status 422 | Empty `query`, a `query` over 8,000 characters, string `content` over 100,000 characters, or `limit` outside 1 to 100 on search. | Shorten or split the text. The server only forwards the `infer` and `replace_metadata` entries of `options`. |
 | `TenxGraphError` status 503 | Store not configured or unreachable. | Check the `store` field in `10xgraph.json` and ensure the store backend is running. |
 | Empty search results | Score threshold too high, or no memories match the type/category. | Lower `score_threshold`, remove the type filter, or store more memories. |
-| Irrelevant search results | Query is too vague, or memories are poorly written. | Use specific queries. Store memories with clear, descriptive content. |
 
 ---
-
-## What you learned
-
-- Use `storeMemory()` to save facts, preferences, and interactions with a type and category.
-- `searchMemory()` finds related memories using vector similarity; higher scores mean stronger matches.
-- Build agent context by searching memories before invoking the agent.
-- Store agent interactions as episodic memories to build a conversation history.
-- Organize memories with types and categories to make searches more precise.
-- Use `updateMemory()`, `deleteMemory()`, and `forgetMemories()` to manage the memory lifecycle.
 
 ## Next step
 

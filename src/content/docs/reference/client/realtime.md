@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 510
 label: "realtime()"
-updated: "2026-11-10"
+updated: "2026-11-26"
 ---
 
 `client.realtime()` opens a realtime, audio-to-audio session over the server's `/v1/graph/live` WebSocket and returns a `RealtimeSession`. You stream PCM16 microphone audio up and receive PCM16 model audio back, plus transcripts, tool calls, and lifecycle events.
@@ -38,7 +38,7 @@ client.realtime(
 
 ### `init: RealtimeInit`
 
-The session configuration, sent to the server as the first frame. Every field is optional and overrides the live agent's build-time `RealtimeConfig` for this session, within the limits the server sets.
+The session configuration, sent to the server as the first frame. Every field is optional. `voice`, `modalities`, `vad` and `system_prompt` apply only when listed in the server's `websocket.realtime_client_overrides` (default `voice`, `modalities`, `vad`); `model` only when listed in `websocket.realtime_models`.
 
 | Field | Type | Description |
 |---|---|---|
@@ -47,7 +47,7 @@ The session configuration, sent to the server as the first frame. Every field is
 | `voice` | `string` | Provider voice name (e.g. `'Puck'`). |
 | `modalities` | `'AUDIO' \| 'TEXT' \| ('AUDIO' \| 'TEXT')[]` | Response modality. A realtime session is single-modality; a bare string is accepted and coerced server-side. Defaults to the agent's config (usually `'AUDIO'`). |
 | `vad` | `RealtimeVADConfig` | Voice-activity-detection overrides. Disable for push-to-talk and drive turns with `activityStart()` / `activityEnd()`. |
-| `system_prompt` | `string` | Per-session system instruction override. |
+| `system_prompt` | `string` | Per-session system instruction override. Ignored unless the operator lists `system_prompt` in `websocket.realtime_client_overrides`. |
 | `tools_tags` | `string[]` | Restrict which tagged tools are available this session. It can only narrow the agent's own tag filter; tags outside it are dropped. |
 
 Unknown keys are forwarded verbatim and ignored by servers that do not understand them, so the type is forward-compatible (`[k: string]: unknown`).
@@ -189,7 +189,7 @@ If the socket drops unexpectedly (not from your `close()` call and not after a `
 - The latest `resumptionHandle` (from `session_update`) is included in the reconnect init frame so the provider can resume server-side.
 - After `maxAttempts` is exhausted, the session emits a single fatal error on both the `'error'` and `'event'` channels: `{ type: 'error', code: 'reconnect_failed', message: '...', fatal: true }`.
 
-The session does **not** reconnect after an explicit `close()` or after receiving a `fatal` error event. Set `reconnect: { enabled: false }` to disable client reconnect entirely.
+The session does **not** reconnect after an explicit `close()`, after receiving a `fatal` error event, or after the server closes the socket with code 1008 (for example an unknown thread id or an expired session); the client reports 1008 as a fatal error itself. Set `reconnect: { enabled: false }` to disable client reconnect entirely.
 
 ---
 
@@ -291,9 +291,9 @@ const session = client.realtime(
 );
 ```
 
-### Running on Node < 21
+### Running on Node 20
 
-Browsers and Node 21+ have a global `WebSocket`. On Node 18 or 20, pass an implementation (the [`ws`](https://www.npmjs.com/package/ws) package) via `webSocketImpl` on the client config. It is used for both `realtime()` and `wsStream()`:
+Browsers and Node 22 or later have a global `WebSocket`. On Node 20, pass an implementation (the [`ws`](https://www.npmjs.com/package/ws) package) via `webSocketImpl` on the client config. It is used for both `realtime()` and `wsStream()`:
 
 ```ts
 import WebSocket from 'ws';
@@ -328,7 +328,7 @@ Constants `REALTIME_INPUT_SAMPLE_RATE` (16000) and `REALTIME_OUTPUT_SAMPLE_RATE`
 | Socket closes with code `1008` in the middle of a session, after an `error` event with `code: 'session_expired'` | The token expired or was revoked. The server re-checks it every 30 seconds. | Reconnect with a fresh token. |
 | Socket closes with code `1011` | An unexpected server-side error ended the session. | Check the server logs. |
 | Socket closes with code `1003` | Invalid init frame (e.g. an unsupported `modalities` value). | Check `model` and `modalities`; read the `error` event for the reason. |
-| `No WebSocket implementation available` thrown | Running on Node < 21 without a global `WebSocket`. | Pass `webSocketImpl` (the `ws` package) in the client config. |
+| `No WebSocket implementation available` thrown | Running on Node 20 without `webSocketImpl`. | Pass `webSocketImpl` (the `ws` package) in the client config. |
 | No audio plays | The client is transport-only. | Wire the `'audio'` channel to your own audio output. |
 | Repeated `'reconnecting'` then a fatal `reconnect_failed` | The server is unreachable past `maxAttempts`. | Check the server and network; raise `maxAttempts` or handle the fatal error. |
 
@@ -339,7 +339,7 @@ Constants `REALTIME_INPUT_SAMPLE_RATE` (16000) and `REALTIME_OUTPUT_SAMPLE_RATE`
 - `client.realtime(init, options?)` returns a transport-only `RealtimeSession` over `/v1/graph/live`.
 - Send PCM16 @ 16 kHz with `sendAudio`; receive PCM16 @ 24 kHz on the `'audio'` channel; capture and playback are your responsibility.
 - Subscribe to typed events (`output_transcript`, `tool_call`, `interrupted`, ...) with `session.on(...)`.
-- Auth uses the browser-safe `10xgraph-bearer` subprotocol automatically (needs `10xgraph-api` 1.0); pass `webSocketImpl` on Node < 21.
+- Auth uses the browser-safe `10xgraph-bearer` subprotocol automatically (use a `10xgraph-api` with the client's major.minor); pass `webSocketImpl` on Node 20.
 - The session auto-reconnects with backoff and resumes the same `thread_id`, unless you call `close()` or a fatal error occurs.
 
 ## Next step

@@ -4,16 +4,14 @@ description: Execute client-side tools from the agent graph, handling geolocatio
 section: "TypeScript client"
 group: "Features"
 order: 60
-updated: "2026-10-08"
+updated: "2026-11-26"
 ---
 
 Remote tools let your agent call functions that run in the browser or on the client machine. Use them for capabilities that only the client owns: geolocation, clipboard access, DOM manipulation, local file system access, or device sensors. Keep database, secrets, and backend work in server-side tools defined in your Python graph.
 
-When the agent asks for a remote tool, 10xGraph automatically detects it, runs your registered handler on the client, collects the result, and feeds it back to the agent, all without you managing the handoff.
-
 ## How it works
 
-The flow is transparent. When you invoke or stream the agent:
+When you invoke or stream the agent:
 
 1. The Python graph calls a remote tool (one you declared in `10xgraph.json`).
 2. The server returns a `RemoteToolCallBlock` to the client.
@@ -26,55 +24,7 @@ This loop repeats until the graph is done or hits the recursion limit (default 2
 
 ## Step 1: Declare schemas in `10xgraph.json`
 
-Add a `remote_tools` array to your config. Each entry describes a tool the server will advertise to the model and the agent will be allowed to call:
-
-```json
-{
-  "agent": "graph.agent:app",
-  "remote_tools": [
-    {
-      "node": "tools",
-      "name": "get_location",
-      "description": "Read the browser's current location using geolocation.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "high_accuracy": {
-            "type": "boolean",
-            "description": "Request high-accuracy coordinates (slower)."
-          }
-        },
-        "required": []
-      }
-    },
-    {
-      "node": "tools",
-      "name": "read_clipboard",
-      "description": "Read text from the user's clipboard.",
-      "parameters": {
-        "type": "object"
-      }
-    }
-  ]
-}
-```
-
-Schema validation happens at server startup. The server checks that:
-
-- Each entry has a non-blank `node`, `name` and `description`. (`node_name` is accepted as an alias for `node`.)
-- The `name` is unique within your remote tools list.
-- `parameters` is an object schema: `type` must be `"object"`, `properties` an object, `required` a list of strings. Missing keys default to `{"type": "object", "properties": {}, "required": []}`.
-- No unknown fields are present.
-
-At startup the server attaches each schema to the named `ToolNode` in your graph.
-
-Restart the API after changing schemas. To validate syntax before restarting, run:
-
-```bash
-10xgraph audit
-```
-
-This command validates the `remote_tools` entries in your `10xgraph.json` and other environment and configuration checks.
+Declare each tool's `name`, `description`, JSON Schema `parameters` and the `node` of the `ToolNode` that offers it in `remote_tools` in the server's `10xgraph.json`, then restart the server. The server validates the entries at startup. Fields and rules: [Remote tools on the server](/docs/server/remote-tools#declaring-remote-tools-in-10xgraphjson).
 
 ## Step 2: Register matching handlers
 
@@ -116,10 +66,18 @@ Handler requirements:
 
 - **Signature:** `async (args: any) => Promise<any>`: the async function receives the tool arguments as a single object and must return a JSON-serializable value.
 - **Arguments:** The model generates arguments based on the schema you declared in `10xgraph.json`. Destructure them as shown, or access them as properties: `args.high_accuracy`.
-- **Return value:** Must be serializable to JSON (objects, arrays, strings, numbers, booleans, null). If your result is not serializable, the tool fails.
+- **Return value:** Return JSON-safe data. `JSON.stringify` drops functions and `undefined`, and a circular value makes the `invoke()` or `stream()` call throw.
 - **Errors:** If the handler throws, the error is caught and converted to a failed tool result. The agent sees the error message and can retry or handle it.
 
-Register handlers before any `invoke()` or `stream()` call. The SDK runs handlers automatically when the response contains a `RemoteToolCallBlock`.
+To check arguments in the client before your handler runs, register with `registerTool()` instead. `parameters` checks top-level types and `required`, `validate` refuses a call when it returns `false` or throws, and `maxArgsBytes` caps the argument size (default 1 MiB). A refused call reaches the model as a failed tool result, and the handler does not run.
+
+```ts
+client.registerTool({
+  name: 'read_clipboard',
+  handler: async () => ({ content: await navigator.clipboard.readText() }),
+  validate: () => document.hasFocus(), // refuse while the tab is in the background
+});
+```
 
 ## Step 3: Invoke normally
 
@@ -151,72 +109,15 @@ for await (const chunk of stream) {
 }
 ```
 
-The SDK automatically:
-
-1. Detects `RemoteToolCallBlock` chunks.
-2. Finds and runs the matching handler.
-3. Sends the result back to the server.
-4. Continues streaming or invoking.
-
 If a handler is missing, the SDK creates a failed tool result with the message `Tool '{name}' not found`. The agent sees this and may retry or ask for clarification.
 
-## registerToolHandler(name, handler)
+## Recursion limit
 
-Register a single tool handler.
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `name` | `string` | Must exactly match a configured `remote_tools[].name` in `10xgraph.json`. Case-sensitive. |
-| `handler` | `(args: any) => Promise<any>` | An async function that executes locally. Receives model-generated arguments and returns a serializable result. |
-
-Example with error handling:
-
-```ts
-client.registerToolHandler('fetch_external_data', async ({ url }) => {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    // Re-throwing here causes the SDK to mark the tool as failed.
-    // The error message is sent to the agent.
-    throw new Error(`Failed to fetch ${url}: ${(error as Error).message}`);
-  }
-});
-```
-
-`registerTool({ name, handler, node?, description?, parameters? })` is also available and takes optional metadata. `registerToolHandler()` is the right choice when the schema lives in `10xgraph.json`, because the server owns the trusted schema.
-
-## Execution behavior
-
-When a response from the server contains one or more `RemoteToolCallBlock` objects, the client:
-
-1. **Finds the handler** by name from your registered handlers.
-2. **Executes the handler** with the arguments the model generated.
-3. **Wraps the result** in a `ToolResultBlock` (or error block if the handler threw).
-4. **Sends it back** in a tool result message.
-5. **Continues invoking** until all remote calls are resolved or the recursion limit is reached.
-
-The recursion limit (default 25) applies to each `invoke()` or `stream()` call. Pass a custom limit in options:
-
-```ts
-const result = await client.invoke(
-  [Message.text_message("...", "user")],
-  { recursion_limit: 50 }
-);
-
-const stream = client.stream(
-  [Message.text_message("...", "user")],
-  { recursion_limit: 10 }
-);
-```
+Each `invoke()`, `stream()` or `wsStream()` call runs at most `recursion_limit` tool rounds (default 25); pass another value in the options, for example `{ recursion_limit: 50 }`. When the limit stops a loop that still has tool calls, `invoke()` returns `recursion_limit_reached: true` and `stream()` yields an `error` chunk with `data.recursion_limit_reached`.
 
 ## Errors and missing handlers
 
-If a handler throws an exception or a handler is not registered:
+If a handler throws, is not registered, or its arguments are refused (see `registerTool()` above), or a call id repeats:
 
 - The exception is caught at the client.
 - A failed `ToolResultBlock` is created with `is_error: true` and the error message.
@@ -242,35 +143,13 @@ Missing handlers produce a similar failure message:
 // Agent receives output { error: "Tool 'unregistered_tool' not found" }, is_error: true, status: 'failed'
 ```
 
-## WebSocket streaming
-
-Both `stream()` (HTTP) and `wsStream()` (WebSocket) automatically handle remote tools. Choose based on your needs:
-
-- **`stream()`**: HTTP streaming with one request per tool-call loop. Simpler; good for low latency and single-tool calls.
-- **`wsStream()`**: Single persistent WebSocket for the full lifecycle. Better for multi-turn interactions or frequent tool calls.
-
-Both have identical APIs and tool-handling behavior:
-
-```ts
-// Identical code; only the method name differs
-const httpStream = client.stream([userMessage]);
-const wsStream = client.wsStream([userMessage]);
-
-for await (const chunk of httpStream) {
-  // Handle chunk
-}
-```
-
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Agent never calls the tool | Tool not declared in `remote_tools` or wrong `node` | Add it to `10xgraph.json` with the correct ToolNode name, then restart the API. Run `10xgraph audit` to validate. |
+| Agent never calls the tool | Tool not declared in `remote_tools` or wrong `node` | Add it to `10xgraph.json` with the correct ToolNode name, then restart the API. |
 | `Tool 'X' not found` error | Handler not registered or name mismatch | Register the handler with the exact name from `remote_tools[].name` before calling `invoke()` or `stream()`. Names are case-sensitive. |
-| API startup fails with validation error | Typo in schema, duplicate tool name, or malformed parameters | Fix the `remote_tools` entry in `10xgraph.json`. Run `10xgraph audit` to identify the error. |
-| Handler result fails silently | Result is not JSON-serializable (e.g., contains a Function or circular reference) | Return only JSON-safe data: objects, arrays, strings, numbers, booleans, null. Use `JSON.stringify(result)` to test before returning. |
-| WebSocket closes unexpectedly | Network issue, timeout, or server error | Check browser console and server logs for details. The stream error propagates to your catch block or `for await` error handler. Reconnect and retry. |
-| Tool is called repeatedly in a loop | Agent's reasoning or parameters trigger a retry loop | Review the tool description and parameters in `10xgraph.json`. Make sure the tool description clearly states its purpose and output format. If the tool should not be retried, ensure your handler returns a clear result. |
+| API startup fails with validation error | Typo in schema, duplicate tool name, or malformed parameters | Fix the `remote_tools` entry in `10xgraph.json`. The startup log names the entry. |
 
 ## Next steps
 

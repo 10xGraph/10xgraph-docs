@@ -6,7 +6,7 @@ section: Reference
 group: "TypeScript client"
 order: 470
 label: Graph control
-updated: "2026-11-21"
+updated: "2026-11-26"
 ---
 
 Seven methods on `TenxGraphClient` inspect the graph and control its execution. They check server health, retrieve the graph's topology, list available tools, fetch observability data for a run, return the state schema, and stop or repair a thread. All are imported from `10xgraph-client` and called on a client instance.
@@ -77,14 +77,15 @@ interface GraphResponse {
       checkpointer_type: string;
       publisher: boolean;
       store: boolean;
-      interrupt_before: string[];
-      interrupt_after: string[];
+      interrupt_before: string[] | null;
+      interrupt_after: string[] | null;
       context_type: string;
       id_generator: string;
       id_type: string;
       state_type: string;
       state_fields: string[];
       models?: Record<string, GraphModelChoice>;
+      realtime_options?: GraphRealtimeOptions | null;
     };
     nodes: Array<{ id: string; name: string }>;
     edges: Array<{ id: string; source: string; target: string }>;
@@ -198,6 +199,8 @@ interface ObservabilityResponse {
     run_count: number;
     run_ids: string[];     // oldest first
     run: ObsRun | null;    // null when nothing has been recorded
+    enabled?: boolean;     // false when the server's local trace store is off
+    reason?: 'disabled_in_production' | 'store_unavailable' | 'no_runs' | null; // why run is null
   };
   metadata: ResponseMetadata;
 }
@@ -215,6 +218,10 @@ interface ObsRun {
   llm_calls: number;
   tool_calls: number;
   iterations: number;
+  error?: string | null;
+  model?: string | null;
+  models?: string[];
+  notes?: string[];
 }
 
 interface ObsSpan {
@@ -227,6 +234,16 @@ interface ObsSpan {
   model?: string | null;       // set on 'llm' spans
   input_tokens?: number | null;
   output_tokens?: number | null;
+  status?: 'ok' | 'error' | 'running';
+  error?: string | null;
+  inputs?: Record<string, unknown> | null;
+  outputs?: Record<string, unknown> | null;
+  step?: number | null;
+  visit?: number | null;
+  total_tokens?: number | null;
+  reasoning_tokens?: number | null;
+  tool_name?: string | null;
+  tool_call_id?: string | null;
 }
 
 interface ObsEvent {
@@ -249,7 +266,7 @@ interface ObsTokenUsage {
 
 Spans nest `root → node → llm | tool` via `parent`. `start_ms` and `offset_ms` are relative to the start of the run, so add `started_at * 1000` to place them on a wall clock.
 
-A server with telemetry recording disabled returns `run_count: 0` and `run: null` instead of raising.
+When the server's local trace store is off, the call returns `run_count: 0`, `run: null`, `enabled: false` and a `reason` instead of raising. The store is off in production mode (`reason` `'disabled_in_production'`), so a production server never has a trace to return; use your tracing backend there.
 
 ---
 
@@ -305,23 +322,21 @@ stopGraph(threadId: string, config?: Record<string, any>): Promise<StopGraphResp
 Sets a stop flag on the thread. The graph checks it between nodes and halts before starting the next one.
 
 ```ts
-// Declared TypeScript type
 interface StopGraphResponse {
   data: {
-    success: boolean;
-    message: string;
-    thread_id: string;
-    stopped_at?: string;   // ISO timestamp
+    ok: boolean;          // false when the thread has no checkpointer or no saved state
+    running?: boolean;    // true when a run was active and a stop was requested
+    reason?: string;      // 'not-running', 'no-state' or 'no-checkpointer'
   };
   metadata: ResponseMetadata;
 }
 ```
 
-The server currently fills `data` with the result of the core stop call instead: `{ ok: boolean, running?: boolean, reason?: string }`. `reason` is `"not-running"` when the thread exists but is idle, `"no-state"` when the thread has no state, and `"no-checkpointer"` when the graph has no checkpointer (stop needs one). Do not rely on `success`, `message` or `stopped_at`; check `data.ok` and `data.running` with a cast if you need the outcome.
+`success`, `message`, `thread_id` and `stopped_at` remain on the type as deprecated fields; the server never sends them.
 
 It is a request, not a guarantee: the currently executing node runs to completion, so one more message may still arrive. Stopping a thread that is not running is not an error.
 
-Breaking out of a `for await` loop over `stream()` closes your end of the connection but does not stop the graph. Call `stopGraph()` as well.
+Breaking out of a `for await` loop over `stream()` closes the connection, and the server then stops the run and saves the thread as interrupted. `stopGraph()` is for stopping a run from another tab or process, or one you are not streaming.
 
 ---
 
@@ -361,7 +376,7 @@ class AgentState {
 }
 ```
 
-The exported `ExecutionMeta` TypeScript interface declares `interrupt`, `is_running`, `is_interrupted` and `is_stopped_requested`, but the server does not send those fields. What arrives on the wire is the Python `ExecutionState`, so read these fields instead (cast `execution_meta` to `any` or to your own interface):
+`ExecutionMeta` types the fields below. Its `interrupt`, `is_running`, `is_interrupted` and `is_stopped_requested` are deprecated: the server never sends them. Read these fields instead:
 
 | Field | Description |
 |---|---|
@@ -375,7 +390,7 @@ The exported `ExecutionMeta` TypeScript interface declares `interrupt`, `is_runn
 | `execution_meta.interrupt_data` | Extra data attached to the pause, or `null`. |
 | `execution_meta.stop_current_execution` | `none`, `stop_requested` or `stopped`, set by `stopGraph()`. |
 
-State is only returned when you request `response_granularity: 'full'`.
+`invoke()` and `stream()` return state only at `'full'` granularity (`stream()` also on `state` chunks at `'partial'`); `threadState()` always returns it.
 
 The constructor takes a partial object and `Object.assign`s it, so a graph compiled with a custom state type carries its extra fields through at runtime even though they are not on the TypeScript class. Read `graphStateSchema()` for the authoritative field list of a given deployment.
 
@@ -401,8 +416,7 @@ const result = await client.invoke([userMessage], {
   response_granularity: 'full',
 });
 
-// The wire shape differs from the exported ExecutionMeta type, so cast it.
-const meta = result.state?.execution_meta as any;
+const meta = result.state?.execution_meta;
 
 if (meta?.status?.startsWith('interrupted')) {
   // Show the approval UI. `interrupt_data` carries whatever the node attached.

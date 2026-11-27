@@ -5,19 +5,17 @@ section: "TypeScript client"
 group: "Basics"
 order: 50
 label: Manage threads
-updated: "2026-10-28"
+updated: "2026-11-26"
 faq:
   - question: "What happens if no checkpointer is configured?"
     answer: "The server falls back to InMemoryCheckpointer, so threads live only in that server process and are lost on restart. For persistence, compile the graph with a SQLite, Postgres+Redis, or custom checkpointer."
-  - question: "Can I update thread state while a graph is running?"
-    answer: "Yes, you can call updateThreadState() at any time, but the next invoke() call will continue from the new state you set. Use this for injection, repair, or seeding initial data."
+  - question: "Can I update thread state while a run is active?"
+    answer: "No. State and message writes, deletes and fixGraph() take the thread's run lock, so while a run is active they fail at once with 409 (ConflictError). Call them after the run ends, or stop it first with stopGraph()."
   - question: "What's the difference between clearThreadState() and deleteThread()?"
     answer: "clearThreadState() removes only the state snapshot, keeping all messages. deleteThread() removes everything: state, messages, and thread metadata. Both are irreversible."
 ---
 
 10xGraph stores conversation history and state in **threads**. This guide shows you how to manage threads from the TypeScript client: listing and searching threads, inspecting their messages and state, updating or clearing state, and deleting threads.
-
-By the end of this guide, you will understand how to read and modify thread data in all its forms, and when to use each operation.
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Requires a configured checkpointer</p>
 
@@ -28,14 +26,12 @@ All thread operations use the checkpointer your graph was compiled with (`compil
 ## Prerequisites
 
 - A configured `TenxGraphClient` instance. See [Create a client](/docs/client/create-client).
-- The 10xGraph API server running with a durable checkpointer (SQLite, Postgres+Redis, or custom).
-- Node 18+ or a browser with fetch support.
 
 ---
 
 ## List all threads
 
-Retrieve all threads from the server. This is useful for discovering past conversations, searching for a specific thread, or bulk operations on threads.
+List the caller's threads (with reach `tenant` or `all`, every thread that reach covers). `threads()` also takes `filters` on your thread columns; see [threads()](/docs/reference/client/threads#threads).
 
 ```ts
 const response = await client.threads();
@@ -77,10 +73,9 @@ async function* allThreads(pageSize = 50) {
   while (true) {
     const res = await client.threads({ offset, limit: pageSize });
     const page = res.data.threads;
-    if (page.length === 0) break;
     yield* page;
+    if (!res.data.has_more) break;
     offset += page.length;
-    if (page.length < pageSize) break;
   }
 }
 
@@ -117,11 +112,7 @@ Retrieve all messages from a thread, optionally searching by content:
 const messages = await client.threadMessages('thread-abc123', {});
 
 for (const msg of messages.data.messages) {
-  const text = msg.content
-    .filter(b => b.type === 'text')
-    .map(b => (b as any).text as string)
-    .join('');
-  console.log(`[${msg.role.toUpperCase()}] ${text.slice(0, 80)}`);
+  console.log(`[${msg.role.toUpperCase()}] ${msg.text().slice(0, 80)}`);
 }
 ```
 
@@ -157,7 +148,7 @@ Use this when you need to read or inspect a specific message without fetching th
 
 ## Delete a message
 
-Remove a message from the thread's history. This is useful for cleaning up incomplete tool calls or messages that shouldn't appear in the conversation:
+Remove one message from the thread's history. To repair unanswered tool calls, use [`fixGraph()`](/docs/client/graph-utilities#fixgraph) instead:
 
 ```ts
 await client.deleteMessage('thread-abc123', 'msg-001');
@@ -201,7 +192,7 @@ console.log('State updated. Next invoke() will use this state.');
 
 <aside class="callout callout-warning" role="note"><p class="callout-title">State updates are immediate</p>
 
-`updateThreadState()` merges your values into the stored state and saves it. The next `invoke()` call continues from the merged state. Messages sent in `context` are appended, and the server rejects client-authored tool calls, assistant or system messages, and the built-in fields `context_summary` and `execution_meta` with a 422. Use with care: incorrect state can cause the agent to fail or behave unexpectedly.
+`updateThreadState()` merges your values into the stored state and saves it. The next `invoke()` call continues from the merged state. Messages sent in `context` are appended, and the server rejects client-authored tool calls, assistant or system messages, and the built-in fields `context_summary` and `execution_meta` with a 422. Use with care: incorrect state can cause the agent to fail or behave unexpectedly. While a run is active on the thread, the call answers 409.
 
 </aside>
 
@@ -229,7 +220,7 @@ await client.updateThreadMessageFeedback('thread-abc123', 'msg-001', {
 });
 ```
 
-The object can be at most 8192 bytes serialized and 10 levels deep, otherwise the server returns 422. A missing message returns 404, and the API returns 501 when the checkpointer lacks `aupdate_message_metadata` (added in `10xgraph` 1.0). See [`updateThreadMessageFeedback`](/docs/reference/client/threads#updatethreadmessagefeedback).
+The object can be at most 8192 bytes serialized and 10 levels deep, otherwise the server returns 422. A missing message returns 404, and the API returns 501 when the checkpointer lacks `aupdate_message_metadata`. See [`updateThreadMessageFeedback`](/docs/reference/client/threads#updatethreadmessagefeedback).
 
 ---
 
@@ -242,58 +233,7 @@ await client.deleteThread('thread-abc123');
 console.log('Thread deleted');
 ```
 
-After deletion, the thread ID cannot be reused. If you want to keep the message history but reset the state, use `clearThreadState()` instead.
-
----
-
-## Complete example: thread history viewer
-
-Putting all operations together in a utility function that displays a thread's full history:
-
-```ts
-import { TenxGraphClient, Message } from '10xgraph-client';
-
-const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
-
-async function displayThreadHistory(threadId: string) {
-  try {
-    // Fetch thread details
-    const details = await client.threadDetails(threadId);
-    const thread = details.data.thread_data.thread;
-    console.log(`\n=== Thread: ${thread.thread_name ?? threadId} ===`);
-    console.log(`Updated: ${thread.updated_at}`);
-
-    // Fetch all messages with pagination
-    const messagesResponse = await client.threadMessages(threadId, {
-      offset: 0,
-      limit: 100,
-    });
-
-    const messages = messagesResponse.data.messages;
-    console.log(`\n--- Messages (${messages.length} total) ---`);
-
-    for (const msg of messages) {
-      const text = msg.content
-        .filter(b => b.type === 'text')
-        .map(b => (b as any).text as string)
-        .join('') || '[non-text content]';
-      
-      console.log(`[${msg.role.toUpperCase()}] ${text.slice(0, 120)}`);
-    }
-
-    // Fetch and display current state
-    const stateResponse = await client.threadState(threadId);
-    console.log(`\n--- Current State ---`);
-    console.log(JSON.stringify(stateResponse.data.state, null, 2));
-
-  } catch (error) {
-    console.error(`Failed to display thread: ${error}`);
-  }
-}
-
-// Usage
-await displayThreadHistory('thread-abc123');
-```
+After deletion the server no longer accepts the id (it answers 404). If you want to keep the message history but reset the state, use `clearThreadState()` instead.
 
 ---
 
@@ -301,20 +241,11 @@ await displayThreadHistory('thread-abc123');
 
 | Error | Cause | Solution |
 |---|---|---|
-| `404 Not Found` | Thread does not exist. | Verify the thread ID exists. |
+| `NotFoundError` (404) | The thread does not exist or is outside the caller's reach. | Use an id the server returned. |
+| `ConflictError` (409) | A run is active on the thread. | Retry after the run ends. |
 | `422 Unprocessable Entity` | Invalid parameter, such as an empty or whitespace thread ID. | Ensure the thread ID is a non-empty string or a positive integer. |
 | Empty `threads` list | No threads have been created yet, or the server restarted with the default in-memory checkpointer. | Run a test invocation to create a thread, and compile with a durable checkpointer for persistence. |
 | `State is null` | The thread exists but has no state snapshot (e.g., after `clearThreadState()`). | Call `updateThreadState()` to set a state, or send a message with `invoke()`. |
-
----
-
-## Key takeaways
-
-- **List threads** with `threads()` to discover or search for conversations.
-- **Thread details** via `threadDetails()` give you metadata (ID, name, timestamps).
-- **Messages** are read with `threadMessages()`, given feedback with `updateThreadMessageFeedback()`, and deleted individually with `deleteMessage()`.
-- **Thread state** (checkpoint) is read with `threadState()`, updated with `updateThreadState()`, and cleared with `clearThreadState()`.
-- **Deletion** is permanent: `deleteThread()` removes everything, while `clearThreadState()` keeps messages but resets state.
 
 ---
 

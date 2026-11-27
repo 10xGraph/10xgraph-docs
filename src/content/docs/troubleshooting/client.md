@@ -4,7 +4,7 @@ description: "Symptoms, causes, and fixes for common 10xGraph TypeScript client 
 section: Troubleshooting
 order: 50
 label: Client Troubleshooting
-updated: "2026-11-10"
+updated: "2026-11-27"
 faq:
   - q: "Why does my browser request fail when curl works?"
     a: "The usual cause is CORS. The server's ORIGINS setting must include the exact origin of your web app, and credentials must be allowed consistently. Check the preflight OPTIONS request in the browser Network tab."
@@ -67,9 +67,9 @@ If the API runs behind a proxy, `baseUrl` must point at the proxy address that b
 
 ## Fix 429 responses
 
-A `TenxGraphError` with `statusCode` 429 means the server refused the call to limit load. There are two causes:
+A `RateLimitError` (`statusCode` 429) means the server refused the call to limit load. There are two causes:
 
-- **Rate limit.** `errorCode` is `RATE_LIMIT_EXCEEDED` and the message ends with `Retry after <n>s.` The server also sent a `Retry-After` header, but the client does not keep response headers on the error, so read the seconds from the message.
+- **Rate limit.** `errorCode` is `RATE_LIMIT_EXCEEDED` and the message ends with `Retry after <n>s.` Read the seconds from `error.retryAfterSeconds` (taken from the `Retry-After` header).
 - **Per-user run cap.** One user has `runs.max_concurrent_per_user` runs in flight (default 10). `errorCode` is `HTTPException` and there is no `Retry-After`. Wait for a run to finish, for example close streams you no longer read.
 
 A related case is `503` with `errorCode` `RATE_LIMIT_UNAVAILABLE`: the server's cache store (where the rate limiter keeps its counters) raised an error and `fail_open` is `false`. It is an outage, not a limit hit; retry after about 5 seconds.
@@ -202,9 +202,9 @@ If curl streams but your app receives everything at once or loses the tail, a pr
 
 `wsStream()` (turn-based, `/v1/graph/ws`) and `realtime()` (audio, `/v1/graph/live`) share the same auth and similar failure modes. Most failures are a missing WebSocket implementation, the wrong endpoint for the graph type, or an auth problem.
 
-### Provide a WebSocket implementation on older Node
+### Provide a WebSocket implementation on Node 20
 
-Browsers and Node 21 or later have a global `WebSocket`. On older Node versions the client reports that no WebSocket implementation is available. Install `ws` and pass it in.
+Browsers and Node 22 or later have a global `WebSocket`. On Node 20 the client reports that no WebSocket implementation is available. Install `ws` and pass it in.
 
 ```bash
 npm install ws
@@ -217,7 +217,7 @@ import { TenxGraphClient, Message } from '10xgraph-client';
 const client = new TenxGraphClient({
   baseUrl: 'http://localhost:8000',
   authToken: 'your-jwt-token',
-  webSocketImpl: WebSocket as never, // needed on Node < 21
+  webSocketImpl: WebSocket as never, // needed on Node 20
 });
 
 for await (const chunk of client.wsStream([Message.text_message('Hello')])) {
@@ -240,7 +240,7 @@ When a socket closes right after opening, the numeric close code tells you why. 
 
 ### Send the token through the subprotocol
 
-The bearer token never goes in the URL. In browsers it travels in the `Sec-WebSocket-Protocol` header as a subprotocol pair, and on Node the client also sets an `Authorization` header. This client sends the `10xgraph-bearer` subprotocol, which needs `10xgraph-api` 1.0. A 0.x server before the rename only knows `agentflow-bearer` and rejects the WebSocket handshake; upgrade the server.
+The bearer token never goes in the URL. In browsers it travels in the `Sec-WebSocket-Protocol` header as a subprotocol pair, and on Node the client also sets an `Authorization` header. This client sends the `10xgraph-bearer` subprotocol, so use a `10xgraph-api` with the same major.minor as the client. A 0.x server before the rename only knows `agentflow-bearer` and rejects the WebSocket handshake; upgrade the server.
 
 If a reverse proxy strips `Sec-WebSocket-Protocol`, the browser handshake arrives without a token and is rejected. Configure the proxy to forward upgrade headers, including `Sec-WebSocket-Protocol`.
 
@@ -284,7 +284,7 @@ These codes appear in error responses the client surfaces as typed errors. The f
 | `STORAGE_TRANSIENT_000` | A temporary storage failure, such as an unreachable database. | Retry after a short delay. |
 | `VALIDATION_ERROR` | The request body failed validation (HTTP 422). | Check the message format and `config` shape against [Invoke and stream](/docs/client/invoke-agent). |
 | `RATE_LIMIT_UNAVAILABLE` | The rate limiter's backend is unreachable and `fail_open` is `false` (HTTP 503, `Retry-After: 5`). | Retry after a short delay and restore the server's rate-limit Redis. See [Fix 429 responses](#fix-429-responses). |
-| `RATE_LIMIT_EXCEEDED` | The server's rate limit is used up (HTTP 429). Arrives as a plain `TenxGraphError`, not a typed subclass. | Wait for the `Retry-After` interval, which the message also states, then retry. See [Fix 429 responses](#fix-429-responses). |
+| `RATE_LIMIT_EXCEEDED` | The server's rate limit is used up (HTTP 429). Arrives as `RateLimitError`. | Wait for the `Retry-After` interval, which the message also states, then retry. See [Fix 429 responses](#fix-429-responses). |
 
 ## Related pages
 

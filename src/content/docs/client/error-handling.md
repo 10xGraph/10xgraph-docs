@@ -4,48 +4,26 @@ description: "Catch, classify, and recover from errors in the TypeScript client.
 section: "TypeScript client"
 group: "Features"
 order: 110
-updated: "2026-11-10"
+updated: "2026-11-26"
 ---
 
-Every API call from the client can fail: the server can reject authentication, return validation errors, encounter internal issues, or experience temporary storage outages. The 10xGraph TypeScript client exports a hierarchy of error classes to help you classify failures and respond appropriately.
+Every client call throws a `TenxGraphError` subclass when it fails, including timeouts and network failures. This page shows which classes to catch and when to retry.
 
-## Error hierarchy
+## Which error to catch
 
-All errors inherit from `TenxGraphError`, which gives you structured access to the status code, error code, request ID, and recovery suggestions.
+| Class | When | What to do |
+|---|---|---|
+| `AuthenticationError` (401) | Token missing, invalid, expired or revoked. `errorCode` is `EXPIRED_TOKEN`, `INVALID_TOKEN` or `REVOKED_TOKEN` when the server says which. | Refresh the token once on `EXPIRED_TOKEN`; otherwise sign the user in again. |
+| `PermissionError` (403) | The caller's role lacks the permission. | Do not retry. |
+| `NotFoundError` (404) | The thread, message, memory or file does not exist or is outside the caller's reach. `errorCode` is `THREAD_NOT_FOUND` for a thread. | For a new conversation, omit `thread_id` and use the id the server returns. |
+| `ConflictError` (409) | The thread is still busy after the server's 30 second wait, or a resume's `interrupt_id` does not match. | Retry later, or send `on_busy: 'cancel'`. The client never retries it. |
+| `ValidationError` (422) | Bad request body, a size limit, or a resume value that fails `response_schema`. | Fix the request. |
+| `RateLimitError` (429) | The rate limit window is used up, or the user has too many runs in flight. | Wait, then retry. See [Rate limits](#rate-limits-429). |
+| `ServerError` (500 to 504), `TransientStorageError` (503) | Server failure, gateway error or a storage outage. | Retry with backoff. |
+| `RequestTimeoutError`, `NetworkError` (`statusCode` 0) | The client timeout fired, or no HTTP reply arrived. | Retry with backoff. |
+| `StreamError`, `WebSocketError` | A stream or socket broke after it started. | Retry the call. |
 
-```ts
-import {
-  TenxGraphError,
-  BadRequestError,
-  AuthenticationError,
-  PermissionError,
-  NotFoundError,
-  ConflictError,
-  ValidationError,
-  ServerError,
-  GraphError,
-  NodeError,
-  StorageError,
-  TransientStorageError,
-} from '10xgraph-client';
-```
-
-| Error Class | HTTP Status | Meaning | Recovery |
-|---|---|---|---|
-| `BadRequestError` | 400 | Malformed request or invalid data | Fix the request and retry immediately |
-| `AuthenticationError` | 401 | Missing or invalid auth credentials | Check token, refresh if expired, retry |
-| `PermissionError` | 403 | User lacks access to the resource, or the `thread_id` does not exist or belongs to another user | Check authorization scope. For a new conversation, omit `thread_id` and use the id the server returns |
-| `NotFoundError` | 404 | Resource (thread, file) does not exist | Verify the ID, create the resource, or move on |
-| `ConflictError` | 409 | The thread is busy with another run, or a resume's `interrupt_id` does not match | Wait and retry, or send `on_busy: 'cancel'`. For a mismatch, fetch the current interrupt id |
-| `ValidationError` | 422 | Request failed schema validation, is over a size limit, or a resume answer fails `response_schema` | Fix field types, ranges and sizes, retry |
-| `ServerError` | 500, 502, 503, 504 | Server-side failure or transient issue | Retry with exponential backoff |
-| `GraphError` | 500 | Error during graph execution | Check graph configuration, inspect logs |
-| `NodeError` | 500 | Error in a specific graph node | Review node implementation and inputs |
-| `StorageError` | 500 | Checkpointer or memory store is unavailable | Verify storage backend is online, retry |
-| `TransientStorageError` | 503 | Temporary storage issue | Retry immediately or after brief delay |
-| `TenxGraphError` (base class) | 429 | Rate limit exceeded (`errorCode` `RATE_LIMIT_EXCEEDED`), or the user has too many runs in flight. The client has no dedicated class for 429 | Check `err.statusCode === 429`, wait, then retry. See [Rate limits](#rate-limits-429) |
-
-The client automatically instantiates the appropriate error class based on HTTP status code and error code from the server.
+`GraphError`, `NodeError`, `GraphRecursionError` and the storage classes are picked from the server's error code before the status. The full list, with fields, is in [Client errors](/docs/reference/client/errors).
 
 ## Catching errors
 
@@ -76,42 +54,9 @@ try {
 }
 ```
 
-## Using getUserMessage and toJSON
+## Show and log an error
 
-`TenxGraphError` provides two utility methods for displaying and debugging errors.
-
-**`getUserMessage()`** returns a user-friendly message that includes a recovery suggestion if one is available:
-
-```ts
-try {
-  await client.invoke([Message.text_message('Hello', 'user')]);
-} catch (err) {
-  if (err instanceof TenxGraphError) {
-    // Suitable for displaying to an end user
-    console.log(err.getUserMessage());
-    // Output: "Invoke request failed\n\nSuggestion: Check your graph configuration..."
-  }
-}
-```
-
-**`toJSON()`** returns a detailed object with all error fields for logging or debugging. Use this when reporting errors to a monitoring system:
-
-```ts
-if (err instanceof TenxGraphError) {
-  console.log(JSON.stringify(err.toJSON(), null, 2));
-  // {
-  //   "name": "GraphError",
-  //   "message": "Node 'search_tool' failed",
-  //   "statusCode": 500,
-  //   "errorCode": "GRAPH_ERROR",
-  //   "requestId": "req-abc123...",
-  //   "timestamp": "2026-10-08T14:32:01.234Z",
-  //   "details": [...],
-  //   "recoverySuggestion": "Check your graph configuration...",
-  //   "stack": "..."
-  // }
-}
-```
+`err.getUserMessage()` returns the message plus a recovery hint when the class has one. `err.toJSON()` returns every field and the stack trace for your logs; do not show it to users. `err.requestId` matches the server's log line for the request.
 
 ## Retrying transient errors
 
@@ -120,19 +65,21 @@ Some errors are temporary and safe to retry. The client itself does not retry au
 **Transient errors** are those where the problem is temporary and will likely resolve on its own:
 - `TransientStorageError` (503): the checkpointer or memory store is momentarily unavailable
 - `ServerError` with status 502/504: a gateway or upstream service is temporarily down
-- Network timeouts or connection resets (a plain `Error`, such as `Request timeout after 300000ms`, not a `TenxGraphError`)
-- A 429 `TenxGraphError`: retry after the `Retry-After` interval, not immediately (see [Rate limits](#rate-limits-429))
+- `RequestTimeoutError` and `NetworkError`: the client timeout fired, or no reply arrived
+- `RateLimitError` (429): retry after `retryAfterSeconds`, not immediately (see [Rate limits](#rate-limits-429))
 
 **Non-transient errors** should not be retried the same way:
 - `AuthenticationError` (401): fix your token before retrying
 - `ValidationError` (422): fix your request before retrying
 - `ConflictError` (409): the client never retries it. A busy thread already waited 30 seconds on the server, so retry only if your app can wait, or use `on_busy: 'cancel'`
-- `NotFoundError` (404): the resource does not exist; create it first
-- `PermissionError` (403): request new permissions before retrying
+- `NotFoundError` (404): the resource does not exist or is outside the caller's reach
+- `PermissionError` (403): the role lacks the permission
 
 Here's a helper function for exponential backoff retry:
 
 ```ts
+import { ServerError, TransientStorageError } from '10xgraph-client';
+
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxAttempts: number = 3,
@@ -165,23 +112,21 @@ const result = await retryWithBackoff(() =>
 
 ## Rate limits (429)
 
-The server returns 429 when the `rate_limit` window is used up, or when one user has more graph runs in flight than `runs.max_concurrent_per_user` allows (default 10). The rate-limit response includes a `Retry-After` header in seconds and ends its message with `Retry after <n>s.` The run-cap response has no `Retry-After` header. The client has no class for 429, so it throws a plain `TenxGraphError` with `statusCode` 429, and it does not keep the response headers.
+The server returns 429 when the `rate_limit` window is used up, or when one user has more graph runs in flight than `runs.max_concurrent_per_user` allows (default 10). The rate-limit response includes a `Retry-After` header in seconds and ends its message with `Retry after <n>s.` The run-cap response has no `Retry-After` header. The client throws `RateLimitError`. Its `retryAfterSeconds` holds the `Retry-After` value (or the body's `retry_after_seconds`) and is `undefined` for the run cap.
 
-If the server's cache store (Redis) is down and `fail_open` is `false`, it answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead. Retry on 503 the same way you retry on 429.
+If the server's cache store (Redis) is down and `fail_open` is `false`, it answers `503` with `RATE_LIMIT_UNAVAILABLE` and `Retry-After: 5` instead. The client throws `ServerError` with `statusCode` 503; read the delay from `err.responseHeaders['retry-after']`.
 
 ```ts
-import { TenxGraphError } from '10xgraph-client';
+import { RateLimitError } from '10xgraph-client';
 
 async function withRateLimitBackoff<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      const limited = err instanceof TenxGraphError && err.statusCode === 429;
-      if (!limited || attempt === maxAttempts) throw err;
-      // Read the seconds from the message ("Retry after 12s."), or fall back to a fixed backoff.
-      const seconds = Number(/Retry after (\d+)s/.exec(err.message)?.[1] ?? 2 ** attempt);
-      await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+      if (!(err instanceof RateLimitError) || attempt === maxAttempts) throw err;
+      const seconds = err.retryAfterSeconds ?? 2 ** attempt;
+      await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
     }
   }
 }
@@ -191,49 +136,11 @@ For server-side setup see [Rate limiting](/docs/reference/api-cli/rate-limiting)
 
 ## Streaming errors
 
-When you call `stream()`, errors appear as part of the stream event sequence, not as thrown exceptions. The stream is NDJSON: one JSON object per line, and each object is a `StreamChunk`.
-
-```ts
-export enum StreamEventType {
-  MESSAGE = 'message',
-  UPDATES = 'updates',
-  STATE = 'state',
-  ERROR = 'error',
-}
-```
-
-Iterate through the stream and check the `event` field. When an error occurs, the server sends a chunk with `event: 'error'`:
-
-```ts
-const stream = client.stream([Message.text_message('Hello', 'user')]);
-
-try {
-  for await (const chunk of stream) {
-    if (chunk.event === 'error') {
-      // Error in the stream
-      console.error('Stream error:', chunk.data);
-      // chunk.data carries the failure reason, for example:
-      // { "reason": "..." }
-      break; // Stop processing stream
-    } else if (chunk.event === 'message') {
-      console.log('Message:', chunk.message);
-    } else if (chunk.event === 'updates') {
-      console.log('State:', chunk.state);
-    }
-  }
-} catch (err) {
-  // Network errors or stream parsing errors
-  if (err instanceof TenxGraphError) {
-    console.error('Request failed:', err.message);
-  } else {
-    console.error('Stream error:', err);
-  }
-}
-```
+An `'error'` chunk is yielded like any other chunk, and the stream then ends. Failures before the first chunk (401, 409, 422 and so on), a timeout and a broken stream are thrown, so handle both. Example: [Stream responses](/docs/client/stream-responses#error-handling).
 
 ## Graph and node errors
 
-When a graph node raises an exception or a tool fails, the error is captured by the server and returned as `GraphError` or `NodeError`. These errors are returned as HTTP 500 responses. The error message describes which node failed and why.
+When a node raises, `invoke()` throws `NodeError` or `GraphError`, picked from the server's error code (status 500). A tool that raises does not fail the run: the model gets a failed tool result and can retry or answer.
 
 ```ts
 try {
@@ -258,18 +165,10 @@ const client = new TenxGraphClient({
 });
 ```
 
-In logs, look for:
-- `request_id` in every error: use this to correlate client logs with server logs
-- `timestamp`: when the error occurred on the server
-- `details`: validation errors or field-specific issues
-- `recoverySuggestion`: guidance on what to do next
-
-When reporting errors to your team or to 10xGraph support, include the full error JSON from `toJSON()` and the request ID.
-
 ## Related pages
 
 - [Create and configure a client](/docs/client/create-client)
-- [Invoke and stream](/docs/client/invoke-agent)
+- [Invoke the agent](/docs/client/invoke-agent)
 - [Client reference: errors](/docs/reference/client/errors)
 - [Troubleshooting: client issues](/docs/troubleshooting/client)
 - [API server error codes](/docs/reference/error-codes)

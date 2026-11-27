@@ -4,41 +4,27 @@ description: Install the TypeScript client and configure authentication to commu
 section: "TypeScript client"
 group: "Basics"
 order: 20
-updated: "2026-10-27"
+updated: "2026-11-26"
 faq:
-  - question: "When should I expose tokens in NEXT_PUBLIC?"
-    answer: "Never. Tokens should remain on the server or be fetched securely. NEXT_PUBLIC variables are bundled into client JavaScript, making them visible to the browser and any attacker. Use a backend proxy instead."
   - question: "How do I rotate the API token?"
-    answer: "Create a new token on the server side, rebuild your application, and deploy. The token is baked into the built client, so you must rebuild to rotate."
+    answer: "Call `client.setAuthToken(newToken)`, or pass a function as `authToken` so every request reads the current token. Nothing needs a rebuild."
   - question: "Can I use the same client instance across my app?"
-    answer: "Yes. Create the client once at module level and import it wherever needed. Sharing a single instance reduces memory overhead and enables consistent request handling."
+    answer: "Yes. Create the client once at module level and import it wherever needed."
 ---
 
-`10xgraph-client` is the typed, authenticated connection from your app to a 10xGraph API server: REST, streaming, WebSocket, threads, files and memory. It runs in Node.js, browsers and frameworks like React and Next.js. This guide shows how to install, configure, and authenticate the client for your 10xGraph API server.
+This page installs `10xgraph-client` and sets its server URL, credentials, timeout and WebSocket support. The client runs in Node.js and browsers.
 
 ## Prerequisites
 
-- Node.js 18 or higher, or a modern browser environment with `fetch` support.
+- Node.js 20 or newer, or a browser.
 - A 10xGraph API server running locally (`10xgraph dev`) or deployed to a remote host.
 - Access to API credentials if the server requires authentication (bearer token, basic auth, or custom API key).
 
 ## Install the package
 
-Install it alongside your existing packages:
-
 ```bash
 npm install 10xgraph-client
 ```
-
-The package exports `TenxGraphClient` plus auth helpers, `Message`, error classes and types. Verify the installation:
-
-```ts
-import { TenxGraphClient, bearerAuth } from '10xgraph-client';
-
-// Ready to create a client
-```
-
-Before the rename the package was published as `@10xscale/agentflow-client`, with classes named `AgentFlowClient`, `AgentFlowError` and so on. `10xgraph-client` keeps those class names as deprecated aliases until 2.0, so existing code keeps working after you change the package name.
 
 ## Create your first client instance
 
@@ -56,7 +42,7 @@ const response = await client.ping();
 console.log(response.data); // 'pong'
 ```
 
-The `baseUrl` is the root of your server. Do not include a trailing slash or path; the client adds the routes itself. Replace `http://localhost:8000` with your actual server address.
+The `baseUrl` is the root of your server, without a path. The client adds the routes and strips a trailing slash.
 
 ## Authentication strategies
 
@@ -86,7 +72,7 @@ const client = new TenxGraphClient({
 
 ### HTTP Basic authentication
 
-Encodes a username and password as `Authorization: Basic <base64>`. Useful when the server is behind a corporate gateway or requires digest auth.
+Encodes a username and password as `Authorization: Basic <base64>`. Use it when a gateway in front of the server, or your custom `BaseAuth`, expects Basic credentials. The built-in `jwt` method expects a bearer token.
 
 ```ts
 import { TenxGraphClient, basicAuth } from '10xgraph-client';
@@ -124,15 +110,7 @@ To add a prefix (for schemes like `ApiKey` or `Bearer`), pass it as the third ar
 auth: headerAuth('Authorization', process.env.API_KEY!, 'ApiKey')
 ```
 
-### Auth strategies reference
-
-| Strategy | Helper | HTTP header |
-|---|---|---|
-| Bearer token | `bearerAuth(token)` | `Authorization: Bearer <token>` |
-| Basic auth | `basicAuth(user, pass)` | `Authorization: Basic <base64>` |
-| Custom header | `headerAuth(name, value, prefix?)` | `<name>: [prefix ]<value>` |
-
-If the config includes multiple headers with the same name (case-insensitive), the last one wins. Auth is applied after any extra headers you pass via `headers: {...}` in the config.
+`auth` is applied after the extra `headers` you pass, so it replaces a header of the same name. `authToken` never replaces an `Authorization` header you set in `headers`. All combinations: [Auth header precedence](/docs/reference/client/auth#auth-header-precedence).
 
 ## Tuning timeout and debugging
 
@@ -147,7 +125,7 @@ const client = new TenxGraphClient({
 });
 ```
 
-When `debug: true`, the client logs every request and its response to `console.debug`. Disable this in production; it exposes request details that can aid attackers. The default is `false`.
+With `debug: true` the client logs request payloads, including message text, and responses to the console. Keep it off in production. The default is `false`.
 
 ## Verify the connection and server state
 
@@ -168,53 +146,11 @@ A successful call confirms that:
 
 ## Complete configuration reference
 
-```ts
-import {
-  TenxGraphClient,
-  TenxGraphConfig,
-  bearerAuth,
-  basicAuth,
-  headerAuth,
-} from '10xgraph-client';
+Every config field with its type and default is in [TenxGraphConfig](/docs/reference/client/client#tenxgraphconfig).
 
-const config: TenxGraphConfig = {
-  baseUrl: 'http://localhost:8000',   // Required. No trailing slash.
+## WebSocket support on Node 20
 
-  // Authentication: pick one, or omit for no auth
-  auth: bearerAuth(process.env.API_TOKEN!),
-  // auth: basicAuth('user', 'pass'),
-  // auth: headerAuth('X-API-Key', process.env.API_KEY!),
-  // auth: { type: 'bearer', token: '...' },
-
-  // Legacy alternative for bearer tokens (use auth instead)
-  authToken: undefined,
-
-  // Optional: extra headers on every request (e.g., for user agents or versions)
-  headers: {
-    'X-App-Version': '2.1.0',
-  },
-
-  // Optional: include cookies in cross-origin requests (browsers only)
-  credentials: 'include',
-
-  // Optional: timeout in milliseconds. Default: 5 minutes (300,000)
-  timeout: 300_000,
-
-  // Optional: log request and response details. Default: false. Disable in production.
-  debug: false,
-
-  // Optional: WebSocket implementation for WebSocket streaming and realtime calls.
-  // Browsers and Node.js 21+ have a global WebSocket and need nothing here.
-  // On Node 18 or 20, pass the 'ws' package (see section below).
-  webSocketImpl: undefined,
-};
-
-const client = new TenxGraphClient(config);
-```
-
-## WebSocket support on Node 18 and 20
-
-The methods `wsStream()` and `realtime()` use WebSocket to stream responses. Node.js 18 and 20 do not expose a global `WebSocket` constructor (Node 21 and later do), so you must install the `ws` package and pass it to the client:
+`wsStream()` and `realtime()` use WebSocket. Browsers and Node 22 or later have a global `WebSocket`. On Node 20, install the `ws` package and pass it to the client:
 
 ```bash
 npm install ws
@@ -235,66 +171,25 @@ const client = new TenxGraphClient({
 
 Other methods like `invoke()`, `stream()`, and thread/memory operations use `fetch` and work without `ws` on any Node version.
 
-## Managing secrets in frontend applications
+## Change the token at runtime
 
-In frontend applications like React and Next.js, be careful with authentication tokens. Never expose them in client-side code that can be viewed in the browser.
-
-### The wrong way: NEXT_PUBLIC variables
-
-Do not do this:
+`authToken` takes a string or a function. A function is called before every request and on every realtime reconnect, so a short-lived token can be refreshed without a new client:
 
 ```ts
-// DON'T DO THIS
 const client = new TenxGraphClient({
-  baseUrl: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000',
-  auth: process.env.NEXT_PUBLIC_API_TOKEN    // UNSAFE: exposed to browser
-    ? { type: 'bearer', token: process.env.NEXT_PUBLIC_API_TOKEN }
-    : undefined,
+  baseUrl: 'https://agents.example.com',
+  authToken: () => session.accessToken, // read before every request
 });
+
+client.setAuthToken(newToken); // replace the token
+client.clearAuth();            // drop authToken and auth, for example on sign-out
 ```
 
-Any environment variable prefixed with `NEXT_PUBLIC_` is bundled into your JavaScript. Anyone viewing the page source in the browser can read it. An attacker can use your token to invoke agents, modify threads, or access sensitive data.
-
-### The right way: backend proxy or runtime session tokens
-
-Instead, either:
-
-1. **Backend proxy.** Create a Next.js API route that acts as a proxy to the 10xGraph server. The route handler has access to the real token in server-only environment variables. The browser client talks to the API route, which forwards requests to the 10xGraph server with authentication.
-
-   ```ts
-   // app/api/agent/route.ts (Next.js App Router)
-   import { NextRequest, NextResponse } from 'next/server';
-   import { TenxGraphClient, bearerAuth } from '10xgraph-client';
-
-   const agentClient = new TenxGraphClient({
-     baseUrl: process.env.AGENT_SERVER_URL!,
-     auth: bearerAuth(process.env.AGENT_TOKEN!),
-   });
-
-   export async function POST(req: NextRequest) {
-     const body = await req.json();
-     const result = await agentClient.invoke(body.messages);
-     return NextResponse.json(result);
-   }
-   ```
-
-   The browser then calls `POST /api/agent` with your message, and the backend handles the token.
-
-2. **Session tokens.** If the 10xGraph server supports custom authentication (via `BaseAuth` in 10xgraph-api), issue a short-lived session token per user after they log in to your app. Your own login endpoint returns that token at runtime, after the user signs in. Never put it in a `NEXT_PUBLIC_` variable: those are fixed at build time and shared by every visitor, so they cannot hold a per-user value. The proxy in option 1 is the recommended pattern, and the [Next.js and React guide](/docs/client/nextjs-and-react) shows it in full.
-
-### Token rotation
-
-With the backend proxy, the token lives in a server-only environment variable such as `AGENT_TOKEN`. To rotate it:
-
-1. Update the environment variable where the proxy runs.
-2. Restart or redeploy the proxy.
-3. The browser needs no change, because it never held the token.
-
-Session tokens issued per user expire on their own, so users pick up a fresh one the next time they sign in.
+`setAuthToken()` does not change a stream or socket that is already open. Where a browser app may keep tokens, and why never in a `NEXT_PUBLIC_` variable: [Secure your frontend](/docs/client/secure-your-frontend).
 
 ## Sharing the client across your application
 
-Create the client once at module level and import it wherever you need it. This avoids creating multiple instances and ensures consistent configuration:
+Create the client once at module level and import it wherever you need it. In browser code, do not pass a server secret here (see [Secure your frontend](/docs/client/secure-your-frontend)):
 
 ```ts
 // lib/agent-client.ts
@@ -307,36 +202,14 @@ export const agentClient = new TenxGraphClient({
 });
 ```
 
-Then import and use it in your components:
-
-```ts
-// components/ChatWidget.tsx
-import { Message } from '10xgraph-client';
-import { agentClient } from '@/lib/agent-client';
-
-export function ChatWidget() {
-  async function sendMessage(text: string) {
-    const result = await agentClient.invoke([Message.text_message(text)]);
-    // Handle result
-  }
-
-  return (
-    <div>
-      {/* UI */}
-    </div>
-  );
-}
-```
-
 ## Troubleshooting connection issues
 
 | Symptom | Likely cause | Solution |
 |---|---|---|
-| `TypeError: Failed to fetch` | Server is not running or the address is wrong. | Start the server with `10xgraph dev` and verify the `baseUrl` is correct. |
-| `TenxGraphError` with status `401` | Authentication failed (missing, invalid, or expired token). | Check the token passed to `auth` or `authToken`. Verify it matches the server's secret (`JWT_SECRET_KEY` in `.env`). |
-| `TenxGraphError` with status `404` on `/ping` | Trailing slash in `baseUrl` or incorrect path. | Ensure `baseUrl` has no trailing slash. Example: `http://localhost:8000` not `http://localhost:8000/`. |
-| CORS error in a browser | The server's CORS policy blocks your origin. | On the server, set `ORIGINS` to include your app's origin. Or in the client, set `credentials: 'include'` if the server allows credentials. |
-| `No WebSocket implementation available` | `wsStream()` or `realtime()` called on Node 18/20 without `webSocketImpl`. | Install `ws` and pass it to the client as shown above. |
+| `NetworkError` (`statusCode` 0) | Server is not running, the address is wrong, or the browser blocked the request (CORS). | Start the server with `10xgraph dev` and verify the `baseUrl` is correct. |
+| `AuthenticationError` (401) | Authentication failed (missing, invalid, or expired token). | Check the token passed to `auth` or `authToken`. Verify it matches the server's secret (`JWT_SECRET_KEY` in `.env`). |
+| CORS error in a browser | The server's CORS policy blocks your origin. | On the server, set `ORIGINS` to include your app's origin. |
+| `No WebSocket implementation available` | `wsStream()` or `realtime()` called on Node 20 without `webSocketImpl`. | Install `ws` and pass it to the client as shown above. |
 
 ## What's next
 

@@ -6,10 +6,10 @@ section: Reference
 group: "TypeScript client"
 order: 560
 label: "Error handling"
-updated: "2026-11-10"
+updated: "2026-11-26"
 ---
 
-When the server returns a non-2xx response, `TenxGraphClient` throws an `TenxGraphError` or one of its 15 subclasses. The class is chosen from the response's error code first, then from the HTTP status. Network failures and client timeouts are not API errors: they throw a plain `Error`.
+When the server returns a non-2xx response, `TenxGraphClient` throws a `TenxGraphError` or one of its subclasses. The class is chosen from the response's error code first, then from the HTTP status. Network failures and client timeouts throw `NetworkError` and `RequestTimeoutError`, subclasses with `statusCode` 0.
 
 **Import:** `import { TenxGraphError } from '10xgraph-client';`
 
@@ -17,23 +17,25 @@ For the practical guide (retries, stream errors), see [Handle errors](/docs/clie
 
 ## How the client picks an error class
 
-The client reads the JSON error body, then matches the error `code` by prefix, then falls back to the HTTP status. A `GRAPH_RECURSION_ERROR` returned with status 500 therefore arrives as `GraphRecursionError`, not `ServerError`.
+The client reads the JSON error body, then matches the error `code` by prefix, then falls back to the HTTP status. A `RECURSION_001` code returned with status 500 therefore arrives as `GraphRecursionError`, not `ServerError`.
 
 | Order | Match | Class |
 |---|---|---|
-| 1 | Code starts with `GRAPH_RECURSION` | `GraphRecursionError` |
+| 1 | Code starts with `RECURSION` or `GRAPH_RECURSION` | `GraphRecursionError` |
 | 2 | Code starts with `GRAPH` | `GraphError` |
 | 3 | Code starts with `NODE` | `NodeError` |
-| 4 | Code starts with `TRANSIENT_STORAGE` | `TransientStorageError` |
-| 5 | Code starts with `STORAGE` | `StorageError` |
-| 6 | Code starts with `METRICS` | `MetricsError` |
-| 7 | Code starts with `SCHEMA_VERSION` | `SchemaVersionError` |
-| 8 | Code starts with `SERIALIZATION` | `SerializationError` |
-| 9 | Status 400, 401, 403, 404, 409, 422 | `BadRequestError`, `AuthenticationError`, `PermissionError`, `NotFoundError`, `ConflictError`, `ValidationError` |
-| 10 | Status 500, 502, 503, 504 | `ServerError` |
-| 11 | Any other status, including 429 | `TenxGraphError` with code `UNKNOWN_ERROR` (unless the body gave one) |
+| 4 | Code starts with `STORAGE_TRANSIENT` or `TRANSIENT_STORAGE` | `TransientStorageError` |
+| 5 | Code starts with `STORAGE_SCHEMA` or `SCHEMA_VERSION` | `SchemaVersionError` |
+| 6 | Code starts with `STORAGE_SERIALIZATION` or `SERIALIZATION` | `SerializationError` |
+| 7 | Code starts with `STORAGE` | `StorageError` |
+| 8 | Code starts with `METRICS` | `MetricsError` |
+| 9 | Code is `VALIDATION_ERROR` (or the older `AGENTFLOW_VALIDATION_ERROR`) | `ValidationError` |
+| 10 | Status 400, 401, 403, 404, 409, 422 | `BadRequestError`, `AuthenticationError`, `PermissionError`, `NotFoundError`, `ConflictError`, `ValidationError` |
+| 11 | Status 429 | `RateLimitError` |
+| 12 | Status 500, 502, 503, 504 | `ServerError` |
+| 13 | Any other status | `TenxGraphError` with code `UNKNOWN_ERROR` (unless the body gave one) |
 
-If the body is not JSON or cannot be parsed, the same status mapping applies with `requestId` set to `'unknown'`.
+If the body is not JSON or cannot be parsed, the same status mapping applies; `requestId` comes from the `x-request-id` header, else `'unknown'`.
 
 <aside class="callout callout-note" role="note"><p class="callout-title">Subclass-only fields are not filled by the client</p>
 
@@ -80,7 +82,7 @@ try {
     console.error(`Error ${err.statusCode} (${err.errorCode}): ${err.getUserMessage()}`);
     console.error(JSON.stringify(err.toJSON()));
   } else {
-    throw err; // network failure or client-side timeout
+    throw err; // not a client error
   }
 }
 ```
@@ -93,8 +95,8 @@ These six classes map to one status each. They carry no recovery suggestion, so 
 |---|---|---|---|
 | `BadRequestError` | 400 | `BAD_REQUEST` | The server rejects the request as malformed. |
 | `AuthenticationError` | 401 | `AUTHENTICATION_FAILED` | Credentials are missing, invalid or expired. |
-| `PermissionError` | 403 | `PERMISSION_ERROR` | The caller is authenticated but not allowed to perform the action. With the default `runs.thread_ids`, a `thread_id` that does not exist or belongs to another user also gives this error. |
-| `NotFoundError` | 404 | `RESOURCE_NOT_FOUND` | The thread, message, memory or file does not exist. |
+| `PermissionError` | 403 | `PERMISSION_ERROR` | The caller is authenticated but not allowed to perform the action. |
+| `NotFoundError` | 404 | `RESOURCE_NOT_FOUND` | The thread, message, memory or file does not exist or is outside the caller's reach (a thread gives `errorCode` `THREAD_NOT_FOUND`). |
 | `ConflictError` | 409 | `CONFLICT` | The thread is still busy with another run after the server's 30 second wait, or a resume's `interrupt_id` does not match the open interrupt. The client never retries it. |
 | `ValidationError` | 422 | `VALIDATION_ERROR` | The request body fails schema validation, is over a size limit (500 messages, 100 blocks per message, 1,000,000 characters of text), or a resume answer fails the interrupt's `response_schema`. The message names the size limit that was hit; `details` lists the failing fields (development only). |
 
@@ -152,25 +154,25 @@ try {
 
 The same class covers a resume whose `interrupt_id` does not match the open interrupt. Do not retry that one with `on_busy`: read the thread state and send the current id.
 
-The server's body for these errors is the standard envelope, with `error.code` set to `HTTPException`. The client picks `ConflictError` from the 409 status.
+`errorCode` carries the server's code when the body has one (for example `EXPIRED_TOKEN`, `THREAD_NOT_FOUND`), else the class default above.
 
 ### Rate limit and run cap (429)
 
-The server answers 429 in two cases: the `rate_limit` sliding window is exhausted, or one user already has `runs.max_concurrent_per_user` graph runs in flight (default 10). The client has no class for 429, so both arrive as a plain `TenxGraphError` with `statusCode` 429. Check `statusCode`, not `instanceof`.
+The server answers 429 in two cases: the `rate_limit` sliding window is exhausted, or one user already has `runs.max_concurrent_per_user` graph runs in flight (default 10). Both arrive as `RateLimitError`.
 
 - Rate limit: the body has `error.code` `RATE_LIMIT_EXCEEDED`, so `errorCode` is `RATE_LIMIT_EXCEEDED`, and the message ends with `Retry after <n>s.` The response also carries a `Retry-After` header (seconds).
 - Run cap: the body is the standard envelope with `error.code` `HTTPException`, so `errorCode` is `HTTPException`. The message says too many runs are in progress for this user. There is no `Retry-After` header; wait for a run to finish.
 
-The error object does not keep response headers, so `Retry-After` is not available on it. Read the seconds from the message, or use your own backoff.
+`retryAfterSeconds` holds the `Retry-After` header (or the body's `retry_after_seconds`), and is `undefined` when the server sent neither. `responseHeaders` holds every response header.
 
 ```ts title="rate-limit.ts"
-import { TenxGraphError } from '10xgraph-client';
+import { RateLimitError } from '10xgraph-client';
 
 try {
   await client.invoke([Message.text_message('Hi')]);
 } catch (err) {
-  if (err instanceof TenxGraphError && err.statusCode === 429) {
-    // Back off, then retry. err.errorCode is RATE_LIMIT_EXCEEDED for the rate limit.
+  if (err instanceof RateLimitError) {
+    // Wait err.retryAfterSeconds (when set), then retry.
   } else {
     throw err;
   }
@@ -242,7 +244,7 @@ Storage errors mean the checkpointer or memory store failed. The two classes dif
 | `StorageError` | 500 | `STORAGE_ERROR` | No | Check your storage configuration and ensure the storage backend is accessible. |
 | `TransientStorageError` | 503 | `TRANSIENT_STORAGE_ERROR` | Yes, with backoff | This is a temporary issue. Please retry your request after a short delay. |
 
-`TransientStorageError` is matched before `StorageError` because its code starts with `TRANSIENT_STORAGE`.
+`TransientStorageError` is matched before `StorageError`: the server sends `STORAGE_TRANSIENT_000` (the older `TRANSIENT_STORAGE` prefix is also accepted).
 
 ```ts title="storage-errors.ts"
 import { TenxGraphClient, StorageError, TransientStorageError } from '10xgraph-client';
@@ -329,7 +331,7 @@ async function ask(text: string, attempt = 0): Promise<unknown> {
     } else if (err instanceof TenxGraphError) {
       console.error(err.getUserMessage());
     } else {
-      throw err; // network error or timeout
+      throw err; // not a client error
     }
   }
 }

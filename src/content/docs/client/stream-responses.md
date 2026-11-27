@@ -5,22 +5,15 @@ section: "TypeScript client"
 group: "Basics"
 order: 40
 label: Stream responses
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
 `client.stream()` and `client.wsStream()` let you process the agent's response as it arrives, chunk by chunk, instead of waiting for the complete response. This guide shows you how to consume streams, handle different event types, and manage long-running operations.
 
-## Why stream
-
-Streaming improves perceived latency. Instead of displaying nothing until the model finishes generating a complete response, you show tokens as they arrive. For a 2000-token response that takes 8 seconds to generate, streaming displays the first token within 100-200ms, letting the user see progress immediately.
-
-Streaming also enables progressive rendering in UIs: you can parse structured content as soon as partial JSON arrives, show tool execution results before the model finishes thinking, or monitor state changes as they occur.
-
 ## Prerequisites
 
-- A configured `10xgraph-client`. See `/docs/client/create-client`.
+- A configured client. See [Create the client](/docs/client/create-client).
 - The 10xGraph API server running.
-- Basic familiarity with async generators and `for await`.
 
 ---
 
@@ -30,7 +23,7 @@ The stream methods return an `AsyncGenerator` that yields `StreamChunk` objects 
 
 - `event`: The type of update (`message`, `updates`, `state`, `error`)
 - `message`: Partial or complete model response (when event is `message`)
-- `state`: Graph state (present with `response_granularity: 'full'`)
+- `state`: Graph state, on `state` chunks (`'partial'` and `'full'` granularity)
 - `data`: Extra payload for `updates` and `error` events (for example `{ status: ... }`)
 - `thread_id`: Thread this chunk belongs to
 - `run_id`, `timestamp` and `metadata`: Execution metadata (thread ID, run ID, timestamp)
@@ -58,27 +51,11 @@ for await (const chunk of stream) {
 }
 ```
 
-No network call happens until the `for await` loop begins. If you never iterate, the stream is never sent.
-
 ---
 
 ## Filter for message chunks
 
 The majority of chunks you receive have `event === 'message'`. To extract and display token-by-token output, filter for message events and check the `delta` field:
-
-```ts
-for await (const chunk of stream) {
-  if (chunk.event === 'message' && chunk.message) {
-    const content = chunk.message.content;
-    
-    for (const block of content) {
-      if (block.type === 'text') {
-        process.stdout.write((block as any).text);
-      }
-    }
-  }
-}
-```
 
 When a message is streaming, the server sends many chunks with `message.delta === true`. After the message completes, it sends one final chunk with `delta === false`. Reasoning arrives as `{ type: 'reasoning' }` blocks in `content`, ordered before the text. A delta carries only the new piece of reasoning; the final message carries the full reasoning block.
 
@@ -92,13 +69,9 @@ Most use cases require separate handling for partial tokens (e.g., display them 
 let currentMessage = '';
 
 for await (const chunk of stream) {
-  if (chunk.event !== 'message' || !chunk.message) continue;
+  if (chunk.event !== 'message' || chunk.message?.role !== 'assistant') continue;
 
-  // Extract all text blocks from this chunk
-  const text = chunk.message.content
-    .filter(b => b.type === 'text')
-    .map(b => (b as any).text as string)
-    .join('');
+  const text = chunk.message.text();
 
   if (chunk.message.delta === true) {
     // Partial token: append to current buffer and update UI
@@ -141,13 +114,13 @@ for await (const chunk of stream) {
 }
 ```
 
-The thread ID appears on every chunk as `chunk.thread_id` and `chunk.metadata?.thread_id`. Store it and send it back on the next call. Do not invent an id: by default the server answers `403` for a thread that does not exist.
+The thread ID appears on every chunk as `chunk.thread_id` and `chunk.metadata?.thread_id`. Store it and send it back on the next call. Do not invent an id: by default the server answers `404` for a thread that does not exist.
 
 ---
 
 ## Receive state updates
 
-By default, the server streams only message tokens. Set `response_granularity: 'full'` to also receive graph state on the chunks as the graph executes:
+At the default `'low'` granularity you get `message` and `error` chunks plus pause updates. `'partial'` adds a `state` chunk after each node; `'full'` adds every `updates` chunk and a final summary chunk:
 
 ```ts
 const stream = client.stream(
@@ -163,8 +136,8 @@ for await (const chunk of stream) {
       .join('');
     console.log('Text token:', text);
   } else if (chunk.event === 'updates') {
-    // State was modified (tool call, routing, etc.)
-    console.log('State changed:', chunk.state);
+    // Lifecycle update: node started or finished, pause, final summary
+    console.log('Update:', chunk.data?.status);
   } else if (chunk.event === 'state') {
     // Full state snapshot at this point in execution
     console.log('Full state:', chunk.state);
@@ -174,35 +147,6 @@ for await (const chunk of stream) {
   }
 }
 ```
-
-`'partial'` adds the context and summary to the response but not the graph state.
-
----
-
-## Collect the full response
-
-If you need the complete final response but want streaming for UI responsiveness, accumulate all non-delta message chunks:
-
-```ts
-async function streamToMessages(messages: any[]) {
-  const stream = client.stream(messages);
-  const finalMessages: any[] = [];
-
-  for await (const chunk of stream) {
-    // Only collect final (non-delta) message chunks
-    if (chunk.event === 'message' && chunk.message && !chunk.message.delta) {
-      finalMessages.push(chunk.message);
-    }
-  }
-
-  return finalMessages;
-}
-
-const result = await streamToMessages([Message.text_message('What is 2+2?')]);
-console.log('Final messages:', result);
-```
-
-This approach gives you streaming for better UX while still having a complete Message object to store or return.
 
 ---
 
@@ -227,53 +171,9 @@ for await (const chunk of stream) {
 }
 ```
 
-### When to use each transport
+`wsStream()` keeps one socket open for the whole call, so client-side tool rounds do not open new HTTP requests. Use it when the graph calls [client-side tools](/docs/client/remote-tools) often; otherwise `stream()` is enough.
 
-| Aspect | `stream()` | `wsStream()` |
-|--------|-----------|-------------|
-| **Transport** | HTTP NDJSON body | WebSocket |
-| **Connection** | One per invocation | Single persistent socket |
-| **Tool call overhead** | New HTTP request per iteration | Resume message over same socket |
-| **Browser auth** | `Authorization` header | `10xgraph-bearer` subprotocol |
-| **Best for** | Simple chat, no remote tools | Tool-heavy graphs, low overhead |
-
-Both methods emit identical `StreamChunk` sequences. If your graph makes remote tool calls (where the server asks the client to run a tool), `wsStream()` avoids the overhead of re-establishing a connection on each iteration. For simple text-only responses, they behave identically.
-
-### WebSocket authentication
-
-Browsers cannot set custom headers on WebSocket connections. The client sends the bearer token via the `Sec-WebSocket-Protocol` header using the `10xgraph-bearer` subprotocol:
-
-```ts
-const client = new TenxGraphClient({
-  baseUrl: 'http://localhost:8000',
-  authToken: 'your-jwt-token',
-});
-```
-
-On Node.js 18 and 20, you must supply a WebSocket implementation (the `ws` package):
-
-```ts
-import WebSocket from 'ws';
-
-const client = new TenxGraphClient({
-  baseUrl: 'http://localhost:8000',
-  authToken: process.env.API_TOKEN,
-  webSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket,
-});
-```
-
-Node 21+ provides `globalThis.WebSocket` automatically.
-
-### NDJSON format
-
-`stream()` receives the response as newline-delimited JSON (NDJSON), one chunk per line. `wsStream()` receives the same chunk objects as individual JSON WebSocket messages:
-
-```
-{"event":"message","message":{"content":[{"type":"text","text":"The"}],"delta":true},...}
-{"event":"message","message":{"content":[{"type":"text","text":" answer"}],"delta":true},...}
-```
-
-The client handles parsing automatically. You only need to know this if you inspect the raw HTTP body for debugging.
+Socket authentication and the `ws` package on Node 20 are covered in [Secure your frontend](/docs/client/secure-your-frontend#rule-2-websocket-authentication) and [Create the client](/docs/client/create-client#websocket-support-on-node-20).
 
 ---
 
@@ -304,37 +204,17 @@ Common errors:
 
 In production, the text in an `'error'` chunk is a generic message; development shows the details.
 
-To control what happens when the thread is busy, pass `on_busy` (`'wait'`, the server default, or `'cancel'`). To answer an `interrupt()` pause, pass `resume` and `interrupt_id`:
+To control what happens when the thread is busy, pass `on_busy` (`'wait'`, the server default, or `'cancel'`). Answering an `interrupt()` pause is covered in [Graph utilities](/docs/client/graph-utilities#human-in-the-loop-detect-and-answer-a-pause).
 
-```ts
-const stream = client.stream([], {
-  config: { thread_id: 'order-42' },
-  resume: { approved: true },
-  interrupt_id: 'int_abc123', // from the thread state or the interrupted update
-});
-```
-
-`wsStream()` takes the same options. See [stream()](/docs/reference/client/stream).
-
-Always handle the `'error'` event to prevent silent failures. The HTTP errors above are thrown by the generator as `TenxGraphError` subclasses, so wrap the `for await` loop in `try/catch`.
+An `'error'` chunk is yielded, not thrown. HTTP errors, a timeout (`RequestTimeoutError`) and a stream cut mid-chunk (`StreamError`) are thrown by the generator, so also wrap the `for await` loop in `try/catch`.
 
 ---
 
 ## Variations
 
-### Response granularity options
-
-- `'low'` (default): Only message tokens. Minimal bandwidth, best for simple chat.
-- `'partial'`: Message tokens plus context and summary.
-- `'full'`: Message tokens plus the graph state on chunks. Verbose; use only if you need it.
-
 ### Timeout and cancellation
 
-Streams do not have a built-in timeout. If you need to cancel a stream early, break from the loop. The request stays in-flight on the server until it completes; see `/docs/client/graph-utilities` for how to request cancellation via `stopGraph()`.
-
-### Backpressure and buffering
-
-The `for await` loop respects backpressure automatically. If you slowly consume chunks (e.g., waiting for DOM updates), the underlying fetch/WebSocket connection will naturally throttle. No explicit buffering is needed.
+The client `timeout` is an idle timeout on a stream: it fires when no data arrives for that long, not when the whole run takes long. To cancel, pass `signal` from an `AbortController`, or break out of the loop; both close the connection. To be sure the run stops on the server, also call `stopGraph(threadId)` ([Graph utilities](/docs/client/graph-utilities#stopgraph)).
 
 ---
 
@@ -348,12 +228,8 @@ The `for await` loop respects backpressure automatically. If you slowly consume 
 
 **"No WebSocket implementation available"**
 
-- You are on Node 18 or 20 and did not pass `webSocketImpl`.
+- You are on Node 20 and did not pass `webSocketImpl`.
 - Install `npm install ws` and pass it in the config.
-
-**Chunks arrive very slowly or in bursts**
-
-- Normal behavior if the model is slow or the network is congested.
 
 **Thread ID is undefined**
 
@@ -362,50 +238,11 @@ The `for await` loop respects backpressure automatically. If you slowly consume 
 
 ---
 
-## Verification
-
-To verify streaming works, run this in Node:
-
-```ts
-import { TenxGraphClient, Message } from '10xgraph-client';
-
-const client = new TenxGraphClient({ baseUrl: 'http://localhost:8000' });
-
-const stream = client.stream([
-  Message.text_message('Write a haiku about mountains.'),
-]);
-
-for await (const chunk of stream) {
-  if (chunk.event === 'message' && chunk.message?.delta) {
-    const text = chunk.message.content
-      .filter(b => b.type === 'text')
-      .map(b => (b as any).text as string)
-      .join('');
-    process.stdout.write(text);
-  }
-}
-
-console.log('\n\nDone.');
-```
-
-You should see a haiku print token by token, followed by a newline and "Done."
-
----
-
-## What you learned
-
-- `stream()` returns an `AsyncGenerator` that yields `StreamChunk` objects.
-- Filter for `event === 'message'` to get text tokens.
-- Use `chunk.message.delta` to differentiate partial tokens from complete messages.
-- Omit `config.thread_id` to start a thread, then pass the id from `chunk.thread_id` to continue it.
-- `wsStream()` is identical to `stream()` but uses WebSocket for lower overhead with remote tools.
-- Set `response_granularity: 'full'` to receive graph state alongside messages.
-
 ## Next steps
 
-- `/docs/client/create-client`: Configure and initialize the client.
-- `/docs/client/invoke-agent`: Single request/response without streaming.
-- `/docs/client/manage-threads`: List, inspect, and delete threads.
-- `/docs/client/graph-utilities`: Stop a stream early, inspect graph details.
-- `/docs/client/nextjs-and-react`: Use streaming in React components.
-- `/docs/concepts/streaming`: Streaming architecture and granularity.
+- [Create the client](/docs/client/create-client): configure and initialize the client.
+- [Invoke the agent](/docs/client/invoke-agent): one request, one result.
+- [Manage threads](/docs/client/manage-threads): list, inspect and delete threads.
+- [Graph utilities](/docs/client/graph-utilities): stop a run, answer a pause.
+- [Next.js and React](/docs/client/nextjs-and-react): streaming in React components.
+- [Streaming concepts](/docs/concepts/streaming): chunk model and granularity.

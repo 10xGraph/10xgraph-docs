@@ -6,7 +6,7 @@ section: Reference
 group: TypeScript client
 order: 500
 label: stream()
-updated: "2026-10-27"
+updated: "2026-11-26"
 ---
 
 `client.stream()` sends a list of messages to the agent graph and returns an `AsyncGenerator` that yields `StreamChunk` objects as the server produces them. Use it to show incremental output (token by token, update by update) instead of waiting for the full response. For a single final result, use `invoke()`.
@@ -49,7 +49,8 @@ Same as [`invoke()`](/docs/reference/client/invoke#parameters). An array of `Mes
 | `on_busy` | `'wait' \| 'cancel'` | server default (`'wait'`) | What the server does when another run is active on the same thread. `'wait'` queues behind it for up to 30 seconds, then fails with `ConflictError`. `'cancel'` stops the running run and starts this one. |
 | `resume` | `unknown` | none | The answer to an `interrupt()` pause on the thread (any JSON value, `null` to cancel). Pass an empty `messages` array with it. |
 | `interrupt_id` | `string` | none | The id of the interrupt `resume` answers. The client does not track ids: pass the one you got from the server (`execution_meta.interrupt_data.interrupt.id` in the thread state, or the `interrupt` object of the `interrupted` update). A mismatch fails with `ConflictError`. |
-| `response_granularity` | `'full' \| 'partial' \| 'low'` | `'low'` | How much data the server returns: `'full'` is state plus latest messages, `'partial'` is context, summary and latest messages, `'low'` is latest messages only. Streaming defaults to `'low'`, unlike `invoke()` which defaults to `'full'`. |
+| `response_granularity` | `'full' \| 'partial' \| 'low'` | `'low'` | Which chunks the server sends: `'low'` sends `message` and `error` chunks and pause updates, `'partial'` adds `state` chunks, `'full'` sends every chunk including all `updates` and a final summary. Streaming defaults to `'low'`, unlike `invoke()` which defaults to `'full'`. |
+| `signal` | `AbortSignal` | none | Abort to cancel the request and close the open stream. |
 
 ---
 
@@ -88,7 +89,7 @@ The `event` field on a `StreamChunk` is a string matching one of these values (e
 |---|---|---|
 | `'message'` | `StreamEventType.MESSAGE` | A new or updated `Message` from the agent. The `message` field contains the full `Message` object. On streaming models this fires multiple times with partial token content (`message.delta = true`), followed by a final chunk with `delta = false`. |
 | `'updates'` | `StreamEventType.UPDATES` | A graph execution update, such as a node starting or finishing. Inspect `chunk.data`, `chunk.state` and `chunk.metadata` for details. |
-| `'state'` | `StreamEventType.STATE` | A state snapshot in the `state` field. Use `'full'` granularity if you need state in your responses. |
+| `'state'` | `StreamEventType.STATE` | A state snapshot in the `state` field. Sent at `'partial'` and `'full'` granularity. |
 | `'error'` | `StreamEventType.ERROR` | An error occurred during graph execution. The `data` field contains the error details. |
 
 ---
@@ -214,7 +215,7 @@ async function streamToString(messages: Message[]): Promise<string> {
 
 ### Stopping a stream mid-way
 
-Breaking out of the loop stops reading locally, but the server keeps running the graph until you call `stopGraph()` with the thread ID:
+Breaking out of the loop closes the connection and the server stops the run. To stop a run you are not streaming (or from another tab), call `stopGraph()` with the thread ID:
 
 ```ts
 const stream = client.stream([Message.text_message('Tell me a very long story')]);
@@ -306,7 +307,7 @@ curl --no-buffer -X POST http://localhost:8000/v1/graph/stream \
 | Error | Cause | Fix |
 |---|---|---|
 | `TenxGraphError` status `401` | Missing or invalid auth. | Set `auth` in the client config. See [auth](/docs/reference/client/auth). |
-| `Request timeout after Nms` | The connection exceeded the client `timeout`. | Raise `timeout` in the client config or retry. |
+| `RequestTimeoutError` | No data arrived for the client `timeout` (an idle timeout on a stream). | Raise `timeout` in the client config or retry. |
 | Stream stops mid-response | Server timeout or network issue. | Wrap the `for await` loop in try/catch and retry. |
 | `ConflictError` (409) | The thread is busy with another run, or `interrupt_id` does not match the open interrupt. Thrown before any chunk arrives. | Wait and retry, set `on_busy: 'cancel'`, or fetch the current interrupt id. |
 | `event: 'error'` chunks | Graph execution error. | Read `chunk.data` for the error message and check server logs. In production the message is generic. |
@@ -319,7 +320,7 @@ curl --no-buffer -X POST http://localhost:8000/v1/graph/stream \
 - `StreamEventType.MESSAGE` with `delta: true` is a partial token; `delta: false` is the final message.
 - `response_granularity` defaults to `'low'` for streaming; use `'full'` when you need state.
 - Remote tool calls are executed automatically between stream iterations, up to `recursion_limit`.
-- Use `stopGraph()` to cancel a running stream on the server.
+- Use `stopGraph()` to stop a run from outside its stream.
 
 ## Next step
 
