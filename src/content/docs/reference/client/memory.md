@@ -51,7 +51,7 @@ import {
 | `'hybrid'` | Similarity plus keyword search. `PgVectorStore` only. |
 | `'temporal'`, `'relevance'`, `'graph_traversal'` | In the enum, but no shipped store supports them: `PgVectorStore` refuses them and `QdrantStore` accepts only `'similarity'`. |
 
-`PgVectorStore` also supports a keyword-only `text` strategy, which the client enum does not list yet.
+`PgVectorStore` also supports a keyword-only `text` strategy. The client enum has no member for it; pass `'text' as RetrievalStrategy` (the client sends the value unchanged).
 
 ### `DistanceMetric`
 

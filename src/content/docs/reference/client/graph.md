@@ -129,7 +129,7 @@ if (choice) {
 ```
 
 
-The server also returns `info.is_realtime`, which is `true` when the graph is rooted at a live agent and therefore accepts `realtime()` over `WS /v1/graph/live` rather than `invoke`/`stream`/`wsStream`. It is not on the `GraphInfo` TypeScript interface yet, so read it with a cast:
+The server also returns `info.is_realtime`, which is `true` when the graph is rooted at a live agent and therefore accepts `realtime()` over `WS /v1/graph/live` rather than `invoke`/`stream`/`wsStream`. It is not on the `GraphInfo` TypeScript interface, so read it with a cast:
 
 ```ts
 const { info } = (await client.graph()).data;
