@@ -7,7 +7,7 @@ label: Kubernetes
 updated: "2026-11-25"
 faq:
   - question: "Why does the termination grace period need to be so long?"
-    answer: "Agent runs are not typical web requests. An LLM call alone can take minutes, and tools add more time. Kubernetes default 30-second termination grace period kills pods mid-run. The server uses 600 seconds for shutdown, so the termination window must exceed that."
+    answer: "Agent runs are not typical web requests. An LLM call alone can take minutes, and tools add more time. Kubernetes default 30-second termination grace period kills pods mid-run. The server waits up to 540 seconds for open runs on shutdown, so the termination window must exceed that."
   - question: "Do I need to scale horizontally?"
     answer: "Start with 2 replicas for redundancy. Scale up for concurrent demand. All replicas share Postgres and Redis, so scaling is straightforward. Configure your load balancer idle timeout for long streaming connections."
   - question: "What if I want to use the generated manifest as-is?"
@@ -34,11 +34,15 @@ Create a `Dockerfile` and Kubernetes manifest in one command:
 
 This produces three files:
 
-- `Dockerfile` with an image that starts Gunicorn with `TenxGraphUvicornWorker` and a 600-second graceful timeout
+- `Dockerfile` with an image that runs one Uvicorn process: `python -m tenxgraph_api.src.app.serve --host 0.0.0.0 --port <port>`. There is no Gunicorn and no `WEB_CONCURRENCY`; scale with replicas.
 - `.dockerignore`
 - `k8s.yaml` containing a Deployment and a Service
 
 The `--force` flag overwrites existing files. Do not add `--docker-compose` for an image you will run on Kubernetes: with that flag the `Dockerfile` omits its `CMD` and relies on the compose file's `command`. Generate the compose file in a separate run if you need it.
+
+### Why one process per pod
+
+The image runs one Uvicorn process through the serve module, which drains and interrupts open streams the same way the Gunicorn image does. In our load test, one Uvicorn process gave the same throughput as Gunicorn with one worker and used about 50 MiB less memory, because there is no master process. Kubernetes already restarts the container and spreads load across replicas, so the Gunicorn master adds nothing here. See [Choosing the server process](/docs/production/scaling#choosing-the-server-process).
 
 ### Worker and scheduler
 
@@ -50,7 +54,7 @@ The manifest sets these values:
 
 | Setting | Value | Purpose |
 | --- | --- | --- |
-| `terminationGracePeriodSeconds` | 675 | Exceeds the app's 600-second graceful timeout plus the 15-second `preStop` sleep, which runs inside the same period. Ensures SIGKILL does not arrive until the app has fully drained. |
+| `terminationGracePeriodSeconds` | 675 | Exceeds the app's 540-second graceful deadline (`TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS`) plus the 15-second `preStop` sleep, which runs inside the same period. Ensures SIGKILL does not arrive until the app has fully drained. |
 | `preStop` sleep | 15 seconds | Gives the load balancer time to notice the pod is terminating and stop routing new requests. Without it, new traffic arrives while the app shuts down. |
 | `readinessProbe` | 10s interval, 5s initial delay | Removes unhealthy pods from the load balancer quickly. Checked via `GET /health/ready`. |
 | `livenessProbe` | 30s interval, 30s initial delay, 5 failures | Deliberately slack. A worker handling a long run must not be restarted. Checked via `GET /ping`. |
@@ -73,7 +77,7 @@ The pod is locked down out of the box:
 | `readOnlyRootFilesystem` | `true` | Code and dependencies cannot be modified at runtime. |
 | `allowPrivilegeEscalation` | `false` | No setuid binaries can raise privileges. |
 | `capabilities.drop` | `ALL` | The server binds a port above 1024 and needs no Linux capabilities. |
-| `emptyDir` volumes | `/tmp`, `/app/uploads` | The only writable paths: Gunicorn worker heartbeats and local media uploads. |
+| `emptyDir` volumes | `/tmp`, `/app/uploads` | The only writable paths: scratch files and local media uploads. |
 | `envFrom.secretRef` | `<service>-secrets` | Every secret comes from a Kubernetes Secret. |
 
 If your graph writes to another path (a SQLite checkpointer file, for example), add a volume for it.

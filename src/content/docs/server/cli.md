@@ -78,7 +78,7 @@ Change any of these with flags:
 10xgraph dev --no-open --port 9000 --no-reload
 ```
 
-`10xgraph dev` is the only server command. It reloads on file changes by default and opens the playground unless you pass `--no-open`. Production runs Gunicorn in the image that `10xgraph build` generates.
+`10xgraph dev` is the only server command. It reloads on file changes by default and opens the playground unless you pass `--no-open`. Production runs Gunicorn in the image that `10xgraph build` generates (one Uvicorn process with `--k8s`).
 
 ### Test and evaluate
 

@@ -106,9 +106,9 @@ Press Ctrl+C: the first signal starts `aclose()`, the next run raises `GraphClos
 
 ## Integration with the API server
 
-If you deploy your graph with the API server (Gunicorn in the `10xgraph build` image, Uvicorn under `10xgraph dev`), the server process handles shutdown signals. Do not call `install_shutdown_signals` there.
+If you deploy your graph with the API server (Gunicorn or the serve module in the `10xgraph build` image, Uvicorn under `10xgraph dev`), the server process handles shutdown signals. Do not call `install_shutdown_signals` there.
 
-The image runs Gunicorn with `TenxGraphUvicornWorker`. On SIGTERM it does this, in order:
+The Gunicorn image (plain and `--docker-compose` builds) runs `TenxGraphUvicornWorker`. The `--k8s` image runs one Uvicorn process through `tenxgraph_api.src.app.serve`. Both do the following on SIGTERM, in order:
 
 1. The app is marked as draining. `GET /health/ready` answers `503` with `status: draining`, so the load balancer stops sending new requests. `/ping` stays `200`. See [Health check endpoint](/docs/reference/rest-api/ping).
 2. Open responses get up to `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` (540 by default) to finish. Five seconds before that deadline, open streams end with a final chunk saying the run was interrupted. The thread is saved, so the client can send a new request on the same `thread_id`.
@@ -116,7 +116,7 @@ The image runs Gunicorn with `TenxGraphUvicornWorker`. On SIGTERM it does this, 
    A run that starts on this replica after `aclose()` begins is refused with `503` `SERVICE_UNAVAILABLE` and `Retry-After: 5`, so the client retries on another replica.
 4. Open WebSockets are closed with code `1012` (service restart). The run is saved INTERRUPTED and the client reconnects. A run refused while the graph is closing sends a terminal `error` chunk (stream) or frame (WebSocket) with `data.code = "SERVICE_UNAVAILABLE"` and `retry_after_seconds`, and no `done` chunk. On a WebSocket the server then closes with 1012.
 
-The timers nest. Gunicorn's `--graceful-timeout` is 600 seconds in the generated image, and the Kubernetes `terminationGracePeriodSeconds` is 675 seconds (600 plus the 15 second `preStop` sleep plus a 60 second margin). The Compose `stop_grace_period` is 660 seconds. Keep each outer timer longer than the inner one.
+The timers nest. Gunicorn's `--graceful-timeout` is 600 seconds in the Gunicorn image (the `--k8s` image uses the 540-second app deadline), and the Kubernetes `terminationGracePeriodSeconds` is 675 seconds (600 plus the 15 second `preStop` sleep plus a 60 second margin). The Compose `stop_grace_period` is 660 seconds. Keep each outer timer longer than the inner one.
 
 If you embed the graph in your own FastAPI app, call `await graph.aclose()` from its lifespan shutdown; see [FastAPI](/docs/integrations/fastapi).
 

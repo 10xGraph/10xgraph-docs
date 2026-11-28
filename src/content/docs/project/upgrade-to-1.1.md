@@ -6,7 +6,7 @@ description: What a 10xgraph 1.0 and 10xgraph-api 1.0 user must know before movi
 section: Project
 order: 19
 label: Upgrade to 1.1
-updated: "2026-11-27"
+updated: "2026-11-28"
 ---
 
 1.1 keeps the 1.0 public API (see [Stability](/docs/project/stability)). Nothing you call is
@@ -302,6 +302,10 @@ These work differently after the upgrade, with no code change. Check each one ag
 - **CLI.** Every command finds `10xgraph.json` (or `agentflow.json`) in the current or nearest
   parent folder. `10xgraph eval` loads the agent as the server does. `10xgraph config` validates
   with the server's rules.
+- **`10xgraph build --k8s` images run one Uvicorn process.** The `CMD` is now
+  `python -m tenxgraph_api.src.app.serve` instead of Gunicorn. Regenerate the Dockerfile to pick it
+  up. Existing images keep working. `WEB_CONCURRENCY` no longer applies to that image; scale with
+  replicas. See [Kubernetes](/docs/server/kubernetes).
 
 ### Jobs
 
@@ -477,3 +481,11 @@ The changelog states these measurements:
 - Checking a model for NUL or lone-surrogate text is about 2.5 times faster.
 - A thread resume in the API reads the thread state once before the run. A stream resume read it
   up to four times.
+- A pool that `PgCheckpointer` or `PgVectorStore` builds from a DSN no longer runs asyncpg's reset
+  query when a connection returns to the pool (one round trip saved per release). To get it back,
+  pass `pool_config={"reset": None}`. See
+  [Performance tuning](/docs/production/scaling#performance-tuning).
+- `10xgraph-api` now depends on `uvloop` and `httptools`, which Uvicorn uses by default. uvloop is
+  skipped on Windows, Cygwin and PyPy. To opt out, set `TENXGRAPH_LOOP=asyncio` and/or
+  `TENXGRAPH_HTTP=h11`. See
+  [Performance tuning](/docs/production/scaling#performance-tuning).

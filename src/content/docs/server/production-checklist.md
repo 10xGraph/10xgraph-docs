@@ -26,7 +26,7 @@ With `MODE=production`, the server does these for you. You do not configure them
 - Cancels a graph run after 300 seconds unless you set `runs.timeout`.
 - Turns debug mode off.
 - Pings every configured backend at boot and refuses to start while one is unreachable (see [Startup check](#startup-check)).
-- Ships a locked-down image when you use `10xgraph build`: non-root user, Gunicorn with `TenxGraphUvicornWorker` and long graceful timeouts, health check on `/ping`. On SIGTERM `/health/ready` answers 503 while open runs finish.
+- Ships a locked-down image when you use `10xgraph build`: non-root user, Gunicorn with `TenxGraphUvicornWorker` (one Uvicorn process with `--k8s`) and long graceful timeouts, health check on `/ping`. On SIGTERM `/health/ready` answers 503 while open runs finish.
 
 For why these matter, see the [security model](/docs/production/security-model) and [scaling and reliability](/docs/production/scaling).
 

@@ -16,15 +16,15 @@ updated: "2026-11-25"
 | Writes | `Dockerfile`, `.dockerignore`, `docker-compose.yml` | `Dockerfile`, `.dockerignore`, `k8s.yaml` |
 | Good for | One host, a small team, a first production run | Several replicas, rolling deploys, autoscaling |
 | Secrets | `.env` file read by Compose (`env_file`) | A Secret that the manifest reads |
-| Default replicas | One container, `WEB_CONCURRENCY=2` workers | 2 replicas |
+| Default replicas | One container, `WEB_CONCURRENCY=2` Gunicorn workers | 2 replicas, one Uvicorn process each |
 | Guide | [Docker and Compose](/docs/server/deploy) | [Kubernetes](/docs/server/kubernetes) |
 
 With neither flag, `build` writes only the `Dockerfile` and `.dockerignore`. At a terminal it asks where you will deploy. Both targets accept `--worker` and `--scheduler` when your `10xgraph.json` has a `worker` key with a broker other than `memory`.
 
 ## What build generates
 
-- A `Dockerfile` with a non-root user (uid 10001), `MODE=production`, a `/ping` healthcheck, and Gunicorn with `TenxGraphUvicornWorker`.
-- A graceful timeout of 600 seconds and a worker timeout of 660 seconds, because an agent run can last minutes. Compose and Kubernetes grace periods are set above that.
+- A `Dockerfile` with a non-root user (uid 10001), `MODE=production`, a `/ping` healthcheck, and Gunicorn with `TenxGraphUvicornWorker` (with `--k8s`, one Uvicorn process via `python -m tenxgraph_api.src.app.serve`).
+- A Gunicorn graceful timeout of 600 seconds and worker timeout of 660 seconds (the `--k8s` image uses a 540-second app deadline), because an agent run can last minutes. Compose and Kubernetes grace periods are set above that.
 - A read-only root filesystem and dropped capabilities. Only `/tmp` and `/app/uploads` are writable.
 - Optional `worker` and `scheduler` services built from the same image.
 

@@ -1,7 +1,7 @@
 ---
 title: Run the API Server
 seoTitle: "Run the 10xGraph API server"
-description: "Start the 10xGraph development server with 10xgraph dev, and run it in production with the Gunicorn image from 10xgraph build."
+description: "Start the 10xGraph development server with 10xgraph dev, and run it in production with the image from 10xgraph build (Gunicorn, or one Uvicorn process with --k8s)."
 section: "API server"
 group: "Basics"
 order: 20
@@ -9,7 +9,7 @@ label: Run the API Server
 updated: "2026-11-25"
 faq:
   - question: "Can I use 10xgraph dev in production?"
-    answer: "No. The 10xgraph dev command runs a single-worker development server with reload. There is no separate production command. For production, use Docker with Gunicorn and multiple Uvicorn workers. Generate production files with 10xgraph build --docker-compose."
+    answer: "No. The 10xgraph dev command runs a single-worker development server with reload. There is no separate production command. For production, use Docker with Gunicorn and multiple Uvicorn workers (10xgraph build --docker-compose), or one Uvicorn process per pod on Kubernetes (10xgraph build --k8s)."
   - question: "How do I check if the server is running?"
     answer: 'Call the /ping endpoint via curl. It returns `{"data": "pong", "metadata": {...}}` and needs no authentication.'
   - question: "Why does my server restart when I save a file?"
@@ -161,7 +161,7 @@ export REDOCS_PATH=""
 
 When `MODE=production`, these paths default to empty unless explicitly set. In other modes, they are enabled by default.
 
-`10xgraph dev` is a single-worker development server. Production runs Gunicorn with Uvicorn workers in the image that `10xgraph build` generates; see [Deploy](/docs/server/deploy).
+`10xgraph dev` is a single-worker development server. Production runs Gunicorn with Uvicorn workers in the image that `10xgraph build` generates, or one Uvicorn process (`python -m tenxgraph_api.src.app.serve`) with `--k8s`; see [Deploy](/docs/server/deploy) and [Kubernetes](/docs/server/kubernetes).
 
 ## Troubleshooting
 

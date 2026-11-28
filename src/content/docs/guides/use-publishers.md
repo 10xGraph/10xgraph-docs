@@ -5,7 +5,7 @@ section: "Observability"
 group: "Events"
 order: 60
 label: "Publishers (Kafka, Redis, RabbitMQ)"
-updated: "2026-11-26"
+updated: "2026-11-27"
 ---
 
 Publishers allow you to observe and audit agent execution by forwarding structured events to external systems. Every time your graph runs, event publishers (Kafka, Redis, RabbitMQ) receive a short stream of run, node and tool events, and tracing publishers receive the extra detail they need for spans, such as model calls. You can subscribe to these events in real-time to monitor your agent, log audits, trigger alerts, or analyze behavior. Publishers are optional: your graph runs without them.
@@ -327,6 +327,8 @@ How each broker sends a batch:
 - **Redis** sends one pipeline without a transaction (Pub/Sub or stream, as configured).
 
 If the queue is full, the new event is dropped. The counter `tenxgraph.publish.dropped` goes up and a warning is logged, at most once every 10 seconds. A batch that fails or times out is dropped as well, and counted the same way. Delivery stays at-most-once, with no retry.
+
+Size the queue for your peak event rate. Each run publishes several events, so a busy pod can fill the default queue of 2048 when the broker answers slowly. In our load test the RabbitMQ publisher dropped events from 300 concurrent users per CPU with the defaults, and none up to 500 users with `queue_size` 16384 and `batch_size` 500. Watch `tenxgraph.publish.dropped`. If it rises, raise `queue_size` first. See [Measured capacity of one pod](/docs/production/scaling#measured-capacity-of-one-pod).
 
 Queued events are sent when you call `await app.aclose()`, when a sync `invoke` or `stream` returns, and when you call the publisher's `close()`. With `ainvoke` and `astream`, call `aclose()` before your process exits.
 

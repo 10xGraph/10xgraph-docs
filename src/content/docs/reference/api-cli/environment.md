@@ -24,6 +24,8 @@ The 10xGraph API server and CLI read configuration from environment variables. T
 | `SUMMARY` | `10xGraph Backend` | One-line service summary shown in the OpenAPI schema |
 | `LOGGER_NAME` | `10xgraph-api` | Name of the root logger the server writes under. Read at import time, so it must be a process environment variable; setting it in `.env` is too late. |
 | `GRAPH_PATH` | `10xgraph.json` | Path to the config file the ASGI app loads. `10xgraph dev --config` sets this for you; set it directly when running the app under an external server such as Gunicorn or Uvicorn. |
+| `TENXGRAPH_LOOP` | `auto` | Event loop for `10xgraph dev`, the Gunicorn image and the `--k8s` image: `auto` (uvloop when installed), `asyncio` or `uvloop`. Case-insensitive. Any other value refuses to start. |
+| `TENXGRAPH_HTTP` | `auto` | HTTP parser for the same paths: `auto` (httptools when installed), `h11` or `httptools`. Case-insensitive. Any other value refuses to start. |
 
 ---
 
@@ -238,7 +240,7 @@ REDOCS_PATH=
 | --- | --- | --- |
 | `WEB_CONCURRENCY` | Unset (`2` in the generated Dockerfile) | Number of Gunicorn workers. Gunicorn reads this variable natively; without it Gunicorn runs one worker. The Dockerfile from `10xgraph build` sets `ENV WEB_CONCURRENCY=2`; override it at deploy time, for example `docker run -e WEB_CONCURRENCY=8 ...`. |
 
-Only Gunicorn reads this variable, for example when started as `gunicorn -k uvicorn_worker.UvicornWorker tenxgraph_api.src.app.main:app`. The development server (`10xgraph dev`) does not use it.
+Only Gunicorn reads this variable, so it does not apply to the `10xgraph build --k8s` image, which runs one Uvicorn process, for example when started as `gunicorn -k uvicorn_worker.UvicornWorker tenxgraph_api.src.app.main:app`. The development server (`10xgraph dev`) does not use it.
 
 ### Shutdown
 
@@ -247,7 +249,7 @@ Only Gunicorn reads this variable, for example when started as `gunicorn -k uvic
 | `SHUTDOWN_GRACE_SECONDS` | `10` | Seconds the lifespan lets active runs finish on their own when it calls `graph.aclose()`. |
 | `SHUTDOWN_STOP_SECONDS` | `10` | Seconds to wait after the stop request; each run saves its thread INTERRUPTED. |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Seconds for the hard cancel and the background drain. |
-| `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` | `540` | Seconds the worker waits for open responses after SIGTERM before it cancels them. Read by `TenxGraphUvicornWorker`, the Gunicorn worker class of the generated image. A value that is not a positive integer falls back to `540`. Keep it below the Gunicorn `--graceful-timeout` (600 in the generated image) so the lifespan shutdown can finish before the kill. Open NDJSON streams get a final "interrupted" chunk 5 seconds before this deadline. |
+| `TENXGRAPH_GRACEFUL_SHUTDOWN_SECONDS` | `540` | Seconds the worker waits for open responses after SIGTERM before it cancels them. Read by `TenxGraphUvicornWorker`, the Gunicorn worker class of the generated image, and by `tenxgraph_api.src.app.serve`, which the `--k8s` image runs. A value that is not a positive integer falls back to `540`. Keep it below the Gunicorn `--graceful-timeout` (600 in the generated image) so the lifespan shutdown can finish before the kill. Open NDJSON streams get a final "interrupted" chunk 5 seconds before this deadline. |
 
 ---
 

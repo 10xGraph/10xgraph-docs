@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 220
 label: Memory stores
-updated: "2026-11-10"
+updated: "2026-11-28"
 ---
 
 A memory store keeps facts, preferences and past interactions across conversation threads, so an agent can recall them later. This page documents the `tenxgraph.storage.store` API: embeddings, `PgVectorStore`, `QdrantStore`, memory configuration, retrieval helpers and factories. A checkpointer, by contrast, saves state within one thread.
@@ -568,7 +568,7 @@ await store.asetup()
 | `embedding` | `BaseEmbedding \| None` | required | Embedding service, or `None` for a text-only store (no `embedding` column). |
 | `dsn` | `str \| None` | `None` | Connection string. The store creates a pool and closes it in `arelease()`. |
 | `pool` | asyncpg `Pool` \| None | `None` | Existing pool. Never closed by the store. Pass `dsn` or `pool`, not both. |
-| `pool_config` | `dict \| None` | `None` | Extra `asyncpg.create_pool` arguments for a pool built from `dsn`. |
+| `pool_config` | `dict \| None` | `None` | Extra `asyncpg.create_pool` arguments for a pool built from `dsn`, merged over the defaults `command_timeout` 60, `timeout` 30 and `reset` skipped (no reset query on release). `{"reset": None}` restores asyncpg's reset. See [Performance tuning](/docs/production/scaling#performance-tuning). |
 | `schema` | `str` | `"public"` | Postgres schema of the table. |
 | `table` | `str` | `"tenxgraph_memories"` | Table name, at most 48 characters. |
 | `collection` | `str \| Callable[[dict], str] \| None` | `None` | Default collection: a name or a function of the config. |

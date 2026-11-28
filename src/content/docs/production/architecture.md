@@ -81,7 +81,7 @@ Postgres is the source of truth. Redis is a cache and a coordination tool, not a
 
 | Stateless (scale out freely) | Stateful (you operate and back up) |
 |---|---|
-| API workers (Gunicorn with Uvicorn workers in the `10xgraph build` image) | Postgres |
+| API workers (Gunicorn with Uvicorn workers, or one Uvicorn process with `--k8s`, in the `10xgraph build` image) | Postgres |
 | Job workers (`10xgraph worker`), when you use background jobs | Redis, when you use it for cache, shared locks and caps; also task results and schedules |
 | Your graph, tools and prompts, rebuilt from code on start | Job broker (Redis Streams, RabbitMQ or Kafka) |
 | | Vector store, if you use long-term memory |

@@ -26,7 +26,7 @@ flowchart TB
   REQ[HTTP Request] --> UV --> FA --> RATE --> AUTH --> AUTHZ --> SVC --> GRAPH
 ```
 
-The API server is a Uvicorn ASGI process that loads your compiled graph **once at startup** and reuses it for every request. The graph itself is stateless; per-request isolation comes from the `thread_id` in the request. In development, `10xgraph dev` auto-restarts on file changes (`--no-reload` turns that off). In production, the image from `10xgraph build` runs Gunicorn with multiple workers; put them behind a load balancer and use `PgCheckpointer` to share state across them.
+The API server is a Uvicorn ASGI process that loads your compiled graph **once at startup** and reuses it for every request. The graph itself is stateless; per-request isolation comes from the `thread_id` in the request. In development, `10xgraph dev` auto-restarts on file changes (`--no-reload` turns that off). In production, the image from `10xgraph build` runs Gunicorn with multiple workers (with `--k8s`, one Uvicorn process per pod: scale with replicas); put them behind a load balancer and use `PgCheckpointer` to share state across them.
 
 ## Configuration: `10xgraph.json`
 
@@ -72,7 +72,7 @@ The server runs one graph with one InjectQ container. Pass the same container to
 
 ## Production deployment
 
-For production, `10xgraph build` generates the Docker files and the image runs Gunicorn with several workers; share state between them with `PgCheckpointer` and a Redis cache store. See [Deploy](/docs/server/deploy) and the [environment reference](/docs/reference/api-cli/environment).
+For production, `10xgraph build` generates the Docker files and the image runs Gunicorn with several workers (with `--k8s`, one Uvicorn process per pod, `python -m tenxgraph_api.src.app.serve`; scale with replicas); share state between them with `PgCheckpointer` and a Redis cache store. See [Deploy](/docs/server/deploy) and the [environment reference](/docs/reference/api-cli/environment).
 
 ## What's next
 

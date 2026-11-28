@@ -560,7 +560,7 @@ Enable the option in `10xgraph.json` only when the app sits behind a proxy you c
 
 **Fix**
 
-- deploy the image from `10xgraph build`, which runs Gunicorn, behind HTTPS and with correct CORS and auth settings
+- deploy the image from `10xgraph build`, which runs Gunicorn (one Uvicorn process with `--k8s`), behind HTTPS and with correct CORS and auth settings
 - treat `10xgraph dev` (a Uvicorn development server with reload) as an interactive test path, not the deployment architecture. `10xgraph api` and `10xgraph play` no longer exist (removed in 0.9.0)
 
 ## Error codes

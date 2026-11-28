@@ -6,7 +6,7 @@ section: Reference
 group: "Python library"
 order: 210
 label: Checkpointers
-updated: "2026-11-10"
+updated: "2026-11-28"
 ---
 
 A checkpointer persists graph state, messages and thread metadata between requests, so conversations survive restarts and multi-turn runs stay coherent. 10xGraph ships four: the `BaseCheckpointer` abstract class, plus `InMemoryCheckpointer`, `SqliteCheckpointer` and `PgCheckpointer`. Pass one to `graph.compile(checkpointer=...)`.
@@ -214,7 +214,7 @@ The constructor takes the connection arguments below as named parameters; the re
 |---|---|---|---|
 | `postgres_dsn` | `str \| None` | `None` | PostgreSQL DSN. Required unless `pg_pool` is provided. |
 | `pg_pool` | `asyncpg.Pool \| None` | `None` | Pre-created asyncpg connection pool. |
-| `pool_config` | `dict \| None` | `None` | Config passed to `asyncpg.create_pool()` (`min_size`, `max_size`, etc.). |
+| `pool_config` | `dict \| None` | `None` | Config passed to `asyncpg.create_pool()` (`min_size`, `max_size`, etc.), merged over the defaults `command_timeout` 60, `timeout` 30 and `reset` skipped (no reset query on release). `{"reset": None}` restores asyncpg's reset. See [Performance tuning](/docs/production/scaling#performance-tuning). |
 | `redis_url` | `str \| None` | `None` | Redis URL for caching. One of `redis_url`, `redis` or `redis_pool` is required. |
 | `redis` | `Redis \| None` | `None` | Pre-created Redis instance. |
 | `redis_pool` | `ConnectionPool \| None` | `None` | Pre-created Redis connection pool. |

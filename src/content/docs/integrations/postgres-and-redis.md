@@ -6,7 +6,7 @@ section: "Data and state"
 group: "Your databases"
 order: 60
 label: "Postgres and Redis"
-updated: "2026-10-08"
+updated: "2026-11-28"
 faq:
   - q: "Does PgCheckpointer work without Redis?"
     a: "No. The constructor raises a ValueError unless you pass redis_url, redis_pool or a redis client, and it raises an ImportError if the redis package is missing. Redis only holds a cache, so losing it does not lose data."
@@ -122,7 +122,7 @@ You must supply one Postgres source (`postgres_dsn` or `pg_pool`) and one Redis 
 |---|---|---|---|
 | `postgres_dsn` | `str` | `None` | Postgres connection string for a pool the checkpointer creates |
 | `pg_pool` | asyncpg `Pool` | `None` | Existing pool to use instead |
-| `pool_config` | `dict` | `None` | Extra keyword arguments for `asyncpg.create_pool` (for example `min_size`, `max_size`) |
+| `pool_config` | `dict` | `None` | Extra keyword arguments for `asyncpg.create_pool` (for example `min_size`, `max_size`). A pool built from `postgres_dsn` skips asyncpg's reset query on release; `{"reset": None}` restores it. See [Performance tuning](/docs/production/scaling#performance-tuning) |
 | `redis_url` | `str` | `None` | Redis URL for a pool the checkpointer creates |
 | `redis` | Redis client | `None` | Existing `redis.asyncio.Redis` instance |
 | `redis_pool` | `ConnectionPool` | `None` | Existing Redis connection pool |
@@ -171,7 +171,7 @@ Watch p95 write latency and connection wait time rather than relying on a fixed 
 
 ## Pooling and concurrency
 
-By default the checkpointer builds its own asyncpg pool lazily on first use from `postgres_dsn`. Tune it with `pool_config`, whose keys are passed to `asyncpg.create_pool`.
+By default the checkpointer builds its own asyncpg pool lazily on first use from `postgres_dsn`. Tune it with `pool_config`, whose keys are passed to `asyncpg.create_pool`. By default the pool skips asyncpg's reset query on release; set `{"reset": None}` to restore it (see [Performance tuning](/docs/production/scaling#performance-tuning)).
 
 ```python
 from tenxgraph.storage.checkpointer import PgCheckpointer
